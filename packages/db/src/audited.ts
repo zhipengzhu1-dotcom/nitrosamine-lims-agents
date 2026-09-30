@@ -69,6 +69,15 @@ export type AuditedTx = {
   readonly dbNow: Date;
   readonly scope: Scope;
   readonly ctx: AuditContext;
+  /**
+   * Runs `fn` in a savepoint. A { rollback } result or a thrown error undoes fn's writes and
+   * leaves the transaction usable; the error is rethrown. The commit pipeline runs a command's
+   * body here, so a refusal's effect is undone while the rows that must survive it, and the
+   * outcome, are written afterwards in the same transaction, still under the commit key's lock.
+   */
+  readonly attempt: <T>(fn: () => Promise<TxOutcome<T>>) => Promise<TxOutcome<T>>;
+  /** Runs `fn` with the audit context switched to `ctx` (validated by the database like any other), then switches back. */
+  readonly withContext: (ctx: AuditContext, fn: () => Promise<void>) => Promise<void>;
 };
 
 export type TxOutcome<T> = { readonly commit: T } | { readonly rollback: T };
@@ -101,7 +110,31 @@ export async function runAudited<T>(
     await sql`select pg_advisory_xact_lock(hashtextextended(${ctx.commitKey}, 0))`.execute(trx);
     await sql`select set_config('lims.ctx', ${JSON.stringify(contextRow(ctx))}, true)`.execute(trx);
     const { rows } = await sql<{ now: Date }>`select lims.lock_chains() as now`.execute(trx);
-    const tx: AuditedTx = { db: trx.withPlugin(scopePlugin(scope, classes)), dbNow: rows[0]!.now, scope, ctx };
+    const setContext = (c: AuditContext) => sql`select set_config('lims.ctx', ${JSON.stringify(contextRow(c))}, true)`.execute(trx);
+    const tx: AuditedTx = {
+      db: trx.withPlugin(scopePlugin(scope, classes)),
+      dbNow: rows[0]!.now,
+      scope,
+      ctx,
+      attempt: async (fn) => {
+        await sql`savepoint attempt`.execute(trx);
+        try {
+          const out = await fn();
+          await ('commit' in out ? sql`release savepoint attempt` : sql`rollback to savepoint attempt`).execute(trx);
+          return out;
+        } catch (e) {
+          await sql`rollback to savepoint attempt`.execute(trx);
+          throw e;
+        }
+      },
+      // An error is not caught here: a database error has aborted the transaction, and the
+      // savepoint or rollback that follows also restores the context (GUC changes are transactional).
+      withContext: async (other, fn) => {
+        await setContext(other);
+        await fn();
+        await setContext(ctx);
+      },
+    };
     unscopedOf.set(tx, trx);
     const out = await fn(tx);
     settled = true;

@@ -4,7 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-type Mutant = { name: string; file: string; find: string; replace: string; test: string };
+/** `test` is a vitest path inside `package` (default @lims/db's directory). */
+type Mutant = { name: string; file: string; find: string; replace: string; test: string; package?: string };
 
 const MUTANTS: Mutant[] = [
   {
@@ -50,6 +51,27 @@ const MUTANTS: Mutant[] = [
     test: 'test/lab-scope.test.ts',
   },
   {
+    name: 'a second receipt for one commit key',
+    file: 'migrations/0040_identity_pipeline.sql',
+    find: "create unique index one_receipt_per_commit_key on lims.commit_outcome (commit_key) where outcome = 'receipt';",
+    replace: '',
+    test: 'test/pipeline-tables.test.ts',
+  },
+  {
+    name: 'a half-enrolled account',
+    file: 'migrations/0040_identity_pipeline.sql',
+    find: 'check ((password_hash is null) = (totp_secret_enc is null))',
+    replace: 'check (true)',
+    test: 'test/pipeline-tables.test.ts',
+  },
+  {
+    name: 'one enrolment token for two people',
+    file: 'migrations/0040_identity_pipeline.sql',
+    find: 'token_hash      bytea not null unique,',
+    replace: 'token_hash      bytea not null,',
+    test: 'test/pipeline-tables.test.ts',
+  },
+  {
     name: 'LA006 other Lab writable',
     file: 'migrations/0010_ledger_audit.sql',
     find: "and ledger is distinct from (ctx->>'acting_lab_id')::uuid then",
@@ -62,6 +84,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 let survivors = 0;
 
 for (const m of MUTANTS) {
+  const cwd = m.package ? `${root}../../${m.package}/` : root;
   const path = `${root}${m.file}`;
   const original = readFileSync(path, 'utf8');
   if (!original.includes(m.find)) {
@@ -72,7 +95,7 @@ for (const m of MUTANTS) {
   writeFileSync(path, original.replace(m.find, m.replace));
   let outcome: 'KILLED  ' | 'SURVIVED' | 'INVALID ';
   try {
-    execFileSync('pnpm', ['exec', 'vitest', 'run', m.test], { cwd: root, stdio: 'pipe' });
+    execFileSync('pnpm', ['exec', 'vitest', 'run', m.test], { cwd, stdio: 'pipe' });
     outcome = 'SURVIVED';
   } catch (e) {
     const out = String((e as { stdout?: Buffer }).stdout ?? '') + String((e as { stderr?: Buffer }).stderr ?? '');

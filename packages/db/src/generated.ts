@@ -31,10 +31,19 @@ export interface Account {
   identity_check_method: string | null;
   identity_checked_at: Timestamp | null;
   identity_checked_by: string | null;
-  password_hash: string;
+  password_hash: string | null;
   person_id: string;
   totp_secret_enc: Buffer | null;
   username: string;
+}
+
+export interface Alert {
+  at: Generated<Timestamp>;
+  detail: Generated<Json>;
+  id: Generated<Int8>;
+  kind: string;
+  person_id: string | null;
+  session_id: string | null;
 }
 
 export interface AuditChainHead {
@@ -78,6 +87,17 @@ export interface AuthEvent {
   typed_user: string | null;
 }
 
+export interface Authorisation {
+  id: string;
+  lab_id: string;
+  meaning: string;
+  person_id: string;
+  scope: string;
+  suspended_at: Timestamp | null;
+  valid_from: Timestamp;
+  valid_until: Timestamp;
+}
+
 export interface Blob {
   ledger_id: string;
   media_type: string;
@@ -92,7 +112,7 @@ export interface CommitOutcome {
   commit_key: string;
   input_hash: Buffer;
   outcome: string;
-  session_id: string;
+  session_id: string | null;
   settled_at: Generated<Timestamp>;
 }
 
@@ -108,6 +128,18 @@ export interface EffectiveVersion {
   record_id: string | null;
   requires_approval: boolean | null;
   version_no: number | null;
+}
+
+export interface EnrolmentLink {
+  created_at: Generated<Timestamp>;
+  created_by: string;
+  expires_at: Timestamp;
+  id: string;
+  person_id: string;
+  token_hash: Buffer;
+  totp_secret_enc: Buffer | null;
+  used_at: Timestamp | null;
+  username: string;
 }
 
 export interface Lab {
@@ -285,6 +317,13 @@ export interface TotpStepUsed {
   used_at: Generated<Timestamp>;
 }
 
+export interface TrainingRecord {
+  document_version: string;
+  id: string;
+  level: string;
+  person_id: string;
+}
+
 export interface VersionRejection {
   at: Generated<Timestamp>;
   ledger_id: string;
@@ -296,12 +335,15 @@ export interface VersionRejection {
 
 export interface DB {
   account: Account;
+  alert: Alert;
   audit_chain_head: AuditChainHead;
   audit_entry: AuditEntry;
   auth_event: AuthEvent;
+  authorisation: Authorisation;
   blob: Blob;
   commit_outcome: CommitOutcome;
   effective_version: EffectiveVersion;
+  enrolment_link: EnrolmentLink;
   lab: Lab;
   ledger: Ledger;
   lockout_state: LockoutState;
@@ -321,6 +363,7 @@ export interface DB {
   signature: Signature;
   spec_gap: SpecGap;
   totp_step_used: TotpStepUsed;
+  training_record: TrainingRecord;
   version_rejection: VersionRejection;
 }
 

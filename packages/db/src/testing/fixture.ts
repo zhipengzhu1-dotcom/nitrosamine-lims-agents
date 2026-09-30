@@ -83,7 +83,7 @@ export async function seedFixture(db: Kysely<DB>): Promise<Fixture> {
       const username = p.key;
       const lab = p.roles[0][1];
       await tx.db.insertInto('person').values({ id, printed_name: p.name }).execute();
-      await tx.db.insertInto('account').values({ person_id: id, username, password_hash: 'argon2id$fixture' }).execute();
+      await tx.db.insertInto('account').values({ person_id: id, username, password_hash: 'argon2id$fixture', totp_secret_enc: Buffer.from('fixture') }).execute();
       for (const [role, roleLab] of p.roles) {
         await tx.db.insertInto('role_grant').values({ id: randomUUID(), person_id: id, role, lab_id: roleLab }).execute();
       }
