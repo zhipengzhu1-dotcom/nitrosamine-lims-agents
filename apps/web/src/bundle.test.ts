@@ -7,8 +7,9 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterAll, describe, expect, it } from 'vitest';
 import { GALLERY_MARKER } from './dev/Gallery';
+import { BENCH_MARKER } from './dev/bench/marker';
 
-const FORBIDDEN_IN_PRODUCTION = [GALLERY_MARKER, 'lims-demo-aid'];
+const FORBIDDEN_IN_PRODUCTION = [GALLERY_MARKER, BENCH_MARKER, 'lims-demo-aid'];
 const root = join(import.meta.dirname, '..');
 const outDir = mkdtempSync(join(tmpdir(), 'lims-web-bundle-'));
 
@@ -29,7 +30,7 @@ describe('production bundle', () => {
       .filter((f) => /\.(js|css|html)$/.test(f))
       .map((f) => readFileSync(f, 'utf8'))
       .join('\n');
-    expect(text).toContain('Sign-in arrives with the session gate');
+    expect(text).toContain('Asking the server who is signed in on this PC.');
     for (const marker of FORBIDDEN_IN_PRODUCTION) expect(text).not.toContain(marker);
   }, 60_000);
 });

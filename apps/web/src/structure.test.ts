@@ -24,7 +24,41 @@ function offenders(files: string[], pattern: RegExp): string[] {
   );
 }
 
+/** The source of each effect callback: from `useEffect(` to its matching parenthesis. */
+export function effectBodies(source: string): string[] {
+  const bodies: string[] = [];
+  const opener = /\buse(?:Layout|Insertion)?Effect\(/g;
+  for (let m = opener.exec(source); m; m = opener.exec(source)) {
+    let depth = 1;
+    let i = m.index + m[0].length;
+    for (; i < source.length && depth > 0; i++) {
+      if (source[i] === '(') depth++;
+      else if (source[i] === ')') depth--;
+    }
+    bodies.push(source.slice(m.index, i));
+  }
+  return bodies;
+}
+
+/** A command sent from an effect: useCommand's run, the client's command, or the commands door. */
+const COMMAND_CALL = /\.run\(|\.command\(|\/api\/commands\//;
+
 describe('structure', () => {
+  it('sends no command from an effect: navigation and render never change anything (sessions.md, no-command-in-effect)', () => {
+    const offending = sources(SRC).flatMap((file) =>
+      effectBodies(readFileSync(file, 'utf8'))
+        .filter((body) => COMMAND_CALL.test(body))
+        .map((body) => `${relative(SRC, file)}: ${body.split('\n')[0]}`),
+    );
+    expect(offending).toEqual([]);
+  });
+
+  it('the no-command-in-effect scan finds a command inside an effect and nothing outside one', () => {
+    const planted = `useEffect(() => { if (x) { void lock.run({}); } }, [x]);\nconst onClick = () => lock.run({});`;
+    expect(effectBodies(planted).filter((b) => COMMAND_CALL.test(b))).toHaveLength(1);
+    expect(effectBodies('useEffect(() => { void api.view("a", {}); }, []);').filter((b) => COMMAND_CALL.test(b))).toHaveLength(0);
+  });
+
   it('formats no number anywhere: limits and values print from their stored strings (rule 20)', () => {
     const numberFormatting = /\.toFixed\(|\.toPrecision\(|\.toLocaleString\(|NumberFormat|parseFloat\(|parseInt\(|\bNumber\(|Math\.round\(/;
     expect(offenders(sources(SRC), numberFormatting)).toEqual([]);
