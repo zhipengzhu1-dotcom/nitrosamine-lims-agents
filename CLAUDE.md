@@ -11,9 +11,10 @@ A demo LIMS for a nitrosamine QC lab, built to 21 CFR Part 11, EU GMP Annex 11 a
 ## Workflow
 
 - **Code work** routes through `pstack:poteto-mode`. The map's Notes list the skills it hands off to (architect, tdd, deslop, interrogate, UI skills).
-- **Compliance review.** Before merging any change or closing any ticket that touches records, audit trail, e-signatures, login or accounts, roles and authorisation, the sample chain, results, equipment, inventory, Deviations, documents, reports, retention or hosting, dispatch both expert agents in parallel and resolve their findings:
+- **Compliance review.** Before merging any change or closing any ticket that touches records, audit trail, e-signatures, login or accounts, roles and authorisation, the sample chain, results, equipment, inventory, Deviations, documents, reports, retention or hosting, dispatch the expert agents in parallel and resolve their findings:
   - `part11-expert`: Part 11, FDA data integrity, EU Annex 11 (2011 and the 2025 draft), and the China and Japan computerized-system rules.
   - `iso17025-expert`: ISO/IEC 17025:2017 and ANAB AR 2250.
+  - `usp-expert`: USP–NF General Notices and general chapters: methods and compendial procedures, equipment checks, reference standards, water, results rounding, and stability storage.
 
   Give each the diff range or ticket and the map ticket it serves, e.g. "Review `main..HEAD` for [Decide the Deviation workflow](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/16)". Each returns a verdict per applicable requirement; a `gap` blocks merge until fixed or recorded as a decision on the map.
 - **Editing an expert agent**: rerun `python3 evals/agents/run.py` and keep it green; add a case to `evals/agents/cases.json`, with its expected verdict taken from the research, for each behaviour you change.

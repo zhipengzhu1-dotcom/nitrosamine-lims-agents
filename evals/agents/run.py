@@ -24,6 +24,8 @@ PROMPT = "Review this proposed design for the LIMS. It is given inline; there is
 VERDICT_LINE = re.compile(r"^\s*[-*]?\s*(met|gap|procedural|unclear|n/a)\s*:\s*(.+?)\s*$", re.I)
 PART11_CITATION = re.compile(r"^(§?11\.\d|a11|di|ci|sa|pics|cs|rd|gmp|jirei|ch4|esl|62fr)")
 ISO_CITATION = re.compile(r"^\d\.\d")
+USP_CITATION = re.compile(r"^(<\d{1,4}(\.\d+)?>|gn\d)")
+LANES = {"part11": PART11_CITATION, "iso17025": ISO_CITATION, "usp": USP_CITATION}
 
 
 def normalize(citation):
@@ -56,15 +58,16 @@ def grade(case, verdicts):
         options = group if isinstance(group, list) else [group]
         if not any(cited(verdicts, "gap", o) for o in options):
             failures.append(f"no gap citing any of {options}")
-    for c in expect.get("met", []):
-        if not cited(verdicts, "met", c):
-            failures.append(f"no met citing {c}")
+    for kind in ("met", "procedural"):
+        for c in expect.get(kind, []):
+            if not cited(verdicts, kind, c):
+                failures.append(f"no {kind} citing {c}")
     for c in expect.get("not_gap", []):
         if cited(verdicts, "gap", c):
             failures.append(f"false alarm: gap citing {c}")
     lane = expect.get("no_gap_in")
     if lane:
-        foreign = PART11_CITATION if lane == "part11" else ISO_CITATION
+        foreign = LANES[lane]
         strays = [c for v, c in verdicts if v == "gap" and foreign.match(c)]
         if strays:
             failures.append(f"out of lane: gaps cite {lane} rules {strays}")
