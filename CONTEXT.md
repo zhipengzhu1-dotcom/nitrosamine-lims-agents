@@ -535,3 +535,11 @@ _Avoid_: Record catalogue
 **Calculation Version**:
 One QA-approved version of the system's calculations, including how values are compared with Acceptance Criteria, naming the version of the SOP it implements. Every computed value and verdict records the Calculation Version that produced it, and a later version never changes a recorded verdict in place: a corrected verdict is a new record linked to it.
 _Avoid_: Algorithm version, software version, release
+
+**Assistant Call**:
+One question or request put to the LIMS's AI assistant and its reply, kept with who asked (or a non-person identity, for background work), when, the assistant configuration in force, the Record Versions it read, and the reply as first generated. It is the one reference any record uses to show the assistant was involved.
+_Avoid_: Call log row, request log entry, prompt, chat
+
+**Assistant Draft**:
+The text an Assistant Call offers for a person to edit and save into a record. It is never itself the record: once saved, the text is a Record Version authored by the person who saved it, whose Audit Trail entry names the Assistant Call.
+_Avoid_: AI suggestion, pencil draft, proposal
