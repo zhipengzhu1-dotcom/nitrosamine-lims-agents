@@ -80,7 +80,7 @@
     "agent": "part11-expert",
     "seam": "no false alarm",
     "source": "research/part11 B1-B3, C4-C5 all satisfied",
-    "artifact": "QA release is an e-signature. The signing dialog always asks for the password and a fresh TOTP code, even inside a session. The server stores an immutable signature row with printed name, username, role, UTC time plus the lab's zone, meaning 'Released', record ID, record version, and a SHA-256 hash of the canonical record content. Every screen and PDF of the record renders the signature block. Any later change creates a new record version, whose hash no longer matches, so it shows as unsigned until re-signed. Signature rows are audit-trailed.",
+    "artifact": "Scope: the signing act and the signature record only. Release locking and report amendment are unchanged from decision #13. QA release is an e-signature. The signing dialog always asks for the typed user ID, the password and a fresh second factor: a TOTP code (accepted once) or a passkey assertion with user verification, even inside a session; the login session never counts toward the signature. The server stores an append-only signature row, linked into the Lab's audit chain, with signer, printed name, username, role, Lab, meaning 'Released', server UTC time taken from the database clock in the same transaction as the audit entry, the Lab's zone for display, record ID, record version, a SHA-256 hash of that version's canonical content, the version of the canonical form that produced the hash, the app release ID, the authenticator type and the session. The canonical content pins each child row's version ID and content hash and each attachment's SHA-256, and any change to a child row writes a new Record Version of every parent that includes it. Every canonical-form version stays in the code for the whole retention period and is never changed in place; the nightly chain verify recomputes every stored signature hash with the version it names. Every screen, PDF and export of the record renders the signature block after recomputing the SHA-256 of the signed version's canonical content with the canonical-form version stored on the signature; each signature is judged against the version it names. A later, unsigned version of the record shows 'UNSIGNED — changed after signature'; an earlier signed version keeps its signature block and is marked Superseded only once a later version carries a valid signature with the meaning that put it in force (Released for a Test Report); until then it stays in force with the note 'Draft vN+1 in progress (unsigned)'; a hash mismatch on the signed version itself shows 'SIGNATURE INVALID' and raises a System Incident that opens a Deviation.",
     "expect": {
       "met": [
         "11.50"
@@ -167,6 +167,107 @@
           "A11d §17.1"
         ]
       ]
+    }
+  },
+  {
+    "id": "usp-balance-no-min-weight",
+    "agent": "usp-expert",
+    "seam": "catches planted gap",
+    "source": "research/usp <41>, GN 8.20: repeatability judged against the smallest net weight; a net weight below it is not 'accurately weighed'",
+    "artifact": "Each morning the Analyst weighs one 200 g check weight on each analytical balance; the check passes if the reading is within 0.10% of the weight's value. Once a balance has passed that day, every weighing on it is accepted for 'accurately weighed' steps, whatever the net weight. Balance records hold capacity, readability, the check weight's ID and the calibration due date; there is no minimum-weight or smallest-net-weight field.",
+    "expect": {
+      "gap": [
+        [
+          "<41>",
+          "<1251>",
+          "GN 8.20"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "usp-round-before-compare",
+    "agent": "usp-expert",
+    "seam": "catches planted gap",
+    "source": "research/usp GN 7.20: round only the final reportable value, to the limit's decimal places, round-half-up; intermediates stay unrounded",
+    "artifact": "When an Analyst enters a Preparation result for NDMA, the server rounds it to the Specification limit's decimal places using the database's default round-half-even. The Reportable Result is the mean of the rounded Preparation results, and that mean is compared with the limit.",
+    "expect": {
+      "gap": [
+        [
+          "GN 7.20"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "usp-sst-warning",
+    "agent": "usp-expert",
+    "seam": "catches planted gap",
+    "source": "research/usp <621>: 'No sample analysis is acceptable unless the suitability of the system has been demonstrated'",
+    "artifact": "The TargetLynx import records each Run's system suitability values (S/N of the LOQ standard, %RSD of replicate standard injections). If a criterion fails, the Run is shown with an amber 'SST failed' badge, and the Reviewer can still approve its Reportable Results with a comment.",
+    "expect": {
+      "gap": [
+        [
+          "<621>"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "usp-rs-lot-complete",
+    "agent": "usp-expert",
+    "seam": "no false alarm",
+    "source": "research/usp <11>: current lots have no valid-use date; a lot that becomes previous gets one and cannot be used after it; the user checks lot status against the catalogue, which USP updates daily",
+    "artifact": "Scope: USP Reference Standard lot status and use dates only (the current-lot rule). Pretreatment, assigned values and compendial substitution are specified in a separate design. Each USP RS Material Lot records catalogue number, lot, status (Current, Previous or Withdrawn), valid-use date, and the date and user of the last check against the USP catalogue. The valid-use date is its own field, never an expiry or retest date. It stays empty while the lot is Current unless the USP catalogue lists one for that Current lot. A lot changes to Previous only at a catalogue check, and that change requires the valid-use date shown in the catalogue at that check, entered by the same user. The Fitness Status blocks GMP use of any lot past a recorded valid-use date whatever its status, of any Withdrawn lot, and of any lot whose last catalogue check is older than a QA-set interval (default 30 days, changed only under change control). A lot never checked against the catalogue is unfit. Solutions made from a lot inherit its block through their lineage. A catalogue check that records a valid-use date earlier than the check date lists, in a Deviation for impact assessment, every Solution and Run that used the lot after that date. Each check records its outcome, and a lot the catalogue no longer lists is blocked until QA resolves it. Marking a lot Withdrawn records USP's notice date and lists the Results that cited the lot for impact assessment in a Deviation.",
+    "expect": {
+      "met": [
+        "<11>"
+      ],
+      "not_gap": [
+        "<11>"
+      ]
+    }
+  },
+  {
+    "id": "usp-621-split-verdicts",
+    "agent": "usp-expert",
+    "seam": "per-requirement verdicts",
+    "source": "research/usp <621>: SST failure blocks the Run's results (met here); an adjustment must stay within the listed ranges and no second adjustment is allowed without revalidation (broken here)",
+    "artifact": "For a compendial USP procedure run on LC-MS/MS: each Run stores every system suitability criterion with its source and value, and any failed or missing criterion blocks all Reportable Results from that Run until it is invalidated through a Deviation. Analysts may change the column temperature, flow rate and mobile-phase pH of the compendial procedure to any value they choose, recorded as free text on the Run, and may adjust a procedure that has already been adjusted.",
+    "expect": {
+      "gap": [
+        [
+          "<621>"
+        ]
+      ],
+      "met": [
+        "<621>"
+      ]
+    }
+  },
+  {
+    "id": "usp-rs-opened-container",
+    "agent": "usp-expert",
+    "seam": "procedural",
+    "source": "research/usp <11>: suitability of a previously opened USP RS 'is the responsibility of the user' (USP RS FAQ)",
+    "artifact": "Scope: the use-after-opening period of USP Reference Standard Packs only. Lot status, valid-use dates and label storage are specified in a separate design. USP publishes no use-after-opening period, so each USP RS Material carries an in-use period after opening that QA sets in the Material record, under change control, from the lab's SOP. A Pack records its opened date, and opened date plus that period is the Pack's in-use expiry; a Solution made from the Pack expires no later than it. The shared fit-for-use check refuses the expired Pack at every step that records use, including making a Solution, judged on the date of use. GMP has no override; the non-GMP override follows the inventory decision (Expired only, with a signed reason, flagged on every descendant). Where a lot's label restricts reuse (for example a single-use ampoule), the Pack is unfit once opened. This design does not choose the period; the SOP does.",
+    "expect": {
+      "procedural": [
+        "<11>"
+      ],
+      "not_gap": [
+        "<11>"
+      ]
+    }
+  },
+  {
+    "id": "usp-lane-lockout",
+    "agent": "usp-expert",
+    "seam": "stays in its lane",
+    "source": "lockout and idle logout are Part 11 §11.300(d) / draft Annex 11 §11.7-11.8 rules, not USP",
+    "artifact": "Login locks after 3 failed attempts and unlocks itself after 15 minutes. Each user can turn off the idle logout in their profile.",
+    "expect": {
+      "no_gap_in": "part11"
     }
   }
 ]
