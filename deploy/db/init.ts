@@ -1,6 +1,7 @@
 // The compose `db-init` job. Brings a cluster to the state the API expects: the roles from
-// packages/db's runner, passwords on the two login roles, the database, every migration applied.
-// It refuses a start whose data class differs from the one stored with the data. Idempotent, so it runs before the API on every start.
+// packages/db's runner, passwords on the two login roles, statement logging for the operator
+// roles, the database, every migration applied. It refuses a start whose data class differs from
+// the one stored with the data. Idempotent, so it runs before the API on every start.
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -16,6 +17,7 @@ const LOGIN_ROLES = [
   { role: 'lims_migrator', secret: 'db_migrator_password' },
   { role: 'lims_app', secret: 'db_app_password' },
 ] as const;
+const OPERATOR_ROLES = ['postgres', 'lims_migrator'] as const;
 
 /**
  * The SCRAM-SHA-256 verifier Postgres stores for a password. Sending the verifier instead of the
@@ -46,6 +48,9 @@ async function init(database: string, requested: DataClass, stateDir: string): P
     for (const { role, secret: name } of LOGIN_ROLES) {
       await admin.query(`alter role ${role} password ${admin.escapeLiteral(scramVerifier(await secret(name)))}`);
     }
+    // Stands in for pgaudit, which the official image lacks: every statement a session of the
+    // superuser or the migrator runs goes to the server log in the pgdata volume.
+    for (const role of OPERATOR_ROLES) await admin.query(`alter role ${role} set log_statement = 'all'`);
     if (exists.rowCount === 0) await admin.query(`create database ${admin.escapeIdentifier(database)} owner lims_owner`);
     if (decision.kind === 'record') await recordFirstStart(stateDir, requested, new Date());
   } finally {
