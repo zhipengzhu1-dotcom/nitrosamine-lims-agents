@@ -154,6 +154,10 @@ _Avoid_: CAPA (alone), action item
 A record that pauses a Test or Sample for a stated reason (a Deviation, a receipt discrepancy, a Customer query, blocked equipment) without changing its state. It blocks named steps until it is released, and several can be open at once.
 _Avoid_: On hold (as a status), suspension, quarantine
 
+**System Incident**:
+A record that the LIMS itself failed or misbehaved (an alarm, a missed backup or anchor, a failed restore drill, a clock step), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a Deviation only when it could have affected results.
+_Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failures)
+
 **Training Record**:
 Evidence that a person is qualified on a specific method or SOP version, required before they can be assigned tests under it.
 _Avoid_: Qualification, certificate
