@@ -246,6 +246,22 @@ _Avoid_: MSDS
 A record that something departed from its acceptance criteria or procedure and must be investigated and closed by QA; this project's name for ISO/IEC 17025 nonconforming work. Its Kind is one of OOS, OOT, Equipment, Room, Excursion, Run Check Failure, Material, Procedure, Data Integrity, Proficiency Testing or Other, and it is Open, Investigating, In QA Review or Closed. Its Kind is fixed once opened, except that QA may reclassify Other. A Deviation raised in error is closed with that finding, never cancelled, and a Closed one never reopens or changes.
 _Avoid_: Incident, nonconformance, NCR
 
+**Planned Deviation**:
+A Deviation approved by QA and accepted by the Customer before the work, allowing a stated, technically justified departure from a Method on named Tests.
+_Avoid_: Waiver, exception, concession
+
+**Risk Level**:
+How serious a Deviation is: Minor (no effect on any result), Major (affects Tests in progress) or Critical (could affect released results, or a data-integrity failure). Every OOS is at least Major.
+_Avoid_: Severity, priority, classification
+
+**Investigator**:
+The person assigned to find a Deviation's impact, root cause and correction; the opener unless the Lab Manager reassigns it.
+_Avoid_: Owner (for Deviations), assignee
+
+**Complaint**:
+An expression of dissatisfaction from a Customer or other party about the Lab's work, which gets its own acknowledgement, investigation and outcome, and may link to a Deviation.
+_Avoid_: Feedback, grievance, Deviation (for complaints)
+
 **CAPA Action**:
 One Corrective or Preventive action raised from a Deviation, with one owner, a due date, evidence, and an effectiveness check whose criterion and date are set when the action is raised and which may be signed off after the Deviation closes. An action judged Not Effective needs a new linked action.
 _Avoid_: CAPA (alone), action item
@@ -308,6 +324,28 @@ _Avoid_: Reference document, third-party document
 One numbered paper copy of an Effective Form or Worksheet, recorded against who took it and why. Every Issued Copy is reconciled as Returned (scanned and linked to what it records), Voided with a reason and kept, or Missing, and a Missing one opens a Deviation.
 _Avoid_: Controlled copy, printout
 
+### ELN
+
+**Notebook**:
+A Lab's electronic notebook for one stated purpose, such as one Method's development, the year's Deviation investigations, or one person's general work, with an Owner and a number such as `RD-NB-0007` that is never reused.
+_Avoid_: Project, folder, lab book
+
+**Notebook Entry**:
+One numbered record in a Notebook, such as `RD-NB-0007-0042`, of work done on its work date: narrative, tables, images and attachments, linking to the Samples, Tests, Runs, Solutions, Equipment and other records it concerns rather than recording their data again. Entry numbers run without gaps; an entry started in error is Voided with a reason, never deleted. Signing it Performed locks it; a witness who is not the author signs it Reviewed.
+_Avoid_: Page, experiment, note
+
+**Addendum**:
+A Notebook Entry that corrects or adds to a signed one, linked to it and signed on its own. A signed entry is never edited.
+_Avoid_: Amendment, correction entry
+
+**Late Entry**:
+A record whose work date is earlier than the Lab's current day when it is first saved. It carries a reason and stays flagged.
+_Avoid_: Backdated entry, retrospective entry
+
+**True Copy**:
+A scan of a paper record, such as a returned Issued Copy, a legacy logbook page or a supplier CoA, that a second person has signed Verified as complete and legible. The paper original is Retained, with its location, unless QA approves an assessment allowing its destruction.
+_Avoid_: Scan (alone), certified copy, electronic copy
+
 ### Records and signatures
 
 **Record Version**:
@@ -337,22 +375,6 @@ _Avoid_: Permission, access right, qualification
 **Return**:
 Sending a record back, with a reason, to the person who signed it Performed, instead of signing it. It is recorded but not signed.
 _Avoid_: Reject (in review), send back
-
-**Planned Deviation**:
-A Deviation approved by QA and accepted by the Customer before the work, allowing a stated, technically justified departure from a Method on named Tests.
-_Avoid_: Waiver, exception, concession
-
-**Risk Level**:
-How serious a Deviation is: Minor (no effect on any result), Major (affects Tests in progress) or Critical (could affect released results, or a data-integrity failure). Every OOS is at least Major.
-_Avoid_: Severity, priority, classification
-
-**Investigator**:
-The person assigned to find a Deviation's impact, root cause and correction; the opener unless the Lab Manager reassigns it.
-_Avoid_: Owner (for Deviations), assignee
-
-**Complaint**:
-An expression of dissatisfaction from a Customer or other party about the Lab's work, which gets its own acknowledgement, investigation and outcome, and may link to a Deviation.
-_Avoid_: Feedback, grievance, Deviation (for complaints)
 
 **Critical Data Change**:
 A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, the instrument a Run used, a Room, storage or DI water reading, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
