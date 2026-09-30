@@ -118,3 +118,7 @@
 .submit__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--s-3); }
 .hash { overflow-wrap: anywhere; }
 .reviews-to-do { display: flex; flex-wrap: wrap; gap: 8px 20px; font-weight: 700; }
+@media (max-width: 600px) {
+  .view .rbtn { white-space: normal; height: auto; min-height: var(--hit-glove); padding: 10px 16px; text-align: center; max-width: 100%; }
+  .portal-report .rbtn { width: 100%; }
+}
