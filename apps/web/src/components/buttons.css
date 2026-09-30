@@ -1,0 +1,29 @@
+/* Glove-sized buttons. They live on the dark bench: the rail, a sheet's footer rail, the lock screen. */
+.rbtn {
+  height: var(--hit-glove); min-width: var(--hit-glove); padding: 0 20px;
+  border-radius: var(--r-glove); border: 1px solid transparent;
+  font-weight: 700; font-size: var(--t-16); line-height: 1; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  transition: transform var(--dur-press) var(--ease-out), background-color 120ms ease, border-color 120ms ease;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation;
+}
+.rbtn .ic { width: 20px; height: 20px; }
+.rbtn:active { transform: scale(0.97); }
+.rbtn:focus-visible { outline-color: var(--focus-on-bench); }
+.rbtn--primary { background: var(--act-on-bench); color: #fff; }
+.rbtn--danger { background: var(--bad-solid); color: #fff; }
+.rbtn--secondary { background: transparent; color: var(--on-bench); border-color: var(--bench-edge); }
+.rbtn--quiet { background: var(--bench-2); color: var(--on-bench); border-color: var(--bench-line); padding: 0 16px; }
+.rbtn[aria-disabled='true'] { background: var(--bench-2); color: var(--on-bench-2); border: 1px dashed var(--bench-dashed); cursor: not-allowed; }
+.rbtn[aria-disabled='true']:active { transform: none; }
+/* In flight: still reads as the same act, dimmed, with a hard stop on further presses. */
+.rbtn[data-pending] { cursor: progress; border-style: solid; }
+@media (hover: hover) and (pointer: fine) {
+  .rbtn--primary:not([aria-disabled='true']):hover { background: var(--act-on-bench-hover); }
+  .rbtn--secondary:not([aria-disabled='true']):hover, .rbtn--quiet:hover { border-color: var(--bench-edge-2); }
+  .rbtn--danger:not([aria-disabled='true']):hover { background: var(--bad-solid-hover); }
+}
+@media (max-width: 1500px) {
+  .rbtn { padding: 0 16px; }
+  .rbtn--quiet { padding: 0 12px; }
+}

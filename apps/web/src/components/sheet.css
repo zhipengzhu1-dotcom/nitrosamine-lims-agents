@@ -1,0 +1,43 @@
+.sheet {
+  position: fixed; inset: auto 0 0 0; margin: 0; padding: 0; border: 0; width: 100%; max-width: none;
+  max-height: calc(100dvh - 24px); color: inherit;
+  background: var(--canvas); border-radius: 16px 16px 0 0; box-shadow: var(--shadow-sheet);
+  display: flex; flex-direction: column; overflow: hidden; outline: none;
+  transition: transform var(--dur-sheet) var(--ease-drawer), opacity var(--dur-sheet) ease;
+  @starting-style { transform: translateY(100%); }
+}
+.sheet::backdrop { background: var(--scrim); transition: opacity 200ms ease; @starting-style { opacity: 0; } }
+.sheet[data-leaving] { transform: translateY(100%); transition-duration: var(--dur-exit); pointer-events: none; }
+.sheet[data-leaving]::backdrop { opacity: 0; transition-duration: var(--dur-exit); }
+.sheet__body { flex: 1; min-height: 0; overflow: auto; padding: 16px 24px; overscroll-behavior: contain; }
+.sheet__title { font-size: 22px; font-weight: 800; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+.sheet__rail { flex: none; min-height: var(--rail-h); display: flex; align-items: center; gap: var(--s-4); padding: 8px var(--s-4) 12px; background: var(--bench); color: var(--on-bench); }
+.sheet__rail-who { min-width: 0; display: grid; }
+.sheet__rail-who b { font-size: var(--t-16); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet__rail-who span { font-size: var(--t-13); color: var(--on-bench-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet__rail .rbtn--commit { min-width: 240px; }
+
+@media (max-height: 820px) {
+  .sheet { max-height: calc(100dvh - 12px); }
+  .sheet__body { padding: 12px 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet { @starting-style { transform: none; opacity: 0; } }
+  .sheet[data-leaving] { transform: none; opacity: 0; }
+}
+/* Refusals and the attempts left answer in the sheet's rail, always in view (decision 23). */
+.sheet__rail-answer { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; padding-left: var(--s-4); border-left: 1px solid var(--bench-line); }
+.sheet__rail-answer.is-refused { border-left: 4px solid var(--bad-on-bench); }
+.sheet__rail-refusal { display: flex; gap: 6px; align-items: center; font-weight: 700; color: var(--bad-text-on-bench); font-size: var(--t-14); }
+.sheet__rail-answer .attempts { display: flex; gap: 6px; align-items: center; font-size: var(--t-13); color: var(--on-bench-2); }
+.sheet__rail-answer .attempts--low { color: var(--warn-text-on-bench); font-weight: 700; }
+.sheet__rail-who { flex: 0 1 260px; }
+@media (max-width: 700px) {
+  .sheet__body { padding: 12px 16px; }
+  .sheet__rail { flex-wrap: wrap; gap: var(--s-2); padding: 8px 16px 12px; }
+  .sheet__rail-who, .sheet__rail-answer { flex: 1 1 100%; }
+  .sheet__rail-answer { border-left: 0; padding-left: 0; }
+  .sheet__rail .rbtn--commit { min-width: 0; flex: 1 1 auto; white-space: normal; }
+  .signing__commit { flex: 1 1 auto; display: flex; }
+}
+.sheet__rail > .rbtn--secondary { margin-left: auto; }
