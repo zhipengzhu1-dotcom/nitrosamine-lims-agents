@@ -1,9 +1,12 @@
 // Identity: enrolment through a one-time link, login, the lockout derived from the access log,
 // and the Admin's exclusivity surfaced as a refusal.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createPerson } from '../src/commands/identity.ts';
+import { SERVICE_COMMANDS } from '../src/actor.ts';
+import { CORE_COMMANDS } from '../src/app.ts';
+import { CHAIN } from '../src/chain/index.ts';
+import { checkIdentity, createPerson } from '../src/commands/identity.ts';
 import { ENABLEMENT_DOCUMENTS } from '../src/records/facts.ts';
-import { handover } from '../src/seed/index.ts';
+import { handover, retireSeed } from '../src/seed/index.ts';
 import { Authenticator, credentials, enrol, login, signAs, testApi, type Person, type TestApi } from '../src/testing/harness.ts';
 import { createLab, type Lab } from './support.ts';
 
@@ -125,6 +128,34 @@ describe('re-enrolment', () => {
     const before = await revoked();
     await expect(handover(api, 'real')).rejects.toThrow(/fictional/);
     expect(await revoked()).toEqual(before);
+  });
+});
+
+describe('service identities', () => {
+  it('a service runs only the commands on its list, holding no business role', async () => {
+    const r = await api.run(api.seed, checkIdentity, { personId: admin.id, method: 'the seed vouching for someone' });
+    expect(r).toMatchObject({ kind: 'refusal', refusal: { kind: 'not-permitted' } });
+    const account = await api.db.app.selectFrom('account').select('identity_checked_at').where('person_id', '=', admin.id).executeTakeFirstOrThrow();
+    expect(account.identity_checked_at).toBeNull();
+  });
+
+  it('every command on a service\'s list is one the API registers', () => {
+    const registered = new Set([...CORE_COMMANDS, ...CHAIN.commands].map((c) => c.name));
+    for (const names of Object.values(SERVICE_COMMANDS)) for (const name of names) expect(registered).toContain(name);
+  });
+
+  it('once the seed retires, the database refuses any write as svc:seed, and retiring again changes nothing', async () => {
+    const fresh = await testApi();
+    try {
+      await retireSeed(fresh.deps);
+      await retireSeed(fresh.deps);
+      await expect(fresh.run(fresh.seed, createPerson, { printedName: 'Late Arrival', username: 'late', grants: [{ role: 'Admin' }] })).rejects.toMatchObject({ code: 'LA004' });
+      const grants = await fresh.db.app.selectFrom('role_grant').select('revoked_at').where('role', '=', 'svc:seed').execute();
+      expect(grants).toHaveLength(1);
+      expect(grants[0]!.revoked_at).toBeInstanceOf(Date);
+    } finally {
+      await fresh.close();
+    }
   });
 });
 

@@ -23,7 +23,7 @@ import { COMPANY_LEDGER, SERVICE, ledgerOf, runAudited, type AuditContext, type 
 import type { Alert, AuthEvent, TotpStepUsed } from '@lims/db';
 import type { CommitKey, LabId, PersonId, SessionId } from '@lims/domain/ids';
 import { refuse, specGapsOf, type Refusal } from '@lims/domain/refusal';
-import { actingLab, holdsRole, primaryRole, scopeOf, type Requester } from './actor.ts';
+import { actingLab, holdsRole, primaryRole, scopeOf, SERVICE_COMMANDS, type Requester } from './actor.ts';
 import type { AnyCommandDef, CookieAction, Receipt } from './doors.ts';
 import type { KindRegistry } from './records/kinds.ts';
 import type { FileTokens } from './files.ts';
@@ -119,14 +119,18 @@ function resolveActing(def: AnyCommandDef, who: Requester, input: never): Acted 
   }
   if (who.kind === 'nobody') return refuse.session('none');
   if (who.kind === 'locked') return refuse.session('locked');
+  if (who.kind === 'service') {
+    if (!SERVICE_COMMANDS[who.identity].has(def.name)) return { kind: 'not-permitted', message: `${who.identity} does not run ${def.name}.` };
+    return { person: who.person, role: who.identity, lab: actingLab(who), customer: null, session: null, scope: scopeOf(who) };
+  }
   const role = a.as === 'session' ? primaryRole(who) : a.as === 'role' ? a.role : a.role(input);
   if (!holdsRole(who, role)) return { kind: 'not-permitted', message: `This needs the ${role} role${who.kind === 'staff' ? ' in this Lab' : ''}.` };
   return {
     person: who.person,
-    role: who.kind === 'service' ? who.identity : role,
+    role,
     lab: actingLab(who),
     customer: who.kind === 'customer' ? who.customer : null,
-    session: who.kind === 'service' ? null : who.session,
+    session: who.session,
     scope: scopeOf(who),
   };
 }

@@ -70,10 +70,26 @@ export const scopeOf = (a: ActorContext): Scope =>
 
 export const actingLab = (a: ActorContext): LabId | null => (a.kind === 'staff' ? a.lab : a.kind === 'service' ? a.lab : null);
 
+/** A service holds no role of a person: SERVICE_COMMANDS says what it may run. */
 export const holdsRole = (a: ActorContext, role: string): boolean =>
-  a.kind === 'service' ? true
+  a.kind === 'service' ? false
   : a.kind === 'admin' ? role === 'Admin'
   : (a.roles as ReadonlySet<string>).has(role);
+
+/**
+ * The commands each service identity may run through the pipeline, by name. The seed creates the
+ * company's reference data and the demo people, and hands the demo accounts over; svc:auth and the
+ * sweeper write directly and run no command.
+ */
+export const SERVICE_COMMANDS: Readonly<Record<ServiceIdentity, ReadonlySet<string>>> = {
+  'svc:seed': new Set([
+    'identity.createPerson', 'identity.reenrol',
+    'reference.customer', 'reference.substance', 'reference.product', 'reference.method', 'reference.methodVersion',
+    'reference.specification', 'reference.adoption', 'reference.equipment',
+  ]),
+  'svc:auth': new Set(),
+  'svc:session-sweeper': new Set(),
+};
 
 const STAFF_PRECEDENCE: readonly StaffRole[] = ['LabManager', 'QA', 'Reviewer', 'Analyst', 'SampleCustodian'];
 

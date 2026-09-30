@@ -2,8 +2,10 @@
 // through the real link and signs with full re-authentication; the seed acts as their phone.
 // It refuses to run twice on a database that already holds a Customer.
 
-import type { Kysely } from 'kysely';
-import type { DB } from '@lims/db';
+import { randomUUID } from 'node:crypto';
+import { sql, type Kysely } from 'kysely';
+import { COMPANY_LEDGER, runAudited, SERVICE, type DB } from '@lims/db';
+import type { CommitKey } from '@lims/domain/ids';
 import type { Deps } from '../commit.ts';
 import { reenrol } from '../commands/identity.ts';
 import type { DataClass } from '../config.ts';
@@ -92,6 +94,27 @@ export async function handover(api: Driver, dataClass: DataClass): Promise<reado
     links.push({ username, printedName, role, token: (out.once?.data as { enrolmentToken: string }).enrolmentToken });
   }
   return links;
+}
+
+/**
+ * Revokes svc:seed's grant, so nothing can write as the seed once it has finished (part11 G7). The
+ * seed cannot revoke its own grant, since the database checks the acting grant on every write
+ * including that one, so svc:auth records it. Retiring twice changes nothing.
+ */
+export async function retireSeed(deps: Deps): Promise<void> {
+  await runAudited(deps.db, {
+    person: SERVICE.auth.person, role: SERVICE.auth.role, actingLab: null, customer: null, action: 'seed.retire', reason: { kind: 'action' },
+    appRelease: deps.release, session: null, commitKey: randomUUID() as CommitKey, ledgers: [COMPANY_LEDGER],
+  }, { kind: 'company' }, async (tx) => {
+    await tx.db.updateTable('role_grant').set({ revoked_at: sql`clock_timestamp()` })
+      .where('person_id', '=', SERVICE.seed.person).where('role', '=', SERVICE.seed.role).where('revoked_at', 'is', null).execute();
+    return { commit: null };
+  });
+}
+
+/** Whether the seed has finished on this database and retired its identity. */
+export async function seedRetired(db: Kysely<DB>): Promise<boolean> {
+  return (await db.selectFrom('role_grant').select('id').where('person_id', '=', SERVICE.seed.person).where('revoked_at', 'is', null).executeTakeFirst()) === undefined;
 }
 
 /** The counts the cap test compares. */
