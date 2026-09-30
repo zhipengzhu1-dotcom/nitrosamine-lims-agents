@@ -4,7 +4,8 @@
 
 import { cite } from '@lims/domain/canonical';
 import type { RecordId } from '@lims/domain/ids';
-import { loadMethodVersion } from '../../chain/facts.ts';
+import { adoptionStatusGate, toRefusal, type AdoptionStatusFacts } from '@lims/domain/gates';
+import { adoptionStatusFacts, loadMethodVersion } from '../../chain/facts.ts';
 import { MethodDataSchema, SpecificationDataSchema, asCanon } from '../../chain/model.ts';
 import { signingEnablement } from '../facts.ts';
 import { gateOf, type KindDef, type SigningRule } from '../kinds.ts';
@@ -48,7 +49,7 @@ export const specificationKind: KindDef = {
     const s = await q.selectFrom('specification as s').innerJoin('product as p', 'p.id', 's.product_id')
       .select(['s.id', 's.purpose', 's.data', 'p.id as product_id', 'p.code', 'p.name']).where('s.id', '=', record).executeTakeFirstOrThrow();
     return {
-      body: { schema: 'specification@1', specification: s.id, product: { id: s.product_id, code: s.code, name: s.name }, purpose: s.purpose, data: asCanon(SpecificationDataSchema.parse(s.data)) },
+      body: { schema: 'specification@2', specification: s.id, product: { id: s.product_id, code: s.code, name: s.name }, purpose: s.purpose, data: asCanon(SpecificationDataSchema.parse(s.data)) },
       cites: [],
     };
   },
@@ -82,9 +83,11 @@ export const methodAdoptionKind: KindDef = {
       ...approvedByQa('The Adoption takes effect: GMP Tests on these Products may be accepted in this Lab.'),
       check: async (ctx, signer, sealed) => {
         for (const s of sealed) {
-          const a = await ctx.q.selectFrom('method_adoption').select('method_version_id').where('id', '=', s.record as RecordId).executeTakeFirstOrThrow();
+          const a = await ctx.q.selectFrom('method_adoption').select(['method_version_id', 'status']).where('id', '=', s.record as RecordId).executeTakeFirstOrThrow();
           const mv = await loadMethodVersion(ctx.q, a.method_version_id);
           if (!mv.approved) return { kind: 'not-permitted', message: `${mv.number} v${mv.version} is not Approved, so it cannot be adopted.` };
+          const gate = adoptionStatusGate(await adoptionStatusFacts(ctx.q, mv, a.status as AdoptionStatusFacts['status']));
+          if (!gate.go) return toRefusal(gate);
         }
         return approvedByQa('').check(ctx, signer, sealed, null);
       },

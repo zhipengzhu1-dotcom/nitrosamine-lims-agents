@@ -32,6 +32,18 @@ export type AuthorisationStanding =
   | { readonly kind: 'expired'; readonly meaning: Meaning; readonly scope: string; readonly validUntil: string }
   | { readonly kind: 'suspended'; readonly meaning: Meaning; readonly scope: string };
 
+const leapYear = (y: number): boolean => y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+
+/**
+ * Decision 19: an Authorisation is valid for 12 months. The latest valid-until (exclusive) for a
+ * valid-from date: the same day a year on, or 28 February when that day is 29 February.
+ */
+export function authorisationEndsBy(validFrom: string): string {
+  const [y, m, d] = validFrom.split('-');
+  const year = Number(y) + 1;
+  return `${year}-${m}-${m === '02' && d === '29' && !leapYear(year) ? '28' : d}`;
+}
+
 /** Decision 13's enabling steps, plus decision 19 §7's LIMS-use training. */
 export type EnablementStep = 'identity-check' | 'policy-acknowledged' | 'lims-use-training';
 
@@ -44,6 +56,9 @@ export type FitnessStatus = 'Quarantined' | 'In use' | 'Suspended' | 'Expired' |
 export type AdoptionStatus =
   | 'in-development' | 'validated-here' | 'transferred-in' | 'verified' | 'verified-basic-compendial' | 'retired'
   | 'none'; // no Adoption of this Method version in this Lab
+
+/** A Method version's basis (decision 36). */
+export type MethodBasis = 'compendial' | 'alternative' | 'in-house';
 
 // ---------------------------------------------------------------------------------------------
 // Who may act. Each signer type holds exactly what decision 19 checks for that meaning.
@@ -197,6 +212,25 @@ const QUALIFIED: ReadonlySet<AdoptionStatus> = new Set(['validated-here', 'verif
 // ---------------------------------------------------------------------------------------------
 // The gates
 // ---------------------------------------------------------------------------------------------
+
+export type AdoptionStatusFacts = {
+  readonly status: Exclude<AdoptionStatus, 'none'>;
+  readonly basis: MethodBasis;
+  readonly nitrosamineAnalytes: readonly string[];
+};
+
+/**
+ * Decision 36 §4: verification is for a compendial Method, and the basic compendial status never
+ * covers nitrosamine Analytes. An in-house or alternative Method is validated here or transferred in.
+ */
+export function adoptionStatusGate(f: AdoptionStatusFacts): GateResult {
+  const verifiedKind = f.status === 'verified' || f.status === 'verified-basic-compendial';
+  const [first, ...rest] = f.nitrosamineAnalytes;
+  return result([
+    ...(verifiedKind && f.basis !== 'compendial' ? [{ code: 'adoption-status-for-basis', status: f.status, basis: f.basis } as const] : []),
+    ...(f.status === 'verified-basic-compendial' && first !== undefined ? [{ code: 'basic-compendial-nitrosamine', analytes: [first, ...rest] } as const] : []),
+  ]);
+}
 
 /** Decision 12: a GMP Test is accepted only on a qualified Method Adoption in this Lab. */
 export function acceptanceGate(f: AcceptanceFacts): GateResult {

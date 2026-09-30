@@ -1,7 +1,7 @@
 // Every way the server says no, as values. The server renders each message; the UI prints it and
 // never writes consequence text of its own (decision 23 rule 18).
 
-import type { AdoptionStatus, AuthorisationStanding, EnablementStep, FitnessStatus, TrainingStanding } from './gates.ts';
+import type { AdoptionStatus, AuthorisationStanding, EnablementStep, FitnessStatus, MethodBasis, TrainingStanding } from './gates.ts';
 import type { VersionId } from './ids.ts';
 import type { Actor, Machine, Role, TransitionResult } from './machines.ts';
 import type { NonEmpty } from './nonempty.ts';
@@ -15,7 +15,9 @@ export type NotBuilt =
   | 'computed-run-check' // a Run Check statistic the LIMS computes from raw values (#37 §4)
   | 'hold-release' | 'amended-report' | 'invalidation' | 'non-gmp-marking' | 'raise-to-gmp' | 'retest'
   | 'receipt-discrepancy' | 'sample-return' | 'sample-disposal'
-  | 'import' | 'passkey' | 'anchoring' | 'below-loq-reporting' | 'multiple-nitrosamine-sum' | 'basis-correction';
+  | 'import' | 'passkey' | 'anchoring' | 'below-loq-reporting' | 'multiple-nitrosamine-sum' | 'basis-correction'
+  | 'training-run' // a Demonstrated Training Record, which needs a passing Training Run (decision 19 §1)
+  | 'compendial-basis'; // a compendial Method, whose cited text and coverage lists are not held (decision 36 §3)
 
 export type SodRule =
   | 'reviewer-signed-performed' // on the record or a Run feeding it
@@ -48,8 +50,14 @@ export type GateReason =
   | { readonly code: 'checklist-incomplete'; readonly items: NonEmpty<string> }
   | { readonly code: 'verdict-not-confirmed'; readonly test: string; readonly jurisdiction: Jurisdiction }
   | { readonly code: 'method-adoption'; readonly status: AdoptionStatus }
+  | { readonly code: 'adoption-status-for-basis'; readonly status: 'verified' | 'verified-basic-compendial'; readonly basis: Exclude<MethodBasis, 'compendial'> }
+  | { readonly code: 'basic-compendial-nitrosamine'; readonly analytes: NonEmpty<string> }
   | { readonly code: 'sample-not-received' }
   | { readonly code: 'work-linked'; readonly test: string }
+  | {
+      readonly code: 'limit-not-derived'; readonly jurisdiction: Jurisdiction; readonly analyte: string;
+      readonly limit: string; readonly derived: string; readonly acceptableIntake: string; readonly maximumDailyDose: string;
+    }
   | { readonly code: 'not-built'; readonly feature: NotBuilt; readonly because: string };
 
 export type Refusal =
@@ -90,6 +98,8 @@ export const NOT_BUILT_MESSAGE: { readonly [F in NotBuilt]: string } = {
   'below-loq-reporting': 'Results below the LOQ not built in the skeleton',
   'multiple-nitrosamine-sum': 'Multiple-nitrosamine sums not built in the skeleton',
   'basis-correction': 'Basis correction not built in the skeleton',
+  'training-run': 'Training Runs not built in the skeleton, so a Training Record can only be Read and Understood',
+  'compendial-basis': 'Compendial Methods not built in the skeleton, because nothing yet checks that the cited text covers the Method\'s Analytes and Products',
 };
 
 const ROLE_LABEL: { readonly [A in Actor]: string } = {
@@ -181,8 +191,13 @@ export function describeReason(r: GateReason): string {
     case 'checklist-incomplete': return `The Review Checklist is not complete: ${andList(r.items.map((i) => `"${i}"`))} not ticked.`;
     case 'verdict-not-confirmed': return `Confirm or disagree with the ${r.jurisdiction} verdict on ${r.test}.`;
     case 'method-adoption': return `The Method Adoption in this Lab is ${ADOPTION_LABEL[r.status]}; a GMP Test needs it validated here, verified or transferred in.`;
+    case 'adoption-status-for-basis':
+      return `${r.basis === 'in-house' ? 'An in-house' : 'An alternative'} Method can't be adopted as ${ADOPTION_LABEL[r.status]}: verification is only for a compendial Method. Adopt it as validated here or transferred in.`;
+    case 'basic-compendial-nitrosamine': return `A Method with nitrosamine Analytes (${andList(r.analytes)}) is never verified (basic compendial).`;
     case 'sample-not-received': return 'The Sample has not been received.';
     case 'work-linked': return `${r.test} has a Preparation or Run linked, so it can't be cancelled.`;
+    case 'limit-not-derived':
+      return `The ${r.jurisdiction} limit for ${r.analyte} is written ${r.limit} ppm, but ${r.acceptableIntake} ng/day ÷ ${r.maximumDailyDose} mg/day rounded down to ${decimals(r.limit.split('.')[1]?.length ?? 0)} is ${r.derived} ppm.`;
     case 'not-built': return `${NOT_BUILT_MESSAGE[r.feature]}: ${r.because}.`;
   }
 }

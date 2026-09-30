@@ -127,7 +127,7 @@ describe('D21: the not-built path', () => {
     expect(refusalOf(r).message).toBe('Deviation workflow not built in the skeleton: Run Check S/N at LOQ standard does not conform (8 against NLT 10).');
     expect((await gaps('deviation-workflow')).length).toBe(before + 1);
     const run = await seed.tabs.ann.view('run.detail', { runId: typed.runId });
-    expect(run.body.runChecks.find((c: { name: string }) => c.name === 'S/N at LOQ standard')).toMatchObject({ value: '8', criterion: 'NLT 10', source: expect.stringMatching(/<621>/), outcome: 'does-not-conform' });
+    expect(run.body.runChecks.find((c: { name: string }) => c.name === 'S/N at LOQ standard')).toMatchObject({ value: '8', criterion: 'NLT 10', source: 'NA-LCMS-001@1', outcome: 'does-not-conform' });
     expect(run.body.signatures).toEqual([]);
     const test = await seed.tabs.ann.view('test.detail', { testId });
     const runStep = test.body.test.steps.find((s: { name: string }) => s.name === 'Run');
