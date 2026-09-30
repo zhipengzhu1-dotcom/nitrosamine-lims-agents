@@ -4,6 +4,9 @@
 // would, so nothing here bypasses a credential check.
 
 import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 import { SERVICE } from '@lims/db';
 import { testDatabase, type TestDb } from '@lims/db/testing';
@@ -73,7 +76,7 @@ export class Client {
 
 export async function testApi(extra: Omit<AppOptions, 'db' | 'config'> = {}): Promise<TestApi> {
   const db = await testDatabase();
-  const config = { release: TEST_RELEASE, pepper: randomBytes(32), totpKey: randomBytes(32) };
+  const config = { release: TEST_RELEASE, pepper: randomBytes(32), totpKey: randomBytes(32), reportStore: mkdtempSync(join(tmpdir(), 'lims-reports-')) };
   const api = await buildApp({ db: db.app, config, ...extra });
   const seed = serviceActor('svc:seed', SERVICE.seed.person);
   return {

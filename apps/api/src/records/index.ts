@@ -270,11 +270,20 @@ export function records(tx: AuditedTx, kinds: KindRegistry, acted: Acted): Recor
       }
       const kindsInGroup = new Set(items.map((i) => i.kind));
       if (kindsInGroup.size !== 1) return { kind: 'not-permitted', message: 'One signing covers records of one kind.' };
+      let attestation: Sealed | null = null;
+      if (req.attestation) {
+        const a = await versionRow(req.attestation.versionId);
+        if (!a) return refuse.staleVersion('The Review', req.attestation.versionId, null);
+        attestation = await sealed(a.record_id as RecordId);
+        if (attestation.version.versionId !== req.attestation.versionId || attestation.version.hash !== req.attestation.hash) {
+          return refuse.staleVersion(attestation.label, req.attestation.versionId, attestation.version.versionId);
+        }
+      }
       const def = kinds.get(items[0]!.kind);
       const rule = def.signing[req.meaning];
       if (!rule) return { kind: 'not-permitted', message: `${items[0]!.label} does not carry the meaning ${req.meaning}.` };
       const signer: Signer = { person: req.signer.person, role: req.signer.role };
-      const gate = await rule.check(ruleContext, signer, items);
+      const gate = await rule.check(ruleContext, signer, items, attestation);
       if ('kind' in gate) return gate;
       if (!gate.go) return toRefusal(gate);
 

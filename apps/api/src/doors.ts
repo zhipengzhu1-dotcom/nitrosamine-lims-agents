@@ -6,6 +6,8 @@
 // Plus the fixed session endpoints sessions.md names:
 //   GET  /api/session              the session's derived state; every page load asks it first.
 //   POST /api/session/activity     "the person touched the screen"; moves only session_activity.
+//   GET  /files/:token             one stored file, for a 60-second single-use token an audited
+//                                  command minted; reads the store and writes nothing.
 // Login, lock, unlock, switch user, takeover and logout are Commands (session.*): audited.
 //
 // No other route is registered. So "no GET creates or changes anything" is structural: a View
@@ -14,8 +16,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { sql, type Kysely } from 'kysely';
 import type { z } from 'zod';
-import type { DB, CompanyRead, CustomerRead, LabRead, ReasonForChange } from '@lims/db';
-import { openRead } from '@lims/db';
+import type { DB, CompanyRead, CustomerRead, LabRead, ReasonForChange, Scope } from '@lims/db';
+import { openRead, readBlob } from '@lims/db';
 import type { LedgerId } from '@lims/domain/ids';
 import { refuse, type Refusal } from '@lims/domain/refusal';
 import { COMMAND_HEADER, CommandEnvelope, SESSION_COOKIE, type SessionDto } from '@lims/contract';
@@ -60,6 +62,12 @@ export type CommandDef<In extends z.ZodType = z.ZodType, D = unknown> = {
   readonly reason: ReasonForChange | ((input: z.infer<In>) => ReasonForChange);
   /** Every Lab ledger the command may write; the company ledger is always declared too. */
   readonly ledgers: (input: z.infer<In>, actor: Requester) => readonly LedgerId[];
+  /**
+   * The read scope of the command's handle, when it is not the actor's own: a Customer's submit
+   * writes Samples into the Lab that will test them. The audit context stays the actor's, and the
+   * database admits only the Customer's own rows (LA006).
+   */
+  readonly scope?: (input: z.infer<In>, actor: Requester) => Scope;
   readonly run: (tx: CommandTx, input: z.infer<In>) => Promise<Receipt<D> | Refusal>;
 };
 
@@ -76,6 +84,7 @@ export type AnyCommandDef = {
   readonly acting: Acting<never>;
   readonly reason: ReasonForChange | ((input: never) => ReasonForChange);
   readonly ledgers: (input: never, actor: Requester) => readonly LedgerId[];
+  readonly scope?: (input: never, actor: Requester) => Scope;
   readonly run: (tx: CommandTx, input: never) => Promise<Receipt<unknown> | Refusal>;
 };
 
@@ -189,6 +198,18 @@ export function registerDoors(app: FastifyInstance, deps: Deps, doors: Doors): v
     await deps.db.insertInto('session_activity').values({ session_id: s.actor.session, last_activity_at: sql`clock_timestamp()` })
       .onConflict((oc) => oc.column('session_id').doUpdateSet({ last_activity_at: sql`clock_timestamp()` })).execute();
     return reply.code(204).send();
+  });
+
+  app.get<{ Params: { token: string } }>('/files/:token', async (req, reply) => {
+    reply.header('cache-control', 'no-store');
+    const grant = deps.fileTokens.consume(req.params.token);
+    if (!grant) return reply.code(404).send({ kind: 'refusal', refusal: { kind: 'not-permitted', message: 'This download link has expired or was already used. Open the report again.' } });
+    const bytes = await readBlob(deps.reportStore, grant.ledger, grant.sha256);
+    if (!bytes) return reply.code(404).send({ kind: 'refusal', refusal: { kind: 'not-permitted', message: 'The file is not in the report store.' } });
+    reply.header('content-type', grant.mediaType);
+    reply.header('content-disposition', `attachment; filename="${grant.filename.replaceAll('"', '')}"`);
+    reply.header('x-lims-sha256', grant.sha256);
+    return reply.send(bytes);
   });
 
   app.get<{ Params: { name: string } }>('/api/views/:name', async (req, reply) => {

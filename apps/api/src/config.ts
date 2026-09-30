@@ -12,6 +12,8 @@ export type Config = {
   readonly pepper: Buffer;
   /** AES-256-GCM key for TOTP secrets at rest. */
   readonly totpKey: Buffer;
+  /** The report-store volume: True Copies and issued PDFs, content-addressed. */
+  readonly reportStore: string;
 };
 
 // deploy/mac/secrets.sh writes each key as 32 random bytes in base64.
@@ -34,5 +36,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     release: need('LIMS_RELEASE'),
     pepper: key(need('LIMS_PASSWORD_PEPPER_FILE')),
     totpKey: key(need('LIMS_TOTP_ENCRYPTION_KEY_FILE')),
+    reportStore: need('LIMS_REPORT_STORE'),
   };
 }

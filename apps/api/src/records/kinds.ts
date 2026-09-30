@@ -34,8 +34,11 @@ export type SigningRule = {
   readonly consequence: string;
   /** The Authorisation meanings any one of which qualifies the signer (the prompt shows the current one); defaults to the meaning itself. */
   readonly authorisations?: readonly Meaning[];
-  /** Loads facts and calls a pure gate; a Refusal is for rules a gate has no reason for. */
-  readonly check: (ctx: RuleContext, signer: Signer, sealed: readonly Sealed[]) => Promise<GateResult | Refusal>;
+  /**
+   * Loads facts and calls a pure gate; a Refusal is for rules a gate has no reason for. The
+   * attestation is the sealed Review a Reviewed or Released signing cites, else null.
+   */
+  readonly check: (ctx: RuleContext, signer: Signer, sealed: readonly Sealed[], attestation: Sealed | null) => Promise<GateResult | Refusal>;
   /** Consequential effects in the same transaction (a lifecycle transition, a lock). */
   readonly after?: (tx: CommandTx, sealed: Sealed, signature: SignatureRow) => Promise<void>;
 };

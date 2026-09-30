@@ -21,6 +21,7 @@ function deployEnv(dir: string): NodeJS.ProcessEnv {
     LIMS_RELEASE: 'r-test',
     LIMS_PASSWORD_PEPPER_FILE: join(dir, 'pepper'),
     LIMS_TOTP_ENCRYPTION_KEY_FILE: join(dir, 'totp'),
+    LIMS_REPORT_STORE: '/var/lib/lims/reports',
   };
 }
 

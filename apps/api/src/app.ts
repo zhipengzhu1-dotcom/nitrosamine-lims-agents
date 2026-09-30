@@ -9,6 +9,7 @@ import type { Config } from './config.ts';
 import type { Deps } from './commit.ts';
 import { registerDoors, type AnyCommandDef, type AnyViewDef } from './doors.ts';
 import { KindRegistry, type KindDef } from './records/kinds.ts';
+import { FileTokens } from './files.ts';
 import { authorisationKind } from './records/kinds/authorisation.ts';
 import { trainingRecordKind } from './records/kinds/training-record.ts';
 import { sessionCommands } from './commands/session.ts';
@@ -24,7 +25,7 @@ export const CORE_VIEWS: readonly AnyViewDef[] = recordViews;
 
 export type AppOptions = {
   readonly db: Kysely<DB>;
-  readonly config: Pick<Config, 'release' | 'pepper' | 'totpKey'>;
+  readonly config: Pick<Config, 'release' | 'pepper' | 'totpKey' | 'reportStore'>;
   /** The sample-chain kinds, commands and views plug in here. */
   readonly kinds?: readonly KindDef[];
   readonly commands?: readonly AnyCommandDef[];
@@ -48,6 +49,8 @@ export async function buildApp(opts: AppOptions): Promise<Api> {
     pepper: opts.config.pepper,
     totpKey: opts.config.totpKey,
     kinds: new KindRegistry([...CORE_KINDS, ...(opts.kinds ?? [])]),
+    reportStore: opts.config.reportStore,
+    fileTokens: new FileTokens(),
   };
   const commands = [...CORE_COMMANDS, ...(opts.commands ?? [])];
   const views = [...CORE_VIEWS, ...(opts.views ?? [])];

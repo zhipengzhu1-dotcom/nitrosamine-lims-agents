@@ -26,14 +26,14 @@ const roleAllowed = (meaning: Meaning, role: string): boolean => (SIGNS_AS[meani
 
 const versionDto = (v: Sealed['version']) => ({ versionId: v.versionId, versionNo: v.versionNo, hash: v.hash });
 
-async function eligibility(tx: CommandTx, actor: ActorContext, meaning: Meaning, sealed: readonly Sealed[]): Promise<PreparedSigningDto['eligibility']> {
+async function eligibility(tx: CommandTx, actor: ActorContext, meaning: Meaning, sealed: readonly Sealed[], attestation: Sealed | null): Promise<PreparedSigningDto['eligibility']> {
   const def = tx.deps.kinds.get(sealed[0]!.kind);
   const rule = def.signing[meaning];
   const roles = SIGNS_AS[meaning].filter((r) => holdsRole(actor, r));
   const scope = await def.authorisationScope(tx.db, sealed[0]!.record);
   const lab = actor.kind === 'staff' ? actor.lab : actor.kind === 'service' ? actor.lab : null;
   const byRole = await Promise.all(roles.map(async (role) => {
-    const answer = rule ? await rule.check({ q: tx.db, dbNow: tx.dbNow, lab }, { person: actor.person, role }, sealed) : null;
+    const answer = rule ? await rule.check({ q: tx.db, dbNow: tx.dbNow, lab }, { person: actor.person, role }, sealed, attestation) : null;
     const reasons = answer === null ? [`${sealed[0]!.label} does not carry the meaning ${meaning}.`]
       : 'kind' in answer ? [answer.message]
       : answer.go ? [] : answer.reasons.map((r) => describeReasons([r]));
@@ -76,7 +76,7 @@ export const prepareSigning = defineCommand({
       })),
       attestation: attestation ? versionDto(attestation.version) : null,
       consequence: def.signing[input.meaning]?.consequence ?? '',
-      eligibility: await eligibility(tx, actor, input.meaning, sealed),
+      eligibility: await eligibility(tx, actor, input.meaning, sealed, attestation),
     };
     return receipt('Ready to sign.', 'audited', data);
   },

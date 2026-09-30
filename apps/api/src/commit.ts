@@ -23,6 +23,7 @@ import { refuse, specGapsOf, type Refusal } from '@lims/domain/refusal';
 import { actingLab, holdsRole, primaryRole, scopeOf, type Requester } from './actor.ts';
 import type { AnyCommandDef, CookieAction, Receipt } from './doors.ts';
 import type { KindRegistry } from './records/kinds.ts';
+import type { FileTokens } from './files.ts';
 import { records, type Records } from './records/index.ts';
 
 export type Deps = {
@@ -31,6 +32,8 @@ export type Deps = {
   readonly pepper: Buffer;
   readonly totpKey: Buffer;
   readonly kinds: KindRegistry;
+  readonly reportStore: string;
+  readonly fileTokens: FileTokens;
 };
 
 /** A row that must outlive a refusal: written now, and again after the savepoint rolls back. */
@@ -121,7 +124,8 @@ export async function commit(deps: Deps, who: Requester, key: CommitKey | string
   };
   const svcAuth: AuditContext = { ...ctx, person: SERVICE.auth.person, role: SERVICE.auth.role, actingLab: null, customer: null, session: null, ledgers: [COMPANY_LEDGER] };
 
-  const out = await runAudited(deps.db, ctx, acted.scope, async (tx): Promise<{ commit: Outcome } | { rollback: Outcome }> => {
+  const scope = def.scope ? def.scope(input, who) : acted.scope;
+  const out = await runAudited(deps.db, ctx, scope, async (tx): Promise<{ commit: Outcome } | { rollback: Outcome }> => {
     const prior = await tx.db.selectFrom('commit_outcome').select(['input_hash', 'outcome', 'body']).where('commit_key', '=', key).execute();
     const receipt = prior.find((p) => p.outcome === 'receipt');
     if (receipt) {
