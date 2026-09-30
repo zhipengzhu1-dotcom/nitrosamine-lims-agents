@@ -457,6 +457,29 @@ The shared contract holds for every item below: the browser prints server facts,
 - Enrolling without a camera. The page shows the QR code only; whether the secret may also be shown as text for manual entry (standard in authenticator apps) under rule 2 is undecided.
 - The enrolment page prints the server's password-problem sentences as the rules, so the breach rule reads as a refusal ("That password appears in a published breach").
 
+### C3, reference data (review fixes 7, 9, 10, 13, 14, 15 and 16)
+
+The shared contract holds for every item below: reference records are still drafted by commands, sealed at once and made effective by QA's Approved signing, and each check is a pure function in `packages/domain` fed by the command or the signing rule.
+
+- **An AI-derived limit is typed, then checked, not computed and stored** (decision 29 says "computed by the server and never typed"). `reference.specification` computes AI ÷ MDD exactly and refuses a line whose limit is not that value rounded down to the limit's own written decimals (`derivationGate`, `packages/domain/src/limits.ts`), so the written decimals stay the Lab's choice while the value cannot drift from its derivation. The stored bytes equal what the server would compute. No LTL factor exists in the schema, so none is applied.
+- **`basis` is required on every Specification Line, not only nitrosamine lines.** Every line the skeleton can hold is AI-derived; fixed-concentration, limit-test and report-only lines are left out of the type (U2b), and a line kind will be added with them. The Acceptable Intake and the maximum daily dose must be positive.
+- **The Decision Rule is a field of each Section**, `{ rule: 'simple-acceptance', riskBasis, wording: { conforms, doesNotConform } }`, sealed into the version the Customer accepts. Guarded acceptance is not representable rather than refused, as report-only lines are, because it needs the Uncertainty Evaluation. The content tag moved to `specification@2`. Printing it is C4's.
+- **Adoption status is checked twice**, at `reference.adoption` and in the Approved signing rule, by one gate (`adoptionStatusGate`): `verified` and `verified-basic-compendial` only on a compendial basis, and basic compendial never with an Analyte whose Substance kind is `small-nitrosamine` or `ndsri`. The draft check saves a record that could never be approved; the signing check is the one that makes it effective, and a test drafts around the first to prove the second.
+- **Every Authorisation is capped at 12 months**, not only Method Authorisations, because decision 19 makes every Authorisation valid for 12 months. `valid_until` is exclusive, so the latest is the same day a year on (28 February from a 29 February). The command refuses first; migration 0070's check is the guard.
+- **Released is refused to the Lab Manager of the same Lab** by `authorisation.grant` and by trigger LI002 on insert. Roles are granted only by `identity.createPerson`, before any Authorisation exists, so the trigger guards the Authorisation side only; a later role-grant command must add the other order, as LI001 does.
+- **The seed** signs Specifications as the QA person, adopts the LC-MS/MS Method as validated here, cites each seeded Method version for its own Run Check and variability criteria (the GC-MS Method had cited the LC-MS/MS one), and grants Authorisations for twelve months from the first of the current month so they are current whenever it runs.
+- **The Review Checklists are `CL-RUN@2` and `CL-TEST@2`**, §7's ticked items for typed entry. Items the signing gates already prove (Fitness Status, Run Checks, Verified values, Training and Authorisation) are no longer ticks. A tick's text may be 120 characters to hold §7's wording. `CL-RELEASE@1` is unchanged, since §7 names no release items.
+- **Demonstrated Training Records are refused** with `not-built: training-run`, since a Training Run is not built; Read and Understood is the only level the skeleton records.
+
+### Spec gaps found by C3
+
+- The AI-derived limit's stated digits (decision 29; carried from U5 and on the map). The check accepts any decimals, so a limit written with too few can round down to zero (96 ng/day over 1200 mg/day written `0.0`); the vectors pin that this is not decided here.
+- Which of decision 20 §7's ticked items go on the Run's checklist and which on the Test's (§7 names one list for both). Assumed: raw-data items (chromatograms, excluded Injections) on the Run, calculations and result flags on the Test, the audit trail and Notebook Entries on both.
+- The MassLynx processing-history item (§7) is left off until the Integration Declaration it is reviewed against exists (decision 20 §2 records it on the import path).
+- The skeleton has no Notebook Entries and no outlier, OOT, trend or Conditional Pass flags, so those ticks attest to nothing the LIMS holds; a tick carries no comment.
+- The Decision Rule's risk basis and printed wording (decision 29 says the record holds them; nothing gives the words). The seed writes a simple-acceptance statement citing ILAC-G8:09/2019.
+- Which Substance kinds count as nitrosamine Analytes for basic compendial (decision 36 §4). Assumed `small-nitrosamine` and `ndsri`.
+
 ## Open questions and risks
 
 - **Recorded Value as a glossary term.** Should "Recorded Value" enter `CONTEXT.md` ("One typed or chosen value on a signable record, with who recorded it and when; the unit of Verified signing and Critical Data Change")? Or does an existing term fit that I missed?
