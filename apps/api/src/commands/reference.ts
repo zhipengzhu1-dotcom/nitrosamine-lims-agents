@@ -9,6 +9,7 @@ import { uuid } from '@lims/contract';
 import type { RecordId, VersionId } from '@lims/domain/ids';
 import { adoptionStatusGate, toRefusal } from '@lims/domain/gates';
 import { derivationGate } from '@lims/domain/limits';
+import { refuse } from '@lims/domain/refusal';
 import { adoptionStatusFacts, loadMethodVersion } from '../chain/facts.ts';
 import { derivedSectionsOf, MethodDataSchema, SpecificationDataSchema } from '../chain/model.ts';
 import { receipt, type CommandTx } from '../commit.ts';
@@ -79,6 +80,7 @@ export const createMethodVersion = defineCommand({
   reason: { kind: 'first_save' },
   ledgers: () => [],
   run: async (tx, input) => {
+    if (input.data.basis === 'compendial') return refuse.notBuilt('compendial-basis');
     const id = randomUUID() as RecordId;
     await tx.db.insertInto('record').values({ ledger_id: COMPANY_LEDGER, id, kind: 'method_version' }).execute();
     await tx.db.insertInto('method_version').values({ id, method_id: input.methodId, version: input.version, data: JSON.stringify(input.data) }).execute();

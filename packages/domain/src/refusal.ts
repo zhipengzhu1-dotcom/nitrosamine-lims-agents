@@ -16,7 +16,8 @@ export type NotBuilt =
   | 'hold-release' | 'amended-report' | 'invalidation' | 'non-gmp-marking' | 'raise-to-gmp' | 'retest'
   | 'receipt-discrepancy' | 'sample-return' | 'sample-disposal'
   | 'import' | 'passkey' | 'anchoring' | 'below-loq-reporting' | 'multiple-nitrosamine-sum' | 'basis-correction'
-  | 'training-run'; // a Demonstrated Training Record, which needs a passing Training Run (decision 19 §1)
+  | 'training-run' // a Demonstrated Training Record, which needs a passing Training Run (decision 19 §1)
+  | 'compendial-basis'; // a compendial Method, whose cited text and coverage lists are not held (decision 36 §3)
 
 export type SodRule =
   | 'reviewer-signed-performed' // on the record or a Run feeding it
@@ -94,6 +95,7 @@ export const NOT_BUILT_MESSAGE: { readonly [F in NotBuilt]: string } = {
   'multiple-nitrosamine-sum': 'Multiple-nitrosamine sums not built in the skeleton',
   'basis-correction': 'Basis correction not built in the skeleton',
   'training-run': 'Training Runs not built in the skeleton, so a Training Record can only be Read and Understood',
+  'compendial-basis': 'Compendial Methods not built in the skeleton, because nothing yet checks that the cited text covers the Method\'s Analytes and Products',
 };
 
 const ROLE_LABEL: { readonly [A in Actor]: string } = {

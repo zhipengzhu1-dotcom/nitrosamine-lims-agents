@@ -10,10 +10,10 @@ import type { RecordId } from '@lims/domain/ids';
 import { CHAIN } from '../src/chain/index.ts';
 import { checklistFor, RELEASE_CHECKLIST, RUN_CHECKLIST, TEST_CHECKLIST } from '../src/chain/model.ts';
 import { receipt } from '../src/commit.ts';
-import { createAdoption, createSpecification } from '../src/commands/reference.ts';
+import { createAdoption, createMethodVersion, createSpecification } from '../src/commands/reference.ts';
 import { defineCommand } from '../src/doors.ts';
 import { seedCast, type Cast } from '../src/seed/cast.ts';
-import { fdaSpecification, METHOD_DOCUMENTS, seedCustomers, seedReference, SIMPLE_ACCEPTANCE, type Reference } from '../src/seed/reference.ts';
+import { fdaSpecification, methodData, METHOD_DOCUMENTS, seedCustomers, seedReference, SIMPLE_ACCEPTANCE, type Reference } from '../src/seed/reference.ts';
 import { signAs, testApi, type TestApi } from '../src/testing/harness.ts';
 
 /** Drafts an Adoption without the command's status check, so the Approved signing's own check is proved. */
@@ -117,6 +117,13 @@ describe('a Method Adoption\'s status suits the Method\'s basis (usp 6, decision
     const signed = await signAs(cast.tabs.cid, cast.cid, 'Approved', 'QA', [(drafted.receipt.data as { recordId: string }).recordId]);
     expect(signed.status).toBe(409);
     expect(signed.body.refusal.message).toMatch(/An in-house Method can't be adopted as verified/);
+  });
+
+  it('refuses a compendial basis as not built, since nothing yet checks the cited text covers the Analytes (usp review of C3)', async () => {
+    const before = (await api.db.app.selectFrom('spec_gap').select('id').where('feature', '=', 'compendial-basis').execute()).length;
+    const out = await api.run(api.seed, createMethodVersion, { methodId: reference.methods.lcms.id, version: 2, data: { ...methodData('NA-LCMS-001', 'compendial', true), analytes: [{ key: 'NDMA', substanceId: reference.substances.ndma, name: 'N-Nitrosodimethylamine' }] } });
+    expect(out).toMatchObject({ kind: 'refusal', refusal: { kind: 'not-built', feature: 'compendial-basis' } });
+    expect((await api.db.app.selectFrom('spec_gap').select('id').where('feature', '=', 'compendial-basis').execute()).length).toBe(before + 1);
   });
 
   it('seeds the LC-MS/MS Method adopted as validated here, and it stands Approved', async () => {
