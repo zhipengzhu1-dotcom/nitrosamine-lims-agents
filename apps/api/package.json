@@ -1,0 +1,26 @@
+{
+  "name": "@lims/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.2",
+    "@lims/contract": "workspace:*",
+    "@lims/db": "workspace:*",
+    "@lims/domain": "workspace:*",
+    "@node-rs/argon2": "2.2.1",
+    "fastify": "5.12.5",
+    "kysely": "0.29.6",
+    "otpauth": "9.5.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "pg": "8.23.0",
+    "@types/pg": "^8.15.0"
+  }
+}

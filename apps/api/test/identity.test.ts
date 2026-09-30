@@ -1,0 +1,155 @@
+// Identity: enrolment through a one-time link, login, the lockout derived from the access log,
+// and the Admin's exclusivity surfaced as a refusal.
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createPerson } from '../src/commands/identity.ts';
+import { credentials, enrol, login, testApi, type Person, type TestApi } from '../src/testing/harness.ts';
+import { createLab, type Lab } from './support.ts';
+
+let api: TestApi;
+let lab: Lab;
+let admin: Person;
+
+beforeAll(async () => {
+  api = await testApi();
+  lab = await createLab(api, 'RD');
+  admin = await enrol(api, { username: 'adam', printedName: 'Adam Admin', grants: [{ role: 'Admin' }] });
+});
+afterAll(() => api.close());
+
+const events = (username: string) =>
+  api.db.app.selectFrom('auth_event').innerJoin('account', 'account.person_id', 'auth_event.person_id').select(['auth_event.kind', 'auth_event.counts_toward_lockout'])
+    .where('account.username', '=', username).orderBy('auth_event.id').execute();
+
+describe('enrolment', () => {
+  it('the Admin creates the person and gets a link; the receipt stored for replay carries no token', async () => {
+    const adminTab = await login(api, admin);
+    const key = crypto.randomUUID();
+    const r = await adminTab.command('identity.createPerson', { printedName: 'Eve Analyst', username: 'eve', grants: [{ role: 'Analyst', lab: lab.id }] }, key);
+    expect(r.status).toBe(200);
+    const token = (r.body as { once: { enrolmentToken: string } }).once.enrolmentToken;
+    expect(token.length).toBeGreaterThan(30);
+    const replay = await adminTab.command('identity.createPerson', { printedName: 'Eve Analyst', username: 'eve', grants: [{ role: 'Analyst', lab: lab.id }] }, key);
+    expect(replay.body['replayed']).toBe(true);
+    expect(JSON.stringify(replay.body)).not.toContain(token);
+    const stored = await api.db.app.selectFrom('commit_outcome').select('body').where('commit_key', '=', key).executeTakeFirstOrThrow();
+    expect(JSON.stringify(stored.body)).not.toContain(token);
+  });
+
+  it('a link works once, refuses a weak password, needs the live code, and the Admin never sees the secret', async () => {
+    const created = await api.run(api.seed, createPerson, { printedName: 'Fay Reviewer', username: 'fay', grants: [{ role: 'Reviewer', lab: lab.id }] });
+    if (created.kind !== 'receipt') throw new Error('createPerson refused');
+    const token = (created.once?.data as { enrolmentToken: string }).enrolmentToken;
+    const anon = api.client();
+    const start = await anon.command('identity.enrolStart', { token });
+    expect(start.status).toBe(200);
+    const uri = (start.body as { once: { otpauthUri: string } }).once.otpauthUri;
+    expect(uri).toMatch(/^otpauth:\/\/totp\//);
+    expect(JSON.stringify(start.body['data'])).not.toContain('secret');
+    const { Authenticator } = await import('../src/testing/harness.ts');
+    const auth = new Authenticator(uri);
+
+    const weak = await anon.command('identity.enrolFinish', { token, password: 'fay-password-2026', totp: await auth.next() });
+    expect(weak.status).toBe(403);
+    expect((weak.body as { refusal: { message: string } }).refusal.message).toMatch(/upper-case.*symbol/);
+    expect((weak.body as { refusal: { message: string } }).refusal.message).toMatch(/must not contain your user ID/);
+
+    const wrongCode = await anon.command('identity.enrolFinish', { token, password: 'Correct-Horse-Battery-9!', totp: '000000' });
+    expect(wrongCode.status).toBe(403);
+
+    const ok = await anon.command('identity.enrolFinish', { token, password: 'Correct-Horse-Battery-9!', totp: await auth.next() });
+    expect(ok.status).toBe(200);
+    const again = await anon.command('identity.enrolStart', { token });
+    expect(again.status).toBe(403);
+
+    const account = await api.db.app.selectFrom('account').select(['password_hash', 'totp_secret_enc']).where('username', '=', 'fay').executeTakeFirstOrThrow();
+    expect(account.password_hash).toMatch(/^\$argon2id\$/);
+    expect(account.totp_secret_enc?.toString('latin1')).not.toContain(auth.secret);
+    const trail = await api.db.app.selectFrom('audit_entry').select('changes').where('table_name', 'in', ['account', 'enrolment_link']).execute();
+    for (const t of trail) {
+      expect(JSON.stringify(t.changes)).not.toContain(auth.secret);
+      expect(JSON.stringify(t.changes)).not.toContain('Correct-Horse');
+    }
+  });
+
+  it('a user ID is never reused, and a breached password is refused', async () => {
+    const dup = await api.run(api.seed, createPerson, { printedName: 'Fay Again', username: 'fay', grants: [{ role: 'Analyst', lab: lab.id }] });
+    expect(dup.kind === 'refusal' && dup.refusal.message).toMatch(/never reused/);
+    const created = await api.run(api.seed, createPerson, { printedName: 'Gus Custodian', username: 'gus', grants: [{ role: 'SampleCustodian', lab: lab.id }] });
+    if (created.kind !== 'receipt') throw new Error('refused');
+    const token = (created.once?.data as { enrolmentToken: string }).enrolmentToken;
+    const anon = api.client();
+    const start = await anon.command('identity.enrolStart', { token });
+    const { Authenticator } = await import('../src/testing/harness.ts');
+    const auth = new Authenticator((start.body as { once: { otpauthUri: string } }).once.otpauthUri);
+    const r = await anon.command('identity.enrolFinish', { token, password: 'Nitrosamine-LIMS-2026!', totp: await auth.next() });
+    expect(r.status).toBe(403);
+    expect(r.body.refusal.message).toMatch(/published breach/);
+  });
+
+  it('Admin with a business role is refused by the database and surfaced as a refusal', async () => {
+    const r = await api.run(api.seed, createPerson, { printedName: 'Two Hats', username: 'hats', grants: [{ role: 'Admin' }, { role: 'Analyst', lab: lab.id }] });
+    expect(r.kind).toBe('refusal');
+    expect(r.kind === 'refusal' && r.refusal.message).toMatch(/Admin never also holds a business role/);
+    expect(await api.db.app.selectFrom('person').select('id').where('printed_name', '=', 'Two Hats').executeTakeFirst()).toBeUndefined();
+  });
+});
+
+describe('login and lockout', () => {
+  let eve: Person;
+  beforeAll(async () => {
+    eve = await enrol(api, { username: 'evelyn', printedName: 'Evelyn Analyst', grants: [{ role: 'Analyst', lab: lab.id }] });
+  });
+
+  it('an unknown user ID is refused without revealing that it is unknown, and counts toward nobody', async () => {
+    const r = await api.client().command('session.login', { typedUserId: 'nobody', password: 'x', totp: '000000', workstation: 'bench-1' });
+    expect(r.status).toBe(401);
+    expect((r.body as { refusal: { kind: string } }).refusal.kind).toBe('credentials');
+    const rows = await api.db.app.selectFrom('auth_event').select('person_id').where('typed_user', '=', 'nobody').execute();
+    expect(rows).toEqual([{ person_id: null }]);
+  });
+
+  it('five consecutive failures lock the account, alert QA and the Admin, and only an Admin unlocks it', async () => {
+    const tab = api.client();
+    const attempt = (password: string) => tab.command('session.login', { typedUserId: eve.username, password, totp: '000000', workstation: 'bench-1' });
+    for (let i = 1; i <= 4; i++) {
+      const r = await attempt('wrong');
+      expect(r.status).toBe(401);
+      expect((r.body as { refusal: { attemptsLeft: number } }).refusal.attemptsLeft).toBe(5 - i);
+    }
+    const fifth = await attempt('wrong');
+    expect(fifth.status).toBe(423);
+    expect((fifth.body as { refusal: { kind: string; message: string } }).refusal.message).toMatch(/QA and the Admin have been alerted/);
+    const alerts = await api.db.app.selectFrom('alert').select('kind').where('person_id', '=', eve.id).execute();
+    expect(alerts).toEqual([{ kind: 'lockout' }]);
+
+    const right = await tab.command('session.login', { ...(await credentials(eve)), workstation: 'bench-1' });
+    expect(right.status).toBe(423);
+
+    const adminTab = await login(api, admin);
+    expect((await adminTab.command('identity.unlockAccount', { personId: eve.id })).status).toBe(200);
+    const after = await tab.command('session.login', { ...(await credentials(eve)), workstation: 'bench-1' });
+    expect(after.status).toBe(200);
+    expect((await events(eve.username)).map((e) => e.kind)).toEqual([
+      'totp_enrolled', 'login_fail', 'login_fail', 'login_fail', 'login_fail', 'login_fail', 'lockout', 'login_fail', 'unlock', 'login_ok',
+    ]);
+  });
+
+  it('a right password with a wrong code counts as one failure, and a success resets the count', async () => {
+    const tab = api.client();
+    const wrongCode = await tab.command('session.login', { typedUserId: eve.username, password: eve.password, totp: '000000', workstation: 'bench-1' });
+    expect(wrongCode.status).toBe(401);
+    const ok = await tab.command('session.login', { ...(await credentials(eve)), workstation: 'bench-1' });
+    expect(ok.status).toBe(200);
+    const state = await api.db.app.selectFrom('lockout_state').select('consecutive_failures').where('person_id', '=', eve.id).executeTakeFirstOrThrow();
+    expect(Number(state.consecutive_failures)).toBe(0);
+  });
+
+  it('a reused code is "wait for the next code" and does not count', async () => {
+    const tab = api.client();
+    const r = await tab.command('session.login', { typedUserId: eve.username, password: eve.password, totp: eve.auth.used(), workstation: 'bench-1' });
+    expect(r.status).toBe(409);
+    expect((r.body as { refusal: { message: string } }).refusal.message).toBe('Wait for the next code.');
+    const state = await api.db.app.selectFrom('lockout_state').select('consecutive_failures').where('person_id', '=', eve.id).executeTakeFirstOrThrow();
+    expect(Number(state.consecutive_failures)).toBe(0);
+  });
+});
