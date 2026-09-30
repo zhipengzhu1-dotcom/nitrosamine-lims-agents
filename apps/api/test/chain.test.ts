@@ -14,16 +14,24 @@ import { signAs, testApi, type TestApi } from '../src/testing/harness.ts';
 
 let api: TestApi;
 let seed: SeedResult;
+let seedWorkstations: string[];
 
 beforeAll(async () => {
   api = await testApi(CHAIN);
   seed = await seedDemo(api, api.deps);
+  seedWorkstations = (await api.db.app.selectFrom('session').select('workstation').distinct().execute()).map((s) => s.workstation);
 });
 afterAll(() => api.close());
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 const refusalOf = (r: { body: any }) => r.body.refusal as { kind: string; message: string; reasons?: { code: string }[] };
 const gaps = (feature: string) => api.db.app.selectFrom('spec_gap').select('id').where('feature', '=', feature).execute();
+
+describe('the seed', () => {
+  it('signs everyone in on workstation seed-script, so no seeded session looks like a bench PC or the portal', () => {
+    expect(seedWorkstations).toEqual(['seed-script']);
+  });
+});
 
 describe('D19: the whole chain', () => {
   it('the Customer downloads the PDF and its SHA-256 equals the one stored with the Released signature', async () => {

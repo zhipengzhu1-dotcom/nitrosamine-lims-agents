@@ -11,7 +11,7 @@ import { reenrol } from '../commands/identity.ts';
 import type { DataClass } from '../config.ts';
 import { authorise, DEMO_ACCOUNTS, seedCast, type Cast } from './cast.ts';
 import { acceptAndReceive, assign, fullChain, openTabs, PASSING, submitOne, typeRun, type Submitted, type Tabs } from './chain.ts';
-import type { Driver } from './drive.ts';
+import { SEED_WORKSTATION, type Driver } from './drive.ts';
 import { METHOD_DOCUMENTS, METHOD_GCMS, METHOD_LCMS, seedCustomers, seedReference, type Reference } from './reference.ts';
 
 /** 30 % of the #23 prototype's counts, the owner's cap for the seed and the tests. */
@@ -39,8 +39,9 @@ export async function alreadySeeded(db: Kysely<DB>): Promise<boolean> {
   return (await db.selectFrom('customer').select('id').executeTakeFirst()) !== undefined;
 }
 
-export async function seedDemo(api: Driver, deps: Deps, log: (line: string) => void = () => {}): Promise<SeedResult> {
+export async function seedDemo(driver: Driver, deps: Deps, log: (line: string) => void = () => {}): Promise<SeedResult> {
   if (await alreadySeeded(deps.db)) throw new Error('this database is already seeded');
+  const api: Driver = { ...driver, workstation: SEED_WORKSTATION };
   log('Customers');
   const customers = await seedCustomers(api);
   log('People: enrolment, identity checks, Training Records');

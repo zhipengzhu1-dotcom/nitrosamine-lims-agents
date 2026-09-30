@@ -18,7 +18,12 @@ export type Driver = {
   readonly client: () => Client;
   readonly run: (who: Requester, def: AnyCommandDef, input: unknown, key?: CommitKey) => Promise<Outcome>;
   readonly seed: Requester;
+  /** Every session this driver opens is on this workstation, whatever the caller asks for. */
+  readonly workstation?: string;
 };
+
+/** Where the seed script signs its fictional people in, so no seeded session passes for a bench PC. */
+export const SEED_WORKSTATION = 'seed-script';
 
 /** The body is whatever JSON came back; callers read into it freely. */
 export type Response = { readonly status: number; readonly body: any };
@@ -163,7 +168,7 @@ export async function login(api: Driver, person: Person, at: string | { workstat
   const opts = typeof at === 'string' ? { workstation: at } : at;
   const tab = api.client();
   const r = await tab.command('session.login', {
-    ...(await credentials(person)), workstation: opts.workstation ?? 'bench-1',
+    ...(await credentials(person)), workstation: api.workstation ?? opts.workstation ?? 'bench-1',
     ...(opts.customer ? { customer: opts.customer } : {}), ...(opts.lab ? { lab: opts.lab } : {}),
   });
   if (r.status !== 200) throw new Error(`login ${person.username}: ${JSON.stringify(r.body)}`);
