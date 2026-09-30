@@ -1,4 +1,4 @@
-export type { DB } from './generated.ts';
+export type * from './generated.ts';
 export * from './ledgers.ts';
 export * from './scope.ts';
 export * from './audited.ts';

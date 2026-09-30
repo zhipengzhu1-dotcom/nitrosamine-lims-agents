@@ -75,12 +75,13 @@ export type AuditedTx = {
    * body here, so a refusal's effect is undone while the rows that must survive it, and the
    * outcome, are written afterwards in the same transaction, still under the commit key's lock.
    */
-  readonly attempt: <T>(fn: () => Promise<TxOutcome<T>>) => Promise<TxOutcome<T>>;
+  readonly attempt: <C, R>(fn: () => Promise<Attempt<C, R>>) => Promise<Attempt<C, R>>;
   /** Runs `fn` with the audit context switched to `ctx` (validated by the database like any other), then switches back. */
   readonly withContext: (ctx: AuditContext, fn: () => Promise<void>) => Promise<void>;
 };
 
-export type TxOutcome<T> = { readonly commit: T } | { readonly rollback: T };
+export type Attempt<C, R> = { readonly commit: C } | { readonly rollback: R };
+export type TxOutcome<T> = Attempt<T, T>;
 
 const unscopedOf = new WeakMap<AuditedTx, Transaction<DB>>();
 

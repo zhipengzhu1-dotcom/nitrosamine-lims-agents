@@ -72,6 +72,14 @@ const MUTANTS: Mutant[] = [
     test: 'test/pipeline-tables.test.ts',
   },
   {
+    name: 'a session unlock does not end a run of failures',
+    file: 'migrations/0040_identity_pipeline.sql',
+    find: "where x.person_id = p.id and x.kind in ('login_ok', 'signing_ok', 'unlock', 'unlock_session')), 0)",
+    replace: "where x.person_id = p.id and x.kind in ('login_ok', 'signing_ok', 'unlock')), 0)",
+    test: 'test/session.test.ts',
+    package: 'apps/api',
+  },
+  {
     name: 'LA006 other Lab writable',
     file: 'migrations/0010_ledger_audit.sql',
     find: "and ledger is distinct from (ctx->>'acting_lab_id')::uuid then",

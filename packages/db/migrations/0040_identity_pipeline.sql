@@ -20,6 +20,18 @@ alter table lims.totp_step_used drop constraint totp_step_used_purpose_check;
 alter table lims.totp_step_used add constraint totp_step_used_purpose_check
   check (purpose in ('login', 'signing', 'unlock', 'takeover', 'enrol'));
 
+-- A session unlock is a full re-authentication too, so it ends a run of failures.
+create or replace view lims.lockout_state as
+select p.id as person_id,
+       count(e.*) filter (where e.counts_toward_lockout and e.kind in ('login_fail', 'signing_fail')) as consecutive_failures,
+       bool_or(e.kind = 'lockout') as locked_out
+  from lims.person p
+  left join lims.auth_event e
+    on e.person_id = p.id
+   and e.id > coalesce((select max(x.id) from lims.auth_event x
+                         where x.person_id = p.id and x.kind in ('login_ok', 'signing_ok', 'unlock', 'unlock_session')), 0)
+ group by p.id;
+
 -- A one-time enrolment link. The Admin creates it and never sees the password or the secret: the
 -- pending secret is encrypted and redacted from the trail, and the link is spent by the person.
 create table lims.enrolment_link (
