@@ -5,7 +5,7 @@ export function nonEmpty<T>(xs: readonly T[]): NonEmpty<T> | undefined {
   return xs.length === 0 ? undefined : [first as T, ...rest];
 }
 
-export function mapNonEmpty<T, U>(xs: NonEmpty<T>, f: (x: T) => U): NonEmpty<U> {
+export function mapNonEmpty<T, U>(xs: NonEmpty<T>, f: (x: T, index: number) => U): NonEmpty<U> {
   const [first, ...rest] = xs;
-  return [f(first), ...rest.map(f)];
+  return [f(first, 0), ...rest.map((x, i) => f(x, i + 1))];
 }
