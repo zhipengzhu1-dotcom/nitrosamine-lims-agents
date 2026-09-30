@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig } from '@playwright/test';
@@ -9,6 +10,7 @@ const out = process.env['E2E_OUT'] ?? join(tmpdir(), 'lims-web-e2e');
 const apiPort = Number(process.env['E2E_API_PORT'] ?? 3107);
 const webPort = Number(process.env['E2E_WEB_PORT'] ?? 5187);
 process.env['E2E_OUT'] = out;
+mkdirSync(out, { recursive: true });
 
 export default defineConfig({
   testDir: 'e2e',
