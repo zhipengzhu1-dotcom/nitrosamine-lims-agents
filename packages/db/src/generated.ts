@@ -116,6 +116,19 @@ export interface CommitOutcome {
   settled_at: Generated<Timestamp>;
 }
 
+export interface Counter {
+  kind: string;
+  next: number;
+  scope: string;
+  year: number;
+}
+
+export interface Customer {
+  code: string;
+  id: string;
+  name: string;
+}
+
 export interface EffectiveVersion {
   app_release: string | null;
   content: Buffer | null;
@@ -142,6 +155,24 @@ export interface EnrolmentLink {
   username: string;
 }
 
+export interface Equipment {
+  code: string;
+  fitness_status: string;
+  id: string;
+  kind: string;
+  lab_id: string;
+}
+
+export interface Hold {
+  blocks_step: string;
+  id: string;
+  lab_id: string;
+  opened_at: Generated<Timestamp>;
+  released_at: Timestamp | null;
+  source: string;
+  test_id: string;
+}
+
 export interface Lab {
   code: string;
   iana_zone: string;
@@ -158,6 +189,32 @@ export interface LockoutState {
   consecutive_failures: Int8 | null;
   locked_out: boolean | null;
   person_id: string | null;
+}
+
+export interface Method {
+  id: string;
+  number: string;
+  title: string;
+}
+
+export interface MethodAdoption {
+  id: string;
+  lab_id: string;
+  method_version_id: string;
+  status: string;
+}
+
+export interface MethodAdoptionScope {
+  adoption_id: string;
+  lab_id: string;
+  product_id: string;
+}
+
+export interface MethodVersion {
+  data: Json;
+  id: string;
+  method_id: string;
+  version: number;
 }
 
 export interface PendingVersion {
@@ -179,6 +236,85 @@ export interface Person {
   id: string;
   native_name: string | null;
   printed_name: string;
+}
+
+export interface PortalCatalogue {
+  customer_id: string | null;
+  lab_code: string | null;
+  lab_id: string | null;
+  method_id: string | null;
+  method_number: string | null;
+  method_title: string | null;
+}
+
+export interface PortalProduct {
+  code: string | null;
+  customer_id: string | null;
+  id: string | null;
+  name: string | null;
+}
+
+export interface PortalReport {
+  customer_id: string | null;
+  id: string | null;
+  lab_id: string | null;
+  number: string | null;
+  pdf_sha256: string | null;
+  released_at: Timestamp | null;
+  report_version_id: string | null;
+  submission_id: string | null;
+}
+
+export interface PortalSample {
+  customer_id: string | null;
+  customer_status: string | null;
+  id: string | null;
+  lab_id: string | null;
+  lot_number: string | null;
+  number: string | null;
+  product_code: string | null;
+  product_id: string | null;
+  product_name: string | null;
+  submission_id: string | null;
+}
+
+export interface PortalSubmission {
+  cancelled_at: Timestamp | null;
+  customer_id: string | null;
+  id: string | null;
+  lab_code: string | null;
+  lab_id: string | null;
+  number: string | null;
+  submitted_at: Timestamp | null;
+}
+
+export interface PortalTest {
+  customer_id: string | null;
+  customer_status: string | null;
+  id: string | null;
+  internal_state: string | null;
+  lab_id: string | null;
+  method_id: string | null;
+  method_number: string | null;
+  method_title: string | null;
+  rejection_reason: string | null;
+  sample_id: string | null;
+  submission_id: string | null;
+}
+
+export interface Preparation {
+  id: string;
+  lab_id: string;
+  prep_no: number;
+  test_id: string;
+}
+
+export interface Product {
+  api_substance_id: string;
+  code: string;
+  customer_id: string;
+  id: string;
+  name: string;
 }
 
 export interface Record {
@@ -249,6 +385,31 @@ export interface Release {
   image_digest: string | null;
 }
 
+export interface ReportDownload {
+  at: Generated<Timestamp>;
+  customer_id: string;
+  id: string;
+  lab_id: string;
+  person_id: string;
+  report_version_id: string;
+}
+
+export interface ReportIssue {
+  lab_id: string;
+  pdf_sha256: Buffer;
+  released_signature: string;
+  renderer_release: string;
+  report_version_id: string;
+}
+
+export interface Review {
+  checklist_version: string;
+  id: string;
+  lab_id: string;
+  reviewer_id: string;
+  reviews_record_id: string;
+}
+
 export interface RoleGrant {
   customer_id: string | null;
   granted_at: Generated<Timestamp>;
@@ -257,6 +418,50 @@ export interface RoleGrant {
   person_id: string;
   revoked_at: Timestamp | null;
   role: string;
+}
+
+export interface Run {
+  acquired_by: string;
+  entry_mode: string;
+  id: string;
+  lab_id: string;
+  method_version_id: string;
+  number: string;
+}
+
+export interface RunTest {
+  lab_id: string;
+  run_id: string;
+  test_id: string;
+}
+
+export interface Sample {
+  customer_id: string;
+  id: string;
+  lab_id: string;
+  lot_number: string;
+  number: string | null;
+  product_id: string;
+  received_at: Timestamp | null;
+  received_by: string | null;
+  state: string;
+  submission_id: string;
+}
+
+export interface SectionVerdict {
+  analyte: string;
+  calculation_version: string;
+  compared_text: string | null;
+  id: string;
+  jurisdiction: string;
+  lab_id: string;
+  limit_text: string;
+  outcome: string;
+  preparations: Json;
+  rule_set_version: string;
+  share_percent: string | null;
+  specification_version_id: string;
+  test_version_id: string;
 }
 
 export interface Session {
@@ -310,6 +515,70 @@ export interface SpecGap {
   record_id: string | null;
 }
 
+export interface Specification {
+  data: Json;
+  id: string;
+  product_id: string;
+  purpose: string;
+}
+
+export interface SpecificationAcceptance {
+  accepted_by: string;
+  at: Generated<Timestamp>;
+  content_hash: Buffer;
+  customer_id: string;
+  id: string;
+  specification_version_id: string;
+}
+
+export interface Submission {
+  cancel_reason: string | null;
+  cancelled_at: Timestamp | null;
+  customer_id: string;
+  entered_by: string;
+  id: string;
+  number: string;
+  submitted_at: Timestamp | null;
+}
+
+export interface Substance {
+  cas: string;
+  id: string;
+  kind: string;
+  name: string;
+}
+
+export interface Test {
+  acceptance_reason: string | null;
+  assigned_analyst: string | null;
+  customer_id: string;
+  gxp_class: Generated<string>;
+  id: string;
+  lab_id: string;
+  method_id: string;
+  method_version_id: string | null;
+  number: string | null;
+  sample_id: string;
+  seq: number;
+  specification_version_id: string | null;
+  state: string;
+}
+
+export interface TestReport {
+  customer_id: string;
+  id: string;
+  lab_id: string;
+  number: string;
+  state: string;
+  submission_id: string;
+}
+
+export interface TestReportTest {
+  lab_id: string;
+  report_id: string;
+  test_id: string;
+}
+
 export interface TotpStepUsed {
   person_id: string;
   purpose: string;
@@ -342,13 +611,29 @@ export interface DB {
   authorisation: Authorisation;
   blob: Blob;
   commit_outcome: CommitOutcome;
+  counter: Counter;
+  customer: Customer;
   effective_version: EffectiveVersion;
   enrolment_link: EnrolmentLink;
+  equipment: Equipment;
+  hold: Hold;
   lab: Lab;
   ledger: Ledger;
   lockout_state: LockoutState;
+  method: Method;
+  method_adoption: MethodAdoption;
+  method_adoption_scope: MethodAdoptionScope;
+  method_version: MethodVersion;
   pending_version: PendingVersion;
   person: Person;
+  portal_catalogue: PortalCatalogue;
+  portal_product: PortalProduct;
+  portal_report: PortalReport;
+  portal_sample: PortalSample;
+  portal_submission: PortalSubmission;
+  portal_test: PortalTest;
+  preparation: Preparation;
+  product: Product;
   record: Record;
   record_kind: RecordKind;
   record_lock: RecordLock;
@@ -357,11 +642,25 @@ export interface DB {
   recorded_value: RecordedValue;
   recorded_value_version: RecordedValueVersion;
   release: Release;
+  report_download: ReportDownload;
+  report_issue: ReportIssue;
+  review: Review;
   role_grant: RoleGrant;
+  run: Run;
+  run_test: RunTest;
+  sample: Sample;
+  section_verdict: SectionVerdict;
   session: Session;
   session_activity: SessionActivity;
   signature: Signature;
   spec_gap: SpecGap;
+  specification: Specification;
+  specification_acceptance: SpecificationAcceptance;
+  submission: Submission;
+  substance: Substance;
+  test: Test;
+  test_report: TestReport;
+  test_report_test: TestReportTest;
   totp_step_used: TotpStepUsed;
   training_record: TrainingRecord;
   version_rejection: VersionRejection;

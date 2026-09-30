@@ -47,7 +47,7 @@ describe('insert-only tables', () => {
       await expectSqlState(db.superuser.query(`update lims.${t} set ${col} = ${col}`), 'LA008');
       await expectSqlState(db.superuser.query(`delete from lims.${t}`), 'LA008');
       // Postgres refuses to truncate a table other tables reference before any trigger runs (0A000).
-      await expectSqlState(db.superuser.query(`truncate lims.${t}`), t === 'record_version' ? '0A000' : 'LA008');
+      await expectSqlState(db.superuser.query(`truncate lims.${t}`), ['record_version', 'signature'].includes(t) ? '0A000' : 'LA008');
     });
   }
 });
@@ -74,7 +74,7 @@ describe('the grant audit', () => {
           and not exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'capture')
         order by 1`);
     expect(rows.rows.map((r) => r.relname)).toEqual([
-      'audit_chain_head', 'audit_entry', 'commit_outcome', 'ledger', 'migration', 'record_kind', 'release', 'session_activity',
+      'audit_chain_head', 'audit_entry', 'commit_outcome', 'counter', 'ledger', 'migration', 'record_kind', 'release', 'session_activity',
     ]);
   });
 
@@ -91,6 +91,7 @@ describe('the grant audit', () => {
       'lims.create_lab(uuid,text,text)',
       'lims.lock_chains()',
       'lims.lock_released(uuid)',
+      'lims.next_number(text,text,integer)',
       'lims.seal(uuid,bytea,text,jsonb)',
       'lims.session_state(lims.session,timestamp with time zone,timestamp with time zone)',
       'lims.sign(uuid,uuid,bytea,text,text,uuid,uuid,bytea)',

@@ -80,6 +80,20 @@ const MUTANTS: Mutant[] = [
     package: 'apps/api',
   },
   {
+    name: "LA006 a Customer may write another Customer's Lab row",
+    file: 'migrations/0050_sample_chain.sql',
+    find: "(tg_table_name = 'record' or coalesce(newj->>'customer_id' = ctx->>'customer_id', false))",
+    replace: 'true',
+    test: 'test/sample-chain.test.ts',
+  },
+  {
+    name: 'LA006 a Customer may change a Lab row in place',
+    file: 'migrations/0050_sample_chain.sql',
+    find: "customer_own := tg_op = 'INSERT' and",
+    replace: 'customer_own :=',
+    test: 'test/sample-chain.test.ts',
+  },
+  {
     name: 'LA006 other Lab writable',
     file: 'migrations/0010_ledger_audit.sql',
     find: "and ledger is distinct from (ctx->>'acting_lab_id')::uuid then",
