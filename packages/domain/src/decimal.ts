@@ -79,3 +79,23 @@ export function roundTo(x: Rational, decimals: number, mode: RoundingMode): Writ
   if (up) q += 1n;
   return { unscaled: negative ? -q : q, decimals };
 }
+
+/**
+ * The digits of a Rational as a person reads a full-precision value (decision 23 rule 22): exact
+ * when it terminates within `maxDecimals`, otherwise cut there and marked with an ellipsis. It
+ * never rounds, so it is display only; verdicts compare the value rounded once by `roundTo`.
+ */
+export function fullPrecision(x: Rational, maxDecimals: number): string {
+  const negative = x.num < 0n;
+  let rest = negative ? -x.num : x.num;
+  const whole = rest / x.den;
+  rest %= x.den;
+  let digits = '';
+  while (rest !== 0n && digits.length < maxDecimals) {
+    rest *= 10n;
+    digits += (rest / x.den).toString();
+    rest %= x.den;
+  }
+  const cut = rest !== 0n ? '…' : '';
+  return `${negative ? '-' : ''}${whole}${digits ? `.${digits}` : ''}${cut}`;
+}

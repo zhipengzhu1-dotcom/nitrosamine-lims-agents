@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  compare, div, formatWritten, mean, parseWritten, roundTo, toRational, written,
+  compare, div, formatWritten, fullPrecision, mean, parseWritten, roundTo, toRational, written,
   type Rational, type RoundingMode,
 } from '../src/decimal.ts';
 
@@ -54,5 +54,15 @@ describe('mean', () => {
     const m = mean([r('0.0344'), r('0.0348'), r('0.0348')]);
     expect(compare(m, div(r('0.1040'), r('3')))).toBe(0);
     expect(formatWritten(roundTo(m, 2, 'half-away-from-zero'))).toBe('0.03');
+  });
+});
+
+describe('fullPrecision', () => {
+  it('prints a terminating value exactly, and cuts a non-terminating one with an ellipsis, never rounding', () => {
+    expect(fullPrecision(div(r('12.34'), r('100.12')), 10)).toBe('0.1232520974…');
+    expect(fullPrecision(div(r('1'), r('8')), 10)).toBe('0.125');
+    expect(fullPrecision(div(r('2'), r('3')), 4)).toBe('0.6666…');
+    expect(fullPrecision(div(r('-1'), r('3')), 3)).toBe('-0.333…');
+    expect(fullPrecision(r('12'), 5)).toBe('12');
   });
 });
