@@ -28,6 +28,13 @@ Node 24, pnpm 12, TypeScript 7.0.2 (`tsc --noEmit`), Fastify 5.12, Kysely 0.29 w
 - `apps/web`: the Bench Rail components, the session gate, the signing hook, the Recorded Value field.
 - `deploy/`: Compose, the Mac scripts and the owner's runbook. Deploys pause for the owner.
 
+## Size and delegation
+
+- **A unit is small.** Your prompt names one unit: a handful of related changes that end in one check. If it turns out bigger than that, say so in your report rather than stretching; the coordinator splits units, not you.
+- **Commit after each verified step,** not at the end. An interruption should cost at most the step in progress.
+- **You may spawn reviewers and read-only helpers, never builders.** Before reporting, run the compliance experts that apply to your diff (`part11-expert` for records, audit trail, signatures, login, roles and hosting; `iso17025-expert` for the sample chain, results, reports and authorisation; `usp-expert` for methods, rounding, limits and equipment checks) in parallel on your own commit range, and fix every `gap` they return, or list it in your report with why it can't be fixed in your unit. You may use `Explore` agents for wide read-only lookups. Don't spawn agents that write code: parallel writers are the coordinator's job, each in its own worktree.
+- **Pin every seam you share.** When your unit meets another unit's code at an interface (an env var, a DTO, a table another unit writes, a function signature), add a test that fails if either side drifts. The runtime-contract test in `apps/api/test/config.test.ts` is the pattern.
+
 ## How to build
 
 - Test first, and see each test fail for the reason you predicted before you write the code. Tests run against the real Postgres; database tests connect as `lims_app`, never a superuser except to simulate tampering. Each test file gets its own database cloned from the migrated template.
@@ -44,4 +51,4 @@ Node 24, pnpm 12, TypeScript 7.0.2 (`tsc --noEmit`), Fastify 5.12, Kysely 0.29 w
 3. Small single-purpose commits, imperative messages that say what and why, each ending with a blank line and the `Co-Authored-By:` line of the Claude model that wrote it.
 4. **Deviations.** Anything you did differently from RATIONALE.md goes in your report and in its "Implementation reconciliation" section, with why and whether the shared contract still holds. If the design is wrong in a way you can't absorb, stop and report.
 5. **Spec gaps.** Anything the decisions don't settle that you had to choose goes in your report and in RATIONALE.md, one line each, citing the decision.
-6. Anything touching records, the audit trail, signatures, login, roles, the sample chain, results, reports or hosting needs the `part11-expert`, `iso17025-expert` and `usp-expert` reviews before merge (`CLAUDE.md`). Say in your report that they haven't run, so the coordinator dispatches them.
+6. **Reviews.** Report each expert you ran, its range, its verdicts, and what you did about each `gap` (`CLAUDE.md` makes a gap block merge until it is fixed or recorded as a decision on the map).
