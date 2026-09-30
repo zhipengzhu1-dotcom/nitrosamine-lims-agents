@@ -17,7 +17,7 @@ An internal department or external organization that submits samples for testing
 _Avoid_: Client, requester
 
 **Customer Contact**:
-A named person at a Customer through whom the Lab deals with it: only a Customer Contact's written request opens, changes or closes a portal account for that Customer's people.
+A named person at a Customer through whom the Lab deals with it, listed with a callback number in its Quality Agreement or internal nomination: only a Customer Contact's written request opens or changes a portal account for that Customer's people. The Lab may also disable one on its own.
 _Avoid_: Customer admin, account owner, sponsor
 
 **Customer User**:
@@ -25,11 +25,11 @@ A person with a portal account for a Customer, acting for one Customer at a time
 _Avoid_: Portal user, requester, client user
 
 **Customer Approver**:
-A Customer User whom the Customer's Quality Agreement names to decide for it in the portal: accepting Specifications and Planned Deviations, answering Holds, and supplying Phase II plans and Protocol approvals. Their accept is audited but is never an Electronic Signature, and never given on a Test they performed or reviewed.
+A Customer User named to decide for the Customer in the portal (in its Quality Agreement, or for an internal department by its head): accepting Specifications and Planned Deviations, answering Holds, and supplying Phase II plans and Protocol approvals. Their accept is audited but is never an Electronic Signature. Nobody takes a Customer decision on a record where they took a Lab decision, or the reverse.
 _Avoid_: Approver (alone, which suggests QA), signatory, authoriser
 
 **Quality Agreement**:
-The written agreement between the company and an external Customer covering GMP testing: audit access to source data, notice of data-integrity failures, record retention and what happens at contract end, its Customer Approvers, and the duty to report leavers. The Lab accepts no GMP Test from an external Customer without a current one.
+The written agreement between the company and an external Customer covering GMP testing: audit access to source data, notice of data-integrity failures, record retention and what happens at contract end, its Customer Approvers, and the duty to report leavers. It is current from its effective date until its review date passes or a newer version supersedes it, and the Lab accepts no GMP Test from an external Customer without a current one.
 _Avoid_: Contract, technical agreement, QAG
 
 **Sample Custodian**:
@@ -421,7 +421,7 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, the instrument a Run used, a Room, storage or DI water reading, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, the instrument a Run used, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
 _Avoid_: Correction, amendment
 
 **Amended Report**:
