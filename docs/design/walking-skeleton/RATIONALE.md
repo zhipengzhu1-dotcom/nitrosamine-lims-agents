@@ -236,6 +236,22 @@ Three candidates (opus, fable, sonnet) sketched the core from one brief. A fable
 
 ## Implementation reconciliation
 
+### U6a: `apps/web` presentation layer
+
+The shared contract still holds for every item below. The components print server facts and compute no verdict, eligibility or hash.
+
+- **Local prop types, not `packages/contract`.** The components take shapes from `apps/web/src/model.ts`, named with `CONTEXT.md` terms (`Signature`, `EligibilityAnswer`, `AuditEntry`, `SigningItem`, `Fitness`, `Limit`). The wiring unit maps DTOs onto them. The `web -> contract` arrow still holds, because nothing in `apps/web` imports another package yet.
+- **The rough-screen lint is a source-scan test, not an ESLint rule.** `src/structure.test.ts` fails if a file under `screens/rough/` mentions a commit, a field or a request. It also fails if any source file formats a number (rule 20), or if a credential component has a fill path (rule 2). The module map's `no-command-in-effect` rule belongs to the wiring unit.
+- **The production-bundle check lives in `src/bundle.test.ts`.** It runs a real `vite build` in a child process and fails if the bundle holds a forbidden marker. The markers are `lims-dev-gallery` and `lims-demo-aid`. A demo module (rule 2) must carry the second marker.
+- **One commit key is sent at most once, on top of the in-flight guard.** `useCommitKeyOnce` refuses to send a key twice. After a refusal the owner hands the sheet a fresh key, as the sketch's `useCommand` rotates its key per attempt. `SignaturePrompt`, `CriticalDataChangeDialog`, `LockScreen` and `SignIn` all use it.
+- **The sheet is a native modal `<dialog>`.** The page behind it is inert. The prototype used a positioned layer, which left the record behind the sheet reachable by Tab and screen readers.
+- **The refusal and the attempts left sit in the sheet's footer rail.** In the prototype they sat under the credentials, and they scrolled out of view at 1366×768. Decision 23 says the attempts left stay in view, and the direction answers in the rail.
+- **Lock-screen tiles are the owner and "Someone else".** The prototype showed one tile per person. A tile never fills the user ID, because decision 23 types it at every sign-in.
+- **FitnessTag's compact form keeps its word visible.** The prototype hid the word visually in compact rows. Rule 19 supersedes that.
+- **Fonts are self-hosted** through `@fontsource`, not the Google Fonts link. A bench PC then makes no third-party request.
+- **Light only.** The direction rejects a dark theme, so the tokens set `color-scheme: light` and ignore the OS preference. Only the rail and the lock screen are dark.
+- **`pnpm-workspace.yaml` gained `minimumReleaseAgeExclude` entries.** pnpm added them for vitest 5.0.3, which is younger than pnpm 12's default minimum release age. The other units will need the same lines.
+
 ## Open questions and risks
 
 - **Recorded Value as a glossary term.** Should "Recorded Value" enter `CONTEXT.md` ("One typed or chosen value on a signable record, with who recorded it and when; the unit of Verified signing and Critical Data Change")? Or does an existing term fit that I missed?
