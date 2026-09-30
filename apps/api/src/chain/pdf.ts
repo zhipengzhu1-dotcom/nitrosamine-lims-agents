@@ -17,8 +17,13 @@ export type RenderInput = {
 };
 
 const utc = (d: Date): string => d.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
-const local = (d: Date, zone: string): string =>
-  new Intl.DateTimeFormat('en-GB', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short', hour12: false }).format(d);
+/** "2026-07-14 09:09:10 EDT": the abbreviation comes from en-US, which names US zones by letters (rule 9). */
+export function labLocalTime(d: Date, zone: string): string {
+  const p: Partial<Record<Intl.DateTimeFormatPartTypes, string>> = {};
+  const f = new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short', hourCycle: 'h23' });
+  for (const part of f.formatToParts(d)) p[part.type] = part.value;
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second} ${p.timeZoneName}`;
+}
 
 type Judgement = {
   kind: string;
@@ -67,7 +72,7 @@ class Writer {
 
 function signatureBlock(w: Writer, s: SignatureFact | RenderInput['releasedSignature'], versionNo: number, hash: string, zone: string): void {
   w.line(`${s.meaning}: ${s.printedName} (${s.username}), ${s.role}`, { indent: 12 });
-  w.line(`${utc(s.signedAt)}  |  ${local(s.signedAt, zone)}  |  version ${versionNo}, ${hash.slice(0, 8)}`, { indent: 12, mono: true, size: 8 });
+  w.line(`${utc(s.signedAt)}  |  ${labLocalTime(s.signedAt, zone)}  |  version ${versionNo}, ${hash.slice(0, 8)}`, { indent: 12, mono: true, size: 8 });
 }
 
 export async function renderReportPdf(q: Q, input: RenderInput): Promise<Uint8Array> {
