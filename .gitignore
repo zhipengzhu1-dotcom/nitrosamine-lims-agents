@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.pg/
+*.tsbuildinfo
+.env*
+todo.md
+test-results/
+playwright-report/

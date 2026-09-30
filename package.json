@@ -1,0 +1,13 @@
+{
+  "name": "nitrosamine-lims",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "packageManager": "pnpm@12.8.1",
+  "scripts": {
+    "db:up": "scripts/pg.sh up",
+    "db:down": "scripts/pg.sh down",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  }
+}
