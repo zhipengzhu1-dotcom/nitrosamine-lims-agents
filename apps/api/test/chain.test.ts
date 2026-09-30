@@ -230,7 +230,7 @@ describe('the chain\'s views', () => {
         ],
       })],
     })]);
-    expect(r.body.reviews).toEqual([expect.objectContaining({ reviewer: { printedName: 'Bob Achebe', username: 'bob' }, checklistVersion: 'CL-TEST@1' })]);
+    expect(r.body.reviews).toEqual([expect.objectContaining({ reviewer: { printedName: 'Bob Achebe', username: 'bob' }, checklistVersion: 'CL-TEST@2' })]);
     expect(r.body.test.steps.map((s: { state: string }) => s.state)).toEqual(Array(7).fill('done'));
     expect(r.body.test.stateLabel).toBe('Reported');
   });
@@ -264,7 +264,7 @@ describe('review fix 2: a release waits for every pending change behind it', () 
     const refused = await signAs(seed.tabs.cid, seed.cast.cid, 'Released', 'QA', [drafted.reportId], reviewId);
     expect(refused.status).toBe(409);
     const pendingNamed = refusalOf(refused).reasons!.flatMap((r) => (r.code === 'change-pending' ? [r.value] : []));
-    expect(pendingNamed).toEqual([expect.stringMatching(/^prep\.weight/), expect.stringMatching(/^Run .* runcheck\.value/)]);
+    expect(pendingNamed).toEqual(['P1 weight', expect.stringMatching(/^Run .* Run Check /)]);
 
     for (const value of [weight.record_id, recovery.record_id]) {
       const v = await api.db.app.selectFrom('pending_version').select(['id', 'content_hash']).where('record_id', '=', value).executeTakeFirstOrThrow();

@@ -112,9 +112,8 @@ describe('a Method Adoption\'s status suits the Method\'s basis (usp 6, decision
   });
 
   it('refuses QA\'s Approved signing on such an Adoption however it was drafted', async () => {
-    const drafted = await api.run(inLab(), draftAdoptionUnchecked, { lab: cast.lab.id, methodVersionId: reference.methods.lcms.versionId, status: 'verified', productId: reference.products.fic01 });
-    if (drafted.kind !== 'receipt') throw new Error('draft refused');
-    const signed = await signAs(cast.tabs.cid, cast.cid, 'Approved', 'QA', [(drafted.receipt.data as { recordId: string }).recordId]);
+    const drafted = await cast.tabs.cid.must<{ recordId: string }>('test.draftAdoptionUnchecked', { lab: cast.lab.id, methodVersionId: reference.methods.lcms.versionId, status: 'verified', productId: reference.products.fic01 });
+    const signed = await signAs(cast.tabs.cid, cast.cid, 'Approved', 'QA', [drafted.recordId]);
     expect(signed.status).toBe(409);
     expect(signed.body.refusal.message).toMatch(/An in-house Method can't be adopted as verified/);
   });

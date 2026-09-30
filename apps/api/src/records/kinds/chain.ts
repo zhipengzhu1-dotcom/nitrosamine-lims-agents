@@ -301,7 +301,7 @@ export const testReportKind: KindDef = {
           performedBy: [...(t.assignedAnalyst ? [t.assignedAnalyst] : []), ...signersOf(t.standing, 'Performed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Performed'))] as PersonId[],
           reviewedBy: [...signersOf(t.standing, 'Reviewed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Reviewed'))],
           blockingHolds: t.holds,
-          pendingChanges: [...pendingOf(t.values), ...(await Promise.all(t.runs.map((x) => loadRun(ctx.q, x.id)))).flatMap((x) => pendingOf(x.values).map((v) => `${x.label} ${v}`))],
+          pendingChanges: [...pendingOf(TEST_FIELD_SPECS, t.values), ...(await Promise.all(t.runs.map((x) => loadRun(ctx.q, x.id)))).flatMap((x) => pendingOf(RUN_FIELD_SPECS, x.values).map((v) => `${x.label} ${v}`))],
           verdicts: (t.specification?.data.sections ?? []).map((s) => ({ jurisdiction: s.jurisdiction, confirmation: review.confirmations.get(verdictSubject(t.label, s.jurisdiction)) ?? 'none' as const })),
         });
         const [first, ...rest] = tests;

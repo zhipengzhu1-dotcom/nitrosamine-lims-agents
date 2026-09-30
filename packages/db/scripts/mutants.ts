@@ -269,7 +269,7 @@ const MUTANTS: Mutant[] = [
   {
     name: "the release ignores a pending change on the Test's value",
     file: '../../apps/api/src/records/kinds/chain.ts',
-    find: 'pendingChanges: [...pendingOf(t.values), ...(await',
+    find: 'pendingChanges: [...pendingOf(TEST_FIELD_SPECS, t.values), ...(await',
     replace: 'pendingChanges: [...(await',
     test: 'test/chain.test.ts',
     package: 'apps/api',
