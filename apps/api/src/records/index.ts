@@ -6,6 +6,7 @@
 //   change   any later value                         -> critical: pending until approved; else effective
 //   reject   turn a pending change down              -> audited, unsigned
 //   seal     the version to sign now                 -> a Record Version (idempotent by bytes)
+//   shown    are the versions the prompt showed still the ones to sign? (before any credential)
 //   sign     bind signatures to versions as shown    -> needs a ReauthenticatedSigner (type-enforced)
 //   standing is a version still what was signed?     -> signed / changed-after-signature / unsigned
 
@@ -14,7 +15,7 @@ import { seal as sealDoor, sign as signDoor, standingFailures, versionStands, ty
 import { canonicalBytes, type Canon } from '@lims/domain/canonical';
 import { formatWritten, type Written } from '@lims/domain/decimal';
 import { toRefusal } from '@lims/domain/gates';
-import type { LabId, LedgerId, PersonId, RecordId, Sha256Hex, SignatureId, ValueRecordId, VersionId, VersionRef } from '@lims/domain/ids';
+import type { Brand, LabId, LedgerId, PersonId, RecordId, Sha256Hex, SignatureId, ValueRecordId, VersionId, VersionRef } from '@lims/domain/ids';
 import { refuse, type Refusal } from '@lims/domain/refusal';
 import { NEEDS_ATTESTATION, type Meaning } from '@lims/domain/signing';
 import type { ReauthenticatedSigner } from '../identity/reauth.ts';
@@ -57,13 +58,21 @@ export type Sealed = {
   readonly pendingChanges: readonly PendingChange[];
 };
 
-export type SignRequest = {
-  readonly signer: ReauthenticatedSigner;
+export type ShownRequest = {
   readonly meaning: Meaning;
   /** Exactly what the prompt displayed. Refused if any is no longer the version to sign. */
   readonly targets: readonly VersionRef[];
   readonly attestation: VersionRef | null;
 };
+
+/**
+ * The versions a prompt showed, confirmed still the ones to sign. Only Records.shown makes one, and
+ * the signing command asks for it before re-authentication, so a stale prompt never spends a code.
+ */
+export type Shown = Brand<ShownVersions, 'Shown'>;
+type ShownVersions = { readonly meaning: Meaning; readonly items: readonly Sealed[]; readonly attestation: Sealed | null };
+
+export type SignRequest = { readonly signer: ReauthenticatedSigner; readonly shown: Shown };
 
 export type SignatureRow = {
   readonly id: SignatureId;
@@ -86,6 +95,7 @@ export interface Records {
   change(input: { readonly value: ValueRecordId; readonly to: TypedValue }): Promise<ValueSaved | Refusal>;
   reject(pending: VersionRef): Promise<null | Refusal>;
   seal(record: RecordId): Promise<Sealed>;
+  shown(req: ShownRequest): Promise<Shown | Refusal>;
   sign(req: SignRequest): Promise<readonly SignatureRow[] | Refusal>;
   standing(version: VersionId): Promise<Standing>;
   /** The kind, label and version to sign now, for a prompt. */
@@ -256,7 +266,7 @@ export function records(tx: AuditedTx, deps: Deps, acted: Acted): Records {
 
     seal: sealed,
 
-    async sign(req) {
+    async shown(req) {
       if (NEEDS_ATTESTATION.has(req.meaning) && !req.attestation) {
         return { kind: 'not-permitted', message: `${req.meaning} needs its Review Checklist as attestation.` };
       }
@@ -281,28 +291,32 @@ export function records(tx: AuditedTx, deps: Deps, acted: Acted): Records {
           return refuse.staleVersion(attestation.label, req.attestation.versionId, attestation.version.versionId);
         }
       }
-      const def = kinds.get(items[0]!.kind);
-      const rule = def.signing[req.meaning];
-      if (!rule) return { kind: 'not-permitted', message: `${items[0]!.label} does not carry the meaning ${req.meaning}.` };
-      const signer: Signer = { person: req.signer.person, role: req.signer.role };
-      const gate = await rule.check(ruleContext, signer, items, attestation);
+      if (!kinds.get(items[0]!.kind).signing[req.meaning]) return { kind: 'not-permitted', message: `${items[0]!.label} does not carry the meaning ${req.meaning}.` };
+      const shown: ShownVersions = { meaning: req.meaning, items, attestation };
+      return shown as Shown;
+    },
+
+    async sign({ signer, shown: { meaning, items, attestation } }) {
+      const rule = kinds.get(items[0]!.kind).signing[meaning];
+      if (!rule) throw new Error(`Records.shown admitted ${meaning} on ${items[0]!.kind}`);
+      const gate = await rule.check(ruleContext, { person: signer.person, role: signer.role } satisfies Signer, items, attestation);
       if ('kind' in gate) return gate;
       if (!gate.go) return toRefusal(gate);
 
       const group = randomUUID();
       const rows: SignatureRow[] = [];
       for (const item of items) {
-        const s = await signDoor(tx, { signer: req.signer.person, target: item.version, meaning: req.meaning, authenticator: req.signer.authenticator, group, attestation: req.attestation });
+        const s = await signDoor(tx, { signer: signer.person, target: item.version, meaning, authenticator: signer.authenticator, group, attestation: attestation?.version ?? null });
         const row: SignatureRow = {
-          id: s.signatureId, record: item.record, version: item.version, meaning: req.meaning, signedAt: s.signedAt,
-          printedName: req.signer.printedName, username: req.signer.username, role: req.signer.role,
+          id: s.signatureId, record: item.record, version: item.version, meaning, signedAt: s.signedAt,
+          printedName: signer.printedName, username: signer.username, role: signer.role,
         };
         rows.push(row);
       }
       for (const [i, item] of items.entries()) await rule.after?.(tx, deps, item, rows[i]!);
       // The signature binds to what was shown; if the meaning's own effects moved it, that is a bug, not a record.
       for (const item of items) {
-        if (!(await versionStands(q, item.version.versionId))) throw new Error(`${item.label} no longer stands after its ${req.meaning} effects`);
+        if (!(await versionStands(q, item.version.versionId))) throw new Error(`${item.label} no longer stands after its ${meaning} effects`);
       }
       return rows;
     },
