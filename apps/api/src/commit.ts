@@ -10,7 +10,9 @@
 //   2. runs the command's body in a savepoint (AuditedTx.attempt);
 //   3. a Receipt keeps the savepoint and stores the outcome; a Refusal rolls the savepoint back,
 //      then the rows that must survive it (auth failures, the used TOTP step, spec gaps) are
-//      written as svc:auth and the refusal is stored; one COMMIT ends either.
+//      written as svc:auth and the refusal is stored; one COMMIT ends either;
+//   4. a bug (an error no refusal maps) also rolls the savepoint back and keeps the survivors, so
+//      a code spent before it stays spent; it stores no outcome and is rethrown after COMMIT.
 // Nothing leaves this function between the effect and its outcome row, so a crash anywhere
 // leaves no outcome and the retry runs once.
 
@@ -103,6 +105,9 @@ const DB_REFUSALS: Readonly<Record<string, (message: string) => Refusal>> = {
   LS002: () => ({ kind: 'not-permitted', message: 'The Verified signer entered a version of this value, so someone else must verify it.' }),
 };
 
+/** An error no refusal maps: its survivors are committed, then it is rethrown. */
+type Bug = { readonly kind: 'bug'; readonly error: unknown };
+
 const sqlState = (e: unknown): string | null => (typeof e === 'object' && e !== null && 'code' in e && typeof e.code === 'string' ? e.code : null);
 
 /** `input` was parsed by `def.input` at the door or by the in-process caller. */
@@ -127,7 +132,7 @@ export async function commit(deps: Deps, who: Requester, key: CommitKey | string
   const svcAuth: AuditContext = { ...ctx, person: SERVICE.auth.person, role: SERVICE.auth.role, actingLab: null, customer: null, session: null, ledgers: [COMPANY_LEDGER] };
 
   const scope = def.scope ? def.scope(input, who) : acted.scope;
-  const out = await runAudited(deps.db, ctx, scope, async (tx): Promise<{ commit: Outcome } | { rollback: Outcome }> => {
+  const out = await runAudited(deps.db, ctx, scope, async (tx): Promise<{ commit: Outcome | Bug } | { rollback: Outcome }> => {
     const prior = await tx.db.selectFrom('commit_outcome').select(['input_hash', 'outcome', 'body']).where('commit_key', '=', key).execute();
     const receipt = prior.find((p) => p.outcome === 'receipt');
     if (receipt) {
@@ -172,7 +177,10 @@ export async function commit(deps: Deps, who: Requester, key: CommitKey | string
     } catch (e) {
       const code = sqlState(e);
       const toRefusal = code ? DB_REFUSALS[code] : undefined;
-      if (!toRefusal) throw e;
+      if (!toRefusal) {
+        for (const s of survivors) await write(s);
+        return { commit: { kind: 'bug', error: e } };
+      }
       result = { rollback: toRefusal((e as Error).message) };
     }
 
@@ -196,7 +204,9 @@ export async function commit(deps: Deps, who: Requester, key: CommitKey | string
     await tx.db.insertInto('commit_outcome').values({ commit_key: key, session_id: acted.session, command: def.name, input_hash: hash, outcome: 'refusal', body: refusal as never }).execute();
     return { commit: { kind: 'refusal', refusal } };
   });
-  return 'commit' in out ? out.commit : out.rollback;
+  const settled = 'commit' in out ? out.commit : out.rollback;
+  if (settled.kind === 'bug') throw settled.error;
+  return settled;
 }
 
 /** Builds the Receipt a command returns. */

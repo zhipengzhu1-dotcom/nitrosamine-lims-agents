@@ -1,14 +1,32 @@
 // Test-plan C14: every commit happens once.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CredentialsSchema } from '@lims/contract';
+import { defineCommand } from '../src/doors.ts';
+import { reauthenticate } from '../src/identity/reauth.ts';
 import { credentials, login, testApi, type Client, type TestApi } from '../src/testing/harness.ts';
 import { cast, createWidget, installWidget, newWidget, note, recordWeight, widgetKind, type People } from './support.ts';
+
+/** Re-authenticates, then fails with a bug: an error no refusal maps. */
+const reauthThenBug = defineCommand({
+  name: 'test.reauthThenBug',
+  input: CredentialsSchema,
+  acting: { as: 'session' },
+  reason: { kind: 'action' },
+  ledgers: () => [],
+  run: async (tx, creds) => {
+    if (tx.actor.kind !== 'staff') throw new Error('acts in a Lab session');
+    const signer = await reauthenticate(tx, tx.actor, 'Analyst', creds, 'signing');
+    if ('kind' in signer) return signer;
+    throw new Error('a bug after re-authentication');
+  },
+});
 
 let api: TestApi;
 let people: People;
 let ann: Client;
 
 beforeAll(async () => {
-  api = await testApi({ kinds: [widgetKind], commands: [createWidget, note] });
+  api = await testApi({ kinds: [widgetKind], commands: [createWidget, note, reauthThenBug] });
   await installWidget(api);
   people = await cast(api);
   ann = await login(api, people.ann);
@@ -84,6 +102,14 @@ describe('commit once', () => {
     expect(retry.status).toBe(200);
     expect(retry.body['replayed']).toBeUndefined();
     expect(await notes('crash')).toHaveLength(1);
+  });
+
+  it('a bug after re-authentication rolls the effect back but keeps the TOTP step used, so the code cannot be replayed', async () => {
+    const typed = await credentials(people.ann);
+    expect((await ann.command('test.reauthThenBug', typed)).status).toBe(500);
+    const replay = await ann.command('test.reauthThenBug', typed);
+    expect(replay.status).toBe(409);
+    expect((replay.body as { refusal: { kind: string } }).refusal.kind).toBe('totp-already-used');
   });
 
   it('a not-built refusal rolls its effect back and keeps one spec_gap row', async () => {
