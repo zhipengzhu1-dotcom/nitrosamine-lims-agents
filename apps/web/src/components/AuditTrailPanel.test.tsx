@@ -48,4 +48,20 @@ describe('AuditTrailPanel', () => {
     expect(bodyRows()[0]).toHaveTextContent('Mei Chen');
     expect(bodyRows()[3]).toHaveTextContent('Omar Haddad');
   });
+
+  it('filters by person, by action and by Lab date, and the filters combine with search', async () => {
+    render(<AuditTrailPanel entries={auditEntries} />);
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Person' }), 'Omar Haddad');
+    expect(bodyRows()).toHaveLength(1);
+    expect(bodyRows()[0]).toHaveTextContent('Omar Haddad');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Person' }), '');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Action' }), 'value.change');
+    expect(bodyRows()).toHaveLength(1);
+    expect(bodyRows()[0]).toHaveTextContent('100.21 mg');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Action' }), '');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Date' }), '2026-07-14');
+    expect(bodyRows()).toHaveLength(3);
+    await userEvent.type(screen.getByRole('searchbox'), 'transcription');
+    expect(bodyRows()).toHaveLength(1);
+  });
 });

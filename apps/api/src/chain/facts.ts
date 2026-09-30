@@ -13,6 +13,7 @@ import { nonEmpty } from '@lims/domain/nonempty';
 import type { Meaning } from '@lims/domain/signing';
 import { judgeRunCheck, judgeTest, type ExportedRunCheck, type RunCheckOutcome, type TestJudgement } from '@lims/domain/verdict';
 import { authorisationStanding, signingEnablement, trainingStanding } from '../records/facts.ts';
+import { find, valuesUnder, type ValueFact } from '../records/values.ts';
 import {
   MethodDataSchema, REVIEW_FIELDS, RUN_FIELDS, SpecificationDataSchema, TEST_FIELDS, methodTrainingDocument, preparationSubject, resultSubject,
   runChecksOf, sectionsOf, variabilityOf, type MethodData, type SpecificationData,
@@ -22,56 +23,6 @@ export type Q = ReadDb<DB>;
 
 const hex = (b: Buffer | null | undefined): Sha256Hex => (b as Buffer).toString('hex') as Sha256Hex;
 
-// ---------------------------------------------------------------------------------------------
-// Recorded Values under a record
-// ---------------------------------------------------------------------------------------------
-
-export type ValueVersionFact = { readonly versionId: VersionId; readonly versionNo: number; readonly hash: Sha256Hex; readonly text: string; readonly decimals: number | null; readonly createdBy: PersonId };
-
-export type ValueFact = {
-  readonly id: ValueRecordId;
-  readonly field: string;
-  readonly subject: string;
-  readonly critical: boolean;
-  readonly valueType: string;
-  readonly unit: string | null;
-  readonly effective: ValueVersionFact;
-  /** A Verified or Approved signature stands on the effective version. */
-  readonly verified: boolean;
-  readonly pending: ValueVersionFact | null;
-  /** Everyone who wrote any version, the first save's author first. */
-  readonly authors: readonly PersonId[];
-};
-
-export async function valuesUnder(q: Q, parent: RecordId): Promise<ValueFact[]> {
-  const rows = await q.selectFrom('recorded_value as rv')
-    .innerJoin('effective_version as ev', 'ev.record_id', 'rv.record_id')
-    .innerJoin('recorded_value_version as vv', 'vv.version_id', 'ev.id')
-    .select(['rv.record_id', 'rv.field', 'rv.subject', 'rv.critical', 'rv.value_type', 'rv.unit',
-      'ev.id as version_id', 'ev.version_no', 'ev.content_hash', 'ev.created_by', 'vv.value_text', 'vv.decimals'])
-    .where('rv.parent_id', '=', parent).orderBy('rv.field').orderBy('rv.subject').execute();
-  const out: ValueFact[] = [];
-  for (const r of rows) {
-    const versions = await q.selectFrom('record_version').select(['id', 'version_no', 'content_hash', 'created_by']).where('record_id', '=', r.record_id).orderBy('version_no').execute();
-    const pendingRow = await q.selectFrom('pending_version as pv').innerJoin('recorded_value_version as vv', 'vv.version_id', 'pv.id')
-      .select(['pv.id', 'pv.version_no', 'pv.content_hash', 'pv.created_by', 'vv.value_text', 'vv.decimals'])
-      .where('pv.record_id', '=', r.record_id).orderBy('pv.version_no', 'desc').executeTakeFirst();
-    const verified = await q.selectFrom('signature').select('id').where('record_version_id', '=', r.version_id as string)
-      .where('meaning', 'in', ['Verified', 'Approved']).executeTakeFirst();
-    out.push({
-      id: r.record_id as ValueRecordId, field: r.field, subject: r.subject, critical: r.critical, valueType: r.value_type, unit: r.unit,
-      effective: { versionId: r.version_id as VersionId, versionNo: r.version_no as number, hash: hex(r.content_hash), text: r.value_text, decimals: r.decimals, createdBy: r.created_by as PersonId },
-      verified: verified !== undefined,
-      pending: pendingRow ? { versionId: pendingRow.id as VersionId, versionNo: pendingRow.version_no as number, hash: hex(pendingRow.content_hash), text: pendingRow.value_text, decimals: pendingRow.decimals, createdBy: pendingRow.created_by as PersonId } : null,
-      authors: [...new Set(versions.map((v) => v.created_by as PersonId))],
-    });
-  }
-  return out;
-}
-
-export const valueRef = (v: ValueFact): VersionRef => ({ versionId: v.effective.versionId, hash: v.effective.hash });
-export const find = (values: readonly ValueFact[], field: string, subject = ''): ValueFact | null =>
-  values.find((v) => v.field === field && v.subject === subject) ?? null;
 const asWritten = (v: ValueFact): Written => written(v.effective.text);
 
 // ---------------------------------------------------------------------------------------------

@@ -7,7 +7,9 @@ import type {
   EligibilityAnswer,
   NonEmpty,
   Person,
+  Sha256Hex,
   SignatureMeaning,
+  SignedValue,
   SigningItem,
 } from '../model';
 import { CommitButton, useCommitKeyOnce } from './CommitButton';
@@ -29,6 +31,8 @@ export type SignaturePromptProps = {
   /** The meaning's fixed statement, from the server. */
   statement: string;
   items: NonEmpty<SigningItem>;
+  /** The Review a Reviewed or Released signature cites, with who made each tick (decision 13). */
+  attestation?: { readonly record: string; readonly versionNo: number; readonly hash: Sha256Hex; readonly values: readonly SignedValue[] } | null;
   /** What signing will do, rendered by the server. */
   consequences: readonly string[];
   signer: Person;
@@ -48,6 +52,27 @@ export type SignaturePromptProps = {
   /** Called once the sheet has finished closing; the owner unmounts it then. */
   onClosed: () => void;
 };
+
+function ValueList({ values }: { values: readonly SignedValue[] }) {
+  if (values.length === 0) return null;
+  return (
+    <ul className="replist">
+      {values.map((v) => (
+        <li key={v.label}>
+          <span className="replist__label">
+            {v.label}
+            {v.by && <span className="sub">by {v.by}</span>}
+          </span>
+          <span className={v.draft ? 'v-draft' : 'v-ink'}>
+            {v.value}
+            {v.unit && ` ${v.unit}`}
+            {v.draft && <span className="sr-only"> (draft)</span>}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /**
  * The signature prompt (decision 23): what is being signed first, then who is signing with the
@@ -152,20 +177,7 @@ export function SignaturePrompt(props: SignaturePromptProps) {
                     </dd>
                   </div>
                 </dl>
-                {item.values.length > 0 && (
-                  <ul className="replist">
-                    {item.values.map((v) => (
-                      <li key={v.label}>
-                        <span className="replist__label">{v.label}</span>
-                        <span className={v.draft ? 'v-draft' : 'v-ink'}>
-                          {v.value}
-                          {v.unit && ` ${v.unit}`}
-                          {v.draft && <span className="sr-only"> (draft)</span>}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <ValueList values={item.values} />
                 {item.sourceFiles.map((f) => (
                   <p className="manifest__line" key={f.name}>
                     <Glyph name="file" size={16} />
@@ -181,6 +193,18 @@ export function SignaturePrompt(props: SignaturePromptProps) {
                 ))}
               </div>
             ))}
+            {props.attestation && (
+              <section className="manifest__item manifest__attest" aria-label="The Review you attest">
+                <h4 className="h-mini">The Review you attest</h4>
+                <p className="manifest__line">
+                  {props.attestation.record}, Record Version {props.attestation.versionNo}
+                </p>
+                <p className="manifest__line">
+                  SHA-256 <Hash value={props.attestation.hash} />
+                </p>
+                <ValueList values={props.attestation.values} />
+              </section>
+            )}
             <p className="manifest__note">The server computed each hash from exactly the content listed. Your signature binds to it.</p>
           </section>
           {props.consequences.length > 0 && (

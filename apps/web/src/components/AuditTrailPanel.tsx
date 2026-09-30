@@ -33,18 +33,43 @@ function haystack(e: AuditEntry): string {
  * UTC and the Lab's zone. Searchable and sortable; a change after first save is highlighted with
  * a word and a glyph, not colour alone.
  */
+const distinct = (values: readonly string[]): string[] => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+
+/** A filter over one facet of the trail; the empty choice shows every entry. */
+function Facet(props: { label: string; all: string; options: readonly string[]; value: string; onChange: (v: string) => void }) {
+  const id = useId();
+  return (
+    <span className="audit__facet">
+      <label htmlFor={id}>{props.label}</label>
+      <select id={id} value={props.value} onChange={(e) => props.onChange(e.target.value)}>
+        <option value="">{props.all}</option>
+        {props.options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
 export function AuditTrailPanel({ entries, title = 'Audit Trail' }: { entries: readonly AuditEntry[]; title?: string }) {
   const [query, setQuery] = useState('');
+  const [person, setPerson] = useState('');
+  const [action, setAction] = useState('');
+  const [date, setDate] = useState('');
   const [sort, setSort] = useState<Sort>({ key: 'when', dir: 'asc' });
   const searchId = useId();
+  const labDate = (e: AuditEntry) => labTime(e.at).date;
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     const compare = COMPARE[sort.key];
     return entries
+      .filter((e) => (person === '' || e.actor.printedName === person) && (action === '' || e.action === action) && (date === '' || labDate(e) === date))
       .filter((e) => q === '' || haystack(e).includes(q))
       .toSorted((a, b) => compare(a, b) * (sort.dir === 'asc' ? 1 : -1));
-  }, [entries, query, sort]);
+  }, [entries, query, sort, person, action, date]);
 
   const toggle = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
@@ -60,6 +85,11 @@ export function AuditTrailPanel({ entries, title = 'Audit Trail' }: { entries: r
           <span className="sr-only">Search the Audit Trail</span>
           <input id={searchId} type="search" placeholder="Search who, field, value or reason" value={query} onChange={(e) => setQuery(e.target.value)} />
         </label>
+        <div className="audit__facets">
+          <Facet label="Person" all="Everyone" options={distinct(entries.map((e) => e.actor.printedName))} value={person} onChange={setPerson} />
+          <Facet label="Action" all="Every action" options={distinct(entries.map((e) => e.action))} value={action} onChange={setAction} />
+          <Facet label="Date" all="Every date" options={distinct(entries.map(labDate))} value={date} onChange={setDate} />
+        </div>
         <p className="audit__count">
           {shown.length === entries.length ? `${entries.length} entries` : `${shown.length} of ${entries.length} entries`}
           {later > 0 && `, ${later} changed after first save`}
@@ -135,7 +165,7 @@ export function AuditTrailPanel({ entries, title = 'Audit Trail' }: { entries: r
             })}
           </tbody>
         </table>
-        {shown.length === 0 && <p className="audit__empty">No entry matches &ldquo;{query}&rdquo;. Search looks at who, the field, both values and the reason.</p>}
+        {shown.length === 0 && <p className="audit__empty">No entry matches the search and filters. Search looks at who, the field, both values and the reason.</p>}
       </div>
     </section>
   );

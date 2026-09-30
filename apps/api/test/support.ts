@@ -20,8 +20,8 @@ export const WIDGET_SCOPE = 'METHOD-W';
 export const widgetKind: KindDef = {
   kind: 'widget',
   fields: {
-    'prep.weight': { critical: true, type: 'decimal', unit: 'mg', subject: 'preparation', verifiedEach: true },
-    'run.sequence': { critical: false, type: 'text', subject: 'none', verifiedEach: true },
+    'prep.weight': { label: 'weight', critical: true, type: 'decimal', unit: 'mg', subject: 'preparation', verifiedEach: true },
+    'run.sequence': { label: 'sequence ID', critical: false, type: 'text', subject: 'none', verifiedEach: true },
   },
   label: async (q, record) => {
     const w = await q.selectFrom('widget' as never).select('name' as never).where('id' as never, '=', record as never).executeTakeFirstOrThrow() as { name: string };

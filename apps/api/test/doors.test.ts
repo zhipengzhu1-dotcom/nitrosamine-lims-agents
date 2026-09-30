@@ -63,22 +63,25 @@ describe('GET never writes', () => {
     const tab = await login(api, people.ann);
     const r = await tab.view('test.writing');
     expect(r.status).toBe(500);
-    await expect(openRead(api.db.app, { kind: 'lab', labId: people.lab.id as never }, (q) => writingView.read(q as LabRead, {}, undefined as never)))
+    await expect(openRead(api.db.app, { kind: 'lab', labId: people.lab.id as never }, (q) => writingView.read(q as LabRead, {}, undefined as never, api.deps.kinds)))
       .rejects.toMatchObject({ code: '25006' });
   });
 
   it('every registered View runs over the door with no row inserted, updated or deleted', async () => {
     const inputs: Record<string, Record<string, string>> = {
       'record.audit': { recordId: widget },
+      'record.values': { parent: widget },
       'signing.standing': { versionId: valueVersion },
       'test.writing': {},
+      'admin.labs': {},
     };
     const missing = api.views.map((v) => v.name).filter((n) => !(n in inputs));
     expect(missing, 'every view needs an input in this test').toEqual([]);
     const tab = await login(api, people.ann);
+    const admin = await login(api, people.admin);
     const before = await tableState();
     for (const view of api.views.filter((v) => v.name !== 'test.writing')) {
-      const r = await tab.view(view.name, inputs[view.name]);
+      const r = await (view.scope === 'company' ? admin : tab).view(view.name, inputs[view.name]);
       expect(r.status, view.name).toBe(200);
     }
     expect(await tableState(), 'every lims table, unchanged').toEqual(before);

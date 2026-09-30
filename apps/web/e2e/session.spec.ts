@@ -88,7 +88,7 @@ test('sessions, a Recorded Value Verified by a second person, and one signature 
   await expect(tab1.getByText('Recorded in the audit trail at')).toBeVisible();
   const valueId = new URL(tab1.url()).searchParams.get('value');
   expect(valueId).toMatch(/^[0-9a-f-]{36}$/);
-  await expect(tab1.getByRole('region', { name: 'Audit Trail of prep.weight (P1)' }).getByText('prep.weight').first()).toBeVisible();
+  await expect(tab1.getByRole('region', { name: 'Audit Trail of prep.weight (P1)' }).getByText('P1 weight', { exact: true }).first()).toBeVisible();
 
   // A second tab of the same PC.
   const tab2 = await pc.newPage();
@@ -111,7 +111,7 @@ test('sessions, a Recorded Value Verified by a second person, and one signature 
   await tab1.getByRole('button', { name: 'Unlock as Ann Analyst' }).click();
   await expect(tab1.getByRole('heading', { name: 'Record bench' })).toBeVisible();
   await expect(tab2.getByRole('heading', { name: 'Work' })).toBeVisible();
-  await expect(tab1.getByRole('region', { name: 'Audit Trail of prep.weight (P1)' }).getByText('prep.weight').first(), 'the remounted screen reads again').toBeVisible();
+  await expect(tab1.getByRole('region', { name: 'Audit Trail of prep.weight (P1)' }).getByText('P1 weight', { exact: true }).first(), 'the remounted screen reads again').toBeVisible();
 
   // Switch user locks at once; Bob's takeover ends Ann's session on the server and on every tab.
   const annCookie = (await pc.cookies()).find((c) => c.name === 'lims_session')?.value;

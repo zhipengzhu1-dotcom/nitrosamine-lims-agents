@@ -2,7 +2,7 @@
 // Trail over any record kind that carries a `prep.weight` field, until the sample chain's Test
 // screens exist. The e2e run points it at the API tests' `widget` kind. It never ships: main.tsx
 // registers it only under import.meta.env.DEV, and bundle.test.ts looks for BENCH_MARKER.
-import type { StandingDto } from '@lims/contract';
+import type { StandingDto, ValueDto } from '@lims/contract';
 import { useState } from 'react';
 import { useView } from '../../api/hooks';
 import { SignatureLine } from '../../components/Signature';
@@ -30,10 +30,10 @@ function useAddressIds() {
   return [ids, set] as const;
 }
 
-function Signatures({ versionId, record, lab, zone }: { versionId: string; record: string; lab: string; zone: string }) {
+function Signatures({ versionId, zone }: { versionId: string; zone: string }) {
   const standing = useView<StandingDto>('signing.standing', { versionId });
   if (standing.status !== 'ok') return null;
-  const lines = signaturesOf(standing.data, record, lab, zone);
+  const lines = signaturesOf(standing.data, zone);
   return (
     <section className="panel" aria-label="Signatures">
       <h2 className="h-sec">Signatures</h2>
@@ -49,7 +49,6 @@ export function RecordBench() {
   const [generation, setGeneration] = useState(0);
   const signing = useSigning();
   const zone = active.zone;
-  const lab = active.lab?.code ?? '';
   const record = `${FIELD.field} (${FIELD.subject})`;
 
   useRail({
@@ -111,18 +110,17 @@ export function RecordBench() {
           {signing.refusal}
         </p>
       )}
-      {ids.value && <VersionSignatures key={`signatures-${generation}`} valueId={ids.value} record={record} lab={lab} zone={zone} />}
+      {ids.value && <VersionSignatures key={`signatures-${generation}`} parent={ids.parent} valueId={ids.value} zone={zone} />}
       {ids.value && <RecordAuditTrail key={`trail-${generation}`} recordId={ids.value} zone={zone} title={`Audit Trail of ${record}`} />}
       {signing.sheet}
     </div>
   );
 }
 
-/** The signatures on the value's versions, read through the value's own trail of versions. */
-function VersionSignatures({ valueId, record, lab, zone }: { valueId: string; record: string; lab: string; zone: string }) {
-  const trail = useView<{ entries: { table: string; changes: Record<string, [unknown, unknown]> }[] }>('record.audit', { recordId: valueId });
-  if (trail.status !== 'ok') return null;
-  const versions = trail.data.entries.filter((e) => e.table === 'record_version').map((e) => e.changes['id']?.[1]).filter((v): v is string => typeof v === 'string');
-  const latest = versions.at(-1);
-  return latest ? <Signatures versionId={latest} record={record} lab={lab} zone={zone} /> : null;
+/** The signatures on the value's effective version, read through the record's values. */
+function VersionSignatures({ parent, valueId, zone }: { parent: string; valueId: string; zone: string }) {
+  const values = useView<{ values: ValueDto[] }>('record.values', { parent });
+  if (values.status !== 'ok') return null;
+  const value = values.data.values.find((v) => v.valueId === valueId);
+  return value ? <Signatures versionId={value.version.versionId} zone={zone} /> : null;
 }

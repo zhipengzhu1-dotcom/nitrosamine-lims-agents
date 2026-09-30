@@ -92,6 +92,8 @@ export type SignedValue = {
   readonly unit: string | null;
   /** Imported and not yet signed Performed: printed in pencil. */
   readonly draft: boolean;
+  /** Who recorded it, e.g. "Ann Kowalczyk (ann)", when the server says. */
+  readonly by?: string;
 };
 
 export type SourceFile = { readonly name: string; readonly sha256: Sha256Hex | null };

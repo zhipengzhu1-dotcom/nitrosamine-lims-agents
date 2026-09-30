@@ -10,19 +10,33 @@ import { TestMachine, TestReportMachine } from '@lims/domain/machines';
 import type { Refusal } from '@lims/domain/refusal';
 import type { Meaning } from '@lims/domain/signing';
 import {
-  labOf, loadReport, loadReview, loadRun, loadTest, performerFacts, recordStanding, releaserFacts, reviewerFacts, signedAndStanding, signersOf, valueRef,
-  type ReviewFacts, type RunFacts, type TestFacts, type ValueFact,
+  labOf, loadReport, loadReview, loadRun, loadTest, performerFacts, recordStanding, releaserFacts, reviewerFacts, signedAndStanding, signersOf,
+  type ReviewFacts, type RunFacts, type TestFacts,
 } from '../../chain/facts.ts';
+import { labelOf, valueRef, type ValueFact } from '../values.ts';
 import { RELEASE_CHECKLIST, RUN_CHECKLIST, TEST_CHECKLIST, move, verdictSubject, type Checklist } from '../../chain/model.ts';
 import { renderReportPdf } from '../../chain/pdf.ts';
 import { judgementCanon, storeSectionVerdicts } from '../../chain/verdicts.ts';
 import type { Sealed } from '../index.ts';
-import type { KindDef, RuleContext, Signer } from '../kinds.ts';
+import type { FieldSpec, KindDef, RuleContext, Signer } from '../kinds.ts';
 
 const valueCanon = (v: ValueFact): Canon => ({ field: v.field, subject: v.subject, ...(cite(valueRef(v)) as object) });
-const labelOf = (v: ValueFact): string => `${v.field}${v.subject ? ` (${v.subject})` : ''}`;
-const unverified = (values: readonly ValueFact[]): string[] => values.filter((v) => !v.verified).map(labelOf);
-const pendingOf = (values: readonly ValueFact[]): string[] => values.filter((v) => v.pending !== null).map(labelOf);
+type Fields = Readonly<Record<string, FieldSpec>>;
+const unverified = (fields: Fields, values: readonly ValueFact[]): string[] => values.filter((v) => !v.verified).map((v) => labelOf(fields, v));
+const pendingOf = (fields: Fields, values: readonly ValueFact[]): string[] => values.filter((v) => v.pending !== null).map((v) => labelOf(fields, v));
+
+const TEST_FIELD_SPECS: Fields = {
+  'prep.weight': { label: 'weight', critical: true, type: 'decimal', unit: 'mg', subject: 'preparation', verifiedEach: true },
+  'prep.dilution': { label: 'dilution volume', critical: true, type: 'decimal', unit: 'mL', subject: 'preparation', verifiedEach: true },
+  'prep.result': { label: 'result', critical: true, type: 'decimal', unit: 'pg/µL', subject: 'preparation+analyte', verifiedEach: true },
+};
+
+const RUN_FIELD_SPECS: Fields = {
+  'run.instrument': { label: 'instrument', critical: true, type: 'ref', subject: 'none', verifiedEach: true },
+  'run.sequence': { label: 'sequence ID', critical: false, type: 'text', subject: 'none', verifiedEach: true },
+  'run.trueCopy': { label: 'True Copy', critical: true, type: 'blob', subject: 'none', verifiedEach: true },
+  'runcheck.value': { label: 'Run Check', critical: true, type: 'decimal', subject: 'run-check', verifiedEach: true },
+};
 
 /** The attestation a Reviewed or Released signing cites must be this signer's Review of this record, on the named checklist. */
 async function attestationOf(ctx: RuleContext, signer: Signer, record: RecordId, attestation: Sealed | null, checklist: Checklist): Promise<ReviewFacts | Refusal> {
@@ -55,10 +69,10 @@ async function testPerformedCheck(ctx: RuleContext, signer: Signer, t: TestFacts
     test: t.label,
     signer: await performerFacts(ctx.q, signer.person, t.method, ctx.lab, ctx.dbNow),
     isAssignee: t.assignedAnalyst === signer.person,
-    valuesByOthers: t.values.filter((v) => v.authors[0] !== signer.person).map(labelOf),
+    valuesByOthers: t.values.filter((v) => v.authors[0] !== signer.person).map((v) => labelOf(TEST_FIELD_SPECS, v)),
     missingValues: t.missingValues,
-    unverifiedValues: unverified(t.values),
-    pendingChanges: pendingOf(t.values),
+    unverifiedValues: unverified(TEST_FIELD_SPECS, t.values),
+    pendingChanges: pendingOf(TEST_FIELD_SPECS, t.values),
     runs: t.runs.map((r) => ({ run: r.number, performedStands: signedAndStanding(r.standing, 'Performed') })),
     judgement,
     blockingHolds: t.holds,
@@ -78,7 +92,7 @@ async function testReviewedCheck(ctx: RuleContext, signer: Signer, t: TestFacts,
     performedStands: signedAndStanding(own, 'Performed'),
     performedSigners: [...signersOf(own, 'Performed'), ...t.runs.flatMap((r) => signersOf(r.standing, 'Performed'))],
     feedingRuns: t.runs.map((r) => ({ run: r.number, reviewedStands: signedAndStanding(r.standing, 'Reviewed') })),
-    pendingChanges: pendingOf(t.values),
+    pendingChanges: pendingOf(TEST_FIELD_SPECS, t.values),
     checklist: { required: TEST_CHECKLIST.items, ticked: review.ticked },
     blockingHolds: t.holds,
   });
@@ -86,11 +100,7 @@ async function testReviewedCheck(ctx: RuleContext, signer: Signer, t: TestFacts,
 
 export const testKind: KindDef = {
   kind: 'test',
-  fields: {
-    'prep.weight': { critical: true, type: 'decimal', unit: 'mg', subject: 'preparation', verifiedEach: true },
-    'prep.dilution': { critical: true, type: 'decimal', unit: 'mL', subject: 'preparation', verifiedEach: true },
-    'prep.result': { critical: true, type: 'decimal', unit: 'pg/µL', subject: 'preparation+analyte', verifiedEach: true },
-  },
+  fields: TEST_FIELD_SPECS,
   label: async (q, record) => (await loadTest(q, record)).label,
   authorisationScope: async (q, record) => {
     const t = await q.selectFrom('test as t').innerJoin('method as m', 'm.id', 't.method_id').select('m.number').where('t.id', '=', record).executeTakeFirstOrThrow();
@@ -149,8 +159,8 @@ async function runPerformedCheck(ctx: RuleContext, signer: Signer, r: RunFacts):
     signer: await performerFacts(ctx.q, signer.person, r.method, ctx.lab, ctx.dbNow),
     isAcquirer: r.acquiredBy === signer.person,
     missingValues: [...r.missingValues, ...r.runChecks.filter((c) => !c.value).map((c) => `Run Check ${c.check.name}`)],
-    unverifiedValues: unverified(r.values),
-    pendingChanges: pendingOf(r.values),
+    unverifiedValues: unverified(RUN_FIELD_SPECS, r.values),
+    pendingChanges: pendingOf(RUN_FIELD_SPECS, r.values),
     equipment: r.instrument?.equipment ? { code: r.instrument.equipment.code, fitness: r.instrument.equipment.fitness } : { code: '(none)', fitness: 'Quarantined' },
     runChecks: r.runChecks.map((c) => ({ check: c.check.name, outcome: c.outcome })),
   });
@@ -166,7 +176,7 @@ async function runReviewedCheck(ctx: RuleContext, signer: Signer, r: RunFacts, a
     performedStands: signedAndStanding(r.standing, 'Performed'),
     performedSigners: signersOf(r.standing, 'Performed'),
     feedingRuns: [],
-    pendingChanges: pendingOf(r.values),
+    pendingChanges: pendingOf(RUN_FIELD_SPECS, r.values),
     checklist: { required: RUN_CHECKLIST.items, ticked: review.ticked },
     blockingHolds: [],
   });
@@ -174,12 +184,7 @@ async function runReviewedCheck(ctx: RuleContext, signer: Signer, r: RunFacts, a
 
 export const runKind: KindDef = {
   kind: 'run',
-  fields: {
-    'run.instrument': { critical: true, type: 'ref', subject: 'none', verifiedEach: true },
-    'run.sequence': { critical: false, type: 'text', subject: 'none', verifiedEach: true },
-    'run.trueCopy': { critical: true, type: 'blob', subject: 'none', verifiedEach: true },
-    'runcheck.value': { critical: true, type: 'decimal', subject: 'run-check', verifiedEach: true },
-  },
+  fields: RUN_FIELD_SPECS,
   label: async (q, record) => (await loadRun(q, record)).label,
   authorisationScope: async (q, record) => (await loadRun(q, record)).method.number,
   content: async (q, record) => {
@@ -219,8 +224,8 @@ export const runKind: KindDef = {
 export const reviewKind: KindDef = {
   kind: 'review',
   fields: {
-    'checklist.item': { critical: false, type: 'boolean', subject: 'checklist-item', verifiedEach: false },
-    'verdict.confirmation': { critical: false, type: 'text', subject: 'checklist-item', verifiedEach: false },
+    'checklist.item': { label: 'checklist item', critical: false, type: 'boolean', subject: 'checklist-item', verifiedEach: false },
+    'verdict.confirmation': { label: 'verdict confirmation', critical: false, type: 'text', subject: 'checklist-item', verifiedEach: false },
   },
   label: async (q, record) => {
     const r = await loadReview(q, record);

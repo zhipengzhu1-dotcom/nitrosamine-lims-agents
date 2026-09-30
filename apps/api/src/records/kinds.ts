@@ -16,6 +16,8 @@ import type { Sealed, SignatureRow } from './index.ts';
 import { valueKind } from './kinds/value.ts';
 
 export type FieldSpec = {
+  /** The field's name as a person reads it, e.g. "weight"; the subject is added by fieldLabel. */
+  readonly label: string;
   readonly critical: boolean; // ADR 0001: decides requires_approval in the database
   readonly type: 'decimal' | 'text' | 'ref' | 'blob' | 'boolean';
   readonly unit?: string;
@@ -24,6 +26,21 @@ export type FieldSpec = {
 };
 
 export type Read = ReadDb<DB>;
+
+/** "P1 weight", "P1/NDMA result", "Run Check S/N at LOQ standard", "instrument". */
+export function fieldLabel(spec: Pick<FieldSpec, 'label' | 'subject'>, subject: string): string {
+  if (subject === '') return spec.label;
+  switch (spec.subject) {
+    case 'preparation':
+    case 'preparation+analyte':
+      return `${subject} ${spec.label}`;
+    case 'none':
+      return `${spec.label} (${subject})`;
+    case 'run-check':
+    case 'checklist-item':
+      return `${spec.label} ${subject}`;
+  }
+}
 
 export type RuleContext = { readonly q: Read; readonly dbNow: Date; readonly lab: LabId | null };
 
@@ -65,7 +82,7 @@ export class KindRegistry {
   readonly #defs: ReadonlyMap<string, KindDef>;
 
   constructor(defs: readonly KindDef[]) {
-    const value = valueKind((q, parent) => this.get(parent.kind).authorisationScope(q, parent.id));
+    const value = valueKind((kind) => this.get(kind));
     this.#defs = new Map([value, ...defs].map((d) => [d.kind, d]));
   }
 

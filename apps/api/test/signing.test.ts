@@ -151,8 +151,8 @@ describe('Recorded Values through the pipeline', () => {
     const now = await api.db.app.selectFrom('effective_version').select('version_no').where('record_id', '=', w1.value).executeTakeFirstOrThrow();
     expect(now.version_no).toBe(2);
     const trail = await ann.view('record.audit', { recordId: w1.value });
-    const entries = (trail.body as { entries: { table: string; reasonCode: string; afterFirstSave: boolean }[] }).entries;
-    expect(entries.some((e) => e.table === 'record_version' && e.reasonCode === 'transcription-error' && e.afterFirstSave)).toBe(true);
+    const entries = (trail.body as { entries: { reason: string; afterFirstSave: boolean; changes: { field: string }[] }[] }).entries;
+    expect(entries.some((e) => e.changes.some((c) => c.field === 'Record Version') && e.reason === 'Transcription error' && e.afterFirstSave)).toBe(true);
   });
 
   it('a proposal turned down never takes effect', async () => {

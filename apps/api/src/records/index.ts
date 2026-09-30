@@ -139,13 +139,7 @@ export function records(tx: AuditedTx, deps: Deps, acted: Acted): Records {
   const refOf = (v: { id: string | null; version_no: number | null; content_hash: Buffer | null }): VersionNo =>
     ({ versionId: v.id as VersionId, hash: (v.content_hash as Buffer).toString('hex') as Sha256Hex, versionNo: v.version_no as number });
 
-  /** A value's label: its parent's label, the field, and the subject if any. */
-  const valueLabel = async (value: RecordId): Promise<string> => {
-    const rv = await q.selectFrom('recorded_value').select(['parent_id', 'field', 'subject']).where('record_id', '=', value).executeTakeFirstOrThrow();
-    const parent = await recordRow(rv.parent_id as RecordId);
-    const parentLabel = await kinds.get(parent.kind).label(q, parent.id);
-    return `${parentLabel} ${rv.field}${rv.subject ? ` (${rv.subject})` : ''}`;
-  };
+  const valueLabel = (value: RecordId): Promise<string> => kinds.get('value').label(q, value);
 
   /** The pending change on one value, if any. */
   const pendingChangeOf = async (value: RecordId): Promise<PendingChange | null> => {

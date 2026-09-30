@@ -6,24 +6,21 @@ import { z } from 'zod';
 import { verifyChain, COMPANY_LEDGER } from '@lims/db';
 import type {
   AssignmentDto, ChainVerdictDto, LabReferenceDto, PortalCatalogueDto, PortalReportDto, PortalSubmissionDto, QueueTestDto, ReportDetailDto,
-  ReviewDetailDto, RunDetailDto, SignatureLineDto, TestDetailDto, ValueDto,
+  ReviewDetailDto, RunDetailDto, SignatureLineDto, TestDetailDto,
 } from '@lims/contract';
 import { formatWritten } from '@lims/domain/decimal';
 import { eligibleAnalysts } from '@lims/domain/gates';
 import { submissionState } from '@lims/domain/machines';
-import { analystsIn, labOf, loadMethodVersion, loadReport, loadReview, loadRun, loadTest, performerFacts, recordStanding, type Q, type RecordStanding, type TestFacts, type ValueFact } from '../chain/facts.ts';
+import { analystsIn, labOf, loadMethodVersion, loadReport, loadReview, loadRun, loadTest, performerFacts, recordStanding, type Q, type RecordStanding, type TestFacts } from '../chain/facts.ts';
+import { valueDto } from '../records/values.ts';
+import { runKind, testKind } from '../records/kinds/chain.ts';
+import { STATEMENT } from '@lims/domain/signing';
 import { checklistFor, preparationSubject } from '../chain/model.ts';
 import { defineView } from '../doors.ts';
 import { RecordIdSchema } from '../wire.ts';
 
-const valueDto = (v: ValueFact): ValueDto => ({
-  valueId: v.id, field: v.field, subject: v.subject, critical: v.critical, type: v.valueType, unit: v.unit, text: v.effective.text,
-  version: { versionId: v.effective.versionId, versionNo: v.effective.versionNo, hash: v.effective.hash }, verified: v.verified,
-  pending: v.pending ? { text: v.pending.text, version: { versionId: v.pending.versionId, versionNo: v.pending.versionNo, hash: v.pending.hash } } : null,
-});
-
 const signatureLines = (s: RecordStanding): SignatureLineDto[] => s.signatures.map((x) => ({
-  id: x.id, meaning: x.meaning, printedName: x.printedName, username: x.username, role: x.role, signedAtUtc: x.signedAt.toISOString(),
+  id: x.id, meaning: x.meaning, printedName: x.printedName, username: x.username, role: x.role, signedAtUtc: x.signedAt.toISOString(), statement: STATEMENT[x.meaning],
   version: { versionId: s.version!.versionId, versionNo: s.version!.versionNo, hash: s.version!.hash }, stands: s.stands,
 }));
 
@@ -67,7 +64,7 @@ export const testDetail = defineView({
         sections: t.specification.data.sections.map((s) => ({ jurisdiction: s.jurisdiction, ruleSetVersion: s.ruleSetVersion, lines: s.lines.map((l) => ({ analyte: l.analyte, limit: l.limit, unit: l.unit })) })),
       } : null,
       preparations: t.preparations.map((p) => ({ id: p.id, prepNo: p.prepNo, subject: preparationSubject(p.prepNo) })),
-      values: t.values.map(valueDto),
+      values: t.values.map((v) => valueDto(testKind.fields, v)),
       missingValues: t.missingValues,
       runs: t.runs.map((r) => ({ id: r.id, number: r.number, state: r.state, version: r.standing.version })),
       version: standing.version,
@@ -92,7 +89,7 @@ export const runDetail = defineView({
     const r = await loadRun(q, runId);
     return {
       run: { id: r.id, number: r.number, state: r.state, version: r.standing.version, method: `${r.method.number} v${r.method.version}`, acquiredBy: r.acquiredBy, tests: r.tests },
-      values: r.values.map(valueDto),
+      values: r.values.map((v) => valueDto(runKind.fields, v)),
       instrument: r.instrument?.equipment ? { code: r.instrument.equipment.code, kind: r.instrument.equipment.kind, fitness: r.instrument.equipment.fitness } : null,
       runChecks: r.runChecks.map((c) => ({
         name: c.check.name, unit: c.unit, criterion: criterionText(c.check.criterion as never),

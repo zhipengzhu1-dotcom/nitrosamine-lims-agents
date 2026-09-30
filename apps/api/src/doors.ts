@@ -25,6 +25,7 @@ import type { SessionAnswer } from '@lims/contract/session';
 import { readSession, scopeOf, type ActorContext, type CustomerRole, type Requester, type StaffRole } from './actor.ts';
 import { commit, type CommandTx, type Deps, type Outcome } from './commit.ts';
 import type { DataClass } from './config.ts';
+import type { KindRegistry } from './records/kinds.ts';
 
 // ---------------------------------------------------------------------------------------------
 // Definitions
@@ -97,7 +98,8 @@ export type ViewDef<S extends keyof ReadFor = keyof ReadFor, In extends z.ZodTyp
   readonly input: In;
   /** Which actors may read it: staff (lab), Customer Users (customer), Admin and services (company). */
   readonly scope: S;
-  readonly read: (q: ReadFor[S], input: z.infer<In>, actor: ActorContext) => Promise<Out>;
+  /** The kind register, for labels and field names; a view reads through `q` only. */
+  readonly read: (q: ReadFor[S], input: z.infer<In>, actor: ActorContext, kinds: KindRegistry) => Promise<Out>;
 };
 
 export const defineView = <S extends keyof ReadFor, In extends z.ZodType, Out>(d: ViewDef<S, In, Out>): ViewDef<S, In, Out> => d;
@@ -107,7 +109,7 @@ export type AnyViewDef = {
   readonly name: string;
   readonly input: z.ZodType;
   readonly scope: keyof ReadFor;
-  readonly read: (q: never, input: never, actor: ActorContext) => Promise<unknown>;
+  readonly read: (q: never, input: never, actor: ActorContext, kinds: KindRegistry) => Promise<unknown>;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -235,7 +237,7 @@ export function registerDoors(app: FastifyInstance, deps: Deps, doors: Doors): v
     if (!parsed.success) return reply.code(400).send({ kind: 'refusal', refusal: { kind: 'bad-input', message: 'The request is malformed.', issues: parsed.error.issues } });
     const scope = scopeOf(who);
     if (scope.kind !== view.scope) return reply.code(403).send({ kind: 'refusal', refusal: { kind: 'not-permitted', message: 'This view is not for this kind of user.' } });
-    return openRead(deps.db, scope, (q) => view.read(q as never, parsed.data as never, who));
+    return openRead(deps.db, scope, (q) => view.read(q as never, parsed.data as never, who, deps.kinds));
   });
 
   app.post<{ Params: { name: string } }>('/api/commands/:name', async (req, reply) => {

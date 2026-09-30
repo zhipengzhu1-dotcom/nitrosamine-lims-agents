@@ -68,7 +68,7 @@ describe('D19: the whole chain', () => {
     const signatures = await api.db.app.selectFrom('signature').select(['record_version_id', 'meaning']).execute();
     expect(signatures.map((s) => s.meaning)).toEqual(expect.arrayContaining(['Acknowledged', 'Approved', 'Verified', 'Performed', 'Reviewed', 'Released']));
     for (const s of signatures) {
-      const standing = await readStanding(api.db.app, s.record_version_id as never);
+      const standing = await readStanding(api.db.app, s.record_version_id as never, api.deps.kinds);
       expect(standing.kind, `${s.meaning} on ${s.record_version_id}`).toBe('signed');
     }
     const test = await api.db.app.selectFrom('test').select('state').where('id', '=', seed.submissions.released.testId).executeTakeFirstOrThrow();

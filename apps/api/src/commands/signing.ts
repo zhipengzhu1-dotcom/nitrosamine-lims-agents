@@ -21,6 +21,7 @@ import { defineCommand } from '../doors.ts';
 import { LOCKOUT_AFTER, reauthenticate } from '../identity/reauth.ts';
 import { authorisationStanding } from '../records/facts.ts';
 import type { Sealed } from '../records/index.ts';
+import { shownValues } from '../records/values.ts';
 
 const roleAllowed = (meaning: Meaning, role: string): boolean => (SIGNS_AS[meaning] as readonly string[]).includes(role);
 
@@ -70,11 +71,12 @@ export const prepareSigning = defineCommand({
     const data: PreparedSigningDto = {
       meaning: input.meaning,
       statement: STATEMENT[input.meaning],
-      items: sealed.map((s) => ({
+      items: await Promise.all(sealed.map(async (s) => ({
         record: s.record, kind: s.kind, label: s.label, version: versionDto(s.version), body: s.body,
+        values: await shownValues(tx.db, tx.deps.kinds, s.record),
         pendingChanges: s.pendingChanges.map((p) => ({ value: p.value, label: p.label, from: p.fromBody, to: p.toBody })),
-      })),
-      attestation: attestation ? versionDto(attestation.version) : null,
+      }))),
+      attestation: attestation ? { ...versionDto(attestation.version), label: attestation.label, values: await shownValues(tx.db, tx.deps.kinds, attestation.record) } : null,
       consequence: def.signing[input.meaning]?.consequence ?? '',
       eligibility: await eligibility(tx, actor, input.meaning, sealed, attestation),
     };

@@ -38,6 +38,7 @@ const prepared = (hash: string, versionNo: number, eligible = true): PreparedSig
       label: 'Widget W1, prep.weight (P1)',
       version: { versionId: `ver-${versionNo}`, versionNo, hash },
       body: { schema: 'value@1', field: 'prep.weight', subject: 'P1', value: { type: 'decimal', value: versionNo === 1 ? '100.12' : '100.21', unit: 'mg' } },
+      values: [],
       pendingChanges: [],
     },
   ],

@@ -87,12 +87,18 @@ export type SignatureDto = {
   readonly role: string;
   readonly signedAtUtc: string;
   readonly version: { readonly versionId: string; readonly versionNo: number; readonly hash: string };
+  /** The meaning's fixed statement, as signed. */
+  readonly statement: string;
 };
 
-export type StandingDto =
+/** A version's standing, with the record's label and the Lab whose chain holds it (rule 10). */
+export type StandingDto = { readonly record: string; readonly lab: string } & (
   | { readonly kind: 'unsigned' }
   | { readonly kind: 'signed'; readonly signatures: readonly SignatureDto[] }
-  | { readonly kind: 'changed-after-signature'; readonly signed: readonly SignatureDto[]; readonly because: readonly string[] };
+  | { readonly kind: 'changed-after-signature'; readonly signed: readonly SignatureDto[]; readonly because: readonly string[] });
+
+/** A Recorded Value as a signing prompt lists it: the effective value, and who recorded it when. */
+export type ShownValueDto = { readonly label: string; readonly text: string; readonly unit: string | null; readonly by: string; readonly at: string };
 
 /** What signing.prepare returns: everything the sheet shows before any credential is asked for. */
 export type PreparedSigningDto = {
@@ -104,9 +110,12 @@ export type PreparedSigningDto = {
     readonly label: string;
     readonly version: { readonly versionId: string; readonly versionNo: number; readonly hash: string };
     readonly body: unknown;
+    /** The record's own Recorded Values, as the version cites them. */
+    readonly values: readonly ShownValueDto[];
     readonly pendingChanges: readonly { readonly value: string; readonly label: string; readonly from: unknown; readonly to: unknown }[];
   }[];
-  readonly attestation: { readonly versionId: string; readonly versionNo: number; readonly hash: string } | null;
+  /** The Review a Reviewed or Released signature cites: its checklist ticks and confirmations, with who made each. */
+  readonly attestation: { readonly versionId: string; readonly versionNo: number; readonly hash: string; readonly label: string; readonly values: readonly ShownValueDto[] } | null;
   readonly consequence: string;
   readonly eligibility: {
     readonly byRole: readonly {
@@ -119,17 +128,21 @@ export type PreparedSigningDto = {
   };
 };
 
+/**
+ * One Audit Trail entry as a person reads it (decision 23 rule 12): who with username and role,
+ * the record by its label, each changed field by name with old -> new as text, and the reason.
+ * An entry with no changes is an event, such as a record being created.
+ */
 export type AuditEntryDto = {
   readonly seq: number;
   readonly atUtc: string;
   readonly person: string;
+  readonly username: string;
   readonly role: string;
   readonly action: string;
-  readonly reasonCode: string;
-  readonly reasonText: string | null;
-  readonly table: string;
-  readonly op: 'insert' | 'update';
-  readonly changes: Readonly<Record<string, readonly [unknown, unknown]>>;
+  readonly reason: string;
+  readonly record: string;
+  readonly changes: readonly { readonly field: string; readonly from: string | null; readonly to: string | null }[];
   readonly afterFirstSave: boolean;
 };
 
@@ -144,6 +157,8 @@ export type ValueDto = {
   readonly valueId: string;
   readonly field: string;
   readonly subject: string;
+  /** The field as a person reads it, e.g. "P1 weight". */
+  readonly label: string;
   readonly critical: boolean;
   readonly type: string;
   readonly unit: string | null;
@@ -223,6 +238,8 @@ export type LabReferenceDto = {
   readonly methodVersions: readonly { readonly id: string; readonly number: string; readonly version: number; readonly title: string; readonly runChecks: readonly { readonly name: string; readonly unit: string }[] }[];
   readonly reports: readonly { readonly id: string; readonly number: string; readonly state: string; readonly submissionNumber: string }[];
 };
+
+export type LabDto = { readonly id: string; readonly code: string; readonly zone: string };
 
 export type ChainVerdictDto = { readonly ledger: string; readonly code: string; readonly intactThrough: number; readonly firstBreak: number | null; readonly headMatches: boolean };
 

@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import { STAFF_ROLES } from '@lims/contract';
-import { useCommand } from '../api/hooks';
+import type { LabDto } from '@lims/contract';
+import { useCommand, useView } from '../api/hooks';
 import { Glyph } from '../components/Glyph';
 import { labTime } from '../time';
 import { useSession } from '../session/context';
@@ -28,6 +29,7 @@ export function AdminPeople() {
   const id = useId();
   const { active } = useSession();
   const { showReceipt } = useRailControl();
+  const labs = useView<{ labs: LabDto[] }>('admin.labs', {});
   const create = useCommand<{ printedName: string; nativeName: string | null; username: string; grants: Grant[] }, Created>('identity.createPerson');
   const [printedName, setPrintedName] = useState('');
   const [nativeName, setNativeName] = useState('');
@@ -43,7 +45,7 @@ export function AdminPeople() {
     printedName.trim() === '' && 'the printed name',
     !USERNAME.test(username) && 'a user ID of 2 to 32 lower-case letters, digits, dots, dashes or underscores, starting with a letter',
     grants.length === 0 && 'at least one role',
-    staffRoles.length > 0 && lab.trim() === '' && 'the Lab ID for the roles',
+    staffRoles.length > 0 && lab.trim() === '' && 'the Lab the roles are held in',
   ].filter((m): m is string => typeof m === 'string');
 
   const toggle = (role: string) =>
@@ -133,9 +135,17 @@ export function AdminPeople() {
         </fieldset>
         {staffRoles.length > 0 && (
           <div className="field person-form__lab">
-            <label htmlFor={`${id}-lab`}>Lab ID</label>
-            <input id={`${id}-lab`} autoComplete="off" spellCheck={false} className="mono" value={lab} onChange={(e) => setLab(e.target.value)} />
-            <span className="field__hint">The Lab the roles are held in. No view lists the Labs yet, so paste its ID.</span>
+            <label htmlFor={`${id}-lab`}>Lab</label>
+            <select id={`${id}-lab`} value={lab} onChange={(e) => setLab(e.target.value)}>
+              <option value="">Choose the Lab</option>
+              {labs.status === 'ok' &&
+                labs.data.labs.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.code} ({l.zone})
+                  </option>
+                ))}
+            </select>
+            <span className="field__hint">{labs.status === 'ok' || labs.status === 'loading' ? 'The Lab the roles are held in.' : labs.status === 'refused' ? labs.refusal.message : labs.message}</span>
           </div>
         )}
         {refusal && (

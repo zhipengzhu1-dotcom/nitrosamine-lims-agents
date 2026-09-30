@@ -7,7 +7,7 @@ import { sha256Hex, type CommitOutcome, type EligibilityAnswer, type NonEmpty, t
 import { useAttemptKey, useSession, wireCredentials } from '../session/context';
 import { roleLabel } from '../session/store';
 import { useRailControl } from '../shell/rail';
-import { signedValues } from './values';
+import { shownValue, signedValues, sourceFilesOf } from './values';
 
 export type SigningRequest = {
   readonly meaning: SignatureMeaning;
@@ -39,8 +39,8 @@ function items(prepared: PreparedSigningDto): NonEmpty<SigningItem> | null {
   const mapped = prepared.items.map(
     (i): SigningItem => ({
       version: { record: i.label, versionNo: i.version.versionNo, versionId: i.version.versionId, hash: sha256Hex(i.version.hash) },
-      values: signedValues(i.body, i.pendingChanges),
-      sourceFiles: [],
+      values: signedValues(i),
+      sourceFiles: sourceFilesOf(i),
     }),
   );
   const [head, ...rest] = mapped;
@@ -138,6 +138,11 @@ export function useSigning(): { readonly open: (request: SigningRequest) => Prom
         meaning={current.request.meaning}
         statement={current.prepared.statement}
         items={shown}
+        attestation={
+          current.prepared.attestation
+            ? { record: current.prepared.attestation.label, versionNo: current.prepared.attestation.versionNo, hash: sha256Hex(current.prepared.attestation.hash), values: current.prepared.attestation.values.map(shownValue) }
+            : null
+        }
         consequences={current.prepared.consequence ? [current.prepared.consequence] : []}
         signer={{ ...active.person, role: roleLabel(current.role) }}
         lab={active.lab?.code ?? ''}

@@ -25,6 +25,7 @@ describe('AdminPeople', () => {
   it('creates a person with role grants in a Lab and hands over the one-time link the server delivered', async () => {
     const sent: { name: string; input: unknown }[] = [];
     const fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).startsWith('/api/views/admin.labs')) return new Response(JSON.stringify({ labs: [{ id: 'lab-qc', code: 'QC', zone: 'Asia/Shanghai' }, { id: 'lab-uuid', code: 'RD', zone: 'America/New_York' }] }), { status: 200 });
       sent.push({ name: String(url).replace('/api/commands/', ''), input: (JSON.parse(String(init?.body)) as { input: unknown }).input });
       return new Response(JSON.stringify({ kind: 'receipt', summary: 'Created Dee Analyst (dee).', at: '2026-09-30T14:40:00.000Z', act: 'audited', data: { personId: 'p-1', username: 'dee', expiresAt: '2026-10-01T14:40:00.000Z' }, once: { enrolmentToken: 'tok_abcdefghijklmnop' } }), { status: 200 });
     });
@@ -44,7 +45,7 @@ describe('AdminPeople', () => {
     await user.type(screen.getByLabelText('User ID'), 'dee');
     await user.click(screen.getByRole('checkbox', { name: 'Analyst' }));
     await user.click(screen.getByRole('checkbox', { name: 'Reviewer' }));
-    await user.type(screen.getByLabelText('Lab ID'), 'lab-uuid');
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Lab' }), 'RD (America/New_York)');
     expect(slot.primary?.kind).toBe('commit');
     await act(async () => {
       if (slot.primary?.kind === 'commit') await slot.primary.onCommit();

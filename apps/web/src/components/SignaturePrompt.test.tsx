@@ -43,6 +43,22 @@ async function typeCredentials(user: ReturnType<typeof userEvent.setup>) {
 
 const signButton = () => screen.getByRole('button', { name: /Sign Test T26-04175 as Performed/ });
 
+describe('the attestation a Reviewed or Released signature cites', () => {
+  it('lists each checklist tick and who made it, beside the Review Version and hash', () => {
+    setup({
+      meaning: 'Reviewed',
+      attestation: {
+        record: 'Review of Test T26-04175', versionNo: 1, hash: 'b'.repeat(64) as never,
+        values: [{ label: 'Checklist: audit trail reviewed', value: 'Yes', unit: null, draft: false, by: 'Omar Haddad (ohaddad)' }],
+      },
+    });
+    const attested = screen.getByRole('region', { name: 'The Review you attest' });
+    expect(attested).toHaveTextContent('Review of Test T26-04175, Record Version 1');
+    expect(attested).toHaveTextContent('Checklist: audit trail reviewed');
+    expect(attested).toHaveTextContent('Omar Haddad (ohaddad)');
+  });
+});
+
 describe('SignaturePrompt', () => {
   it('shows what is signed first: each Record Version and its full SHA-256 with the first 8 highlighted', () => {
     setup();
