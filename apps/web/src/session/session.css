@@ -1,0 +1,1 @@
+.gate { min-height: 100%; display: grid; place-content: center; gap: var(--s-3); padding: 48px 24px; max-width: 70ch; margin: 0 auto; }
