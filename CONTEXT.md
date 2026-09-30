@@ -132,6 +132,34 @@ _Avoid_: CoA, certificate, report
 
 ### Inventory
 
+**Material**:
+A catalogue entry for something the company buys to use in testing, such as a reference standard, reagent, solvent, consumable or column, with its manufacturer and catalogue number, category, storage conditions, in-use period after opening, and current SDS. A Material that any Method marks as critical is checked on receipt like a reference standard. Owned by the company.
+_Avoid_: Item, product, chemical
+
+**Material Lot**:
+One supplier lot of a Material, with its lot number, CoA and expiry or retest date, and for a reference standard its certified value, uncertainty, purity, producer and traceability class: CRM (from a national metrology institute or an accredited ISO 17034 producer) or RM (characterised in-house before use).
+_Avoid_: Batch, lot (alone, which means a Customer's Lot)
+
+**Pack**:
+One received package of a Material Lot (a bottle, ampoule, box or single column) with its own label ID, owned by one Lab. It is Unopened, Opened or Finished, and a Finished Pack can never be used again; its remaining amount is not tracked.
+_Avoid_: Container (which is for Samples), unit, bottle, stock item
+
+**Solution**:
+Anything a Lab makes from Packs or other Solutions (a stock, intermediate, working or internal standard, a mobile phase, a diluent), recording each parent and the amount taken, so every standard traces back to its reference material. Never made from a Sample; that is a Preparation.
+_Avoid_: Prep, standard (alone), mix, reagent (for made solutions)
+
+**Solution Recipe**:
+A Method version's instruction for making one Solution: its target concentration, its parent Materials or Solutions, and how long it stays stable. GMP work uses only Solutions made from a recipe; only non-GMP work may make ad-hoc Solutions.
+_Avoid_: Prep sheet, formula, SOP (for this)
+
+**Supplier**:
+A company the Lab buys Materials or calibration services from, approved by QA for a stated scope. The approval lapses when the Supplier's accreditation or its re-evaluation falls due, and nothing is received from a Supplier that is not approved.
+_Avoid_: Vendor, provider, manufacturer
+
+**Fitness Status**:
+Whether a piece of equipment, a Pack or a Solution may be used now: Quarantined, In use, Suspended, Expired or Retired. Every step that records use checks it the same way.
+_Avoid_: Status (alone), availability, condition
+
 **CoA**:
 A supplier's Certificate of Analysis for one lot of a standard or reagent.
 _Avoid_: Certificate (alone)
@@ -193,7 +221,7 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, or the instrument a Run used. It stays a proposal until a second person approves it.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, the instrument a Run used, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
 _Avoid_: Correction, amendment
 
 **Amended Report**:
