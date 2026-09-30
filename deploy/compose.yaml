@@ -48,7 +48,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/db_superuser_password
       POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
     secrets:
-      - { source: db_superuser_password, uid: "999", gid: "999", mode: 0400 }
+      - db_superuser_password
     volumes:
       - pgdata:/var/lib/postgresql
     networks: [db]
@@ -78,9 +78,9 @@ services:
     volumes:
       - state:/var/lib/lims/state
     secrets:
-      - { source: db_superuser_password, uid: "1000", gid: "1000", mode: 0400 }
-      - { source: db_migrator_password, uid: "1000", gid: "1000", mode: 0400 }
-      - { source: db_app_password, uid: "1000", gid: "1000", mode: 0400 }
+      - db_superuser_password
+      - db_migrator_password
+      - db_app_password
     tmpfs: ["/run/lims:uid=1000,gid=1000,mode=0700"]
     networks: [db]
     depends_on:
@@ -105,12 +105,12 @@ services:
       LIMS_WORKER_ALARM_TOKEN_FILE: /run/secrets/worker_alarm_token
       LIMS_AGE_PUBLIC_KEY_FILE: /run/secrets/age_public_key
     secrets:
-      - { source: db_app_password, uid: "1000", gid: "1000", mode: 0400 }
-      - { source: totp_encryption_key, uid: "1000", gid: "1000", mode: 0400 }
-      - { source: password_pepper, uid: "1000", gid: "1000", mode: 0400 }
-      - { source: worker_upload_token, uid: "1000", gid: "1000", mode: 0400 }
-      - { source: worker_alarm_token, uid: "1000", gid: "1000", mode: 0400 }
-      - { source: age_public_key, uid: "1000", gid: "1000", mode: 0400 }
+      - db_app_password
+      - totp_encryption_key
+      - password_pepper
+      - worker_upload_token
+      - worker_alarm_token
+      - age_public_key
     volumes:
       - reports:/var/lib/lims/reports
     tmpfs: ["/run/lims:uid=1000,gid=1000,mode=0700", "/tmp"]
@@ -137,8 +137,8 @@ services:
     image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
     command: [tunnel, --config, /run/secrets/tunnel_config, run]
     secrets:
-      - { source: tunnel_config, uid: "65532", gid: "65532", mode: 0400 }
-      - { source: tunnel_credentials, uid: "65532", gid: "65532", mode: 0400 }
+      - tunnel_config
+      - tunnel_credentials
     networks: [edge, egress]
     depends_on: [web]
 
