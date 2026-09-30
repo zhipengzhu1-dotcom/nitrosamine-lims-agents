@@ -115,7 +115,7 @@ Making a new Preparation from the same Sample within the same Test.
 _Avoid_: Reprep, repeat
 
 **Retest**:
-A new Test on the same Sample, linked to the original, created after the original is invalidated or under an approved OOS investigation plan. The Customer is told; the original is kept and never averaged with the Retest.
+A new Test on the same Sample, linked to the original, created after the original is invalidated or under the Customer's OOS investigation plan, in the number that plan or the Method sets in advance. The Customer is told; the original is kept and never averaged with the Retest.
 _Avoid_: Repeat test, reanalysis
 
 **Resample**:
@@ -127,7 +127,7 @@ Moving a Sample, equipment or stock from one Lab to another, recorded as a dispa
 _Avoid_: Move, relocation
 
 **Test Report**:
-The signed document a Lab issues to a Customer with Reportable Results. It may be titled "Certificate of Analysis" when printed, but is never called a CoA in the system.
+The signed document a Lab issues to a Customer with Reportable Results. It may be titled "Certificate of Analysis" when printed, but is never called a CoA in the system. Once released it changes only through a Deviation: superseded by an Amended Report, or Withdrawn when its results cannot be corrected.
 _Avoid_: CoA, certificate, report
 
 ### Equipment
@@ -197,11 +197,11 @@ _Avoid_: MSDS
 ### Quality
 
 **Deviation**:
-A record that something departed from its acceptance criteria or procedure (an out-of-range reading, a failed check, an out-of-specification result) and must be investigated and closed. It is this project's name for ISO/IEC 17025 nonconforming work.
+A record that something departed from its acceptance criteria or procedure and must be investigated and closed by QA; this project's name for ISO/IEC 17025 nonconforming work. Its Kind is one of OOS, OOT, Equipment, Room, Excursion, Run Check Failure, Material, Procedure, Data Integrity, Proficiency Testing or Other, and it is Open, Investigating, In QA Review or Closed. Its Kind is fixed once opened, except that QA may reclassify Other. A Deviation raised in error is closed with that finding, never cancelled, and a Closed one never reopens or changes.
 _Avoid_: Incident, nonconformance, NCR
 
 **CAPA Action**:
-One corrective or preventive action raised from a Deviation, with an owner, a due date and an effectiveness check that may be signed off after the Deviation closes.
+One Corrective or Preventive action raised from a Deviation, with one owner, a due date, evidence, and an effectiveness check whose criterion and date are set when the action is raised and which may be signed off after the Deviation closes. An action judged Not Effective needs a new linked action.
 _Avoid_: CAPA (alone), action item
 
 **Hold**:
@@ -209,7 +209,7 @@ A record that pauses a Test or Sample for a stated reason (a Deviation, a receip
 _Avoid_: On hold (as a status), suspension, quarantine
 
 **System Incident**:
-A record that the LIMS itself failed or misbehaved (an alarm, a missed backup or anchor, a failed restore drill, a clock step), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a Deviation only when it could have affected results.
+A record that the LIMS itself failed or misbehaved (an alarm, a missed backup or anchor, a failed restore drill, a clock step), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
 _Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failures)
 
 **Training Record**:
@@ -245,6 +245,22 @@ _Avoid_: Permission, access right, qualification
 **Return**:
 Sending a record back, with a reason, to the person who signed it Performed, instead of signing it. It is recorded but not signed.
 _Avoid_: Reject (in review), send back
+
+**Planned Deviation**:
+A Deviation approved by QA and accepted by the Customer before the work, allowing a stated, technically justified departure from a Method on named Tests.
+_Avoid_: Waiver, exception, concession
+
+**Risk Level**:
+How serious a Deviation is: Minor (no effect on any result), Major (affects Tests in progress) or Critical (could affect released results, or a data-integrity failure). Every OOS is at least Major.
+_Avoid_: Severity, priority, classification
+
+**Investigator**:
+The person assigned to find a Deviation's impact, root cause and correction; the opener unless the Lab Manager reassigns it.
+_Avoid_: Owner (for Deviations), assignee
+
+**Complaint**:
+An expression of dissatisfaction from a Customer or other party about the Lab's work, which gets its own acknowledgement, investigation and outcome, and may link to a Deviation.
+_Avoid_: Feedback, grievance, Deviation (for complaints)
 
 **Critical Data Change**:
 A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, the instrument a Run used, a Room, storage or DI water reading, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
