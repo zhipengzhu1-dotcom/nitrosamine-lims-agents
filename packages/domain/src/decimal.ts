@@ -47,6 +47,7 @@ export function formatWritten(w: Written): string {
 export const toRational = (w: Written): Rational => ({ num: w.unscaled, den: 10n ** BigInt(w.decimals) });
 
 export const add = (a: Rational, b: Rational): Rational => ({ num: a.num * b.den + b.num * a.den, den: a.den * b.den });
+export const sub = (a: Rational, b: Rational): Rational => add(a, { num: -b.num, den: b.den });
 export const mul = (a: Rational, b: Rational): Rational => ({ num: a.num * b.num, den: a.den * b.den });
 
 export function div(a: Rational, b: Rational): Rational {

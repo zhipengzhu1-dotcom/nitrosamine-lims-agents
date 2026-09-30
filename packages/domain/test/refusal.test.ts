@@ -16,6 +16,35 @@ describe('the not-built catalogue', () => {
   });
 });
 
+const COMPENDIAL = { kind: 'compendial', citation: 'USP <621>' } as const;
+const MISMATCHES: readonly GateReason[] = [
+  { code: 'criterion-misconfigured', check: 'S/N', problem: 'criterion-coarser-than-export', valueDecimals: 1, limitDecimals: 0, source: COMPENDIAL },
+  { code: 'criterion-misconfigured', check: 'S/N', problem: 'export-coarser-than-criterion', valueDecimals: 0, limitDecimals: 1, source: COMPENDIAL },
+  { code: 'criterion-misconfigured', check: 'CCV recovery', problem: 'criterion-coarser-than-export', valueDecimals: 2, limitDecimals: 1, source: { kind: 'method', methodVersion: 'NA-LCMS-001 v3' } },
+  { code: 'criterion-misconfigured', check: 'CCV recovery', problem: 'export-coarser-than-criterion', valueDecimals: 0, limitDecimals: 1, source: { kind: 'sop', sopVersion: 'SOP-QA-010 v1' } },
+];
+
+describe('a criterion whose decimals differ from the export (GN 7.10, #37 §4)', () => {
+  const [compendialCoarser, compendialFiner, methodCoarser, sopFiner] = MISMATCHES.map(describeReason);
+
+  it('tells the user to set the export to a compendial criterion\'s printed decimals, never to rewrite the criterion', () => {
+    for (const m of [compendialCoarser!, compendialFiner!]) {
+      expect(m).toMatch(/USP <621>/);
+      expect(m).toMatch(/Set the instrument's export to/);
+      expect(m).not.toMatch(/new .*version|write the criterion|correct/i);
+    }
+    expect(compendialCoarser).toMatch(/export to 0 decimals/);
+    expect(compendialFiner).toMatch(/export to 1 decimal\b/);
+  });
+
+  it('offers either change for the lab\'s own criterion, naming the version that would change', () => {
+    expect(methodCoarser).toMatch(/write the criterion to 2 decimals in a new version \(it cites NA-LCMS-001 v3\)/);
+    expect(methodCoarser).toMatch(/or set the instrument's export to 1 decimal\b/);
+    expect(sopFiner).toMatch(/write the criterion to 0 decimals in a new version \(it cites SOP-QA-010 v1\)/);
+    expect(sopFiner).toMatch(/or set the instrument's export to 1 decimal\b/);
+  });
+});
+
 describe('a gate refusal', () => {
   const reasons: readonly [GateReason, ...GateReason[]] = [
     { code: 'not-verified', value: 'Preparation 1 weight' },
@@ -59,8 +88,9 @@ describe('a gate refusal', () => {
       { code: 'change-pending', value: 'w' },
       { code: 'unsigned-dependency', record: 'R1', needs: 'Performed' },
       { code: 'run-check-missing', check: 'S/N' },
-      { code: 'criterion-misconfigured', check: 'S/N', problem: 'criterion-coarser-than-export', valueDecimals: 1, limitDecimals: 0 },
-      { code: 'criterion-misconfigured', check: 'S/N', problem: 'export-coarser-than-criterion', valueDecimals: 0, limitDecimals: 1 },
+      ...MISMATCHES,
+      { code: 'variability-not-computed', analyte: 'NDMA', because: 'one-preparation' },
+      { code: 'variability-not-computed', analyte: 'NDMA', because: 'zero-mean' },
       { code: 'equipment-not-in-use', equipment: 'LCMS-02', status: 'Suspended' },
       { code: 'open-hold', hold: 'HOLD-7' },
       { code: 'checklist-incomplete', items: ['LIMS audit trail reviewed'] },

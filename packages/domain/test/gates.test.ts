@@ -9,7 +9,7 @@ import {
 import type { AnalyteKey, PersonId, PreparationId } from '../src/ids.ts';
 import { mapNonEmpty, type NonEmpty } from '../src/nonempty.ts';
 import type { GateReason } from '../src/refusal.ts';
-import { judgeCriterion, judgeSpecification } from '../src/verdict.ts';
+import { judgeRunCheck, judgeTest, type ExportedRunCheck, type VariabilityCriterion } from '../src/verdict.ts';
 
 const ana = 'ana' as PersonId;
 const vic = 'vic' as PersonId;
@@ -166,9 +166,17 @@ describe('verifiedGate', () => {
 // Run Performed (decisions 19, 20; ADR 0006 for Run Checks)
 // ---------------------------------------------------------------------------------------------
 
-const passing = judgeCriterion({ provenance: 'instrument-rounded', value: written('25.3') }, { op: 'NLT', limit: written('10.0') });
-const failing = judgeCriterion({ provenance: 'instrument-rounded', value: written('8.7') }, { op: 'NLT', limit: written('10.0') });
-const misconfigured = judgeCriterion({ provenance: 'instrument-rounded', value: written('25.3') }, { op: 'NLT', limit: written('10') });
+const sn = (limit: string): ExportedRunCheck => ({
+  name: 'S/N at the LOQ standard', comparedAs: 'as-exported',
+  criterion: { op: 'NLT', limit: written(limit), source: { kind: 'method', methodVersion: METHOD } },
+});
+const passing = judgeRunCheck({ check: sn('10.0'), typed: written('25.3') });
+const failing = judgeRunCheck({ check: sn('10.0'), typed: written('8.7') });
+const misconfigured = judgeRunCheck({ check: sn('10'), typed: written('25.3') });
+const computed = judgeRunCheck({
+  check: { name: 'Replicate-injection RSD', comparedAs: 'lims-computed', statistic: 'rsd', criterion: { op: 'NMT', limit: written('5.0'), source: { kind: 'method', methodVersion: METHOD } } },
+  raw: [written('1021'), written('1030')],
+});
 
 describe('runPerformedGate', () => {
   const base: RunPerformedFacts = {
@@ -177,7 +185,7 @@ describe('runPerformedGate', () => {
     isAcquirer: true,
     missingValues: [], unverifiedValues: [], pendingChanges: [],
     equipment: { code: 'LCMS-02', fitness: 'In use' },
-    runChecks: [{ check: 'S/N at the LOQ standard', verdict: passing }, { check: 'CCV recovery', verdict: passing }],
+    runChecks: [{ check: 'S/N at the LOQ standard', outcome: passing }, { check: 'CCV recovery', outcome: passing }],
   };
 
   it.each([
@@ -187,11 +195,12 @@ describe('runPerformedGate', () => {
       ...base, missingValues: ['Run sequence'], unverifiedValues: ['Injection 3 time'], pendingChanges: ['CCV recovery'],
     }, ['value-missing', 'not-verified', 'change-pending']],
     ['the instrument not In use', { ...base, equipment: { code: 'LCMS-02', fitness: 'Suspended' } }, ['equipment-not-in-use']],
-    ['a Run Check not recorded', { ...base, runChecks: [{ check: 'CCV recovery', verdict: null }] }, ['run-check-missing']],
-    ['a Run Check written coarser than its export', { ...base, runChecks: [{ check: 'S/N at the LOQ standard', verdict: misconfigured }] }, ['criterion-misconfigured']],
-    ['a failing Run Check: the Deviation workflow is not built', { ...base, runChecks: [{ check: 'S/N at the LOQ standard', verdict: failing }] }, ['not-built']],
+    ['a Run Check not recorded', { ...base, runChecks: [{ check: 'CCV recovery', outcome: { kind: 'not-recorded' } }] }, ['run-check-missing']],
+    ['a Run Check the LIMS must compute: not built', { ...base, runChecks: [{ check: 'Replicate-injection RSD', outcome: computed }] }, ['not-built']],
+    ['a Run Check written coarser than its export', { ...base, runChecks: [{ check: 'S/N at the LOQ standard', outcome: misconfigured }] }, ['criterion-misconfigured']],
+    ['a failing Run Check: the Deviation workflow is not built', { ...base, runChecks: [{ check: 'S/N at the LOQ standard', outcome: failing }] }, ['not-built']],
     ['a failing Run Check and an unverified value: both', {
-      ...base, unverifiedValues: ['Injection 3 time'], runChecks: [{ check: 'S/N at the LOQ standard', verdict: failing }],
+      ...base, unverifiedValues: ['Injection 3 time'], runChecks: [{ check: 'S/N at the LOQ standard', outcome: failing }],
     }, ['not-verified', 'not-built']],
   ] as const)('%s', (_, facts, expected) => {
     expect(codes(runPerformedGate(facts as RunPerformedFacts))).toEqual(expected);
@@ -202,7 +211,7 @@ describe('runPerformedGate', () => {
   });
 
   it('names the failing Run Check in the not-built reason', () => {
-    expect(reasons(runPerformedGate({ ...base, runChecks: [{ check: 'S/N at the LOQ standard', verdict: failing }] })))
+    expect(reasons(runPerformedGate({ ...base, runChecks: [{ check: 'S/N at the LOQ standard', outcome: failing }] })))
       .toEqual([{ code: 'not-built', feature: 'deviation-workflow', because: 'Run Check S/N at the LOQ standard does not conform (8.7 against NLT 10.0)' }]);
   });
 });
@@ -212,10 +221,14 @@ describe('runPerformedGate', () => {
 // ---------------------------------------------------------------------------------------------
 
 const NDMA = 'NDMA' as AnalyteKey;
-const judge = (...ppm: NonEmpty<string>) => judgeSpecification(
-  [{ jurisdiction: 'FDA', ruleSetVersion: 'fda-1', rounding: 'half-away-from-zero', lines: [{ analyte: NDMA, limit: written('0.03'), uspClaim: false }] }],
-  mapNonEmpty(ppm, (v, i) => ({ preparation: `p${i + 1}` as PreparationId, results: new Map([[NDMA, toRational(written(v))]]) })),
-);
+const RD: VariabilityCriterion = { statistic: 'relative-difference', limit: written('20.0'), source: { kind: 'method', methodVersion: METHOD } };
+const FDA = [{ jurisdiction: 'FDA', ruleSetVersion: 'fda-1', rounding: 'half-away-from-zero', lines: [{ analyte: NDMA, limit: written('0.03'), uspClaim: false }] }] as const;
+const judgeWith = (variability: VariabilityCriterion | null, ...ppm: NonEmpty<string>) => judgeTest({
+  sections: FDA,
+  preparations: mapNonEmpty(ppm, (v, i) => ({ preparation: `p${i + 1}` as PreparationId, results: new Map([[NDMA, toRational(written(v))]]) })),
+  variability,
+});
+const judge = (...ppm: NonEmpty<string>) => judgeWith(RD, ...ppm);
 
 describe('testPerformedGate', () => {
   const base: TestPerformedFacts = {
@@ -238,13 +251,26 @@ describe('testPerformedGate', () => {
     ['the Reportable Result and each Preparation fail', { ...base, judgement: judge('0.045', '0.047') }, ['not-built', 'not-built', 'not-built']],
     ['a Preparation result missing', {
       ...base,
-      judgement: judgeSpecification(
-        [{ jurisdiction: 'FDA', ruleSetVersion: 'fda-1', rounding: 'half-away-from-zero', lines: [{ analyte: NDMA, limit: written('0.03'), uspClaim: false }] }],
-        [{ preparation: 'p1' as PreparationId, results: new Map() }],
-      ),
+      judgement: judgeTest({ sections: FDA, preparations: [{ preparation: 'p1' as PreparationId, results: new Map() }], variability: RD }),
     }, ['value-missing']],
+    ['variability between Preparations over its limit (a Deviation, not built)', { ...base, judgement: judge('0.024', '0.030') }, ['not-built']],
+    ['variability missing: one Preparation', { ...base, judgement: judge('0.012') }, ['variability-not-computed']],
+    ['a variability statistic the skeleton does not compute', {
+      ...base, judgement: judgeWith({ ...RD, statistic: 'rsd' }, '0.012', '0.014'),
+    }, ['not-built']],
+    ['a Method with no variability limit', { ...base, judgement: judgeWith(null, '0.012') }, []],
   ] as const)('%s', (_, facts, expected) => {
     expect(codes(testPerformedGate(facts as TestPerformedFacts))).toEqual(expected);
+  });
+
+  it('names the variability that failed, rounded once to its limit\'s decimals', () => {
+    expect(reasons(testPerformedGate({ ...base, judgement: judge('0.024', '0.030') }))).toEqual([{
+      code: 'not-built', feature: 'deviation-workflow',
+      because: 'the variability between Preparations 1 and 2 does not conform: NDMA 22.2 % against NMT 20.0 %',
+    }]);
+    expect(reasons(testPerformedGate({ ...base, judgement: judgeWith({ ...RD, statistic: 'rsd' }, '0.012', '0.014') }))).toEqual([{
+      code: 'not-built', feature: 'variability-statistic', because: 'the Method\'s variability is an rsd limit',
+    }]);
   });
 
   it('names the failing Preparation and its rounded result', () => {

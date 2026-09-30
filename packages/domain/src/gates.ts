@@ -7,11 +7,11 @@
 // Gates return every reason, not the first, because the rail lists them all.
 
 import { formatWritten } from './decimal.ts';
-import type { PersonId } from './ids.ts';
+import type { PersonId, PreparationId } from './ids.ts';
 import type { NonEmpty } from './nonempty.ts';
 import { describeReasons, type GateReason, type NotBuilt, type Refusal, type SodRule } from './refusal.ts';
 import type { Meaning } from './signing.ts';
-import type { CriterionVerdict, Jurisdiction, LineVerdict, SpecificationJudgement } from './verdict.ts';
+import type { Jurisdiction, LineVerdict, RunCheckOutcome, TestJudgement } from './verdict.ts';
 
 export type GateResult =
   | { readonly go: true }
@@ -108,7 +108,7 @@ export type RunPerformedFacts = {
   readonly unverifiedValues: readonly string[];
   readonly pendingChanges: readonly string[];
   readonly equipment: { readonly code: string; readonly fitness: FitnessStatus };
-  readonly runChecks: readonly { readonly check: string; readonly verdict: CriterionVerdict | null }[]; // null: not recorded
+  readonly runChecks: readonly { readonly check: string; readonly outcome: RunCheckOutcome }[]; // from judgeRunCheck
 };
 
 export type TestPerformedFacts = {
@@ -120,7 +120,7 @@ export type TestPerformedFacts = {
   readonly unverifiedValues: readonly string[];
   readonly pendingChanges: readonly string[];
   readonly runs: readonly { readonly run: string; readonly performedStands: boolean }[];
-  readonly judgement: SpecificationJudgement;
+  readonly judgement: TestJudgement;
   readonly blockingHolds: readonly string[];
 };
 
@@ -254,14 +254,19 @@ export function runPerformedGate(f: RunPerformedFacts): GateResult {
     ...each(f.unverifiedValues, (value) => ({ code: 'not-verified', value })),
     ...each(f.pendingChanges, (value) => ({ code: 'change-pending', value })),
     ...(f.equipment.fitness === 'In use' ? [] : [{ code: 'equipment-not-in-use' as const, equipment: f.equipment.code, status: f.equipment.fitness }]),
-    ...f.runChecks.flatMap(({ check, verdict }): Reasons => {
-      if (verdict === null) return [{ code: 'run-check-missing', check }];
-      if (verdict.kind !== 'judged') {
-        return [{ code: 'criterion-misconfigured', check, problem: verdict.kind, valueDecimals: verdict.valueDecimals, limitDecimals: verdict.limitDecimals }];
+    ...f.runChecks.flatMap(({ check, outcome }): Reasons => {
+      switch (outcome.kind) {
+        case 'not-recorded': return [{ code: 'run-check-missing', check }];
+        case 'not-built': return [notBuilt('computed-run-check', `Run Check ${check} is an ${outcome.statistic} the LIMS computes`)];
+        case 'criterion-coarser-than-export':
+        case 'export-coarser-than-criterion':
+          return [{ code: 'criterion-misconfigured', check, problem: outcome.kind, valueDecimals: outcome.valueDecimals, limitDecimals: outcome.limitDecimals, source: outcome.source }];
+        case 'judged': {
+          if (outcome.conforms) return [];
+          const failed = outcome.comparisons.find((c) => !c.within)!;
+          return [notBuilt('deviation-workflow', `Run Check ${check} does not conform (${formatWritten(failed.compared)} against ${criterionText(outcome)})`)];
+        }
       }
-      if (verdict.conforms) return [];
-      const failed = verdict.comparisons.find((c) => !c.within)!;
-      return [notBuilt('deviation-workflow', `Run Check ${check} does not conform (${formatWritten(failed.compared)} against ${criterionText(verdict)})`)];
     }),
   ]);
 }
@@ -330,24 +335,41 @@ export const toRefusal = (gate: Extract<GateResult, { go: false }>): Refusal =>
 const sod = (rule: SodRule, subject: string): GateReason => ({ code: 'separation-of-duties', rule, subject });
 const notBuilt = (feature: NotBuilt, because: string): GateReason => ({ code: 'not-built', feature, because });
 
-function criterionText(v: Extract<CriterionVerdict, { kind: 'judged' }>): string {
+function criterionText(v: Extract<RunCheckOutcome, { kind: 'judged' }>): string {
   const [first, second] = v.comparisons;
   return second
     ? `${formatWritten(first.limit)}–${formatWritten(second.limit)}`
     : `${first.op} ${formatWritten(first.limit)}`;
 }
 
-/** Decision 29: a failing Preparation opens OOS even when the mean passes; so does a failing Reportable Result. */
-function verdictReasons(j: SpecificationJudgement): Reasons {
+/**
+ * Decision 29: a failing Preparation opens OOS even when the mean passes; so does a failing
+ * Reportable Result. Variability over its limit blocks the Reportable Result and opens a Deviation.
+ */
+function verdictReasons(j: TestJudgement): Reasons {
   if (j.kind === 'result-missing') return [{ code: 'value-missing', field: `${j.analyte} result` }];
-  return j.sections.flatMap((s) => {
+  const variability = j.variability.flatMap((v): Reasons => {
+    switch (v.kind) {
+      case 'missing': return [{ code: 'variability-not-computed', analyte: v.analyte, because: v.because }];
+      case 'not-built': return [notBuilt('variability-statistic', `the Method's variability is an ${v.statistic} limit`)];
+      case 'judged': return v.pairs.filter((p) => !p.within).map((p) => notBuilt('deviation-workflow',
+        `the variability between Preparations ${pairLabel(j, p.preparations)} does not conform: ${v.analyte} ${formatWritten(p.compared)} % against NMT ${formatWritten(v.limit)} %`));
+    }
+  });
+  return [...variability, ...j.sections.flatMap((s) => {
     const against = (l: LineVerdict) =>
       `${l.analyte} ${formatWritten(l.compared)} ppm against ${s.jurisdiction} NMT ${formatWritten(l.limit)} ppm`;
     return [
-      ...s.reportable.filter((l) => !l.conforms)
-        .map((l) => notBuilt('deviation-workflow', `the Reportable Result does not conform: ${against(l)}`)),
+      ...s.reportable.flatMap((l) => (l.kind === 'judged' && !l.conforms
+        ? [notBuilt('deviation-workflow', `the Reportable Result does not conform: ${against(l)}`)] : [])),
       ...s.preparations.flatMap((p, i) => p.lines.filter((l) => !l.conforms)
         .map((l) => notBuilt('deviation-workflow', `Preparation ${i + 1} does not conform: ${against(l)}`))),
     ];
-  });
+  })];
+}
+
+/** Preparations are numbered in the order the Test lists them, as the rail shows them. */
+function pairLabel(j: Extract<TestJudgement, { kind: 'judged' }>, pair: readonly [PreparationId, PreparationId]): string {
+  const order = j.sections[0].preparations.map((p) => p.preparation);
+  return `${order.indexOf(pair[0]) + 1} and ${order.indexOf(pair[1]) + 1}`;
 }

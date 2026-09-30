@@ -6,11 +6,13 @@ import type { VersionId } from './ids.ts';
 import type { Actor, Machine, Role, TransitionResult } from './machines.ts';
 import type { NonEmpty } from './nonempty.ts';
 import type { Meaning } from './signing.ts';
-import type { Jurisdiction } from './verdict.ts';
+import type { CriterionSource, Jurisdiction } from './verdict.ts';
 
 export type NotBuilt =
   | 'deviation-workflow' // a failing Run Check, Preparation or Reportable Result, or QA disagreeing with a verdict
   | 'split-performed-signing' // Performed after a reassignment, each Analyst signing their own entries
+  | 'variability-statistic' // a Method variability statistic other than the relative difference of a pair
+  | 'computed-run-check' // a Run Check statistic the LIMS computes from raw values (#37 §4)
   | 'hold-release' | 'amended-report' | 'invalidation' | 'non-gmp-marking' | 'raise-to-gmp' | 'retest'
   | 'receipt-discrepancy' | 'sample-return' | 'sample-disposal'
   | 'import' | 'passkey' | 'anchoring' | 'below-loq-reporting' | 'multiple-nitrosamine-sum' | 'basis-correction';
@@ -38,8 +40,9 @@ export type GateReason =
   | {
       readonly code: 'criterion-misconfigured'; readonly check: string;
       readonly problem: 'criterion-coarser-than-export' | 'export-coarser-than-criterion';
-      readonly valueDecimals: number; readonly limitDecimals: number;
+      readonly valueDecimals: number; readonly limitDecimals: number; readonly source: CriterionSource;
     }
+  | { readonly code: 'variability-not-computed'; readonly analyte: string; readonly because: 'one-preparation' | 'zero-mean' }
   | { readonly code: 'equipment-not-in-use'; readonly equipment: string; readonly status: FitnessStatus }
   | { readonly code: 'open-hold'; readonly hold: string }
   | { readonly code: 'checklist-incomplete'; readonly items: NonEmpty<string> }
@@ -66,6 +69,8 @@ export type Refusal =
 export const NOT_BUILT_MESSAGE: { readonly [F in NotBuilt]: string } = {
   'deviation-workflow': 'Deviation workflow not built in the skeleton',
   'split-performed-signing': 'Signing Performed after a reassignment not built in the skeleton',
+  'variability-statistic': 'Variability statistics other than the relative difference of two Preparations not built in the skeleton',
+  'computed-run-check': 'Run Checks the LIMS computes from raw values not built in the skeleton',
   'hold-release': 'Hold release not built in the skeleton',
   'amended-report': 'Amended Reports not built in the skeleton',
   'invalidation': 'Invalidation not built in the skeleton',
@@ -121,6 +126,22 @@ function authorisationPhrase(a: Exclude<AuthorisationStanding, { kind: 'current'
   }
 }
 
+const decimals = (n: number): string => `${n} ${n === 1 ? 'decimal' : 'decimals'}`;
+
+/**
+ * GN 7.10: a compendial criterion keeps its printed decimals, so only the export can move. The lab's
+ * own criterion may instead be written to the export's decimals, in a new version of what it cites.
+ */
+function mismatchSentence(r: Extract<GateReason, { code: 'criterion-misconfigured' }>): string {
+  const setExport = `set the instrument's export to ${decimals(r.limitDecimals)}`;
+  const head = `Run Check ${r.check} can't be judged`;
+  if (r.source.kind === 'compendial') {
+    return `${head}: ${r.source.citation} prints its criterion to ${decimals(r.limitDecimals)} and the value has ${decimals(r.valueDecimals)}. ${capitalise(setExport)}; the criterion keeps its printed decimals.`;
+  }
+  const cites = r.source.kind === 'method' ? r.source.methodVersion : r.source.sopVersion;
+  return `${head}: its criterion is written to ${decimals(r.limitDecimals)} and the value has ${decimals(r.valueDecimals)}. Either write the criterion to ${decimals(r.valueDecimals)} in a new version (it cites ${cites}), or ${setExport}.`;
+}
+
 const capitalise = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** One sentence per reason, server-side. */
@@ -146,10 +167,11 @@ export function describeReason(r: GateReason): string {
     case 'change-pending': return `${capitalise(r.value)} has a change waiting for approval.`;
     case 'unsigned-dependency': return `${r.record} has no standing ${r.needs} signature.`;
     case 'run-check-missing': return `Run Check ${r.check} is not recorded.`;
-    case 'criterion-misconfigured':
-      return r.problem === 'criterion-coarser-than-export'
-        ? `Run Check ${r.check} can't be judged: its criterion is written to ${r.limitDecimals} decimals, fewer than the ${r.valueDecimals} exported. The Method's criterion needs correcting.`
-        : `Run Check ${r.check} can't be judged: the value has ${r.valueDecimals} decimals, fewer than the ${r.limitDecimals} its criterion is written to. The export needs more decimals.`;
+    case 'criterion-misconfigured': return mismatchSentence(r);
+    case 'variability-not-computed':
+      return r.because === 'one-preparation'
+        ? `The variability between Preparations can't be computed for ${r.analyte}: it needs at least two Preparations.`
+        : `The variability between Preparations can't be computed for ${r.analyte}: the Preparations' mean is zero.`;
     case 'equipment-not-in-use': return `${r.equipment} is ${r.status}, not In use.`;
     case 'open-hold': return `Hold ${r.hold} is open.`;
     case 'checklist-incomplete': return `The Review Checklist is not complete: ${andList(r.items.map((i) => `"${i}"`))} not ticked.`;
