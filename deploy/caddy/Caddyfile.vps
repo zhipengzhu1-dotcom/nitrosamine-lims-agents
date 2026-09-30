@@ -1,0 +1,9 @@
+# Inactive until the VPS move (compose.vps.yaml selects it). DNS is grey-cloud there and Caddy
+# terminates TLS itself with a certificate it obtains for the domain.
+{
+	admin off
+}
+
+{$LIMS_DOMAIN:nitrolims-demo.com} {
+	import site.caddy
+}

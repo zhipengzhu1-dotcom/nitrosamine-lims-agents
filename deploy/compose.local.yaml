@@ -1,0 +1,9 @@
+# A smoke test before the tunnel exists: Caddy on http://127.0.0.1:8080 of this Mac only.
+# deploy/mac/start.sh --local layers it over compose.yaml instead of starting the tunnel.
+services:
+  web:
+    networks: [edge, published]
+    ports: ["127.0.0.1:8080:80"]
+
+networks:
+  published: {}
