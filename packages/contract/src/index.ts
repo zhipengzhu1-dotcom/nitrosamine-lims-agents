@@ -128,3 +128,117 @@ export type AuditEntryDto = {
   readonly changes: Readonly<Record<string, readonly [unknown, unknown]>>;
   readonly afterFirstSave: boolean;
 };
+
+// ---------------------------------------------------------------------------------------------
+// The sample chain's views. Every number is the stored string; every verdict is the server's.
+// ---------------------------------------------------------------------------------------------
+
+export type VersionDto = { readonly versionId: string; readonly versionNo: number; readonly hash: string };
+
+/** A Recorded Value as a screen prints it: the effective value, whether it is Verified, and any pending change. */
+export type ValueDto = {
+  readonly valueId: string;
+  readonly field: string;
+  readonly subject: string;
+  readonly critical: boolean;
+  readonly type: string;
+  readonly unit: string | null;
+  readonly text: string;
+  readonly version: VersionDto;
+  readonly verified: boolean;
+  readonly pending: { readonly text: string; readonly version: VersionDto } | null;
+};
+
+export type SignatureLineDto = SignatureDto & { readonly stands: boolean };
+
+export type RunSummaryDto = { readonly id: string; readonly number: string; readonly state: 'Open' | 'Performed' | 'Reviewed'; readonly version: VersionDto | null };
+
+export type QueueTestDto = {
+  readonly id: string;
+  readonly label: string;
+  readonly number: string | null;
+  readonly state: string;
+  readonly gxpClass: string;
+  readonly customer: string;
+  readonly product: string;
+  readonly lotNumber: string;
+  readonly sampleNumber: string | null;
+  readonly submissionNumber: string;
+  readonly method: string;
+  readonly assignedAnalyst: { readonly id: string; readonly printedName: string } | null;
+};
+
+export type TestDetailDto = {
+  readonly test: QueueTestDto & { readonly sampleId: string; readonly submissionId: string; readonly acceptanceReason: string | null; readonly methodVersionId: string | null; readonly specificationVersionId: string | null };
+  readonly method: { readonly number: string; readonly title: string; readonly version: number; readonly analytes: readonly string[]; readonly minimumPreparations: string } | null;
+  readonly specification: { readonly purpose: string; readonly versionNo: number; readonly hash: string; readonly sections: readonly { readonly jurisdiction: string; readonly ruleSetVersion: string; readonly lines: readonly { readonly analyte: string; readonly limit: string; readonly unit: string }[] }[] } | null;
+  readonly preparations: readonly { readonly id: string; readonly prepNo: number; readonly subject: string }[];
+  readonly values: readonly ValueDto[];
+  readonly missingValues: readonly string[];
+  readonly runs: readonly RunSummaryDto[];
+  readonly version: VersionDto | null;
+  readonly signatures: readonly SignatureLineDto[];
+  /** The server's verdicts on the current version, as stored; empty until the Test is signed Performed. */
+  readonly verdicts: readonly { readonly jurisdiction: string; readonly analyte: string; readonly limit: string; readonly compared: string | null; readonly sharePercent: string | null; readonly outcome: string; readonly ruleSetVersion: string; readonly calculationVersion: string; readonly preparations: readonly { readonly preparation: string; readonly compared: string; readonly conforms: boolean }[] }[];
+  readonly holds: readonly string[];
+};
+
+export type RunDetailDto = {
+  readonly run: RunSummaryDto & { readonly method: string; readonly acquiredBy: string; readonly tests: readonly { readonly id: string; readonly label: string }[] };
+  readonly values: readonly ValueDto[];
+  readonly instrument: { readonly code: string; readonly kind: string; readonly fitness: string } | null;
+  readonly runChecks: readonly { readonly name: string; readonly unit: string; readonly criterion: string; readonly source: string; readonly value: string | null; readonly outcome: string }[];
+  readonly signatures: readonly SignatureLineDto[];
+  readonly missingValues: readonly string[];
+};
+
+export type ReviewDetailDto = {
+  readonly reviewId: string;
+  readonly reviews: { readonly id: string; readonly kind: string; readonly label: string };
+  readonly checklistVersion: string;
+  readonly items: readonly { readonly item: string; readonly ticked: boolean }[];
+  readonly confirmations: readonly { readonly subject: string; readonly confirmation: string }[];
+};
+
+export type ReportDetailDto = {
+  readonly report: { readonly id: string; readonly number: string; readonly state: string; readonly customer: string; readonly submissionNumber: string; readonly version: VersionDto | null };
+  readonly tests: readonly (QueueTestDto & { readonly version: VersionDto | null; readonly performedStands: boolean; readonly reviewedStands: boolean; readonly jurisdictions: readonly string[] })[];
+  readonly signatures: readonly SignatureLineDto[];
+  readonly issue: { readonly pdfSha256: string; readonly rendererRelease: string } | null;
+};
+
+export type AssignmentDto = {
+  readonly test: QueueTestDto;
+  /** Only the Analysts the assignment gate lets through (decision 19 §4). */
+  readonly eligible: readonly { readonly id: string; readonly printedName: string; readonly username: string }[];
+};
+
+export type LabReferenceDto = {
+  readonly lab: { readonly id: string; readonly code: string; readonly zone: string };
+  readonly equipment: readonly { readonly id: string; readonly code: string; readonly kind: string; readonly fitness: string }[];
+  readonly methodVersions: readonly { readonly id: string; readonly number: string; readonly version: number; readonly title: string; readonly runChecks: readonly { readonly name: string; readonly unit: string }[] }[];
+  readonly reports: readonly { readonly id: string; readonly number: string; readonly state: string; readonly submissionNumber: string }[];
+};
+
+export type ChainVerdictDto = { readonly ledger: string; readonly code: string; readonly intactThrough: number; readonly firstBreak: number | null; readonly headMatches: boolean };
+
+export type PortalSubmissionDto = {
+  readonly id: string;
+  readonly number: string;
+  readonly labId: string | null;
+  readonly labCode: string | null;
+  readonly submittedAt: string | null;
+  readonly status: string;
+  readonly samples: readonly {
+    readonly id: string; readonly lotNumber: string; readonly number: string | null; readonly product: string; readonly status: string;
+    readonly tests: readonly { readonly id: string; readonly method: string; readonly status: string; readonly rejectionReason: string | null }[];
+  }[];
+};
+
+export type PortalReportDto = { readonly id: string; readonly labId: string; readonly number: string; readonly submissionNumber: string; readonly releasedAtUtc: string; readonly pdfSha256: string };
+
+export type PortalCatalogueDto = {
+  readonly labs: readonly { readonly id: string; readonly code: string }[];
+  readonly products: readonly { readonly id: string; readonly code: string; readonly name: string }[];
+  readonly methods: readonly { readonly id: string; readonly number: string; readonly title: string }[];
+};

@@ -1,0 +1,143 @@
+// The sample chain's data shapes. A Method version's and a Specification's structured data are
+// stored as jsonb on their heads and sealed into their bytes; both hold decimal strings, never
+// numbers, so the same object is canonical content. These schemas parse them at the wire and
+// again when read back, and the domain types are built from the parsed value.
+
+import { z } from 'zod';
+import { uuid } from '@lims/contract';
+import type { Canon } from '@lims/domain/canonical';
+import { written } from '@lims/domain/decimal';
+import type { AnalyteKey } from '@lims/domain/ids';
+import { transition, type Actor, type Machine } from '@lims/domain/machines';
+import { refuse, type Refusal } from '@lims/domain/refusal';
+import type { NonEmpty } from '@lims/domain/nonempty';
+import type { Criterion, CriterionSource, ExportedRunCheck, SpecificationSection, VariabilityCriterion } from '@lims/domain/verdict';
+
+const Decimal = z.string().regex(/^-?\d+(\.\d+)?$/);
+
+export const CriterionSourceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('compendial'), citation: z.string().min(1) }),
+  z.object({ kind: z.literal('method'), methodVersion: z.string().min(1) }),
+  z.object({ kind: z.literal('sop'), sopVersion: z.string().min(1) }),
+]);
+
+export const CriterionSchema = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('NMT'), limit: Decimal, source: CriterionSourceSchema }),
+  z.object({ op: z.literal('NLT'), limit: Decimal, source: CriterionSourceSchema }),
+  z.object({ op: z.literal('range'), low: Decimal, high: Decimal, source: CriterionSourceSchema }),
+]);
+
+export const MethodDataSchema = z.object({
+  basis: z.enum(['compendial', 'alternative', 'in-house']),
+  analytes: z.array(z.object({ key: z.string().min(1).max(32), substanceId: uuid, name: z.string().min(1) })).min(1),
+  /** From the Method's calculation; the dilution factor is fixed by the procedure, never typed (decision 36). */
+  dilutionFactor: Decimal,
+  /** The minimum number of Preparations, at least 2 for GMP. */
+  preparations: z.string().regex(/^[1-9]\d*$/),
+  variability: z.object({ statistic: z.enum(['relative-difference', 'rsd', 'absolute-difference']), limit: Decimal, source: CriterionSourceSchema }).nullable(),
+  runChecks: z.array(z.object({ name: z.string().min(1).max(64), unit: z.string().min(1).max(16), comparedAs: z.literal('as-exported'), criterion: CriterionSchema })).min(1),
+  /** Document versions an Analyst needs Training Records on, beyond the Method version itself. */
+  prerequisiteDocuments: z.array(z.string().min(1)),
+});
+export type MethodData = z.infer<typeof MethodDataSchema>;
+
+export const SpecificationDataSchema = z.object({
+  sections: z.array(z.object({
+    jurisdiction: z.enum(['FDA', 'EMA', 'NMPA', 'MHLW']),
+    ruleSetVersion: z.string().min(1),
+    rounding: z.enum(['half-away-from-zero', 'half-even']),
+    maximumDailyDose: z.object({ value: Decimal, unit: z.literal('mg/day') }),
+    lines: z.array(z.object({
+      analyte: z.string().min(1).max(32),
+      limit: Decimal,
+      unit: z.literal('ppm'),
+      uspClaim: z.boolean(),
+      /** How the limit was derived: the published Acceptable Intake and its source, kept as written. */
+      basis: z.object({ acceptableIntakeNgPerDay: Decimal, source: z.string().min(1) }).nullable(),
+    })).min(1),
+  })).min(1),
+});
+export type SpecificationData = z.infer<typeof SpecificationDataSchema>;
+
+/** A parsed data object is canonical content already: strings, booleans, nulls, arrays, objects. */
+export const asCanon = (data: MethodData | SpecificationData): Canon => data as unknown as Canon;
+
+const nonEmpty = <T>(xs: readonly T[], what: string): NonEmpty<T> => {
+  const [first, ...rest] = xs;
+  if (first === undefined) throw new Error(`${what} is empty`);
+  return [first, ...rest];
+};
+
+export const criterionOf = (c: z.infer<typeof CriterionSchema>): Criterion => {
+  const source: CriterionSource = c.source;
+  return c.op === 'range' ? { op: 'range', low: written(c.low), high: written(c.high), source } : { op: c.op, limit: written(c.limit), source };
+};
+
+export const runChecksOf = (m: MethodData): readonly ExportedRunCheck[] =>
+  m.runChecks.map((r) => ({ name: r.name, comparedAs: 'as-exported', criterion: criterionOf(r.criterion) }));
+
+export const variabilityOf = (m: MethodData): VariabilityCriterion | null =>
+  m.variability ? { statistic: m.variability.statistic, limit: written(m.variability.limit), source: m.variability.source } : null;
+
+export const sectionsOf = (s: SpecificationData): NonEmpty<SpecificationSection> =>
+  nonEmpty(s.sections.map((section) => ({
+    jurisdiction: section.jurisdiction,
+    ruleSetVersion: section.ruleSetVersion,
+    rounding: section.rounding,
+    lines: nonEmpty(section.lines.map((l) => ({ analyte: l.analyte as AnalyteKey, limit: written(l.limit), uspClaim: l.uspClaim })), 'section lines'),
+  })), 'sections');
+
+/** A lifecycle move as a command applies it: the target state, or the refusal to print. */
+export function move(machine: Machine<string, string, string>, label: string, from: string, event: string, actor: Actor): { readonly to: string } | Refusal {
+  const t = transition(machine, from, event, actor);
+  return t.ok ? { to: t.to } : refuse.transition(machine, label, t);
+}
+
+/** The Document version a Training Record on a Method version names. */
+export const methodTrainingDocument = (methodNumber: string, version: number): string => `${methodNumber}@${version}`;
+
+// ---------------------------------------------------------------------------------------------
+// Recorded Value fields per kind, and how subjects are written.
+// ---------------------------------------------------------------------------------------------
+
+export const TEST_FIELDS = { weight: 'prep.weight', dilution: 'prep.dilution', result: 'prep.result' } as const;
+export const RUN_FIELDS = { instrument: 'run.instrument', sequence: 'run.sequence', trueCopy: 'run.trueCopy', runCheck: 'runcheck.value' } as const;
+export const REVIEW_FIELDS = { tick: 'checklist.item', verdict: 'verdict.confirmation' } as const;
+
+export const preparationSubject = (prepNo: number): string => `P${prepNo}`;
+export const resultSubject = (prepNo: number, analyte: string): string => `P${prepNo}/${analyte}`;
+export const verdictSubject = (testId: string, jurisdiction: string): string => `${testId}/${jurisdiction}`;
+
+// ---------------------------------------------------------------------------------------------
+// Review Checklists (decision 20 §7). Versioned documents once the vault exists; constants here.
+// ---------------------------------------------------------------------------------------------
+
+export type Checklist = { readonly version: string; readonly items: readonly string[] };
+
+export const RUN_CHECKLIST: Checklist = {
+  version: 'CL-RUN@1',
+  items: ['audit trail reviewed', 'typed values checked against the True Copy', 'Run Checks recorded and passing', 'instrument In use at acquisition'],
+};
+export const TEST_CHECKLIST: Checklist = {
+  version: 'CL-TEST@1',
+  items: ['audit trail reviewed', 'calculations checked', 'every feeding Run Reviewed', 'Preparations complete and Verified'],
+};
+export const RELEASE_CHECKLIST: Checklist = {
+  version: 'CL-RELEASE@1',
+  items: ['audit trail reviewed', 'every Test Reviewed on its current version', 'report content matches the signed Tests'],
+};
+
+export const checklistFor = (reviewedKind: string): Checklist | null =>
+  reviewedKind === 'run' ? RUN_CHECKLIST : reviewedKind === 'test' ? TEST_CHECKLIST : reviewedKind === 'test_report' ? RELEASE_CHECKLIST : null;
+
+// ---------------------------------------------------------------------------------------------
+// Numbers: every Lab-coded number carries the Lab code and the year in the Lab's zone.
+// ---------------------------------------------------------------------------------------------
+
+export const yearIn = (zone: string, at: Date): number =>
+  Number(new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric' }).format(at));
+
+export const labNumber = (labCode: string, kind: 'S' | 'R' | 'TR', year: number, n: number): string =>
+  `${labCode}-${kind}-${year}-${String(n).padStart(6, '0')}`;
+
+export const submissionNumber = (year: number, n: number): string => `SUB-${year}-${String(n).padStart(6, '0')}`;

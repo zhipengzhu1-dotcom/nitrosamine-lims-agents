@@ -18,7 +18,8 @@ import type { LabId, LedgerId, PersonId, RecordId, Sha256Hex, SignatureId, Value
 import { refuse, type Refusal } from '@lims/domain/refusal';
 import { NEEDS_ATTESTATION, type Meaning } from '@lims/domain/signing';
 import type { ReauthenticatedSigner } from '../identity/reauth.ts';
-import type { KindDef, KindRegistry, RuleContext, Signer } from './kinds.ts';
+import type { Deps } from '../commit.ts';
+import type { KindDef, RuleContext, Signer } from './kinds.ts';
 
 export type TypedValue =
   | { readonly type: 'decimal'; readonly value: Written; readonly unit: string }
@@ -112,7 +113,8 @@ const valueText = (v: TypedValue): { text: string; decimals: number | null; blob
 
 type Acted = { readonly person: PersonId; readonly role: string; readonly lab: LabId | null };
 
-export function records(tx: AuditedTx, kinds: KindRegistry, acted: Acted): Records {
+export function records(tx: AuditedTx, deps: Deps, acted: Acted): Records {
+  const kinds = deps.kinds;
   const q = tx.db;
   const ruleContext: RuleContext = { q, dbNow: tx.dbNow, lab: acted.lab };
 
@@ -297,7 +299,7 @@ export function records(tx: AuditedTx, kinds: KindRegistry, acted: Acted): Recor
         };
         rows.push(row);
       }
-      for (const [i, item] of items.entries()) await rule.after?.(tx as never, item, rows[i]!);
+      for (const [i, item] of items.entries()) await rule.after?.(tx, deps, item, rows[i]!);
       // The signature binds to what was shown; if the meaning's own effects moved it, that is a bug, not a record.
       for (const item of items) {
         if (!(await versionStands(q, item.version.versionId))) throw new Error(`${item.label} no longer stands after its ${req.meaning} effects`);

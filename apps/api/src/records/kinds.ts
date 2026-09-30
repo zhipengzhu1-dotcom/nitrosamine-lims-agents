@@ -10,7 +10,8 @@ import type { GateResult } from '@lims/domain/gates';
 import type { LabId, PersonId, RecordId, VersionRef } from '@lims/domain/ids';
 import type { GateReason, Refusal } from '@lims/domain/refusal';
 import type { Meaning } from '@lims/domain/signing';
-import type { CommandTx } from '../commit.ts';
+import type { AuditedTx } from '@lims/db';
+import type { Deps } from '../commit.ts';
 import type { Sealed, SignatureRow } from './index.ts';
 import { valueKind } from './kinds/value.ts';
 
@@ -39,8 +40,8 @@ export type SigningRule = {
    * attestation is the sealed Review a Reviewed or Released signing cites, else null.
    */
   readonly check: (ctx: RuleContext, signer: Signer, sealed: readonly Sealed[], attestation: Sealed | null) => Promise<GateResult | Refusal>;
-  /** Consequential effects in the same transaction (a lifecycle transition, a lock). */
-  readonly after?: (tx: CommandTx, sealed: Sealed, signature: SignatureRow) => Promise<void>;
+  /** Consequential effects in the same transaction (a lifecycle transition, a lock, a rendered PDF). */
+  readonly after?: (tx: AuditedTx, deps: Deps, sealed: Sealed, signature: SignatureRow) => Promise<void>;
 };
 
 export type KindDef = {

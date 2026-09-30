@@ -148,7 +148,7 @@ export async function commit(deps: Deps, who: Requester, key: CommitKey | string
       ...tx,
       actor: who,
       deps,
-      records: records(tx, deps.kinds, acted),
+      records: records(tx, deps, acted),
       survive: async (s) => { survivors.push(s); await write(s); },
       surviveOnce: async (s) => {
         let inserted = false;

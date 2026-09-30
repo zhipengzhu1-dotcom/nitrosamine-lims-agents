@@ -1,11 +1,12 @@
 import { createDb } from '@lims/db';
 import { buildApp } from './app.ts';
+import { CHAIN } from './chain/index.ts';
 import { loadConfig } from './config.ts';
 import { sweepIdleSessions } from './sweeper.ts';
 
 const config = loadConfig();
 const db = createDb(config.database);
-const { app } = await buildApp({ db, config });
+const { app } = await buildApp({ db, config, ...CHAIN });
 const sweeper = setInterval(() => void sweepIdleSessions(db, config.release).catch((e) => app.log.error(e)), 60_000);
 await app.listen({ port: config.port, host: config.host });
 
