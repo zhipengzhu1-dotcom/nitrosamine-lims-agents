@@ -13,11 +13,11 @@ The fixes run as six small units in three waves, each in its own worktree, each 
 
 | Wave | Unit | Fixes | Migrations |
 |---|---|---|---|
-| 1 | **S1** database guards | 2, 17, 20, 21 | 0060–0064 |
+| 1 | **S1** database guards | 2, 17, 20, 21, and a per-service table allowlist (S2's review) | 0060–0064 |
 | 1 | **S2** identity and pipeline | 3, 18, 19, 22, 23, 27 | none |
 | 1 | **C3** reference data | 7, 9, 10, 13 (schema and acceptance), 14, 15, 16 | 0070–0074 |
-| 2 | **C1** results integrity | 1, 6 (calculation), 8, 11, 12, 25, 26 | 0080–0084 |
-| 2 | **C2** writer rules and failure holds | 4, 5, 6 (unit check on record and change) | 0090–0094 |
+| 2 | **C1** results integrity | 1, 6 (calculation), 8, 11, 12, 25, 26, 30–33 | 0080–0084 |
+| 2 | **C2** writer rules, failure holds and the trail | 4, 5, 6 (unit check on record and change), 28, 29 | 0090–0094 |
 | 3 | **C4** the report PDF | 24, 13 (printing the Decision Rule and limit source) | none |
 
 Every unit appends its database guards to `packages/db/scripts/mutants.ts`.
@@ -53,6 +53,12 @@ Every unit appends its database guards to `packages/db/scripts/mutants.ts`.
 | 25 | `section_verdict` is written from a second load, not the sealed body | usp | C1 | written from the sealed body, with `rounding` and `usp_claim` columns |
 | 26 | A decimal schema accepts `010` and `00.30`, which crash later | usp | C1 | the zod schemas refine with `parseWritten` |
 | 27 | A stale version is detected only after credentials are consumed | part11 point 2 | S2 | the version check runs before re-authentication |
+| 28 | After a proposal is turned down, the Audit Trail shows the rejected value as the next change's old value | iso 7.5.2, part11 §11.10(e) (screen review) | C2 | `trail.ts` restores the last effective text on a rejection; a test covers change, rejection, change |
+| 29 | A Sample's receipt is in no trail a Reviewer or QA sees | part11 DI Q7, iso 7.4 (screen review) | C2 | the Test's trail includes its Sample's entries, labelled "Sample receipt" |
+| 30 | A Section heading names one rounding rule for lines rounded by different rules | usp GN 7.20 (screen review) | C1 | rounding is carried and printed per line |
+| 31 | The step bar shows a Run Check the server can't judge, or a Hold on an earlier step, as current while the server refuses | usp `<621>`, iso 7.10.1 (screen review) | C1 | the step's reasons come from the domain gate's own reasons, so screen and server agree; the three unjudgeable kinds get words |
+| 32 | Each Preparation row reads "Conforms", which can contradict the Reportable Result | usp GN 7.20, interpretation (screen review) | C1 | the column reads "Individual vs limit (for information)" |
+| 33 | The step model falls back to the unit ppm when it can't find the Specification line | usp (screen review) | C1 | it refuses instead of inventing a unit |
 
 The Audit Trail showing a Test's descendants and a value's own text (part11 G5), and the prompt showing an attestation's body (part11 point 2, G3), are in the chain-screens unit.
 
@@ -77,3 +83,6 @@ The Audit Trail showing a Test's descendants and a value's own text (part11 G5),
 - Deactivating an account, and whether `account.username` may ever change (part11 C1/C7, unclear).
 - Whether the Admin handing over an enrolment link needs the person to show a live code (part11 C6, unclear).
 - Storage location, custody and receipt condition for Samples (iso 7.4, procedural).
+- Whether a signature's statement is stored with it, so a later rewording never changes what an old signature shows (part11 §11.50(b), interpretation, screen review).
+- Whether a correct password and code that opens no session (a place still to choose, or no role there) belongs in the login log (part11 A11d §11.9, unclear, screen review).
+- Whether the submit screen shows the Customer the Specification version and Decision Rule each Test will be judged by (iso 7.1.3, unclear, screen review).
