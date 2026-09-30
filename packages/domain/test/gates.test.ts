@@ -339,6 +339,7 @@ describe('releasedGate', () => {
     performedStands: true, reviewedStands: true,
     performedBy: [ana], reviewedBy: [rex],
     blockingHolds: [] as string[],
+    pendingChanges: [] as string[],
     verdicts: [{ jurisdiction: 'FDA' as const, confirmation: 'confirmed' as const }],
   });
   const base: ReleasedFacts = {
@@ -362,6 +363,7 @@ describe('releasedGate', () => {
     ['a Test whose Performed signature no longer stands', withTests({ performedStands: false }), ['unsigned-dependency']],
     ['a Test whose Reviewed signature no longer stands', withTests({ reviewedStands: false }), ['unsigned-dependency']],
     ['an open Hold on a Test', withTests({ blockingHolds: ['HOLD-7'] }), ['open-hold']],
+    ['a change pending on a value behind a Test, which the release lock would leave unsettleable', withTests({}, { pendingChanges: ['prep.weight (P1)'] }), ['change-pending']],
     ['a verdict QA has not confirmed', withTests({ verdicts: [{ jurisdiction: 'FDA', confirmation: 'none' }] }), ['verdict-not-confirmed']],
     ['a verdict QA disagrees with: the Deviation workflow is not built', withTests({ verdicts: [{ jurisdiction: 'FDA', confirmation: 'disagreed' }] }), ['not-built']],
     ['the release checklist incomplete', { ...base, checklist: { required: ['every verdict confirmed'], ticked: [] } }, ['checklist-incomplete']],

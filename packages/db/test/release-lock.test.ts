@@ -19,6 +19,7 @@ let runValue: RecordId;
 let testV1: Sealed;
 let runV1: Sealed;
 let reportV1: Sealed;
+let weightV2: Sealed;
 
 beforeAll(async () => {
   db = await testDatabase();
@@ -36,6 +37,7 @@ beforeAll(async () => {
     testV1 = await seal(tx, test, bodyBytes({ kind: 'test' }, [w.v1, runV1]), 'test@1', [w.v1, runV1]);
     reportV1 = await seal(tx, report, bodyBytes({ kind: 'report' }, [testV1]), 'report@1', [testV1]);
   });
+  weightV2 = await as(fx.bob, 'Reviewer', (tx) => recordValue(tx, fx.labA, weight, '100.13'), true);
 });
 afterAll(() => db.close());
 
@@ -55,6 +57,14 @@ describe('before release', () => {
     const forged = { ...testV1, hash: testV1.hash.replace(/^./, testV1.hash.startsWith('0') ? '1' : '0') as never };
     await expectSqlState(as(fx.ann, 'Analyst', (tx) => seal(tx, report, bodyBytes({ x: 1 }, [forged]), 'report@1', [forged])), 'LV002');
     await expectSqlState(as(fx.ann, 'Analyst', (tx) => seal(tx, report, bodyBytes({ x: 2 }), 'report@1', [testV1])), 'LV003');
+  });
+
+  it('LV006: only a pending version can be rejected; the effective Test version stays', async () => {
+    await expectSqlState(
+      as(fx.cid, 'QA', (tx) => tx.db.insertInto('version_rejection').values({ ledger_id: fx.labA, version_id: testV1.versionId, rejected_by: fx.cid.id, reason_code: 'wrong-item-selected' }).execute(), true),
+      'LV006',
+    );
+    expect(await versionStands(db.app, testV1.versionId)).toBe(true);
   });
 
   it('the pinned identity column may be set once from null, then never changes (LR002)', async () => {
@@ -82,9 +92,22 @@ describe('after release', () => {
 
   it('LR001: a new version of the Test, of a Recorded Value under it, of the Run\'s value, or of the report is refused', async () => {
     await expectSqlState(as(fx.ann, 'Analyst', (tx) => seal(tx, test, bodyBytes({ kind: 'test', v: 2 }), 'test@1'), true), 'LR001');
-    await expectSqlState(as(fx.ann, 'Analyst', (tx) => recordValue(tx, fx.labA, weight, '100.13'), true), 'LR001');
+    await expectSqlState(as(fx.ann, 'Analyst', (tx) => recordValue(tx, fx.labA, weight, '100.14'), true), 'LR001');
     await expectSqlState(as(fx.ann, 'Analyst', (tx) => recordValue(tx, fx.labA, runValue, '0.96'), true), 'LR001');
     await expectSqlState(as(fx.cid, 'QA', (tx) => seal(tx, report, bodyBytes({ kind: 'report', v: 2 }), 'report@1'), true), 'LR001');
+  });
+
+  it('LR001: the change that was pending on a locked value can be neither approved nor rejected', async () => {
+    expect(await db.app.selectFrom('pending_version').select('id').where('record_id', '=', weight).execute()).toEqual([{ id: weightV2.versionId }]);
+    await expectSqlState(
+      as(fx.cid, 'QA', (tx) => sign(tx, { signer: fx.cid.id, target: weightV2, meaning: 'Verified', authenticator: 'totp', group: randomUUID() })),
+      'LR001',
+    );
+    await expectSqlState(
+      as(fx.cid, 'QA', (tx) => tx.db.insertInto('version_rejection').values({ ledger_id: fx.labA, version_id: weightV2.versionId, rejected_by: fx.cid.id, reason_code: 'wrong-item-selected' }).execute(), true),
+      'LR001',
+    );
+    expect(await db.app.selectFrom('pending_version').select('id').where('record_id', '=', weight).execute()).toEqual([{ id: weightV2.versionId }]);
   });
 
   it('LR001: a value added under a locked Test cannot get a version', async () => {

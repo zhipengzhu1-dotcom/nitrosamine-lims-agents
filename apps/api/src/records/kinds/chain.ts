@@ -288,15 +288,17 @@ export const testReportKind: KindDef = {
         if ('kind' in next) return next;
         const review = await attestationOf(ctx, signer, r.id, attestation, RELEASE_CHECKLIST);
         if ('kind' in review) return review;
-        const tests = r.tests.map((t) => ({
+        const tests = [];
+        for (const t of r.tests) tests.push({
           test: t.label,
           performedStands: signedAndStanding(t.standing, 'Performed'),
           reviewedStands: signedAndStanding(t.standing, 'Reviewed'),
           performedBy: [...(t.assignedAnalyst ? [t.assignedAnalyst] : []), ...signersOf(t.standing, 'Performed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Performed'))] as PersonId[],
           reviewedBy: [...signersOf(t.standing, 'Reviewed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Reviewed'))],
           blockingHolds: t.holds,
+          pendingChanges: [...pendingOf(t.values), ...(await Promise.all(t.runs.map((x) => loadRun(ctx.q, x.id)))).flatMap((x) => pendingOf(x.values).map((v) => `${x.label} ${v}`))],
           verdicts: (t.specification?.data.sections ?? []).map((s) => ({ jurisdiction: s.jurisdiction, confirmation: review.confirmations.get(verdictSubject(t.id, s.jurisdiction)) ?? 'none' as const })),
-        }));
+        });
         const [first, ...rest] = tests;
         if (!first) return { kind: 'not-permitted', message: `${r.label} holds no Test.` };
         return releasedGate({ report: r.label, signer: await releaserFacts(ctx.q, signer.person, ctx.lab, ctx.dbNow), tests: [first, ...rest], checklist: { required: RELEASE_CHECKLIST.items, ticked: review.ticked } });

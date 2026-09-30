@@ -108,6 +108,27 @@ const MUTANTS: Mutant[] = [
     replace: '',
     test: 'test/adr0001.test.ts',
   },
+  {
+    name: "LR001 a locked value's pending change is approved",
+    file: 'migrations/0061_lock_settles_pending.sql',
+    find: "if new.meaning in ('Verified', 'Approved') and lims.locked(v.record_id) then",
+    replace: 'if false then',
+    test: 'test/release-lock.test.ts',
+  },
+  {
+    name: "LR001 a locked value's pending change is rejected",
+    file: 'migrations/0061_lock_settles_pending.sql',
+    find: "  if lims.locked(v.record_id) then\n    raise exception 'record % is locked by a Released Test Report', v.record_id using errcode = 'LR001';\n  end if;\n  return new;",
+    replace: '  return new;',
+    test: 'test/release-lock.test.ts',
+  },
+  {
+    name: 'LV006 an effective version is rejected',
+    file: 'migrations/0061_lock_settles_pending.sql',
+    find: 'if not exists (select 1 from lims.pending_version p where p.id = new.version_id) then',
+    replace: 'if false then',
+    test: 'test/release-lock.test.ts',
+  },
 ];
 
 const root = fileURLToPath(new URL('..', import.meta.url));
