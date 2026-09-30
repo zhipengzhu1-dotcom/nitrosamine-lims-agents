@@ -31,7 +31,14 @@ export type LockedSession = {
   readonly person: PersonId;
   readonly printedName: string;
   readonly username: string;
+  readonly nativeName: string | null;
+  /** The roles held where the session was opened, for the LockScreen's owner tile. */
+  readonly roles: readonly string[];
   readonly lockReason: 'manual' | 'switch-user' | 'idle';
+  /** When it locked: the stamp, or for an idle lock the instant the 15 minutes ran out. */
+  readonly lockedAt: Date;
+  /** The Lab's IANA zone, for the lock screen's clock and times. */
+  readonly zone: string | null;
   readonly lab: LabId | null;
   readonly customer: CustomerId | null;
   readonly workstation: string;
@@ -121,14 +128,19 @@ export async function readSession(db: Kysely<DB>, token: string | undefined): Pr
   if (!s) return { state: 'none' };
   if (s.state === 'ended') return { state: 'ended' };
   const base = { session: s.id, person: s.person_id, printedName: s.printed_name, username: s.username ?? '' };
-  if (s.state === 'locked') {
-    return {
-      state: 'locked',
-      locked: { ...base, lockReason: s.lock_reason ?? 'idle', lab: s.acting_lab_id, customer: s.customer_id, workstation: s.workstation },
-    };
-  }
   const grants = await db.selectFrom('role_grant').select(['role', 'lab_id', 'customer_id'])
     .where('person_id', '=', s.person_id).where('revoked_at', 'is', null).execute();
+  if (s.state === 'locked') {
+    const held = grants.filter((g) => (s.acting_lab_id ? g.lab_id === s.acting_lab_id : s.customer_id ? g.customer_id === s.customer_id : g.role === 'Admin'));
+    return {
+      state: 'locked',
+      locked: {
+        ...base, nativeName: s.native_name, roles: held.map((g) => g.role), lockReason: s.lock_reason ?? 'idle',
+        lockedAt: s.locked_at ?? new Date(s.last_activity.getTime() + IDLE_LOCK_MINUTES * 60_000),
+        zone: s.iana_zone, lab: s.acting_lab_id, customer: s.customer_id, workstation: s.workstation,
+      },
+    };
+  }
   let actor: Exclude<ActorContext, { kind: 'service' }> | null = null;
   if (s.acting_lab_id) {
     const roles = new Set(grants.filter((g) => g.lab_id === s.acting_lab_id).map((g) => g.role as StaffRole));
