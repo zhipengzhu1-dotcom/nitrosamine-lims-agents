@@ -319,7 +319,7 @@ export const openReview = defineCommand({
 
 export const tickChecklist = defineCommand({
   name: 'review.tick',
-  input: z.object({ reviewId: RecordIdSchema, item: z.string().min(1).max(64), role: z.enum(REVIEW_ROLES) }),
+  input: z.object({ reviewId: RecordIdSchema, item: z.string().min(1).max(120), role: z.enum(REVIEW_ROLES) }),
   acting: { as: 'role-from-input', role: (i) => i.role },
   reason: { kind: 'first_save' },
   ledgers: () => [],

@@ -135,17 +135,20 @@ export const verdictSubject = (testId: string, jurisdiction: string): string => 
 
 // ---------------------------------------------------------------------------------------------
 // Review Checklists (decision 20 §7). Versioned documents once the vault exists; constants here.
+// A version never changes its items, because each Reviewed signature keeps the version it used.
+// These are §7's ticked items for typed entry, split by what each record holds; Fitness Status,
+// Run Checks, Training and Authorisation are proved by the signing gates, so nobody ticks them.
 // ---------------------------------------------------------------------------------------------
 
 export type Checklist = { readonly version: string; readonly items: readonly string[] };
 
 export const RUN_CHECKLIST: Checklist = {
-  version: 'CL-RUN@1',
-  items: ['audit trail reviewed', 'typed values checked against the True Copy', 'Run Checks recorded and passing', 'instrument In use at acquisition'],
+  version: 'CL-RUN@2',
+  items: ['LIMS audit trail reviewed', 'chromatograms inspected', 'excluded Injections justified', 'Notebook Entries read'],
 };
 export const TEST_CHECKLIST: Checklist = {
-  version: 'CL-TEST@1',
-  items: ['audit trail reviewed', 'calculations checked', 'every feeding Run Reviewed', 'Preparations complete and Verified'],
+  version: 'CL-TEST@2',
+  items: ['LIMS audit trail reviewed', 'calculations checked', 'Notebook Entries read', 'outlier, OOT, trend and Conditional Pass flags acknowledged with a comment'],
 };
 export const RELEASE_CHECKLIST: Checklist = {
   version: 'CL-RELEASE@1',

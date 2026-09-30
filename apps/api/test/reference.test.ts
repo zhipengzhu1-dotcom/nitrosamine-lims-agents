@@ -8,6 +8,7 @@ import { ledgerOf } from '@lims/db';
 import { uuid } from '@lims/contract';
 import type { RecordId } from '@lims/domain/ids';
 import { CHAIN } from '../src/chain/index.ts';
+import { checklistFor, RELEASE_CHECKLIST, RUN_CHECKLIST, TEST_CHECKLIST } from '../src/chain/model.ts';
 import { receipt } from '../src/commit.ts';
 import { createAdoption, createSpecification } from '../src/commands/reference.ts';
 import { defineCommand } from '../src/doors.ts';
@@ -172,5 +173,22 @@ describe('a Training Record is Read and Understood until Training Runs exist (is
     expect(r.body.refusal).toEqual({ kind: 'not-built', feature: 'training-run', message: 'Training Runs not built in the skeleton, so a Training Record can only be Read and Understood' });
     expect((await api.db.app.selectFrom('spec_gap').select('id').where('feature', '=', 'training-run').execute()).length).toBe(before + 1);
     expect(await api.db.app.selectFrom('training_record').select('id').where('document_version', '=', 'SOP-PREP-011@2').execute()).toEqual([]);
+  });
+});
+
+describe('the Review Checklists follow decision 20 §7 for typed entry (iso 7)', () => {
+  // A checklist version never changes its items: a Reviewed signature keeps the version it used.
+  // Changing an item means a new version here and in chain/model.ts.
+  it('pins each version\'s items', () => {
+    expect([RUN_CHECKLIST, TEST_CHECKLIST, RELEASE_CHECKLIST]).toEqual([
+      { version: 'CL-RUN@2', items: ['LIMS audit trail reviewed', 'chromatograms inspected', 'excluded Injections justified', 'Notebook Entries read'] },
+      { version: 'CL-TEST@2', items: ['LIMS audit trail reviewed', 'calculations checked', 'Notebook Entries read', 'outlier, OOT, trend and Conditional Pass flags acknowledged with a comment'] },
+      { version: 'CL-RELEASE@1', items: ['audit trail reviewed', 'every Test Reviewed on its current version', 'report content matches the signed Tests'] },
+    ]);
+    expect([checklistFor('run'), checklistFor('test'), checklistFor('test_report')]).toEqual([RUN_CHECKLIST, TEST_CHECKLIST, RELEASE_CHECKLIST]);
+  });
+
+  it('ticks no item the system proves as evidence (Fitness Status, Run Checks, Training and Authorisation)', () => {
+    for (const item of [...RUN_CHECKLIST.items, ...TEST_CHECKLIST.items]) expect(item).not.toMatch(/In use|Run Checks|Training|Authoris|Verified|True Copy/);
   });
 });
