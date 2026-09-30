@@ -182,7 +182,7 @@ Two lessons come straight from the failure reports.
 - An Electronic Signature must be used "only by [its] genuine owner" and must be hard to misuse (part11.md C6, §11.200(a)(2)–(3)). An agent holding the credentials, or a session that can sign, is exactly that misuse.
 - Draft Annex 11 §13.3 says relying on an existing login to sign is "not acceptable" (part11.md C5). The LIMS already re-authenticates in full at every signing (#13), so a borrowed session can't sign even in principle. The standing rule should also forbid the assistant from making unsigned changes under the session.
 
-**Why reads are different.** The Audit Trail covers changes, not reads (#13). An assistant that reads inside the asker's `ActorContext` creates no record under their name. It only helps them see what they may already see. That fits Muse's model: the agent never holds the real credential, and a program outside the model decides what it can reach [MU-sec].
+**Why reads are different.** The Audit Trail covers changes, not reads (#13). An assistant that reads inside the asker's `ActorContext` changes no regulated record; the request log (item 4) records who asked. It only helps them see what they may already see. That fits Muse's model: the agent never holds the real credential, and a program outside the model decides what it can reach [MU-sec].
 
 **The settlement proposed for #43.**
 1. The assistant has no credentials, no account of its own that can write, and no use of a person's session for any write. The **act** tier is empty by construction: no route it can call changes a record.
@@ -199,3 +199,32 @@ If #43 later wants the assistant to do anything that runs without a person prese
 - Whether background preparation (dots-style) is worth the cost at 500+ Samples a month (#42).
 - Whether Customer Users on the portal get **explain and find**, given the cross-Customer drift that OpenAI measured.
 - Voice for gloved Analysts, read-only, as a later option.
+
+## 6. Compliance review (2026-09-30)
+
+`part11-expert`, `iso17025-expert` and `usp-expert` reviewed this file. USP found no gaps. Part 11 and ISO/IEC 17025 found four between them. Each is closed by a requirement that [Decide the assistant layer](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/43) must adopt; they amend the settlement in §4. The same review of [Research: running an assistant within the demo's hosting, cost and security limits](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/42) (its §6) sets further requirements on the provider, change control and the call log.
+
+### 6.1 Gaps and the requirement that closes each
+
+| # | Gap | Requirement for #43 |
+|---|---|---|
+| A1 | A draft could carry a value that counts, skipping the data-transfer check (ISO 7.11.6, 7.5.1; A11 §6) | Drafts are prose only. The assistant never proposes a result, reading, Check value, verdict, limit, Specification field or Deviation impact-list entry. Those come only from typed entry, the validated import parser or a Calculation Version, and the server computes impact lists. At Import it may explain a parser mismatch but never supply the value. Numbers quoted in prose are filled from the database or checked on save (hosting §6, R6). |
+| A2 | The portal assistant would give Customers interpretations no authorised person released (ISO 7.8.7, 7.8.1) | If Customer Users get the assistant at all, it navigates and gives plain help on released content only (where a report is, what a status word means). No interpretation, pass/fail or Deviation effect; such questions go to an authorised person as a Customer message. Sending a staff-drafted Customer message checks the sender's Authorisation for opinions. |
+| A3 | Unattended output is not limited to what the viewer may see (§11.10(d), (g); A11d §11.10) | Each unattended output is stored with the Record Versions it read and served only to a viewer whose `ActorContext` can read every one; otherwise it is re-run under the viewer's context or hidden. The non-person identity is scoped to one Lab, never spans Customers, and its output never reaches the portal. |
+| A4 | The request log can't reproduce a draft: no prompt version or settings (§11.10(k)(2); A11 §10; NMPA RD Art. 22(4)) | Each log entry records the prompt or template version, retrieval parameters and the Release Log entry in force, alongside the model version. Every change to that configuration is a Release Log entry (hosting §6, R7). |
+
+### 6.2 Unclear points, settled
+
+- **No write path by mechanism.** The assistant path uses a database role with SELECT on business tables and INSERT only on the request log. `ActorContext` comes from the server session, never from the model or the request body.
+- **Provenance mark.** The server sets "drafted by the assistant" in the audit row, with the request reference. No one can remove it, and it appears in the inline trail and in PDF and JSON exports.
+- **Request log.** Append-only through database permissions and triggers, hash-chained per Lab, server UTC timestamps, searchable. Retention is at least that of the longest-kept record a draft from it was saved into, and never under 4 years, with a Record Type Register row. Treated as a separate trail under §11.9-style reasoning, it also meets a literal reading of draft Annex 11 §12.1 without reopening #13.
+- **Non-person identity.** Unique per function and per Lab, in the access-rights register with a named owner. It can't log in to the UI, hold a Signature Meaning, an Authorisation or admin rights, and it is deactivated, never deleted.
+- **Lock and Switch user.** A running request is cancelled on Lock, idle logout or Switch user, and its result is never shown to the next person.
+- **Failures.** A retrieval outside `ActorContext`, wrongly listed sources or a model-version mismatch opens a System Incident, which becomes a Data Integrity Deviation when QA judges a saved draft could have affected records.
+- **Documents.** "Find the SOP section" returns the Effective version, or the one pinned to the work in progress, with its ID and version. Superseded or Obsolete text comes back only when labelled.
+
+### 6.3 Procedural
+
+- Assistant use joins the LIMS-use training the training decision already requires. Every draft shows a short "draft, verify against sources" notice with the sources it read.
+- The software never ticks a Review Checklist item from assistant output, and "audit trail reviewed" is allowed only after the trail itself was shown.
+- USP points for #43: explanations show limits as stored and results as the server rounded them; an Investigator summary never proposes dropping a result on an outlier test alone or averaging a Retest with the original; Method status (compendial, alternative, in-house) comes from the Method record.
