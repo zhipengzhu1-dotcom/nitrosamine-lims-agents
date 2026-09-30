@@ -13,8 +13,7 @@ import { transition, type Actor, type Machine } from '@lims/domain/machines';
 import { refuse, type Refusal } from '@lims/domain/refusal';
 import type { NonEmpty } from '@lims/domain/nonempty';
 import type { Criterion, CriterionSource, ExportedRunCheck, SpecificationSection, VariabilityCriterion } from '@lims/domain/verdict';
-
-const Decimal = z.string().regex(/^-?\d+(\.\d+)?$/);
+import { DecimalSchema as Decimal } from '../wire.ts';
 
 export const CriterionSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('compendial'), citation: z.string().min(1) }),
@@ -33,7 +32,7 @@ export const MethodDataSchema = z.object({
   analytes: z.array(z.object({ key: z.string().min(1).max(32), substanceId: uuid, name: z.string().min(1) })).min(1),
   /** From the Method's calculation; the dilution factor is fixed by the procedure, never typed (decision 36). */
   dilutionFactor: Decimal,
-  /** The minimum number of Preparations, at least 2 for GMP. */
+  /** The number of Preparations, exact (usp 5): the Reportable Result is their mean, and preparation.create refuses beyond it. */
   preparations: z.string().regex(/^[1-9]\d*$/),
   variability: z.object({ statistic: z.enum(['relative-difference', 'rsd', 'absolute-difference']), limit: Decimal, source: CriterionSourceSchema }).nullable(),
   runChecks: z.array(z.object({ name: z.string().min(1).max(64), unit: z.string().min(1).max(16), comparedAs: z.literal('as-exported'), criterion: CriterionSchema })).min(1),

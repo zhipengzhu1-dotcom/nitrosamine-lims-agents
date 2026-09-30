@@ -38,6 +38,7 @@ export type GateReason =
   | { readonly code: 'not-verified'; readonly value: string }
   | { readonly code: 'change-pending'; readonly value: string }
   | { readonly code: 'unsigned-dependency'; readonly record: string; readonly needs: Meaning }
+  | { readonly code: 'no-run-linked'; readonly test: string }
   | { readonly code: 'run-check-missing'; readonly check: string }
   | {
       readonly code: 'criterion-misconfigured'; readonly check: string;
@@ -180,6 +181,7 @@ export function describeReason(r: GateReason): string {
     case 'not-verified': return `${capitalise(r.value)} is not Verified.`;
     case 'change-pending': return `${capitalise(r.value)} has a change waiting for approval.`;
     case 'unsigned-dependency': return `${r.record} has no standing ${r.needs} signature.`;
+    case 'no-run-linked': return `No Run is linked to ${r.test}; its results come from a Run.`;
     case 'run-check-missing': return `Run Check ${r.check} is not recorded.`;
     case 'criterion-misconfigured': return mismatchSentence(r);
     case 'variability-not-computed':

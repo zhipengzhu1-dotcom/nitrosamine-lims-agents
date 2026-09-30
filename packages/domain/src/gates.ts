@@ -139,8 +139,9 @@ export type TestPerformedFacts = {
   readonly blockingHolds: readonly string[];
 };
 
-/** Reviewed on a Test (with the Runs feeding it) or on a Run (with none). */
+/** Reviewed on a Test (with the Runs feeding it, at least one) or on a Run (with none). */
 export type ReviewedFacts = {
+  readonly kind: 'test' | 'run';
   readonly record: string;
   readonly signer: ReviewerFacts;
   readonly performedStands: boolean;
@@ -160,6 +161,7 @@ export type ReleasedFacts = {
     readonly reviewedStands: boolean;
     readonly performedBy: readonly PersonId[]; // assigned Analysts and Performed signers, of the Test and its Runs
     readonly reviewedBy: readonly PersonId[]; // Reviewed signers, of the Test and its Runs
+    readonly hasRun: boolean;
     readonly blockingHolds: readonly string[];
     readonly pendingChanges: readonly string[]; // on the Test's values and its Runs' values: the lock would leave them unsettleable
     readonly verdicts: readonly { readonly jurisdiction: Jurisdiction; readonly confirmation: 'confirmed' | 'disagreed' | 'none' }[];
@@ -306,7 +308,9 @@ export function runPerformedGate(f: RunPerformedFacts): GateResult {
   ]);
 }
 
-/** Decisions 12, 19, 20 and 29: the assignee signs after every feeding Run, and no Preparation or Reportable Result fails. */
+const noRun = (test: string): GateReason => ({ code: 'no-run-linked', test });
+
+/** Decisions 12, 19, 20 and 29: the assignee signs after every feeding Run (usp 2: at least one), and no Preparation or Reportable Result fails. */
 export function testPerformedGate(f: TestPerformedFacts): GateResult {
   return result([
     ...performerReasons(f.signer),
@@ -315,6 +319,7 @@ export function testPerformedGate(f: TestPerformedFacts): GateResult {
     ...each(f.missingValues, (field) => ({ code: 'value-missing', field })),
     ...each(f.unverifiedValues, (value) => ({ code: 'not-verified', value })),
     ...each(f.pendingChanges, (value) => ({ code: 'change-pending', value })),
+    ...(f.runs.length === 0 ? [noRun(f.test)] : []),
     ...f.runs.flatMap((r): Reasons => (r.performedStands ? [] : [{ code: 'unsigned-dependency', record: r.run, needs: 'Performed' }])),
     ...each(f.blockingHolds, (hold) => ({ code: 'open-hold', hold })),
     ...verdictReasons(f.judgement),
@@ -329,6 +334,7 @@ export function reviewedGate(f: ReviewedFacts): GateResult {
     ...enablement(f.signer.signing),
     ...(f.performedSigners.includes(f.signer.person) ? [sod('reviewer-signed-performed', f.record)] : []),
     ...(f.performedStands ? [] : [{ code: 'unsigned-dependency' as const, record: f.record, needs: 'Performed' as const }]),
+    ...(f.kind === 'test' && f.feedingRuns.length === 0 ? [noRun(f.record)] : []),
     ...f.feedingRuns.flatMap((r): Reasons => (r.reviewedStands ? [] : [{ code: 'unsigned-dependency', record: r.run, needs: 'Reviewed' }])),
     ...each(f.pendingChanges, (value) => ({ code: 'change-pending', value })),
     ...each(f.blockingHolds, (hold) => ({ code: 'open-hold', hold })),
@@ -350,6 +356,7 @@ export function releasedGate(f: ReleasedFacts): GateResult {
     ...f.tests.flatMap((t): Reasons => [
       ...(t.performedStands ? [] : [{ code: 'unsigned-dependency' as const, record: t.test, needs: 'Performed' as const }]),
       ...(t.reviewedStands ? [] : [{ code: 'unsigned-dependency' as const, record: t.test, needs: 'Reviewed' as const }]),
+      ...(t.hasRun ? [] : [noRun(t.test)]),
       ...(t.performedBy.includes(me) ? [sod('releaser-performed', t.test)] : []),
       ...(t.reviewedBy.includes(me) ? [sod('releaser-reviewed', t.test)] : []),
       ...each(t.blockingHolds, (hold) => ({ code: 'open-hold', hold })),

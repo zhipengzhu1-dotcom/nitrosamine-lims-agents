@@ -29,6 +29,21 @@ describe('calculatePreparation', () => {
       dilutionFactor: written('1'), concentrations: new Map([[NDMA, written('1')]]),
     })).toEqual({ kind: 'weight-not-positive', preparation: prep });
   });
+
+  it.each(['0', '0.00', '-10'])('refuses a dilution volume of %s (usp 3): a volume is positive', (v) => {
+    expect(calculatePreparation({
+      preparation: prep, weightMg: written('100.12'), dilutionVolumeMl: written(v),
+      dilutionFactor: written('1'), concentrations: new Map([[NDMA, written('1')]]),
+    })).toEqual({ kind: 'dilution-not-positive', preparation: prep });
+  });
+
+  it('refuses a negative concentration and names the Analyte; zero is a real reading', () => {
+    const inputs = { preparation: prep, weightMg: written('100.12'), dilutionVolumeMl: written('10'), dilutionFactor: written('1') };
+    expect(calculatePreparation({ ...inputs, concentrations: new Map([[NDMA, written('0.5')], [NDEA, written('-0.001')]]) }))
+      .toEqual({ kind: 'concentration-negative', preparation: prep, analyte: NDEA });
+    const zero = calculatePreparation({ ...inputs, concentrations: new Map([[NDMA, written('0')]]) });
+    expect(zero.kind).toBe('calculated');
+  });
 });
 
 describe('reportableResult', () => {

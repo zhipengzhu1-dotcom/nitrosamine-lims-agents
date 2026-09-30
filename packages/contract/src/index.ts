@@ -226,7 +226,7 @@ export type JudgementDto = {
 
 export type TestDetailDto = {
   readonly test: QueueTestDto & { readonly acceptanceReason: string | null; readonly methodVersionId: string | null; readonly specificationVersionId: string | null };
-  readonly method: { readonly number: string; readonly title: string; readonly version: number; readonly analytes: readonly string[]; readonly minimumPreparations: string } | null;
+  readonly method: { readonly number: string; readonly title: string; readonly version: number; readonly analytes: readonly string[]; readonly preparationCount: string } | null;
   readonly specification: { readonly purpose: string; readonly versionNo: number; readonly hash: string; readonly sections: readonly { readonly jurisdiction: string; readonly ruleSetVersion: string; readonly lines: readonly { readonly analyte: string; readonly limit: string; readonly unit: string }[] }[] } | null;
   readonly preparations: readonly { readonly id: string; readonly prepNo: number; readonly subject: string }[];
   readonly values: readonly ValueDto[];

@@ -286,6 +286,9 @@ export const createPreparation = defineCommand({
     const t = await loadTest(tx.db, testId);
     if (t.assignedAnalyst !== person(tx)) return { kind: 'not-permitted', message: `${t.label} is assigned to another Analyst.` };
     if (t.state !== 'InProgress') return { kind: 'transition', message: `${t.label} is ${TestMachine.states[t.state]}; Preparations are made on a Test In Progress.` };
+    if (!t.method) return { kind: 'transition', message: `${t.label} has no pinned Method version.` };
+    const count = t.method.data.preparations;
+    if (t.preparations.length >= Number(count)) return { kind: 'transition', message: `${t.method.number} v${t.method.version} asks for exactly ${count} Preparations, and ${t.label} has them.` };
     const prepNo = t.preparations.length + 1;
     const id = randomUUID();
     await tx.db.insertInto('preparation').values({ lab_id: t.labId, id, test_id: testId, prep_no: prepNo }).execute();

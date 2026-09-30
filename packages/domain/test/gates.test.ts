@@ -280,6 +280,7 @@ describe('testPerformedGate', () => {
     ['everything in place', base, []],
     ['not the assigned Analyst', { ...base, isAssignee: false }, ['not-assignee']],
     ['a feeding Run not Performed', { ...base, runs: [{ run: 'RUN-2026-0042', performedStands: false }] }, ['unsigned-dependency']],
+    ['no Run linked at all (usp 2, iso 1)', { ...base, runs: [] }, ['no-run-linked']],
     ['a Hold blocks Performed', { ...base, blockingHolds: ['HOLD-7'] }, ['open-hold']],
     ['a value another Analyst typed (split signing is not built)', { ...base, valuesByOthers: ['Preparation 1 weight'] }, ['not-built']],
     ['a Preparation fails although the mean passes (OOS)', { ...base, judgement: judge('0.030', '0.036') }, ['not-built']],
@@ -328,6 +329,7 @@ describe('reviewedGate', () => {
     authorisation: current('Reviewed'),
   };
   const base: ReviewedFacts = {
+    kind: 'test',
     record: 'RD-S-2026-000123/T1',
     signer: reviewer,
     performedStands: true,
@@ -343,6 +345,8 @@ describe('reviewedGate', () => {
     ['the Reviewer signed Performed on it or a Run feeding it', { ...base, performedSigners: [ana, rex] }, ['separation-of-duties']],
     ['no Performed signature standing on the version shown', { ...base, performedStands: false }, ['unsigned-dependency']],
     ['a feeding Run not Reviewed', { ...base, feedingRuns: [{ run: 'RUN-2026-0042', reviewedStands: false }] }, ['unsigned-dependency']],
+    ['a Test with no Run linked', { ...base, feedingRuns: [] }, ['no-run-linked']],
+    ['a Run reviews itself, so it needs no feeding Run', { ...base, kind: 'run', record: 'RUN-2026-0042', feedingRuns: [] }, []],
     ['"audit trail reviewed" not ticked', { ...base, checklist: { ...base.checklist, ticked: ['calculations checked'] } }, ['checklist-incomplete']],
     ['a change pending', { ...base, pendingChanges: ['Preparation 1 weight'] }, ['change-pending']],
     ['a Hold blocks Reviewed', { ...base, blockingHolds: ['HOLD-7'] }, ['open-hold']],
@@ -373,6 +377,7 @@ describe('releasedGate', () => {
     test: number,
     performedStands: true, reviewedStands: true,
     performedBy: [ana], reviewedBy: [rex],
+    hasRun: true,
     blockingHolds: [] as string[],
     pendingChanges: [] as string[],
     verdicts: [{ jurisdiction: 'FDA' as const, confirmation: 'confirmed' as const }],
@@ -397,6 +402,7 @@ describe('releasedGate', () => {
   it.each([
     ['a Test whose Performed signature no longer stands', withTests({ performedStands: false }), ['unsigned-dependency']],
     ['a Test whose Reviewed signature no longer stands', withTests({ reviewedStands: false }), ['unsigned-dependency']],
+    ['a Test with no Run linked', withTests({ hasRun: false }), ['no-run-linked']],
     ['an open Hold on a Test', withTests({ blockingHolds: ['HOLD-7'] }), ['open-hold']],
     ['a change pending on a value behind a Test, which the release lock would leave unsettleable', withTests({}, { pendingChanges: ['prep.weight (P1)'] }), ['change-pending']],
     ['a verdict QA has not confirmed', withTests({ verdicts: [{ jurisdiction: 'FDA', confirmation: 'none' }] }), ['verdict-not-confirmed']],

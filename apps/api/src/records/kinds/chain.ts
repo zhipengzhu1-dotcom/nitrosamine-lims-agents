@@ -87,6 +87,7 @@ async function testReviewedCheck(ctx: RuleContext, signer: Signer, t: TestFacts,
   if ('kind' in review) return review;
   const own = await recordStanding(ctx.q, t.id);
   return reviewedGate({
+    kind: 'test',
     record: t.label,
     signer: await reviewerFacts(ctx.q, signer.person, t.method, ctx.lab, ctx.dbNow),
     performedStands: signedAndStanding(own, 'Performed'),
@@ -171,6 +172,7 @@ async function runReviewedCheck(ctx: RuleContext, signer: Signer, r: RunFacts, a
   const review = await attestationOf(ctx, signer, r.id, attestation, RUN_CHECKLIST);
   if ('kind' in review) return review;
   return reviewedGate({
+    kind: 'run',
     record: r.label,
     signer: await reviewerFacts(ctx.q, signer.person, r.method, ctx.lab, ctx.dbNow),
     performedStands: signedAndStanding(r.standing, 'Performed'),
@@ -300,6 +302,7 @@ export const testReportKind: KindDef = {
           reviewedStands: signedAndStanding(t.standing, 'Reviewed'),
           performedBy: [...(t.assignedAnalyst ? [t.assignedAnalyst] : []), ...signersOf(t.standing, 'Performed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Performed'))] as PersonId[],
           reviewedBy: [...signersOf(t.standing, 'Reviewed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Reviewed'))],
+          hasRun: t.runs.length > 0,
           blockingHolds: t.holds,
           pendingChanges: [...pendingOf(TEST_FIELD_SPECS, t.values), ...(await Promise.all(t.runs.map((x) => loadRun(ctx.q, x.id)))).flatMap((x) => pendingOf(RUN_FIELD_SPECS, x.values).map((v) => `${x.label} ${v}`))],
           verdicts: (t.specification?.data.sections ?? []).map((s) => ({ jurisdiction: s.jurisdiction, confirmation: review.confirmations.get(verdictSubject(t.label, s.jurisdiction)) ?? 'none' as const })),

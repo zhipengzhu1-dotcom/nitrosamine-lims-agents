@@ -276,8 +276,8 @@ export async function loadTest(q: Q, id: string): Promise<TestFacts> {
   }
 
   const missing: string[] = [];
-  const minimum = method ? Number(method.data.preparations) : 0;
-  if (preparations.length < minimum) missing.push(`Preparations (${preparations.length} of ${minimum})`);
+  // usp 5: the Method's count is exact, so the Reportable Result is always the mean of that many.
+  if (method && preparations.length !== Number(method.data.preparations)) missing.push(`Preparations (${preparations.length} of ${method.data.preparations})`);
   const inputs: PreparationResults[] = [];
   for (const p of preparations) {
     const label = preparationSubject(p.prepNo);
@@ -289,8 +289,12 @@ export async function loadTest(q: Q, id: string): Promise<TestFacts> {
       preparation: p.id, weightMg: asWritten(p.weight), dilutionVolumeMl: asWritten(p.dilution), dilutionFactor: written(method.data.dilutionFactor),
       concentrations: new Map([...p.results].map(([a, v]) => [a, asWritten(v!)])),
     });
-    if (calculated.kind === 'weight-not-positive') missing.push(`${label} weight (not positive)`);
-    else inputs.push(calculated.results);
+    switch (calculated.kind) {
+      case 'calculated': inputs.push(calculated.results); break;
+      case 'weight-not-positive': missing.push(`${label} weight (not positive)`); break;
+      case 'dilution-not-positive': missing.push(`${label} dilution volume (not positive)`); break;
+      case 'concentration-negative': missing.push(`${label} ${calculated.analyte} result (negative)`); break;
+    }
   }
   const prepInputs = nonEmpty(inputs);
   const judgement = method && specification && missing.length === 0 && prepInputs

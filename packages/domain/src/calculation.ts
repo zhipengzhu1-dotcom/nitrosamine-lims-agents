@@ -22,16 +22,23 @@ export type PreparationResults = {
   readonly results: ReadonlyMap<AnalyteKey, Rational>;
 };
 
+/** A weight or a volume is positive; a concentration is a reading, so zero is real and only a negative is refused (usp 3). */
 export type Calculated =
   | { readonly kind: 'calculated'; readonly results: PreparationResults }
-  | { readonly kind: 'weight-not-positive'; readonly preparation: PreparationId };
+  | { readonly kind: 'weight-not-positive'; readonly preparation: PreparationId }
+  | { readonly kind: 'dilution-not-positive'; readonly preparation: PreparationId }
+  | { readonly kind: 'concentration-negative'; readonly preparation: PreparationId; readonly analyte: AnalyteKey };
 
 const ZERO: Rational = { num: 0n, den: 1n };
 
 export function calculatePreparation(p: PreparationInputs): Calculated {
   const weight = toRational(p.weightMg);
   if (compare(weight, ZERO) <= 0) return { kind: 'weight-not-positive', preparation: p.preparation };
-  const factor = mul(toRational(p.dilutionVolumeMl), toRational(p.dilutionFactor));
+  const volume = toRational(p.dilutionVolumeMl);
+  if (compare(volume, ZERO) <= 0) return { kind: 'dilution-not-positive', preparation: p.preparation };
+  const negative = [...p.concentrations].find(([, c]) => compare(toRational(c), ZERO) < 0);
+  if (negative) return { kind: 'concentration-negative', preparation: p.preparation, analyte: negative[0] };
+  const factor = mul(volume, toRational(p.dilutionFactor));
   const results = new Map<AnalyteKey, Rational>();
   for (const [analyte, c] of p.concentrations) results.set(analyte, div(mul(toRational(c), factor), weight));
   return { kind: 'calculated', results: { preparation: p.preparation, results } };

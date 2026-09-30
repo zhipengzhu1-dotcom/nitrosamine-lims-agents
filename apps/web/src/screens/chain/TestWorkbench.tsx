@@ -186,7 +186,7 @@ export function TestWorkbench({ testId }: { testId: string }) {
             {(editable || dd.preparations.length > 0) && (
               <section className="panel" aria-label="Preparations">
                 <h2 className="h-sec">Preparations</h2>
-                {dd.method && <p className="sub">{dd.method.number} v{dd.method.version} asks for {dd.method.minimumPreparations} Preparations. The dilution factor comes from the Method.</p>}
+                {dd.method && <p className="sub">{dd.method.number} v{dd.method.version} asks for {dd.method.preparationCount} Preparations. The dilution factor comes from the Method.</p>}
                 <div className="preps">
                   {dd.preparations.map((p) => {
                     const v = (field: string, subject: string) => savedOf(dd.values.find((x) => x.field === field && x.subject === subject));

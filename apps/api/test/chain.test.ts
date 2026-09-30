@@ -8,8 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { COMPANY_LEDGER, ledgerOf, verifyChain } from '@lims/db';
 import { CHAIN } from '../src/chain/index.ts';
 import { readStanding } from '../src/records/standing.ts';
-import { assign, idsOf, PASSING, review, runPerformedAndReviewed, testPerformedAndReviewed, typeRun, verifyAll } from '../src/seed/chain.ts';
-import { RELEASE_CHECKLIST } from '../src/chain/model.ts';
+import { acceptAndReceive, assign, idsOf, PASSING, review, runPerformedAndReviewed, submitOne, testPerformedAndReviewed, typeRun, verifyAll } from '../src/seed/chain.ts';
+import { preparationSubject, RELEASE_CHECKLIST, resultSubject } from '../src/chain/model.ts';
 import { seedCounts, seedDemo, SEED_CAP, type SeedResult } from '../src/seed/index.ts';
 import { signAs, testApi, type TestApi } from '../src/testing/harness.ts';
 
@@ -273,6 +273,36 @@ describe('review fix 2: a release waits for every pending change behind it', () 
     const released = await signAs(seed.tabs.cid, seed.cast.cid, 'Released', 'QA', [drafted.reportId], reviewId);
     expect(released.status).toBe(200);
     expect((await seed.tabs.ann.view('test.detail', { testId })).body.test.state).toBe('Reported');
+  });
+});
+
+describe('review fixes 1, 8 and 26: results integrity', () => {
+  it('refuses Performed on a Test with no Run, a Preparation beyond the Method\'s count, and a padded decimal', async () => {
+    const submitted = await submitOne(seed.tabs.acme, seed.cast.lab.id, seed.reference.products.fic02, 'FIC-26-0777', [seed.reference.methods.lcms.id]);
+    await acceptAndReceive(seed.tabs, submitted);
+    const testId = submitted.samples[0]!.tests[0]!;
+    await assign(seed.tabs, testId, seed.cast.ann);
+    await seed.tabs.ann.must('test.start', { testId });
+    const values: string[] = [];
+    for (const p of PASSING.preparations) {
+      const prep = await seed.tabs.ann.must('preparation.create', { testId });
+      const subject = preparationSubject(prep.prepNo);
+      const entries = [['prep.weight', subject, p.weightMg, 'mg'], ['prep.dilution', subject, p.dilutionMl, 'mL'], ['prep.result', resultSubject(prep.prepNo, 'NDMA'), p.results.NDMA, 'pg/µL']] as const;
+      for (const [field, s, value, unit] of entries) {
+        values.push((await seed.tabs.ann.must('value.record', { role: 'Analyst', parent: testId, field, subject: s, value: { type: 'decimal', value, unit } })).value);
+      }
+    }
+    const third = await seed.tabs.ann.command('preparation.create', { testId });
+    expect(third.status).toBe(409);
+    expect(refusalOf(third).message).toMatch(/asks for exactly 2 Preparations/);
+    expect((await seed.tabs.ann.view('test.detail', { testId })).body.preparations).toHaveLength(2);
+    const padded = await seed.tabs.ann.command('value.record', { role: 'Analyst', parent: testId, field: 'prep.weight', subject: 'P1', value: { type: 'decimal', value: '010', unit: 'mg' } });
+    expect(padded.status).toBe(400);
+    await verifyAll(seed.tabs, seed.cast, values);
+    const refused = await signAs(seed.tabs.ann, seed.cast.ann, 'Performed', 'Analyst', [testId]);
+    expect(refused.status).toBe(409);
+    expect(refusalOf(refused).reasons!.map((r) => r.code)).toEqual(['no-run-linked']);
+    expect(refusalOf(refused).message).toMatch(/^No Run is linked to Test RD-S-\d{4}-\d{6}\/T1; its results come from a Run\.$/);
   });
 });
 
