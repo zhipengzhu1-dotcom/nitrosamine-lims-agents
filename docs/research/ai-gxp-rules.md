@@ -32,7 +32,7 @@ No text in force names an AI assistant. Every source that does speak to AI says 
 - Give an answer that someone treats as the value of record. The record is the cited Record Version, not the assistant's restatement of it.
 
 **Controls:**
-- **Runs as the person.** Every query runs with the person's own role, Lab and Customer scope, enforced by the server, not by the prompt.
+- **Runs as the person.** Every query runs with the person's own role, Lab and Customer scope, enforced by the server, not by the prompt. Background work is the one exception (G7).
 - **No write path.** The assistant's tools are read-only API calls. This is a technical control, not an instruction to the model.
 - **Cites its sources.** Each answer links the Record Versions and Document versions it used, so the person can check the original.
 - **Labelled.** Answers are marked "Assistant answer, not a record".
@@ -45,10 +45,9 @@ No text in force names an AI assistant. Every source that does speak to AI says 
 ### Tier 2: Draft (a person reviews, adopts and signs)
 
 **May draft text:**
-- The description of a Deviation or Complaint, an investigation narrative, and proposed CAPA Actions.
+- The description of a Deviation or Complaint, an investigation narrative, and proposed CAPA Actions. A narrative may not state a cause or conclusion that a result is invalid or an Injection excluded; the person writes that reason in their own field. A drafted Complaint description sits beside the Complaint as received, word for word, and never replaces it.
 - Document text in the vault editor: an SOP revision or a Method section. It may not add or change any number, limit, acceptance criterion or unit (G1).
 - Test Report comments and Customer messages. One that carries an opinion or interpretation is adopted or sent only by a person Authorised for opinions and interpretations (G4).
-- A Change Request description.
 - A Review Checklist pre-read: "these three Injections were excluded; the reasons are …", each point citing its record.
 
 **May not draft:**
@@ -86,7 +85,7 @@ No text in force names an AI assistant. Every source that does speak to AI says 
 - **No agent accounts.** Unique personal accounts [A11d §11.1] and authority checks for "only authorized individuals" [P11 §11.10(g)] leave no room for an LLM account that decides. Rule-based automation by the validated system is different: the Calculation Version's verdicts are deterministic and QA-approved.
 - **Decisions stay with people.** Approving and rejecting belongs to the quality unit [211.22(a), (c)]. Reviewing and authorising results belongs to authorised personnel [17025 §6.2.6(c)]. An LLM taking any of these decisions is a critical GMP application [A22 §1].
 
-**Control:** the assistant holds no credentials and has no API that changes state or signs. Its path uses a database role with SELECT on business tables and INSERT only on the Assistant Call log [ai-agents §6.2]; that is the §11.300(d) safeguard. Prove it in validation with a test showing every state-changing endpoint rejects the assistant's calls.
+**Control:** the assistant holds no credentials and has no API that changes state or signs. Its path uses a database role with SELECT on business tables and INSERT only on the Assistant Call log [ai-agents §6.2]; that is the "prevent" half of the §11.300(d) safeguard. For the "detect and report" half, a rejected state-changing call from the assistant opens a System Incident and alerts the Admin [ai-agents §6.2]. Prove it in validation with a test showing every state-changing endpoint rejects the assistant's calls.
 
 ## Attribution, audit trail and records
 
@@ -96,7 +95,7 @@ No text in force names an AI assistant. Every source that does speak to AI says 
   - Draft Chapter 4: "At least, all data on which quality decisions are based should be defined as raw data" [C4d §4.27(iv)].
   - Raw data is "the first capture of stored information" [C4d glossary].
   - So a Tier 2 draft is not raw data about the sample. It is part of how a record came to be. Once adopted, the saved text is the record.
-  - A Tier 1 answer is not a record, provided nobody bases a quality decision on it instead of on the cited record.
+  - A Tier 1 answer is not relied on as data: nobody bases a quality decision on it instead of on the cited record. Its Assistant Call is still a record kept under Part 11 controls.
   - The Record Type Register should list the **Assistant Call** log and the **Assistant Draft** (G10). A Tier 1 answer is not a GMP record, but its Assistant Call is retained. QA approves those entries. *This is interpretation: no source rules on it.*
 - **Keeping prompts and outputs.**
   - No source sets a retention rule for prompts.
@@ -131,7 +130,7 @@ No text in force names an AI assistant. Every source that does speak to AI says 
   - "The accountability for the integrity of documents, records or (raw) data produced or processed with artificial intelligence or any other automatic means … rests with the regulated user" [C4d §4.24].
   - AI support "should be included in a pharmaceutical quality system regardless of the service located on premise or as a hosted service" [C4d §4.25].
   - Decision-making supported by AI falls under Annex 22 [C4d §4.23].
-- **EU AI Act, Article 4 (AI literacy)** [AIA]. Providers and deployers of AI systems "shall take measures to support the development of AI literacy of their staff and other persons dealing with the operation and use of AI systems on their behalf". It applies from 2 February 2025 [AIA; Art. 113(a)]. The page read gives this wording, which is softer than the 2024 text ("ensure, to their best extent, a sufficient level"), so it may have been amended; the current wording is *not verified*. Either way, the Lab is a deployer and meets it through the assistant-use training in Tier 2 and hosting §6.3.
+- **EU AI Act, Article 4 (AI literacy)** [AIA]. As published in 2024, providers and deployers of AI systems "shall take measures to ensure, to their best extent, a sufficient level of AI literacy of their staff and other persons dealing with the operation and use of AI systems on their behalf". It applies from 2 February 2025 [AIA; Art. 113(a)]. This file keeps the 2024 wording as controlling. The mirror read gives a softer wording ("take measures to support the development of AI literacy"), which may reflect an amendment; that is *not verified*, and the 2024 wording was not re-read on EUR-Lex. Either way, the Lab is a deployer and meets it through the assistant-use training in Tier 2 and hosting §6.3.
 - EMA's reflection paper (final, 9 September 2024) warns that "generative language models are prone to include plausible but erroneous or incomplete output" [EMA-RP §2.3.5]. For manufacturing it points to ICH Q8–Q10 "awaiting revision of current regulatory requirements and GMP standards" [EMA-RP §2.3.6].
 
 ### FDA
@@ -160,7 +159,7 @@ No text in force names an AI assistant. Every source that does speak to AI says 
 | Who is the author of an adopted draft? | The person who adopts it. The Audit Trail records their entry, with the assistant as origin metadata. | [P11 §11.10(e)]; [DI Q1]; [A11d §12.2] |
 | Can the assistant use the person's session or credentials to act? | No. Signatures are used "only by their genuine owners". An agent in the person's session could use the signature with no second person colluding, which defeats §11.200(a)(3). Transaction safeguards must prevent and report unauthorised use; here that is the SELECT-only database role [ai-agents §6.2]. | [P11 §11.200(a)(2)–(3), §11.300(d)]; [A11d §13.3] |
 | Can it have its own account to act? | Not to sign or decide. Access and authority are for "authorized individuals". An LLM deciding is a critical application. | [P11 §11.10(d), (g)]; [A11d §11.1]; [A22 §1] |
-| Is its output an electronic record? | Anything it stores is an "electronic record" in the broad sense of §11.3(b)(6). Part 11 controls apply once a predicate rule requires the record or the record is relied on. An adopted draft is; a Tier 1 answer is not. | [P11 §11.3(b)(6)]; baseline part11.md scope notes |
+| Is its output an electronic record? | Anything it stores is an "electronic record" in the broad sense of §11.3(b)(6). Part 11 controls apply once a predicate rule requires the record or the record is relied on. An adopted draft is. A Tier 1 answer is not relied on as data, but its Assistant Call is a record kept under Part 11 controls. | [P11 §11.3(b)(6)]; baseline part11.md scope notes |
 | Retention | Every Assistant Call at least 4 years; one that fed a record, the longer of that and the record's retention. | [P11 §11.10(e)]; G6 |
 | Policy | Written policy that holds people "accountable and responsible for actions initiated under their electronic signatures" must cover adopting drafts. | [P11 §11.10(j)] |
 
@@ -201,10 +200,10 @@ No text in force names an AI assistant. Every source that does speak to AI says 
 Adopt the three tiers as proposed, with these rules:
 
 1. **The assistant never produces a value of record, a verdict, a calculation, a limit or other structured Method or Specification requirement, an impact-list entry, a Reason for Change, a reason to exclude or invalidate, or a status**, not even as a draft. Values come only from Import, typed entry or the Calculation Version.
-2. **The assistant runs as the person, reads only what they can read, and holds no credentials or state-changing API.** Validation proves this.
+2. **The assistant discloses nothing the person cannot read, and holds no credentials or state-changing API.** It runs as the person; background work runs only under a read-only non-person identity scoped to one Lab (G7; agents A3). Validation proves this.
 3. **Adopted drafts carry origin metadata naming their Assistant Call, and every Assistant Call is kept at least 4 years**, or as long as the record it fed if longer.
 4. **Adopting a draft needs the Authorisation for that activity, and the normal second-person review stays.**
-5. **The model is configuration-controlled software.** A model change is a change: revalidate, and record the model as software identity.
+5. **The whole assistant configuration is one versioned item and is the software identity**, changed only by a Release Log entry signed *Approved*. A change to the model or any other part of it is a change: revalidate (G5; hosting R7).
 6. **Revisit when Annex 22 is final** (target Q4 2026). If it opens critical uses to LLMs with guardrails, these rules still stand. They are stricter.
 7. **Adopt the requirements in §"Compliance review"**, and those in §6 of the hosting and always-on agents research, which win where they differ.
 
@@ -223,8 +222,8 @@ Adopt the three tiers as proposed, with these rules:
 
 | # | Gap | Requirement for #43 |
 |---|---|---|
-| G1 | A Document draft could change a number, limit or unit, and so change a Method or Specification without anyone noticing (211.22(c); ISO 7.11.6) | In Document drafts the assistant may not add or change any number, limit, acceptance criterion or unit. The server compares the numbers in the draft with the Effective version it started from and blocks the save on any difference the person has not typed themselves. |
-| G2 | Values quoted in drafts are unchecked transcriptions (ISO 7.11.6; A11 §6) | Adopt hosting R6 and agents A1: values are filled by the server or matched on save against the Record Versions the Assistant Call read. Citations shown beside the text are not enough. Limits and Deviation impact-list entries are on "May not draft". |
+| G1 | A Document draft could change a number, limit or unit, and so change a Method or Specification without anyone noticing (211.22(c); ISO 7.11.6) | In Document drafts the assistant may not add or change any number, limit, acceptance criterion or unit. The server compares the numbers in the draft, as written strings, with the Effective version it started from, so decimal places, trailing zeros and NMT or NLT all count. It refuses the save on any difference the person has not typed themselves. In a new Method or Specification with no Effective version, the person types every number. |
+| G2 | Values quoted in drafts are unchecked transcriptions (ISO 7.11.6; A11 §6) | Adopt hosting R6 and agents A1: values are filled by the server or matched on save against the Record Versions the Assistant Call read. Citations shown beside the text are not enough. The save is refused until each value matches or the person types it; this tightens R6's highlight, it does not conflict with it. Limits and Deviation impact-list entries are on "May not draft". |
 | G3 | The model could state a verdict the LIMS did not compute | Adopt hosting R5: no verdicts from the model. Conformity terms are stripped or flagged on the server, and any verdict shown is rendered from the stored verdict and its Calculation Version. |
 | G4 | Open question 4 would let the portal assistant interpret results for Customers (ISO 7.8.7, 6.2.6 b) | Adopt hosting R4 and agents A2. The portal assistant only finds and shows released content verbatim. Interpretation questions go to an authorised person as a Customer message. Each exchange is kept as a Customer communication record (ISO 7.1.8). A Test Report comment or Customer message that carries an opinion or interpretation is adopted or sent only by a person Authorised for opinions and interpretations, is labelled as one, and cites its basis. |
 | G5 | Change control covers the model only (§11.10(k)(2); A11d §3.1(ii), §6.6; ISO 7.11.2) | Adopt hosting R7 and agents A4: one versioned assistant configuration (model, system prompt, tool definitions, role-to-tool map and the rest) that changes only through a Release Log entry signed *Approved*, with eval results attached. Every Assistant Call records the configuration version in force. |
@@ -238,12 +237,12 @@ Adopt the three tiers as proposed, with these rules:
 
 | Target | QA step that clears it |
 |---|---|
-| Deviation description, investigation narrative, proposed CAPA Actions | QA closes the Deviation (In QA Review to Closed). |
+| Deviation description, investigation narrative, proposed CAPA Actions | QA closes the Deviation (In QA Review to Closed). A CAPA Action raised or changed after closure is cleared by QA's sign-off of the action and its effectiveness check. |
 | SOP revision or Method section | Reviewed by an authorised non-author, then Approved by QA [211.22(c)]. |
 | Test Report comment | QA release of the Test Report. |
-| Complaint description | None by default. The outcome is reviewed or approved by someone not involved [17025 §7.9]; a Complaint linked to a Deviation is cleared when QA closes that Deviation. |
+| Complaint description | None by default. The outcome is reviewed or approved by someone not involved [17025 §7.9.6, per PJLA LF-56]; a Complaint linked to a Deviation is cleared when QA closes that Deviation. The Complaint as received stays word for word beside the drafted description. |
 | Customer message | None. It passes on released content, and an opinion in it needs the sender's opinions Authorisation (G4). It is not a procedure, specification or batch decision under 211.22. |
-| Change Request description | None. It is the Customer's own request, and the Lab reviews it when each affected Test goes back to Acceptance. |
+| Change Request description | Removed from Tier 2. A Change Request is the Customer's own request, and the portal assistant may only find and show released content (G4). |
 | Review Checklist pre-read | None. It is never saved into a record. The Reviewer's own second-person review [211.194(a)(8)] is the check, and the Review record links the Assistant Call (G8). |
 
 ### Record Type Register rows (G10)
@@ -252,7 +251,7 @@ Proposed for QA approval. *Interpretation: no source rules on these values.*
 
 | Record type | Part 11 record | Legally binding signature | Raw data | Primary form | Retention | Data-integrity owner |
 |---|---|---|---|---|---|---|
-| Assistant Call | Yes | No | No: it is not the first capture of anything about a Sample [C4d glossary] | Electronic | At least 4 years; the longer of that and the fed record's, where a draft fed a record | The Lab Manager, named by QA in the row |
+| Assistant Call | Yes, including Tier 1 calls. A portal call is also a Customer communication record, with reads restricted to staff who may see that Customer | No | No: it is not the first capture of anything about a Sample [C4d glossary] | Electronic | At least 4 years; the longer of that and the fed record's, where a draft fed a record | The Lab Manager, named by QA in the row |
 | Assistant Draft (held in its Assistant Call, as first generated) | Yes | No | No | Electronic | As its Assistant Call | As its Assistant Call |
 
 ### Glossary
@@ -277,7 +276,7 @@ The draft ID in this file, the "call log" of #42 and the "request log" of #40 ar
 | EMA-AG | EMA, *Draft agenda Annex 22 Expert Workshop – Day 1* | 19 June 2026 | [PDF](https://www.ema.europa.eu/en/documents/agenda/annex-22-expert-workshop-draft-agenda-day-1-session-interested-parties_en.pdf) |
 | EMA-RP | EMA, *Reflection paper on the use of AI in the medicinal product lifecycle*, EMA/CHMP/CVMP/83833/2023 | Final, 9 September 2024 | [PDF](https://www.ema.europa.eu/en/documents/scientific-guideline/reflection-paper-use-artificial-intelligence-ai-medicinal-product-lifecycle_en.pdf) |
 | FDA-AI | FDA, *Considerations for the Use of Artificial Intelligence to Support Regulatory Decision-Making for Drug and Biological Products* | Draft, January 2025 | [PDF](https://www.fda.gov/media/184830/download) |
-| FDA-FR | Federal Register notice of availability for FDA-AI | 7 January 2025 | 90 FR 1157, FR Doc. 2024-31542 | [Page](https://www.federalregister.gov/documents/2025/01/07/2024-31542) |
+| FDA-FR | Federal Register notice of availability for FDA-AI | 7 January 2025; 90 FR 1157, FR Doc. 2024-31542 | [Page](https://www.federalregister.gov/documents/2025/01/07/2024-31542) |
 | FDA-PAGE | FDA CDER, *Artificial Intelligence for Drug Development* | Content current as of 1 May 2026 | [Page](https://www.fda.gov/about-fda/center-drug-evaluation-and-research-cder/artificial-intelligence-drug-development) |
 | GAIP | FDA and EMA, *Guiding Principles of Good AI Practice in Drug Development* | January 2026 | [PDF](https://www.fda.gov/media/189581/download) |
 | WL-PUR | FDA CDER, Warning Letter to Purolea Cosmetics Lab, MARCS-CMS 722591 | 2 April 2026 | [Page](https://www.fda.gov/inspections-compliance-enforcement-and-criminal-investigations/warning-letters/purolea-cosmetics-lab-722591-04022026) |
