@@ -275,8 +275,20 @@ A record that the LIMS itself failed or misbehaved (an alarm, a missed backup or
 _Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failures)
 
 **Training Record**:
-Evidence that a person is qualified on a specific method or SOP version, required before they can be assigned tests under it.
+Evidence that a person is trained on one Document version, at the Training Level set for their role: Read and Understood is the person's own Acknowledged signature; Demonstrated adds a passing Training Run. It belongs to the person, never expires by time, and stops being current when a newer version that requires training for their role takes effect.
 _Avoid_: Qualification, certificate
+
+**Training Level**:
+What QA sets for each Distribution role on an approved Document version: None (existing Training Records carry forward), Read and Understood, or Demonstrated.
+_Avoid_: Training required (alone), training type
+
+**Training Run**:
+Work a trainee does on a known sample, or a Check done as training, judged against the version's demonstration acceptance criteria, signed Performed by the trainee and Verified by an authorised trainer, to earn a Demonstrated Training Record. It is recorded like any other work but is never reported to a Customer and never counts as a scheduled Check. The validation, verification or transfer work behind a Method Adoption counts as the first Training Runs on that Method version.
+_Avoid_: Practice run, supervised test
+
+**Competence Assessment**:
+A yearly review of whether a person remains competent in each thing they are authorised for, one line per Authorisation citing evidence such as their own passing Tests, a proficiency testing result, a blind or retained sample, an observed Run, or an audit of their reviews. The Lab Manager signs it Reviewed and QA signs it Approved, never the person assessed. A line without evidence lets its Authorisation lapse; a failed line suspends it and opens a Deviation.
+_Avoid_: Requalification, annual review, proficiency check
 
 ### Document vault
 
@@ -309,7 +321,7 @@ The date QA sets at approval on which a version replaces the previous one, which
 _Avoid_: Release date, issue date
 
 **Distribution**:
-The roles and people a Document version applies to. When the version requires training, each of them signs it Acknowledged before its Effective Date.
+The roles and people a Document version applies to. Where a role's Training Level is not None, each person in it is due a Training Record on the version by its Effective Date.
 _Avoid_: Audience, recipients
 
 **Periodic Review**:
@@ -373,7 +385,7 @@ What an Electronic Signature attests: Performed, Verified, Reviewed, Approved, R
 _Avoid_: Signature type, status
 
 **Authorisation**:
-QA's grant allowing a person to sign with a given Signature Meaning within a scope (a Method or record type) for a stated period. It is separate from a Training Record: being trained is not being authorised.
+QA's grant allowing a person to sign with a given Signature Meaning within a scope (a Method or record type) in one Lab, valid for 12 months unless renewed through a Competence Assessment. A Method Authorisation covers every version of that Method; each version still needs its own Training Record. QA may suspend one, citing a Deviation, and nobody grants, renews or lifts their own. It is separate from a Training Record: being trained is not being authorised.
 _Avoid_: Permission, access right, qualification
 
 **Return**:
