@@ -1,13 +1,14 @@
 // Test-plan A5: the signature binds to stored bytes.
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sql } from 'kysely';
 import { contextRow, runAudited } from '../src/audited.ts';
 import { seal, sign, type Sealed } from '../src/doors.ts';
 import { ledgerOf } from '../src/ledgers.ts';
 import type { RecordId, Sha256Hex } from '@lims/domain/ids';
 import { seedFixture, type Fixture } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
-import { bodyBytes, expectSqlState, installWidget, newWidget, committed } from './support.ts';
+import { bodyBytes, expectSqlState, installWidget, newWidget, reauth, committed } from './support.ts';
 
 let db: TestDb;
 let fx: Fixture;
@@ -27,9 +28,10 @@ beforeAll(async () => {
 afterAll(() => db.close());
 
 const signAs = (who: Fixture['ann'], role: string, signer: Fixture['ann'], hash: Sha256Hex) =>
-  runAudited(db.app, fx.ctx(who, role), { kind: 'lab', labId: fx.labA }, async (tx) => ({
-    commit: await sign(tx, { signer: signer.id, target: { versionId: v1.versionId, hash }, meaning: 'Performed', authenticator: 'totp', group: randomUUID() }),
-  }));
+  runAudited(db.app, fx.ctx(who, role), { kind: 'lab', labId: fx.labA }, async (tx) => {
+    await reauth(tx, signer.id);
+    return { commit: await sign(tx, { signer: signer.id, target: { versionId: v1.versionId, hash }, meaning: 'Performed', authenticator: 'totp', group: randomUUID() }) };
+  });
 
 describe('signature binding', () => {
   it('a signature whose content_hash differs from the stored hash fails on the foreign key', async () => {
@@ -81,10 +83,66 @@ describe('signature binding', () => {
 
   it('LS003: a meaning the record kind does not carry is refused', async () => {
     await expectSqlState(
-      runAudited(db.app, fx.ctx(fx.cid, 'QA'), { kind: 'lab', labId: fx.labA }, async (tx) => ({
-        commit: await sign(tx, { signer: fx.cid.id, target: v1, meaning: 'Acknowledged', authenticator: 'totp', group: randomUUID() }),
-      })),
+      runAudited(db.app, fx.ctx(fx.cid, 'QA'), { kind: 'lab', labId: fx.labA }, async (tx) => {
+        await reauth(tx, fx.cid.id);
+        return { commit: await sign(tx, { signer: fx.cid.id, target: v1, meaning: 'Acknowledged', authenticator: 'totp', group: randomUUID() }) };
+      }),
       'LS003',
     );
+  });
+});
+
+// Part 11 §11.200(a)(1): the database itself holds the proof that a signing re-authenticated.
+describe('a signing re-authenticates in its own commit (LS005)', () => {
+  const reviewed = (tx: Parameters<typeof sign>[0]) =>
+    sign(tx, { signer: fx.bob.id, target: v1, meaning: 'Reviewed', authenticator: 'totp', group: randomUUID() });
+  const bobCommit = <T>(commitKey: string, fn: (tx: Parameters<typeof sign>[0]) => Promise<T>) =>
+    runAudited(db.app, fx.ctx(fx.bob, 'Reviewer', { commitKey: commitKey as never }), { kind: 'lab', labId: fx.labA }, async (tx) => ({ commit: await fn(tx) }));
+  const noReviewedSignature = async () =>
+    expect(await db.app.selectFrom('signature').select('id').where('meaning', '=', 'Reviewed').execute()).toEqual([]);
+
+  it('with no TOTP step consumed for the signer, the signature is refused', async () => {
+    await expectSqlState(bobCommit(randomUUID(), reviewed), 'LS005');
+    await noReviewedSignature();
+  });
+
+  it('a step consumed by an earlier attempt under the same commit key does not count', async () => {
+    const key = randomUUID();
+    committed(await bobCommit(key, (tx) => reauth(tx, fx.bob.id)));
+    await expectSqlState(bobCommit(key, reviewed), 'LS005');
+    await noReviewedSignature();
+  });
+
+  it("another commit's step, consumed after this transaction began, does not count", async () => {
+    // The other attempt lands between this transaction's start and its chain locks, the one
+    // window in which its row is newer than this transaction and visible to it.
+    const trx = await db.app.startTransaction().setIsolationLevel('read committed').execute();
+    try {
+      await sql`select set_config('lims.ctx', ${JSON.stringify(contextRow(fx.ctx(fx.bob, 'Reviewer')))}, true)`.execute(trx);
+      committed(await bobCommit(randomUUID(), (other) => reauth(other, fx.bob.id)));
+      await sql`select lims.lock_chains()`.execute(trx);
+      await expectSqlState(
+        sql`select * from lims.sign(${fx.bob.id}, ${v1.versionId}, decode(${v1.hash}, 'hex'), 'Reviewed', 'totp', ${randomUUID()})`.execute(trx),
+        'LS005',
+      );
+    } finally {
+      await trx.rollback().execute();
+    }
+    await noReviewedSignature();
+  });
+
+  it('a step consumed for a login or an unlock does not count', async () => {
+    await expectSqlState(bobCommit(randomUUID(), async (tx) => { await reauth(tx, fx.bob.id, 'login'); return reviewed(tx); }), 'LS005');
+    await expectSqlState(bobCommit(randomUUID(), async (tx) => { await reauth(tx, fx.bob.id, 'unlock'); return reviewed(tx); }), 'LS005');
+    await noReviewedSignature();
+  });
+
+  it("the step consumed in the signing's own commit is accepted, and names that commit", async () => {
+    const key = randomUUID();
+    const s = committed(await bobCommit(key, async (tx) => { await reauth(tx, fx.bob.id); return reviewed(tx); }));
+    const sig = await db.app.selectFrom('signature').select('commit_key').where('id', '=', s.signatureId).executeTakeFirstOrThrow();
+    const steps = await db.app.selectFrom('totp_step_used').select(['purpose', 'commit_key']).where('person_id', '=', fx.bob.id).where('commit_key', '=', key).execute();
+    expect(sig.commit_key).toBe(key);
+    expect(steps).toEqual([{ purpose: 'signing', commit_key: key }]);
   });
 });

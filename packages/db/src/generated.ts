@@ -580,6 +580,7 @@ export interface TestReportTest {
 }
 
 export interface TotpStepUsed {
+  commit_key: string | null;
   person_id: string;
   purpose: string;
   step: Int8;

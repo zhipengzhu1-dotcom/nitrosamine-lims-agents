@@ -8,7 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { COMPANY_LEDGER, ledgerOf, verifyChain } from '@lims/db';
 import { CHAIN } from '../src/chain/index.ts';
 import { readStanding } from '../src/records/standing.ts';
-import { assign, idsOf, PASSING, runPerformedAndReviewed, testPerformedAndReviewed, typeRun, verifyAll } from '../src/seed/chain.ts';
+import { assign, idsOf, PASSING, review, runPerformedAndReviewed, testPerformedAndReviewed, typeRun, verifyAll } from '../src/seed/chain.ts';
+import { RELEASE_CHECKLIST } from '../src/chain/model.ts';
 import { seedCounts, seedDemo, SEED_CAP, type SeedResult } from '../src/seed/index.ts';
 import { signAs, testApi, type TestApi } from '../src/testing/harness.ts';
 
@@ -22,7 +23,7 @@ beforeAll(async () => {
 afterAll(() => api.close());
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
-const refusalOf = (r: { body: any }) => r.body.refusal as { kind: string; message: string; reasons?: { code: string }[] };
+const refusalOf = (r: { body: any }) => r.body.refusal as { kind: string; message: string; reasons?: { code: string; value?: string }[] };
 const gaps = (feature: string) => api.db.app.selectFrom('spec_gap').select('id').where('feature', '=', feature).execute();
 
 describe('D19: the whole chain', () => {
@@ -233,6 +234,37 @@ describe('the chain\'s views', () => {
     expect(requested.steps[0]).toMatchObject({ name: 'Accepted', state: 'current', reasons: [] });
     const rejected = (q.body.tests as Row[]).find((t) => t.id === seed.submissions.rejected.samples[0]!.tests[0]!)!;
     expect(rejected.steps[0]).toMatchObject({ name: 'Accepted', state: 'blocked', reasons: [expect.stringMatching(/Rejected at Acceptance: .*in development/)] });
+  });
+});
+
+describe('review fix 2: a release waits for every pending change behind it', () => {
+  it('names the pending change on the Test and the one on its Run, then releases once both are settled', async () => {
+    const testId = seed.submissions.ready.samples[0]!.tests[1]!;
+    expect((await seed.tabs.ann.view('test.detail', { testId })).body.test.state).toBe('Reviewed');
+    const run = await api.db.app.selectFrom('run_test').select('run_id').where('test_id', '=', testId).executeTakeFirstOrThrow();
+    const weight = await api.db.app.selectFrom('recorded_value').select('record_id').where('parent_id', '=', testId).where('field', '=', 'prep.weight').orderBy('subject').executeTakeFirstOrThrow();
+    const recovery = await api.db.app.selectFrom('recorded_value').select('record_id').where('parent_id', '=', run.run_id).where('subject', 'like', '%recovery%').executeTakeFirstOrThrow();
+    const propose = (value: string, to: { value: string; unit: string }) =>
+      seed.tabs.bob.must('value.change', { role: 'Reviewer', value, to: { type: 'decimal', ...to }, reason: { code: 'transcription-error' } });
+    expect((await propose(weight.record_id, { value: '100.31', unit: 'mg' })).standing).toBe('pending');
+    expect((await propose(recovery.record_id, { value: '97.9', unit: '%' })).standing).toBe('pending');
+
+    const drafted = await seed.tabs.bob.must('report.draft', { submissionId: seed.submissions.ready.submissionId, testIds: [testId], role: 'Reviewer' });
+    await seed.tabs.bob.must('report.submitToQa', { reportId: drafted.reportId, role: 'Reviewer' });
+    const reviewId = await review(seed.tabs.cid, 'QA', drafted.reportId, RELEASE_CHECKLIST.items);
+    await seed.tabs.cid.must('review.confirmVerdict', { reviewId, testId, jurisdiction: 'FDA', confirmation: 'confirmed' });
+    const refused = await signAs(seed.tabs.cid, seed.cast.cid, 'Released', 'QA', [drafted.reportId], reviewId);
+    expect(refused.status).toBe(409);
+    const pendingNamed = refusalOf(refused).reasons!.flatMap((r) => (r.code === 'change-pending' ? [r.value] : []));
+    expect(pendingNamed).toEqual([expect.stringMatching(/^prep\.weight/), expect.stringMatching(/^Run .* runcheck\.value/)]);
+
+    for (const value of [weight.record_id, recovery.record_id]) {
+      const v = await api.db.app.selectFrom('pending_version').select(['id', 'content_hash']).where('record_id', '=', value).executeTakeFirstOrThrow();
+      await seed.tabs.cid.must('value.reject', { role: 'QA', version: { versionId: v.id, hash: v.content_hash!.toString('hex') }, reason: { code: 'wrong-item-selected' } });
+    }
+    const released = await signAs(seed.tabs.cid, seed.cast.cid, 'Released', 'QA', [drafted.reportId], reviewId);
+    expect(released.status).toBe(200);
+    expect((await seed.tabs.ann.view('test.detail', { testId })).body.test.state).toBe('Reported');
   });
 });
 

@@ -161,6 +161,7 @@ export type ReleasedFacts = {
     readonly performedBy: readonly PersonId[]; // assigned Analysts and Performed signers, of the Test and its Runs
     readonly reviewedBy: readonly PersonId[]; // Reviewed signers, of the Test and its Runs
     readonly blockingHolds: readonly string[];
+    readonly pendingChanges: readonly string[]; // on the Test's values and its Runs' values: the lock would leave them unsettleable
     readonly verdicts: readonly { readonly jurisdiction: Jurisdiction; readonly confirmation: 'confirmed' | 'disagreed' | 'none' }[];
   }>;
   readonly checklist: Checklist;
@@ -337,7 +338,8 @@ export function reviewedGate(f: ReviewedFacts): GateResult {
 
 /**
  * Decisions 12, 13 and 29: every Test's current version carries standing Performed and Reviewed
- * signatures, no Hold is open, QA worked on none of it, and QA confirmed every verdict.
+ * signatures, no Hold is open, no change is pending on a value the release would lock, QA worked
+ * on none of it, and QA confirmed every verdict.
  */
 export function releasedGate(f: ReleasedFacts): GateResult {
   const me = f.signer.person;
@@ -351,6 +353,7 @@ export function releasedGate(f: ReleasedFacts): GateResult {
       ...(t.performedBy.includes(me) ? [sod('releaser-performed', t.test)] : []),
       ...(t.reviewedBy.includes(me) ? [sod('releaser-reviewed', t.test)] : []),
       ...each(t.blockingHolds, (hold) => ({ code: 'open-hold', hold })),
+      ...each(t.pendingChanges, (value) => ({ code: 'change-pending', value })),
       ...t.verdicts.flatMap(({ jurisdiction, confirmation }): Reasons =>
         confirmation === 'confirmed' ? []
         : confirmation === 'none' ? [{ code: 'verdict-not-confirmed', test: t.test, jurisdiction }]

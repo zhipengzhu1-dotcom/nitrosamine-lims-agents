@@ -6,7 +6,7 @@ import { lockReleased, seal, sign, standingFailures, versionStands, type Sealed 
 import type { RecordId } from '@lims/domain/ids';
 import { seedFixture, type Fixture, type Person } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
-import { bodyBytes, expectSqlState, installWidget, newValue, newWidget, recordValue, widgets, committed } from './support.ts';
+import { bodyBytes, expectSqlState, installWidget, newValue, newWidget, reauth, recordValue, widgets, committed } from './support.ts';
 
 let db: TestDb;
 let fx: Fixture;
@@ -19,6 +19,7 @@ let runValue: RecordId;
 let testV1: Sealed;
 let runV1: Sealed;
 let reportV1: Sealed;
+let weightV2: Sealed;
 
 beforeAll(async () => {
   db = await testDatabase();
@@ -36,6 +37,7 @@ beforeAll(async () => {
     testV1 = await seal(tx, test, bodyBytes({ kind: 'test' }, [w.v1, runV1]), 'test@1', [w.v1, runV1]);
     reportV1 = await seal(tx, report, bodyBytes({ kind: 'report' }, [testV1]), 'report@1', [testV1]);
   });
+  weightV2 = await as(fx.bob, 'Reviewer', (tx) => recordValue(tx, fx.labA, weight, '100.13'), true);
 });
 afterAll(() => db.close());
 
@@ -57,6 +59,14 @@ describe('before release', () => {
     await expectSqlState(as(fx.ann, 'Analyst', (tx) => seal(tx, report, bodyBytes({ x: 2 }), 'report@1', [testV1])), 'LV003');
   });
 
+  it('LV006: only a pending version can be rejected; the effective Test version stays', async () => {
+    await expectSqlState(
+      as(fx.cid, 'QA', (tx) => tx.db.insertInto('version_rejection').values({ ledger_id: fx.labA, version_id: testV1.versionId, rejected_by: fx.cid.id, reason_code: 'wrong-item-selected' }).execute(), true),
+      'LV006',
+    );
+    expect(await versionStands(db.app, testV1.versionId)).toBe(true);
+  });
+
   it('the pinned identity column may be set once from null, then never changes (LR002)', async () => {
     const pin = randomUUID();
     await as(fx.dee, 'LabManager', (tx) => widgets(tx).updateTable('widget').set({ spec_pin: pin }).where('id', '=', test).execute(), true);
@@ -70,6 +80,7 @@ describe('before release', () => {
 describe('after release', () => {
   it('the Released signature locks the report, the Test, the Run and every value in the closure', async () => {
     const locked = await as(fx.cid, 'QA', async (tx) => {
+      await reauth(tx, fx.cid.id);
       const s = await sign(tx, { signer: fx.cid.id, target: reportV1, meaning: 'Released', authenticator: 'totp', group: randomUUID() });
       await widgets(tx).updateTable('widget').set({ state: 'Reported' }).where('id', '=', test).execute();
       await widgets(tx).updateTable('widget').set({ state: 'Released' }).where('id', '=', report).execute();
@@ -82,9 +93,25 @@ describe('after release', () => {
 
   it('LR001: a new version of the Test, of a Recorded Value under it, of the Run\'s value, or of the report is refused', async () => {
     await expectSqlState(as(fx.ann, 'Analyst', (tx) => seal(tx, test, bodyBytes({ kind: 'test', v: 2 }), 'test@1'), true), 'LR001');
-    await expectSqlState(as(fx.ann, 'Analyst', (tx) => recordValue(tx, fx.labA, weight, '100.13'), true), 'LR001');
+    await expectSqlState(as(fx.ann, 'Analyst', (tx) => recordValue(tx, fx.labA, weight, '100.14'), true), 'LR001');
     await expectSqlState(as(fx.ann, 'Analyst', (tx) => recordValue(tx, fx.labA, runValue, '0.96'), true), 'LR001');
     await expectSqlState(as(fx.cid, 'QA', (tx) => seal(tx, report, bodyBytes({ kind: 'report', v: 2 }), 'report@1'), true), 'LR001');
+  });
+
+  it('LR001: the change that was pending on a locked value can be neither approved nor rejected', async () => {
+    expect(await db.app.selectFrom('pending_version').select('id').where('record_id', '=', weight).execute()).toEqual([{ id: weightV2.versionId }]);
+    await expectSqlState(
+      as(fx.cid, 'QA', async (tx) => {
+        await reauth(tx, fx.cid.id);
+        return sign(tx, { signer: fx.cid.id, target: weightV2, meaning: 'Verified', authenticator: 'totp', group: randomUUID() });
+      }),
+      'LR001',
+    );
+    await expectSqlState(
+      as(fx.cid, 'QA', (tx) => tx.db.insertInto('version_rejection').values({ ledger_id: fx.labA, version_id: weightV2.versionId, rejected_by: fx.cid.id, reason_code: 'wrong-item-selected' }).execute(), true),
+      'LR001',
+    );
+    expect(await db.app.selectFrom('pending_version').select('id').where('record_id', '=', weight).execute()).toEqual([{ id: weightV2.versionId }]);
   });
 
   it('LR001: a value added under a locked Test cannot get a version', async () => {
@@ -107,8 +134,23 @@ describe('after release', () => {
     expect(await as(fx.cid, 'QA', (tx) => lockReleased(tx, sig.id as never), true)).toBe(0);
   });
 
+  it('LR001: no signature of any meaning lands on a locked record', async () => {
+    await expectSqlState(
+      as(fx.ann, 'Analyst', async (tx) => {
+        await reauth(tx, fx.ann.id);
+        return sign(tx, { signer: fx.ann.id, target: testV1, meaning: 'Performed', authenticator: 'totp', group: randomUUID() });
+      }),
+      'LR001',
+    );
+  });
+
   it('LR003: only a Released signature locks', async () => {
-    const sig = await as(fx.bob, 'Reviewer', (tx) => sign(tx, { signer: fx.bob.id, target: testV1, meaning: 'Reviewed', authenticator: 'totp', group: randomUUID() }));
+    const sig = await as(fx.bob, 'Reviewer', async (tx) => {
+      const other = await newWidget(tx, fx.labA, 'T-unlocked');
+      const v = await seal(tx, other, bodyBytes({ kind: 'test' }), 'test@1');
+      await reauth(tx, fx.bob.id);
+      return sign(tx, { signer: fx.bob.id, target: v, meaning: 'Reviewed', authenticator: 'totp', group: randomUUID() });
+    });
     await expectSqlState(as(fx.bob, 'Reviewer', (tx) => lockReleased(tx, sig.signatureId), true), 'LR003');
   });
 });
@@ -140,8 +182,10 @@ describe('version_stands, the recursive rule', () => {
 
   it('an approved change to the Run\'s value unsigns the Run version and, through the cite, the Test version', async () => {
     const v2 = await db.app.selectFrom('pending_version').select(['id', 'content_hash']).where('record_id', '=', runValue2).executeTakeFirstOrThrow();
-    await as(fx.cid, 'QA', (tx) =>
-      sign(tx, { signer: fx.cid.id, target: { versionId: v2.id as never, hash: v2.content_hash!.toString('hex') as never }, meaning: 'Verified', authenticator: 'totp', group: randomUUID() }));
+    await as(fx.cid, 'QA', async (tx) => {
+      await reauth(tx, fx.cid.id);
+      await sign(tx, { signer: fx.cid.id, target: { versionId: v2.id as never, hash: v2.content_hash!.toString('hex') as never }, meaning: 'Verified', authenticator: 'totp', group: randomUUID() });
+    });
     expect(await versionStands(db.app, run2V1.versionId)).toBe(false);
     expect(await versionStands(db.app, test2V1.versionId)).toBe(false);
     const why = await standingFailures(db.app, test2V1.versionId);
