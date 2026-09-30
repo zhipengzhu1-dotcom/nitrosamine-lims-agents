@@ -53,31 +53,39 @@ const withLine = (line: Partial<ReturnType<typeof fdaSpecification>['sections'][
   return { sections: [{ ...section!, maximumDailyDose: { value: mdd, unit: 'mg/day' as const }, lines: [{ ...section!.lines[0]!, ...line }] }] };
 };
 
-describe('an AI-derived limit is checked against AI ÷ MDD (usp 1, decision 29)', () => {
-  it('refuses a version whose limit is not AI ÷ MDD rounded down to its decimals, and writes nothing', async () => {
+describe('an AI-derived limit is checked against AI ÷ MDD (usp 1, decision 29 as ruled 2026-09-30)', () => {
+  const draft = (limit: string, mdd: string) => api.run(api.seed, createSpecification, { productId: reference.products.fic01, purpose: 'shelf-life', data: withLine({ limit }, mdd) });
+
+  it('refuses a limit looser than AI ÷ MDD rounded half up to two significant figures, names the derived value, and writes nothing', async () => {
     const before = await specificationCount();
-    const out = await api.run(api.seed, createSpecification, { productId: reference.products.fic01, purpose: 'shelf-life', data: withLine({ limit: '0.31' }) });
+    const out = await draft('0.04', '2550');
     expect(out.kind).toBe('refusal');
     if (out.kind !== 'refusal') return;
-    expect(out.refusal).toMatchObject({ kind: 'gate', reasons: [{ code: 'limit-not-derived', jurisdiction: 'FDA', analyte: 'NDMA', limit: '0.31', derived: '0.30' }] });
-    expect(out.refusal.message).toBe('The FDA limit for NDMA is written 0.31 ppm, but 96 ng/day ÷ 320 mg/day rounded down to 2 decimals is 0.30 ppm.');
+    expect(out.refusal).toMatchObject({ kind: 'gate', reasons: [{ code: 'limit-not-derived', jurisdiction: 'FDA', analyte: 'NDMA', limit: '0.04', derived: '0.038' }] });
+    expect(out.refusal.message).toBe('The FDA limit for NDMA is written 0.04 ppm, but 96 ng/day ÷ 2550 mg/day rounded half up to two significant figures is 0.038 ppm. Write 0.038 or a lower limit.');
     expect(await specificationCount()).toBe(before);
   });
 
-  it('rounds down, so 96 ng/day over 330 mg/day is 0.29, never 0.30', async () => {
-    const refused = await api.run(api.seed, createSpecification, { productId: reference.products.fic01, purpose: 'shelf-life', data: withLine({ limit: '0.30' }, '330') });
-    expect(refused.kind).toBe('refusal');
-    const drafted = await api.run(api.seed, createSpecification, { productId: reference.products.fic01, purpose: 'shelf-life', data: withLine({ limit: '0.29' }, '330') });
-    expect(drafted.kind).toBe('receipt');
+  it('drafts metformin IR\'s NDMA limit as FDA prints it, 0.038 ppm, and a tighter one kept at its written decimals', async () => {
+    for (const limit of ['0.038', '0.0375']) {
+      const out = await draft(limit, '2550');
+      expect(out.kind).toBe('receipt');
+      if (out.kind !== 'receipt') return;
+      const version = await api.db.app.selectFrom('record_version').select('content').where('record_id', '=', (out.receipt.data as { recordId: string }).recordId).executeTakeFirstOrThrow();
+      const body = JSON.parse(version.content!.toString('utf8')) as { data: { sections: { lines: { limit: string }[] }[] } };
+      expect(body.data.sections[0]!.lines[0]!.limit).toBe(limit);
+    }
   });
 
-  it('requires the Acceptable Intake behind every line, and a positive AI and MDD', () => {
+  it('requires the Acceptable Intake behind every line, and a positive AI, MDD and limit', () => {
     const parse = (data: unknown) => createSpecification.input.safeParse({ productId: reference.products.fic01, purpose: 'release', data }).success;
     expect(parse(fdaSpecification())).toBe(true);
     expect(parse(withLine({ basis: null as never }))).toBe(false);
     expect(parse(withLine({}, '0'))).toBe(false);
     expect(parse(withLine({}, '-320'))).toBe(false);
     expect(parse(withLine({ basis: { acceptableIntakeNgPerDay: '0.0', source: 'x' } }))).toBe(false);
+    expect(parse(withLine({ limit: '0.000' }))).toBe(false);
+    expect(parse(withLine({ limit: '-0.30' }))).toBe(false);
   });
 });
 

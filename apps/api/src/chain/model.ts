@@ -66,8 +66,8 @@ export const SpecificationDataSchema = z.object({
     /** Every line the skeleton holds is AI-derived; fixed-concentration, limit-test and report-only lines are not built. */
     lines: z.array(z.object({
       analyte: z.string().min(1).max(32),
-      /** AI ÷ MDD rounded down to the decimals written here; the command refuses any other value. */
-      limit: Decimal,
+      /** AI ÷ MDD rounded half up to two significant figures, or lower; the command refuses a looser value. */
+      limit: PositiveDecimal,
       unit: z.literal('ppm'),
       uspClaim: z.boolean(),
       /** The published Acceptable Intake the limit is derived from, and its source, kept as written. */

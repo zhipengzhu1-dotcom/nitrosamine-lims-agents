@@ -63,7 +63,7 @@ export const SIMPLE_ACCEPTANCE: DecisionRule = {
   },
 };
 
-/** FDA Section only: NDMA at 96 ng/day over a maximum daily dose of 320 mg/day is 0.30 ppm (rounded down to the stated digits). */
+/** FDA Section only: NDMA at 96 ng/day over a maximum daily dose of 320 mg/day is 0.30 ppm, two significant figures. */
 export const fdaSpecification = (): SpecificationData => ({
   sections: [{
     jurisdiction: 'FDA', ruleSetVersion: 'FDA-RS@1', rounding: 'half-away-from-zero', maximumDailyDose: { value: '320', unit: 'mg/day' },
