@@ -50,6 +50,10 @@ _Avoid_: Admin, host, IT
 One request from a Customer to the company, listing the Samples sent and the Tests wanted on each.
 _Avoid_: Order, request, job
 
+**Acceptance**:
+The Sample Custodian's review of each requested Test before testing starts, which accepts or rejects that Test with a reason. A Submission is accepted if any of its Tests is.
+_Avoid_: Contract review, approval, intake
+
 **Product**:
 A Customer's API or drug, identified by the Customer's product code. The same API from two manufacturers is two Products.
 _Avoid_: Material, compound, item
@@ -83,7 +87,7 @@ One Method requested on one Sample; the unit of work assigned to an Analyst in o
 _Avoid_: Analysis, assay, job
 
 **GxP Class**:
-Whether a Test is GMP or non-GMP. Every Test is GMP unless marked non-GMP at acceptance with a signed reason. Once results exist it can be raised to GMP, never lowered. Non-GMP covers only method development, feasibility, and Customer-labelled research or screening samples. Validation, verification, transfer and Phase 1 material are always GMP.
+Whether a Test is GMP or non-GMP. Every Test is GMP unless marked non-GMP at acceptance with a signed reason. Once results exist it can be raised to GMP, never lowered. Non-GMP covers only method development, feasibility, and Customer-labelled research or screening samples. Validation, verification, transfer and Phase 1 material are always GMP. Non-GMP work is still audit-trailed, signed and second-checked where data is typed or corrected, but skips the Reviewer and QA release, and its Test Reports carry no accreditation mark.
 _Avoid_: GMP flag, regulated/unregulated
 
 **Run**:
@@ -111,7 +115,7 @@ Making a new Preparation from the same Sample within the same Test.
 _Avoid_: Reprep, repeat
 
 **Retest**:
-A new Test on the same Sample after the original Test is invalidated; the original is kept and linked, never deleted.
+A new Test on the same Sample, linked to the original, created after the original is invalidated or under an approved OOS investigation plan. The Customer is told; the original is kept and never averaged with the Retest.
 _Avoid_: Repeat test, reanalysis
 
 **Resample**:
@@ -141,6 +145,14 @@ _Avoid_: MSDS
 **Deviation**:
 A record that something departed from its acceptance criteria or procedure (an out-of-range reading, a failed check, an out-of-specification result) and must be investigated and closed. It is this project's name for ISO/IEC 17025 nonconforming work.
 _Avoid_: Incident, nonconformance, NCR
+
+**CAPA Action**:
+One corrective or preventive action raised from a Deviation, with an owner, a due date and an effectiveness check that may be signed off after the Deviation closes.
+_Avoid_: CAPA (alone), action item
+
+**Hold**:
+A record that pauses a Test or Sample for a stated reason (a Deviation, a receipt discrepancy, a Customer query, blocked equipment) without changing its state. It blocks named steps until it is released, and several can be open at once.
+_Avoid_: On hold (as a status), suspension, quarantine
 
 **Training Record**:
 Evidence that a person is qualified on a specific method or SOP version, required before they can be assigned tests under it.
