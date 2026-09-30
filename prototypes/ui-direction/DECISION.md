@@ -2,7 +2,7 @@
 
 Decided with the owner after a four-way arena of throwaway prototypes, all built from one brief and one fictional dataset. The owner inspected them, rated the two Opus results best, and chose to merge them with **Bench Rail** as the base. The Part 11, ISO/IEC 17025 and USP expert agents reviewed the merged direction and this text. Their gaps are closed by the rules below, and two open questions became new tickets.
 
-The prototypes, rationales, click-through reports and the comparison page source are on the `prototype/ui-direction` branch under `prototypes/ui-direction/`. The merged direction is `candidates/chosen/`; its `RATIONALE.md` holds the design tokens and the component list. The owner can flip between all five at full size on the [comparison page](https://claude.ai/artifact/99wmmecXf6B28UQdUdvLE7), which is private to the owner until shared.
+The prototypes, rationales, click-through reports and the comparison page source are on the `prototype/ui-direction` branch under [`prototypes/ui-direction/`](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/tree/prototype/ui-direction/prototypes/ui-direction). The merged direction is `candidates/chosen/`; its `RATIONALE.md` holds the design tokens and the component list. The owner can flip between all five at full size on the [comparison page](https://claude.ai/artifact/99wmmecXf6B28UQdUdvLE7), which is private to the owner until shared.
 
 ### The direction: Bench Rail, with four parts of "Ledger, bottom rail"
 
@@ -215,3 +215,14 @@ The three expert agents reviewed the merged prototype and this text. They re-rev
   - A signing with a user ID that isn't the session's is logged and alerted, but not counted toward lockout.
   - A reading whose device isn't In use is taken on a calibrated reference thermometer instead.
 - **For #24's own review.** If its result entry includes Preparation weights under rule 23's hard limits, refused values are logged until #38 decides.
+
+### Tickets cited by number
+
+- #13 [Decide the audit trail and electronic signature design](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13)
+- #15 [Decide the equipment and scheduled-check model](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/15)
+- #20 [Decide how results are entered, imported, and reviewed](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/20)
+- #24 [Prototype the walking skeleton on main](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/24)
+- #29 [Decide the specification and limits model](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/29)
+- #36 [Decide the Method record's structured data](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/36)
+- #37 [Decide how Check and Run Check results are compared with their limits](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/37)
+- #38 [Decide what is recorded when a failing value is first typed](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/38)
