@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, it } from 'vitest';
 import { sql } from 'kysely';
 import { contextRow, runAudited } from '../src/audited.ts';
-import { ledgerOf } from '../src/ids.ts';
+import { ledgerOf } from '../src/ledgers.ts';
 import { seedFixture, type Fixture } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
 import { expectSqlState, installWidget, newWidget, withRawContext } from './support.ts';

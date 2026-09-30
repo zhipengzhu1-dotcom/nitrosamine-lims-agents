@@ -13,7 +13,7 @@
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { DB } from './generated.ts';
 import { GENERATED_CLASSES, scopePlugin, type Scope, type TableClasses } from './scope.ts';
-import type { CommitKey, CustomerId, LabId, LedgerId, PersonId, SessionId } from './ids.ts';
+import type { CommitKey, CustomerId, LabId, LedgerId, PersonId, SessionId } from '@lims/domain/ids';
 
 export type ReasonCode = 'transcription-error' | 'wrong-unit' | 'wrong-item-selected' | 'instrument-reprint' | 'other';
 

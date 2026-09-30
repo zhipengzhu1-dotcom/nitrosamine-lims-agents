@@ -2,7 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, it } from 'vitest';
 import { runAudited } from '../src/audited.ts';
-import { ledgerOf, type RecordId } from '../src/ids.ts';
+import { ledgerOf } from '../src/ledgers.ts';
+import type { RecordId } from '@lims/domain/ids';
 import { seedFixture, type Fixture } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
 import { expectSqlState, installWidget, widgets } from './support.ts';

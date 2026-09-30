@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runAudited, type AuditedTx } from '../src/audited.ts';
 import { lockReleased, seal, sign, standingFailures, versionStands, type Sealed } from '../src/doors.ts';
-import type { RecordId } from '../src/ids.ts';
+import type { RecordId } from '@lims/domain/ids';
 import { seedFixture, type Fixture, type Person } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
 import { bodyBytes, expectSqlState, installWidget, newValue, newWidget, recordValue, widgets, committed } from './support.ts';

@@ -16,7 +16,8 @@ import {
 } from 'kysely';
 import type { DB } from './generated.ts';
 import { COMPANY_TABLES, LAB_TABLES, LEDGER_TABLES, PORTAL_VIEWS, type CompanyTable, type LedgerTable, type PortalView } from './tables.generated.ts';
-import { COMPANY_LEDGER, type CustomerId, type LabId } from './ids.ts';
+import { COMPANY_LEDGER } from './ledgers.ts';
+import type { CustomerId, LabId } from '@lims/domain/ids';
 
 export type Scope =
   | { readonly kind: 'lab'; readonly labId: LabId }

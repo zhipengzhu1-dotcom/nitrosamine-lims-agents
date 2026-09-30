@@ -7,7 +7,8 @@ import { sql, type Kysely } from 'kysely';
 import type { DB } from '../src/generated.ts';
 import type { AuditedTx, TxOutcome } from '../src/audited.ts';
 import { seal, type Sealed } from '../src/doors.ts';
-import { ledgerOf, type LabId, type RecordId, type VersionRef } from '../src/ids.ts';
+import { ledgerOf } from '../src/ledgers.ts';
+import type { LabId, RecordId, VersionRef } from '@lims/domain/ids';
 import { GENERATED_CLASSES, type TableClasses } from '../src/scope.ts';
 import { sqlState, type TestDb } from '../src/testing/harness.ts';
 

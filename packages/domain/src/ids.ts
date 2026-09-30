@@ -29,6 +29,7 @@ export type EquipmentId = Brand<string, 'EquipmentId'>;
 export type AnalyteKey = Brand<string, 'AnalyteKey'>; // 'NDMA'
 
 export type VersionId = Brand<string, 'VersionId'>;
+export type SignatureId = Brand<string, 'SignatureId'>;
 /** Lowercase hex SHA-256 as the database stored it. The client displays it and never computes it. */
 export type Sha256Hex = Brand<string, 'Sha256Hex'>;
 

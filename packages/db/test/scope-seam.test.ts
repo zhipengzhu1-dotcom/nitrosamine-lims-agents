@@ -2,7 +2,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql, type Kysely } from 'kysely';
 import { runAudited } from '../src/audited.ts';
-import { COMPANY_LEDGER, type CustomerId } from '../src/ids.ts';
+import { COMPANY_LEDGER } from '../src/ledgers.ts';
+import type { CustomerId } from '@lims/domain/ids';
 import { openRead, ScopeViolation, scopePlugin, type CompanyRead, type CustomerRead, type ReadDb } from '../src/scope.ts';
 import { seedFixture, type Fixture } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';

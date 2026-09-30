@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runAudited } from '../src/audited.ts';
 import { verifyChain } from '../src/doors.ts';
-import { COMPANY_LEDGER } from '../src/ids.ts';
+import { COMPANY_LEDGER } from '../src/ledgers.ts';
 import { seedFixture, type Fixture } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
 

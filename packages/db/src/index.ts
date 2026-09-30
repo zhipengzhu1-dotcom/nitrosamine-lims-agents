@@ -1,5 +1,5 @@
 export type { DB } from './generated.ts';
-export * from './ids.ts';
+export * from './ledgers.ts';
 export * from './scope.ts';
 export * from './audited.ts';
 export * from './doors.ts';

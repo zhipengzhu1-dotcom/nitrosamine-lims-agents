@@ -5,7 +5,7 @@
 import { sql, type Kysely } from 'kysely';
 import { unscoped, type AuditedTx } from './audited.ts';
 import type { DB } from './generated.ts';
-import type { LabId, PersonId, RecordId, Sha256Hex, SignatureId, VersionId, VersionRef } from './ids.ts';
+import type { LabId, PersonId, RecordId, Sha256Hex, SignatureId, VersionId, VersionRef } from '@lims/domain/ids';
 
 export type Meaning = 'Performed' | 'Verified' | 'Reviewed' | 'Approved' | 'Released' | 'Authored' | 'Acknowledged';
 

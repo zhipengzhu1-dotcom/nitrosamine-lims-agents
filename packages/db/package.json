@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "kysely": "0.29.6",
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "@lims/domain": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "^8.15.0"

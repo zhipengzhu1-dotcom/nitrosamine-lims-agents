@@ -3,7 +3,8 @@ import { sql, type Kysely } from 'kysely';
 import type { DB } from '../generated.ts';
 import { runAudited, type AuditContext, type AuditedTx } from '../audited.ts';
 import { createLab } from '../doors.ts';
-import { COMPANY_LEDGER, SERVICE, ledgerOf, type CommitKey, type LabId, type LedgerId, type PersonId, type SessionId } from '../ids.ts';
+import { COMPANY_LEDGER, SERVICE, ledgerOf } from '../ledgers.ts';
+import type { CommitKey, LabId, LedgerId, PersonId, SessionId } from '@lims/domain/ids';
 
 export const TEST_RELEASE = 'test';
 
