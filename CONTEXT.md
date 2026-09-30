@@ -130,6 +130,32 @@ _Avoid_: Move, relocation
 The signed document a Lab issues to a Customer with Reportable Results. It may be titled "Certificate of Analysis" when printed, but is never called a CoA in the system.
 _Avoid_: CoA, certificate, report
 
+### Equipment
+
+**Equipment**:
+A physical item in one Lab with its own identity: instruments, balances, pipettes, pH meters, Karl Fischer titrators, freezers, fridges, stability chambers, the DI water dispenser, and the check weights, thermometers and loggers used to check them. Its Fitness Status is In use only while it is approved into service, has no open Deviation that blocks the use in question, has had no repair, software change, relocation or other event needing re-verification since its last passing verification, and every blocking Check is current. A before-use Check, where its Check Plan needs one, is a further gate at each use.
+_Avoid_: Asset, device, instrument (for the general case)
+
+**Room**:
+A space in a Lab where Equipment stands and work is done, with its own Checks of environmental conditions. A Room, or a cabinet in it, can also be a storage location.
+_Avoid_: Area, location
+
+**Check Plan**:
+What must be checked on one piece of Equipment or one Room: the kind of Check, its schedule, its acceptance criteria, whether it blocks use, and the controlled document it comes from.
+_Avoid_: Schedule, maintenance plan
+
+**Check**:
+One performance of a Check Plan (a reading, verification, calibration, maintenance or qualification), with its outcome against the acceptance criteria.
+_Avoid_: Test (reserved for work on Samples), inspection, calibration (for the general case)
+
+**Excursion**:
+A Room or storage location going outside its limits, shown by a reading or its minimum and maximum since the last reading. It is presumed to have lasted from the last in-limit reading unless attached evidence shows a shorter time.
+_Avoid_: Alarm, out-of-range, spike
+
+**Equipment Logbook**:
+The chronological record of everything that happened to one piece of Equipment: each use, Check, cleaning, repair, software change, status change, Deviation and Transfer.
+_Avoid_: Log, usage log
+
 ### Inventory
 
 **Material**:
@@ -157,7 +183,7 @@ A company the Lab buys Materials or calibration services from, approved by QA fo
 _Avoid_: Vendor, provider, manufacturer
 
 **Fitness Status**:
-Whether a piece of equipment, a Pack or a Solution may be used now: Quarantined, In use, Suspended, Expired or Retired. Every step that records use checks it the same way.
+Whether a piece of equipment, a Pack or a Solution may be used now: Quarantined, In use, Suspended, Expired or Retired. Every step that records use checks it the same way. What a status blocks can depend on the step: a storage location in an Excursion refuses new placements but not removals.
 _Avoid_: Status (alone), availability, condition
 
 **CoA**:
@@ -221,7 +247,7 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, the instrument a Run used, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, the instrument a Run used, a Room, storage or DI water reading, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
 _Avoid_: Correction, amendment
 
 **Amended Report**:

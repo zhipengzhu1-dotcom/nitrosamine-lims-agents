@@ -11,3 +11,5 @@ A change to critical data (a result value, weight, dilution volume, standard con
 ## Consequences
 
 Fixing a typo in a weight is not an edit. It creates a proposed value that a second person sees and approves. "Simplifying" this into an in-place edit with a reason would break the China alignment. Source: [Decide the audit trail and electronic signature design](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13). The Material Lot fields were added by [Decide the inventory model](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/17), because the server computes standard concentrations from them. An approved correction makes new Record Versions of every descendant Solution, so their Verified signatures show as unsigned until given again.
+
+[Decide the equipment and scheduled-check model](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/15) added Room, storage and DI water readings. Each of those readings alone decides whether an Excursion or Deviation opens, so one person must not be able to correct an out-of-limits reading into limits.
