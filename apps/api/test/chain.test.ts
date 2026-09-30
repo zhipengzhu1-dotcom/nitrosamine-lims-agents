@@ -23,7 +23,7 @@ beforeAll(async () => {
 afterAll(() => api.close());
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
-const refusalOf = (r: { body: any }) => r.body.refusal as { kind: string; message: string; reasons?: { code: string }[] };
+const refusalOf = (r: { body: any }) => r.body.refusal as { kind: string; message: string; reasons?: { code: string; value?: string }[] };
 const gaps = (feature: string) => api.db.app.selectFrom('spec_gap').select('id').where('feature', '=', feature).execute();
 
 describe('D19: the whole chain', () => {
@@ -218,7 +218,7 @@ describe('review fix 2: a release waits for every pending change behind it', () 
     await seed.tabs.cid.must('review.confirmVerdict', { reviewId, testId, jurisdiction: 'FDA', confirmation: 'confirmed' });
     const refused = await signAs(seed.tabs.cid, seed.cast.cid, 'Released', 'QA', [drafted.reportId], reviewId);
     expect(refused.status).toBe(409);
-    const pendingNamed = refusalOf(refused).reasons!.flatMap((r) => (r.code === 'change-pending' ? [(r as { value: string }).value] : []));
+    const pendingNamed = refusalOf(refused).reasons!.flatMap((r) => (r.code === 'change-pending' ? [r.value] : []));
     expect(pendingNamed).toEqual([expect.stringMatching(/^prep\.weight/), expect.stringMatching(/^Run .* runcheck\.value/)]);
 
     for (const value of [weight.record_id, recovery.record_id]) {
