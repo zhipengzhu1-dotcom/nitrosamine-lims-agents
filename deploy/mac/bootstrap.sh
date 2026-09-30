@@ -9,7 +9,7 @@ set -euo pipefail
 PROFILE="${LIMS_COLIMA_PROFILE:-lims}"
 SECRETS_DIR="${LIMS_SECRETS_DIR:-$HOME/.config/nitrosamine-lims/secrets}"
 DOCKER_CONFIG_DIR="$HOME/.config/nitrosamine-lims/docker"
-FORMULAE=(colima docker docker-compose docker-buildx cloudflared)
+FORMULAE=(colima docker docker-compose docker-buildx cloudflared age)
 DRY_RUN=false
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=true
 
