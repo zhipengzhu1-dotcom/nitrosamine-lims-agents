@@ -16,6 +16,7 @@ A demo LIMS for a nitrosamine QC lab, built to 21 CFR Part 11, EU GMP Annex 11 a
   - `iso17025-expert`: ISO/IEC 17025:2017 and ANAB AR 2250.
 
   Give each the diff range or ticket and the map ticket it serves, e.g. "Review `main..HEAD` for [Decide the Deviation workflow](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/16)". Each returns a verdict per applicable requirement; a `gap` blocks merge until fixed or recorded as a decision on the map.
+- **Editing an expert agent**: rerun `python3 evals/agents/run.py` and keep it green; add a case to `evals/agents/cases.json`, with its expected verdict taken from the research, for each behaviour you change.
 
 ## Data
 

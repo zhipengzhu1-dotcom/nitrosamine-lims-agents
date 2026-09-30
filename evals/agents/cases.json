@@ -1,0 +1,172 @@
+[
+  {
+    "id": "p11-edit-in-place",
+    "agent": "part11-expert",
+    "seam": "catches planted gap",
+    "source": "research/part11 A5, D6: audit trail keeps old and new value; changes never obscure earlier data",
+    "artifact": "Analysts correct a typed nitrosamine result by overwriting the value in the results table. An audit row stores the new value, the user ID and the server timestamp.",
+    "expect": {
+      "gap": [
+        [
+          "11.10(e)",
+          "DI Q12",
+          "A11d §12.2"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "iso-deviation-bare",
+    "agent": "iso17025-expert",
+    "seam": "catches planted gap",
+    "source": "research/iso17025 7.10: impact on earlier results, customer notification and recall, authorised resumption",
+    "artifact": "An out-of-tolerance balance verification opens a Deviation with a description and an owner. The balance is blocked until any Analyst closes the Deviation with a closing comment.",
+    "expect": {
+      "gap": [
+        [
+          "7.10"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "p11-checkbox-signature",
+    "agent": "part11-expert",
+    "seam": "catches planted gap",
+    "source": "research/part11 B1-B3, C4-C5: signature shows name, time, meaning; bound to record; re-authenticates",
+    "artifact": "Reviewer approval of a result is a checkbox on the review screen. Ticking it stores the reviewer's user ID and the time.",
+    "expect": {
+      "gap": [
+        [
+          "11.50",
+          "11.70",
+          "11.200"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "iso-qc-warning",
+    "agent": "iso17025-expert",
+    "seam": "catches planted gap",
+    "source": "research/iso17025 7.7.3: failed batch QC must prevent incorrect results being reported",
+    "artifact": "When a batch's spiked recovery or blank fails its acceptance criteria, the review screen shows a yellow warning banner. The Reviewer can still approve the batch and QA can release its reports.",
+    "expect": {
+      "gap": [
+        [
+          "7.7.3",
+          "7.7"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "iso-review-training-only",
+    "agent": "iso17025-expert",
+    "seam": "catches planted gap",
+    "source": "research/iso17025 6.2.6: people are authorised, not just trained, to review and release",
+    "artifact": "Review sign-off checks only that the Reviewer holds a current Training Record for the method. QA release checks only that the user has the QA role.",
+    "expect": {
+      "gap": [
+        [
+          "6.2.6",
+          "6.2"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "p11-signature-complete",
+    "agent": "part11-expert",
+    "seam": "no false alarm",
+    "source": "research/part11 B1-B3, C4-C5 all satisfied",
+    "artifact": "QA release is an e-signature. The signing dialog always asks for the password and a fresh TOTP code, even inside a session. The server stores an immutable signature row with printed name, username, role, UTC time plus the lab's zone, meaning 'Released', record ID, record version, and a SHA-256 hash of the canonical record content. Every screen and PDF of the record renders the signature block. Any later change creates a new record version, whose hash no longer matches, so it shows as unsigned until re-signed. Signature rows are audit-trailed.",
+    "expect": {
+      "met": [
+        "11.50"
+      ],
+      "not_gap": [
+        "11.50",
+        "11.70",
+        "11.200"
+      ]
+    }
+  },
+  {
+    "id": "iso-equipment-complete",
+    "agent": "iso17025-expert",
+    "seam": "no false alarm",
+    "source": "research/iso17025 6.4.13 a-h all recorded",
+    "artifact": "Each equipment record holds: identity with software and firmware version; manufacturer, type and serial number; verification evidence; current location; calibration dates, results, adjustments, acceptance criteria and due date; reference-material documentation, results, acceptance criteria, dates and period of validity; maintenance plan and maintenance done; and any damage, malfunction, modification or repair.",
+    "expect": {
+      "met": [
+        "6.4.13"
+      ],
+      "not_gap": [
+        "6.4.13"
+      ]
+    }
+  },
+  {
+    "id": "p11-lane-calibration",
+    "agent": "part11-expert",
+    "seam": "stays in its lane",
+    "source": "calibration traceability is ISO/IEC 17025 6.5, not a Part 11 rule",
+    "artifact": "Balance calibration certificates are uploaded as PDF files with a due date. The calibration provider's accreditation and the stated uncertainty are not recorded.",
+    "expect": {
+      "no_gap_in": "iso17025"
+    }
+  },
+  {
+    "id": "iso-lane-lockout",
+    "agent": "iso17025-expert",
+    "seam": "stays in its lane",
+    "source": "lockout and idle logout are Part 11 §11.300(d) / draft Annex 11 §11.7-11.8 rules",
+    "artifact": "Login locks after 3 failed attempts and unlocks itself after 15 minutes. Each user can turn off the idle logout in their profile.",
+    "expect": {
+      "no_gap_in": "part11"
+    }
+  },
+  {
+    "id": "p11-china-critical-change",
+    "agent": "part11-expert",
+    "seam": "jurisdiction deltas",
+    "source": "research/cn: every change to entered critical data must be approved (CS Art. 16)",
+    "artifact": "For specifications under China jurisdiction, an Analyst corrects a typed result by creating a new result version with a mandatory reason. The audit trail keeps the old and new values, the user, the role and the UTC time. Nobody approves the correction.",
+    "expect": {
+      "gap": [
+        [
+          "CS Art. 16"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "p11-japan-auto-passfail",
+    "agent": "part11-expert",
+    "seam": "jurisdiction deltas",
+    "source": "research/jp: automatic pass/fail is advisory; QA records its own judgment (JIREI GMP20-11)",
+    "artifact": "For Japanese customers, the LIMS computes pass or fail against the specification and that computed result is final. QA release signs the report without recording a judgment of its own.",
+    "expect": {
+      "gap": [
+        [
+          "GMP20-11"
+        ]
+      ]
+    }
+  },
+  {
+    "id": "p11-eu-post-release-edit",
+    "agent": "part11-expert",
+    "seam": "jurisdiction deltas",
+    "source": "research/eu: data and audit trail read-only after release (A11d §17.1)",
+    "artifact": "For EU customers, after QA release a Lab Manager can still correct a typo in a released result by entering a reason. The audit trail records the change.",
+    "expect": {
+      "gap": [
+        [
+          "A11d §17.1"
+        ]
+      ]
+    }
+  }
+]

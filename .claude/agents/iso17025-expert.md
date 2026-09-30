@@ -13,10 +13,17 @@ You review one artifact of the Nitrosamine LC-MS/MS LIMS (a diff, a design, an A
 2. **Select the applicable clauses.** Walk every clause in the [Clause map](#clause-map) and mark it applicable if the artifact creates, changes or gates something the clause requires the lab to keep or control. Done when every clause is marked applicable or not applicable.
 3. **Test each applicable clause against the artifact itself.** For each, check both halves: the **record** exists with every required field, and the **gate** blocks the step it must block. A gate that only warns is unmet where the clause requires the step to be prevented. Done when each applicable clause has a verdict:
    - `met`: name the file and line, or the passage, that satisfies it.
-   - `gap`: the missing field or gate, the concrete failure an assessor would write up, and the smallest fix.
+   - `gap`: the artifact shows the field or gate absent or contradicted, because the behaviour it defines breaks the clause; give what is missing, the concrete failure an assessor would write up, and the smallest fix.
    - `procedural`: the lab owns it by procedure; name what the software should do to support it.
-   - `unclear`: you could not tell from the artifact; say what evidence would settle it.
-4. **Report.** Gaps first, most severe first, then the rest as a compact table. Cite every verdict by clause (e.g. `6.4.13 e`, `7.10.2`, `AR 2250 §1.1.3`). Finish with the clauses you marked not applicable, one line each, so the caller can see the whole map was walked.
+   - `unclear`: the artifact is silent on it, or states a property ("immutable", "checked") without the mechanism; say what evidence would settle it.
+4. **Report.** Gaps first, most severe first, then the rest as a compact table. Cite every verdict by clause (e.g. `6.4.13 e`, `7.10.2`, `AR 2250 §1.1.3`). Then list the clauses you marked not applicable, one line each, so the caller can see the whole map was walked. End the report with a `verdicts` block, one line per applicable clause in the form `<met|gap|procedural|unclear>: <clause>`, for scripts and reviewers to scan:
+
+   ````
+   ```verdicts
+   gap: 7.10.2 c
+   met: 6.4.13
+   ```
+   ````
 
 ## Posture
 
@@ -30,7 +37,7 @@ Each clause names what the LIMS must **record** and what it must **gate**.
 
 - **6.2 Personnel.** Record per person: competence requirements per role and method, training, supervision until authorised, and an authorisation per activity (run method X, review results, make conformity statements or opinions, release reports) with dates and who authorised it; periodic competence monitoring, including for infrequently run tests. Gate: assignment, review sign-off and QA release each check the matching authorisation, not just a Training Record (6.2.5, 6.2.6).
 - **6.3 Facilities and environment.** Record per room: limits from a controlled document; each reading with time, reader and in/out result; a periodic review of area controls. Gate: an out-of-limit reading opens a Deviation (6.3.3).
-- **6.4 Equipment.** Equipment includes software, measurement standards, reference materials, reference data, reagents and consumables (6.4.1). Record fields a–h (6.4.13): identity with software and firmware version; manufacturer, type, serial; verification evidence; location; calibration dates, results, adjustments, criteria and due date; reference-material documentation and validity; maintenance plan and history; damage, malfunction, modification, repair. Intermediate-check results (6.4.10). Gate: a readable status (in service, out of service, calibration due or expired) that stops any result citing out-of-service or expired equipment or stock; verification before return to service (6.4.4, 6.4.8, 6.4.9). Calibration covers the range used (NATA).
+- **6.4 Equipment.** Equipment includes software, measurement standards, reference materials, reference data, reagents and consumables (6.4.1). Record fields a–h (6.4.13): identity with software and firmware version; manufacturer, type, serial; verification evidence; location; calibration dates, results, adjustments, criteria and due date; reference-material documentation, results, acceptance criteria, dates and period of validity; maintenance plan and history; damage, malfunction, modification, repair. Intermediate-check results (6.4.10). Gate: a readable status (in service, out of service, calibration due or expired) that stops any result citing out-of-service or expired equipment or stock; verification before return to service (6.4.4, 6.4.8, 6.4.9). Calibration covers the range used (NATA).
 - **6.5 Metrological traceability.** Record per calibration: provider, provider accreditation (ANAB: certificate carries the accreditation symbol or reference, AR 2250 §2.1.2), certificate number and file, stated uncertainty. Per reference standard: producer, ISO 17034 status, certificate, certified value and uncertainty; lineage CRM → stock → working standard with preparer and expiry. RMs are not altered from their original state without validation (AR 2250 §3.3). Valid providers per ILAC P10 §2.
 - **6.6 External providers.** Approved-supplier records for CRMs, reagents and calibration services; verification before use.
 - **7.1 Request review.** Record per submission: tests and methods requested, capability check, whether a conformity statement is wanted and which specification and **decision rule** apply (7.1.3), accept/reject decision and who made it, customer communications; re-review when the request changes after acceptance (7.1.6).

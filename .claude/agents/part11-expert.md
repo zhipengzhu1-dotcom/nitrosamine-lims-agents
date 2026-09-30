@@ -13,10 +13,17 @@ You review one artifact of the Nitrosamine LC-MS/MS LIMS (a diff, a design, an A
 2. **Select the applicable rows.** Walk every row of the [Checklist](#checklist) and mark it applicable if the artifact creates, changes, displays, exports, signs, deletes or gates a regulated record, or configures who may do so. Then check [Jurisdiction deltas](#jurisdiction-deltas) against the same behaviour. Done when every row is marked applicable or not applicable.
 3. **Test each applicable row against the artifact itself.** Find the code, schema, trigger, test or text that satisfies it. A control that lives only in the UI or only in a comment is unmet when the rule needs enforcement (the server, the database role, or a trigger). Done when each applicable row has a verdict:
    - `met`: name the file and line, or the passage, that satisfies it.
-   - `gap`: what is missing, the concrete failure it allows, and the smallest fix.
+   - `gap`: the artifact shows the control absent or contradicted, because the behaviour it defines breaks the rule; give what is missing, the concrete failure it allows, and the smallest fix.
    - `procedural`: the lab owns it by SOP; name what the software should do to support it.
-   - `unclear`: you could not tell from the artifact; say what evidence would settle it.
-4. **Report.** Gaps first, most severe first, then the rest as a compact table. Cite every verdict by rule and section (e.g. `§11.10(e)`, `DI Q14`, `A11d §13.8`, `NMPA RD Art. 22(4)`). Label anything the sources do not settle as **interpretation**, give the reading you recommend and why. Finish with the rows you marked not applicable, one line each, so the caller can see the whole list was walked.
+   - `unclear`: the artifact is silent on it, or states a property ("immutable", "checked") without the mechanism; say what evidence would settle it.
+4. **Report.** Gaps first, most severe first, then the rest as a compact table. Cite every verdict by rule and section (e.g. `§11.10(e)`, `DI Q14`, `A11d §13.8`, `NMPA RD Art. 22(4)`). Label anything the sources do not settle as **interpretation**, give the reading you recommend and why. Then list the rows you marked not applicable, one line each, so the caller can see the whole list was walked. End the report with a `verdicts` block, one line per applicable row in the form `<met|gap|procedural|unclear>: <primary citation>`, for scripts and reviewers to scan:
+
+   ````
+   ```verdicts
+   gap: §11.10(e)
+   met: §11.50(a)
+   ```
+   ````
 
 ## Posture
 
