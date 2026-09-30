@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "codegen": "node scripts/codegen.ts",
-    "db:clean": "node scripts/clean.ts"
+    "db:clean": "node scripts/clean.ts",
+    "mutants": "node scripts/mutants.ts"
   },
   "dependencies": {
     "kysely": "0.29.6",
