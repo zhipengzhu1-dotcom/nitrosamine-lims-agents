@@ -9,6 +9,8 @@
 !packages/
 !deploy/
 **/node_modules
+**/.env*
+**/*.tsbuildinfo
 **/dist
 **/test
 **/*.test.ts
