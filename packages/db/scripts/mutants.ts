@@ -1,7 +1,10 @@
 // Proves the part A tests can fail: each mutant breaks one database rule, runs the test file that
 // guards it, and expects that run to fail. A mutant that survives means the test proves nothing.
+// A mutant must target the migration that last defined its rule: when a later migration
+// re-creates the function, the same pattern appears there and the mutant is reported SHADOWED.
+// `pnpm --filter @lims/db mutants <text>` runs only the mutants whose name contains the text.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /** `test` is a vitest path inside `package` (default @lims/db's directory). */
@@ -10,21 +13,21 @@ type Mutant = { name: string; file: string; find: string; replace: string; test:
 const MUTANTS: Mutant[] = [
   {
     name: 'LS001 self-approval allowed',
-    file: 'migrations/0020_records.sql',
+    file: 'migrations/0061_lock_settles_pending.sql',
     find: "and new.signer_person_id = v.created_by then\n    raise exception 'nobody approves",
     replace: "and false then\n    raise exception 'nobody approves",
     test: 'test/adr0001.test.ts',
   },
   {
     name: 'LS002 typist may verify',
-    file: 'migrations/0020_records.sql',
+    file: 'migrations/0061_lock_settles_pending.sql',
     find: "if new.meaning = 'Verified' and exists (",
     replace: "if false and exists (",
     test: 'test/adr0001.test.ts',
   },
   {
     name: 'LS000 anyone signs for anyone',
-    file: 'migrations/0020_records.sql',
+    file: 'migrations/0061_lock_settles_pending.sql',
     find: "if new.signer_person_id <> (ctx->>'person_id')::uuid then",
     replace: 'if false then',
     test: 'test/signature.test.ts',
@@ -160,14 +163,22 @@ const MUTANTS: Mutant[] = [
 ];
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const migrations = readdirSync(`${root}migrations`).sort();
+const only = process.argv[2];
 let survivors = 0;
 
-for (const m of MUTANTS) {
+for (const m of MUTANTS.filter((m) => !only || m.name.includes(only))) {
   const cwd = m.package ? `${root}../../${m.package}/` : root;
   const path = `${root}${m.file}`;
   const original = readFileSync(path, 'utf8');
   if (!original.includes(m.find)) {
     console.log(`STALE    ${m.name}: pattern not found in ${m.file}`);
+    survivors++;
+    continue;
+  }
+  const later = migrations.filter((f) => `migrations/${f}` > m.file && readFileSync(`${root}migrations/${f}`, 'utf8').includes(m.find));
+  if (later.length) {
+    console.log(`SHADOWED ${m.name}: pattern also in ${later.join(', ')}, which redefines the rule`);
     survivors++;
     continue;
   }
