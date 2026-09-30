@@ -36,6 +36,14 @@ _Avoid_: Approver, quality
 The role that assigns tests to Analysts and oversees the workload.
 _Avoid_: Supervisor
 
+**Admin**:
+The role that manages user accounts, roles and configuration inside the system, and unlocks accounts. An Admin never also holds a business role.
+_Avoid_: Administrator, superuser, IT
+
+**Platform Operator**:
+Whoever runs the server and database outside the system. Independent of the Lab, holds no business role, and has no access to records through the system.
+_Avoid_: Admin, host, IT
+
 ### Sample chain
 
 **Submission**:
@@ -137,3 +145,45 @@ _Avoid_: Incident, nonconformance, NCR
 **Training Record**:
 Evidence that a person is qualified on a specific method or SOP version, required before they can be assigned tests under it.
 _Avoid_: Qualification, certificate
+
+### Records and signatures
+
+**Record Version**:
+One saved state of a record that can be signed. Changing a signable record makes a new Record Version; earlier versions are kept.
+_Avoid_: Revision, edit
+
+**Audit Trail**:
+The permanent, system-generated history of every change to records, accounts and configuration: who (with role and Lab), what (old and new value), when, and why. Nobody can edit or switch it off.
+_Avoid_: Log, history, change log
+
+**Reason for Change**:
+The cause recorded with every change made after a record is first saved.
+_Avoid_: Comment, justification
+
+**Electronic Signature**:
+A person's sign-off on one Record Version with one Signature Meaning, given by re-entering their user ID, password and second factor. It shows as unsigned if the record changes afterwards, and can never be withdrawn.
+_Avoid_: E-sig, approval, sign-off
+
+**Signature Meaning**:
+What an Electronic Signature attests: Performed, Verified, Reviewed, Approved, Released, Authored or Acknowledged.
+_Avoid_: Signature type, status
+
+**Authorisation**:
+QA's grant allowing a person to sign with a given Signature Meaning. It is separate from a Training Record: being trained is not being authorised.
+_Avoid_: Permission, access right, qualification
+
+**Return**:
+Sending a record back, with a reason, to the person who signed it Performed, instead of signing it. It is recorded but not signed.
+_Avoid_: Reject (in review), send back
+
+**Critical Data Change**:
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, or the instrument a Run used. It stays a proposal until a second person approves it.
+_Avoid_: Correction, amendment
+
+**Amended Report**:
+A new version of a released Test Report that corrects it, linked to a Deviation and stating what changed. The original stays on record.
+_Avoid_: Revised report, reissue
+
+**Record Type Register**:
+The QA-approved list of record types, stating for each whether it is a Part 11 record, whether it needs a legally binding signature, whether it is raw data, whether its primary form is electronic or paper, its retention class and its data-integrity owner.
+_Avoid_: Record catalogue
