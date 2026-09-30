@@ -22,6 +22,7 @@ OWNER_PROVIDED=(
   "age_public_key: the age public key made on 2026-09-30 (decision #34)"
   "cloudflared.yml: deploy/cloudflared/config.yml.template with the tunnel id filled in"
   "tunnel_credentials.json: the credentials file \`cloudflared tunnel create\` wrote"
+  "approved_releases: one line per signed release, as \`start.sh --local\` prints it"
 )
 
 if [ ! -d "$SECRETS_DIR" ]; then
