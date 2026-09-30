@@ -132,8 +132,9 @@ export type TransitionResult<S extends string, E extends string> =
 /** Pure. The command applies `to` with an UPDATE, and the capture trigger audits it. */
 export function transition<S extends string, E extends string, N extends string>(
   machine: Machine<S, E, N>, from: NoInfer<S>, event: NoInfer<E | N>, actor: Actor,
-): TransitionResult<S, E | N> {
-  if (Object.hasOwn(machine.notBuilt, event)) return { ok: false, refusal: 'not-built', feature: machine.notBuilt[event as N].feature };
+): TransitionResult<S, E> {
+  const isNotBuilt = (e: E | N): e is N => Object.hasOwn(machine.notBuilt, e);
+  if (isNotBuilt(event)) return { ok: false, refusal: 'not-built', feature: machine.notBuilt[event].feature };
   const cell = machine.transitions.find((t) => t.from === from && t.event === event);
   if (!cell) return { ok: false, refusal: 'not-from-this-state', from, event };
   if (!cell.by.includes(actor)) return { ok: false, refusal: 'not-this-actor', from, event, allowed: cell.by };

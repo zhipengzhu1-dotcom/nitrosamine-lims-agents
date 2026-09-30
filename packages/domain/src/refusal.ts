@@ -177,14 +177,14 @@ export const refuse = {
   }),
   notPermitted: (role: Role): Refusal => ({ kind: 'not-permitted', message: `This needs the ${role} role in this Lab.` }),
   transition: <S extends string, E extends string, N extends string>(
-    m: Machine<S, E, N>, record: string, t: NoInfer<Exclude<TransitionResult<S, E | N>, { ok: true }>>,
+    m: Machine<S, E, N>, record: string, t: NoInfer<Exclude<TransitionResult<S, E>, { ok: true }>>,
   ): Refusal => {
     switch (t.refusal) {
       case 'not-built': return refuse.notBuilt(t.feature);
       case 'not-from-this-state':
-        return { kind: 'transition', message: `Can't ${m.events[t.event as E]} ${record}: it is ${m.states[t.from]}.` };
+        return { kind: 'transition', message: `Can't ${m.events[t.event]} ${record}: it is ${m.states[t.from]}.` };
       case 'not-this-actor':
-        return { kind: 'transition', message: `Only ${orList(t.allowed.map((a) => ROLE_LABEL[a]))} can ${m.events[t.event as E]} ${record}.` };
+        return { kind: 'transition', message: `Only ${orList(t.allowed.map((a) => ROLE_LABEL[a]))} can ${m.events[t.event]} ${record}.` };
     }
   },
   staleVersion: (record: string, shown: VersionId, current: VersionId | null): Refusal => ({
