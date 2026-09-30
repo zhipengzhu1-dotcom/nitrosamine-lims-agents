@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "types": ["node"],
+    "paths": { "pg": ["../packages/db/node_modules/@types/pg/index.d.ts"] }
+  },
+  "include": ["checks", "db"]
+}
