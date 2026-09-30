@@ -16,6 +16,7 @@ let fx: Fixture;
 const customerA = randomUUID() as CustomerId;
 const customerB = randomUUID() as CustomerId;
 const product = randomUUID();
+const productB = randomUUID();
 const submission = randomUUID();
 const submissionB = randomUUID();
 let cara: { id: PersonId; session: SessionId };
@@ -28,7 +29,10 @@ beforeAll(async () => {
   committed(await runAudited(db.app, fx.seedCtx(), { kind: 'company' }, async (tx) => {
     await tx.db.insertInto('customer').values([{ id: customerA, code: 'ACME', name: 'Acme Pharma' }, { id: customerB, code: 'BETA', name: 'Beta Labs' }]).execute();
     await tx.db.insertInto('substance').values({ id: substance, cas: '0-00-0', name: 'Fictionib', kind: 'api' }).execute();
-    await tx.db.insertInto('product').values({ id: product, customer_id: customerA, code: 'FIC-01', name: 'Fictionib API', api_substance_id: substance }).execute();
+    await tx.db.insertInto('product').values([
+      { id: product, customer_id: customerA, code: 'FIC-01', name: 'Fictionib API', api_substance_id: substance },
+      { id: productB, customer_id: customerB, code: 'BET-01', name: 'Betanib API', api_substance_id: substance },
+    ]).execute();
     await tx.db.insertInto('person').values({ id: cara.id, printed_name: 'Cara Customer' }).execute();
     await tx.db.insertInto('submission').values([
       { id: submission, customer_id: customerA, number: 'SUB-2026-000001', entered_by: cara.id, submitted_at: sql`clock_timestamp()` },
@@ -53,7 +57,8 @@ const asCara = (over: Partial<AuditContext> = {}): AuditContext => ({
 });
 
 const sampleRow = (customer: CustomerId) => ({
-  lab_id: fx.labA, id: randomUUID(), customer_id: customer, submission_id: customer === customerA ? submission : submissionB, product_id: product, lot_number: 'L1', state: 'Expected' as const,
+  lab_id: fx.labA, id: randomUUID(), customer_id: customer, submission_id: customer === customerA ? submission : submissionB,
+  product_id: customer === customerA ? product : productB, lot_number: 'L1', state: 'Expected' as const,
 });
 
 describe('a Customer writing into a Lab', () => {
@@ -99,13 +104,38 @@ describe('a Customer writing into a Lab', () => {
     );
   });
 
-  it('LA006: the bare record row a Customer may write is a Test\'s, never another kind\'s', async () => {
+  it('LA006: the bare record row a Customer may write is a Test\'s with no parent, never another kind\'s', async () => {
+    const insert = (row: { kind: string; parent_id?: string }) => runAudited(db.app, asCara(), { kind: 'lab', labId: fx.labA }, async (tx) => {
+      await tx.db.insertInto('record').values({ ledger_id: ledgerOf(fx.labA), id: randomUUID(), ...row }).execute();
+      return { commit: null };
+    });
+    await expectSqlState(insert({ kind: 'run' }), 'LA006');
+    const test = await db.app.selectFrom('test').select('id').where('customer_id', '=', customerA).executeTakeFirstOrThrow();
+    await expectSqlState(insert({ kind: 'test', parent_id: test.id }), 'LA006');
+  });
+
+  it('a Customer\'s Sample or Test never points at another Customer\'s Product or Sample: the schema refuses (23503)', async () => {
     await expectSqlState(
       runAudited(db.app, asCara(), { kind: 'lab', labId: fx.labA }, async (tx) => {
-        await tx.db.insertInto('record').values({ ledger_id: ledgerOf(fx.labA), id: randomUUID(), kind: 'run' }).execute();
+        await tx.db.insertInto('sample').values({ ...sampleRow(customerA), product_id: productB }).execute();
         return { commit: null };
       }),
-      'LA006',
+      '23503',
+    );
+    const sampleB = sampleRow(customerB);
+    committed(await runAudited(db.app, fx.seedCtx({ ledgers: [ledgerOf(fx.labA), COMPANY_LEDGER] }), { kind: 'lab', labId: fx.labA }, async (tx) => {
+      await tx.db.insertInto('sample').values(sampleB).execute();
+      return { commit: null };
+    }));
+    const method = await methodId();
+    await expectSqlState(
+      runAudited(db.app, asCara(), { kind: 'lab', labId: fx.labA }, async (tx) => {
+        const test = randomUUID();
+        await tx.db.insertInto('record').values({ ledger_id: ledgerOf(fx.labA), id: test, kind: 'test' }).execute();
+        await tx.db.insertInto('test').values({ lab_id: fx.labA, id: test, customer_id: customerA, sample_id: sampleB.id, seq: 1, method_id: method, state: 'Requested' }).execute();
+        return { commit: null };
+      }),
+      '23503',
     );
   });
 
@@ -127,7 +157,7 @@ describe('a Customer writing into a Lab', () => {
       await tx.db.insertInto('sample').values(sample).execute();
       return { commit: null };
     }));
-    for (const over of [{ state: 'Accepted' as const }, { number: 'RD-T-2026-0001' }, { assigned_analyst: fx.ann.id }, { method_version_id: methodVersion }]) {
+    for (const over of [{ state: 'Accepted' as const }, { number: 'RD-T-2026-0001' }, { assigned_analyst: fx.ann.id }, { method_version_id: methodVersion }, { gxp_class: 'non-GMP' as const }]) {
       await expectSqlState(
         runAudited(db.app, asCara(), { kind: 'lab', labId: fx.labA }, async (tx) => {
           const test = randomUUID();
@@ -140,15 +170,17 @@ describe('a Customer writing into a Lab', () => {
     }
   });
 
-  it('a Customer\'s download event names the downloader; LA006 for anyone else', async () => {
-    const version = await releasedReportVersion();
-    const download = (person: PersonId) => runAudited(db.app, asCara({ action: 'report.download' }), { kind: 'lab', labId: fx.labA }, async (tx) => {
-      await tx.db.insertInto('report_download').values({ lab_id: fx.labA, id: randomUUID(), customer_id: customerA, report_version_id: version, person_id: person }).execute();
+  it('a Customer\'s download event names the downloader and its own report; LA006 for anyone or any report else', async () => {
+    const version = await releasedReportVersion(customerA, submission);
+    const versionB = await releasedReportVersion(customerB, submissionB);
+    const download = (person: PersonId, of: string) => runAudited(db.app, asCara({ action: 'report.download' }), { kind: 'lab', labId: fx.labA }, async (tx) => {
+      await tx.db.insertInto('report_download').values({ lab_id: fx.labA, id: randomUUID(), customer_id: customerA, report_version_id: of, person_id: person }).execute();
       return { commit: null };
     });
-    await expectSqlState(download(fx.ann.id), 'LA006');
-    committed(await download(cara.id));
-    expect(await db.app.selectFrom('report_download').select('person_id').where('report_version_id', '=', version).execute()).toEqual([{ person_id: cara.id }]);
+    await expectSqlState(download(fx.ann.id, version), 'LA006');
+    await expectSqlState(download(cara.id, versionB), 'LA006');
+    committed(await download(cara.id, version));
+    expect(await db.app.selectFrom('report_download').select(['person_id', 'report_version_id']).where('customer_id', '=', customerA).execute()).toEqual([{ person_id: cara.id, report_version_id: version }]);
   });
 
   it('LA006: a Customer cannot insert a Lab row that carries no customer_id', async () => {
@@ -183,14 +215,15 @@ async function methodVersionId(method: string): Promise<string> {
   return id;
 }
 
-/** A Released Test Report version with its issued PDF, the row a download event references. */
-async function releasedReportVersion(): Promise<string> {
+/** A Customer's Released Test Report version with its issued PDF, the row a download event references. */
+async function releasedReportVersion(customer: CustomerId, of: string): Promise<string> {
   const report = randomUUID() as RecordId;
-  const pdf = Buffer.from('%PDF-1.7 fictional');
+  const pdf = Buffer.from(`%PDF-1.7 fictional ${report}`);
   const sha = createHash('sha256').update(pdf).digest();
   const sealed = committed(await runAudited(db.app, fx.ctx(fx.ann, 'Analyst'), { kind: 'lab', labId: fx.labA }, async (tx) => {
     await tx.db.insertInto('record').values({ ledger_id: ledgerOf(fx.labA), id: report, kind: 'test_report' }).execute();
-    return { commit: await seal(tx, report, bodyBytes({ kind: 'report' }), 'test_report@1') };
+    await tx.db.insertInto('test_report').values({ lab_id: fx.labA, id: report, customer_id: customer, submission_id: of, number: `RD-TR-${report.slice(0, 8)}`, state: 'Released' }).execute();
+    return { commit: await seal(tx, report, bodyBytes({ kind: 'report', report }), 'test_report@1') };
   }));
   committed(await runAudited(db.app, fx.ctx(fx.cid, 'QA', { reason: { kind: 'action' } }), { kind: 'lab', labId: fx.labA }, async (tx) => {
     await reauth(tx, fx.cid.id);

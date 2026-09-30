@@ -134,10 +134,22 @@ describe('after release', () => {
     expect(await as(fx.cid, 'QA', (tx) => lockReleased(tx, sig.id as never), true)).toBe(0);
   });
 
+  it('LR001: no signature of any meaning lands on a locked record', async () => {
+    await expectSqlState(
+      as(fx.ann, 'Analyst', async (tx) => {
+        await reauth(tx, fx.ann.id);
+        return sign(tx, { signer: fx.ann.id, target: testV1, meaning: 'Performed', authenticator: 'totp', group: randomUUID() });
+      }),
+      'LR001',
+    );
+  });
+
   it('LR003: only a Released signature locks', async () => {
     const sig = await as(fx.bob, 'Reviewer', async (tx) => {
+      const other = await newWidget(tx, fx.labA, 'T-unlocked');
+      const v = await seal(tx, other, bodyBytes({ kind: 'test' }), 'test@1');
       await reauth(tx, fx.bob.id);
-      return sign(tx, { signer: fx.bob.id, target: testV1, meaning: 'Reviewed', authenticator: 'totp', group: randomUUID() });
+      return sign(tx, { signer: fx.bob.id, target: v, meaning: 'Reviewed', authenticator: 'totp', group: randomUUID() });
     });
     await expectSqlState(as(fx.bob, 'Reviewer', (tx) => lockReleased(tx, sig.signatureId), true), 'LR003');
   });

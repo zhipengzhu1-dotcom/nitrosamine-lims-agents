@@ -71,9 +71,19 @@ describe('a critical Recorded Value', () => {
     v3 = await as(fx.bob, 'Reviewer', (tx) => recordValue(tx, fx.labA, value, '100.30'), 'change');
     expect(await effective(value)).toMatchObject({ version_no: 2 });
     await as(fx.cid, 'QA', (tx) =>
-      tx.db.insertInto('version_rejection').values({ ledger_id: fx.labA, version_id: v3.versionId, rejected_by: fx.cid.id, reason_code: 'wrong-item-selected' }).execute(), 'change');
+      tx.db.insertInto('version_rejection').values({ ledger_id: fx.labA, version_id: v3.versionId, rejected_by: fx.bob.id, reason_code: 'wrong-item-selected' }).execute(), 'change');
     expect(await effective(value)).toMatchObject({ version_no: 2 });
     expect(await pending(value)).toEqual([]);
+  });
+
+  it('LV006: a rejected version cannot be approved afterwards', async () => {
+    await expectSqlState(verified(fx.cid, 'QA', v3), 'LV006');
+    expect(await effective(value)).toMatchObject({ version_no: 2 });
+  });
+
+  it('the rejection names the context\'s person whatever the app passed', async () => {
+    const row = await db.app.selectFrom('version_rejection').select('rejected_by').where('version_id', '=', v3.versionId).executeTakeFirstOrThrow();
+    expect(row.rejected_by).toBe(fx.cid.id);
   });
 
   it('re-proposing the rejected value is a new pending version, not the rejected one reused', async () => {

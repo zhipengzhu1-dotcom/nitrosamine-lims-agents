@@ -2,7 +2,9 @@
 -- lets a Submission create its Samples as Expected and its Tests as Requested in the Lab that will
 -- test them, and decision 13 §2 records every download as an event. Nothing else a Customer
 -- context inserts is its own, and no in-place change ever is (LA006). The earlier guard admitted
--- any INSERT naming the Customer and any bare record row.
+-- any INSERT naming the Customer and any bare record row. The GxP Class stays at its default
+-- until a decision names who sets it. A download names a report of the Customer's own; 0064's
+-- composite keys keep a Sample on the Customer's own Product and a Test on its own Sample.
 create or replace function lims.capture() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -20,7 +22,7 @@ begin
     raise exception 'row on % names no ledger', tg_table_name using errcode = 'LA006';
   end if;
   customer_own := tg_op = 'INSERT' and (ctx->>'customer_id') is not null and case tg_table_name
-    when 'record' then newj->>'kind' = 'test'
+    when 'record' then newj->>'kind' = 'test' and newj->>'parent_id' is null
     when 'sample' then newj->>'customer_id' = ctx->>'customer_id'
                        and newj->>'state' = 'Expected' and newj->>'number' is null
                        and newj->>'received_at' is null and newj->>'received_by' is null
@@ -28,7 +30,13 @@ begin
                      and newj->>'state' = 'Requested' and newj->>'number' is null
                      and newj->>'method_version_id' is null and newj->>'specification_version_id' is null
                      and newj->>'assigned_analyst' is null and newj->>'acceptance_reason' is null
+                     and newj->>'gxp_class' = 'GMP'
     when 'report_download' then newj->>'customer_id' = ctx->>'customer_id' and newj->>'person_id' = ctx->>'person_id'
+                     and exists (select 1 from lims.report_issue i
+                                   join lims.record_version v on v.id = i.report_version_id
+                                   join lims.test_report r on r.id = v.record_id
+                                  where i.report_version_id = (newj->>'report_version_id')::uuid
+                                    and r.customer_id = (ctx->>'customer_id')::uuid)
     else false end;
   if ctx->>'role' not like 'svc:%'
      and exists (select 1 from lims.lab where id = ledger)
