@@ -2,7 +2,9 @@
 // and the Admin's exclusivity surfaced as a refusal.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPerson } from '../src/commands/identity.ts';
-import { credentials, enrol, login, testApi, type Person, type TestApi } from '../src/testing/harness.ts';
+import { ENABLEMENT_DOCUMENTS } from '../src/records/facts.ts';
+import { handover } from '../src/seed/index.ts';
+import { Authenticator, credentials, enrol, login, signAs, testApi, type Person, type TestApi } from '../src/testing/harness.ts';
 import { createLab, type Lab } from './support.ts';
 
 let api: TestApi;
@@ -91,6 +93,38 @@ describe('enrolment', () => {
     expect(r.kind).toBe('refusal');
     expect(r.kind === 'refusal' && r.refusal.message).toMatch(/Admin never also holds a business role/);
     expect(await api.db.app.selectFrom('person').select('id').where('printed_name', '=', 'Two Hats').executeTakeFirst()).toBeUndefined();
+  });
+});
+
+describe('re-enrolment', () => {
+  it('replacing an authenticator clears the identity check, so signing waits until the Admin checks again', async () => {
+    const hal = await enrol(api, { username: 'hal', printedName: 'Hal Analyst', grants: [{ role: 'Analyst', lab: lab.id }] });
+    const adminTab = await login(api, admin);
+    await adminTab.must('identity.checkIdentity', { personId: hal.id, method: 'passport seen in person' });
+
+    const replaced = await adminTab.command('identity.reenrol', { username: 'hal' });
+    expect(replaced.status).toBe(200);
+    const token = (replaced.body as { once: { enrolmentToken: string } }).once.enrolmentToken;
+    const anon = api.client();
+    const start = await anon.command('identity.enrolStart', { token });
+    const halAgain: Person = { ...hal, password: 'Replaced-Phone-Mint-7!', auth: new Authenticator((start.body as { once: { otpauthUri: string } }).once.otpauthUri, hal.auth) };
+    expect((await anon.command('identity.enrolFinish', { token, password: halAgain.password, totp: await halAgain.auth.next() })).status).toBe(200);
+
+    const tab = await login(api, halAgain);
+    const { recordId } = await tab.must<{ recordId: string }>('training.open', { documentVersion: ENABLEMENT_DOCUMENTS.policy, level: 'read-and-understood' });
+    const refused = await signAs(tab, halAgain, 'Acknowledged', 'Analyst', [recordId]);
+    expect(refused.status).not.toBe(200);
+    expect(JSON.stringify(refused.body)).toMatch(/identity/i);
+
+    await adminTab.must('identity.checkIdentity', { personId: hal.id, method: 'passport seen in person, new phone' });
+    expect((await signAs(tab, halAgain, 'Acknowledged', 'Analyst', [recordId])).status).toBe(200);
+  });
+
+  it('the seed hands the demo accounts over only on a fictional-data deployment', async () => {
+    const revoked = () => api.db.app.selectFrom('auth_event').select('id').where('kind', '=', 'totp_revoked').execute();
+    const before = await revoked();
+    await expect(handover(api, 'real')).rejects.toThrow(/fictional/);
+    expect(await revoked()).toEqual(before);
   });
 });
 

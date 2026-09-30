@@ -12,10 +12,8 @@ import { buildApp } from '../app.ts';
 import { CHAIN } from '../chain/index.ts';
 import { commit } from '../commit.ts';
 import { loadConfig } from '../config.ts';
-import { reenrol } from '../commands/identity.ts';
-import { DEMO_ACCOUNTS } from './cast.ts';
 import { Client } from './drive.ts';
-import { alreadySeeded, seedDemo } from './index.ts';
+import { alreadySeeded, handover as handOver, seedDemo } from './index.ts';
 
 const handover = process.argv.includes('--handover');
 const config = loadConfig();
@@ -36,11 +34,10 @@ try {
     console.log('Seeded.');
   }
   if (handover) {
-    console.log('\nHandover: the seed\'s authenticators are revoked; enrol each account through its link within 24 hours.\n');
-    for (const [username, printedName, role] of DEMO_ACCOUNTS) {
-      const out = await driver.run(seed, reenrol, { username });
-      if (out.kind !== 'receipt') throw new Error(`reenrol ${username}: ${out.refusal.message}`);
-      const token = (out.once?.data as { enrolmentToken: string }).enrolmentToken;
+    const links = await handOver(driver, config.dataClass);
+    console.log('\nHandover: the seed\'s authenticators are revoked; enrol each account through its link within 24 hours.');
+    console.log('Enrol adam first; as the Admin, record a new identity check for each person before they sign.\n');
+    for (const { username, printedName, role, token } of links) {
       console.log(`${username.padEnd(6)} ${printedName.padEnd(16)} ${role.padEnd(40)} /enrol#${token}`);
     }
   }

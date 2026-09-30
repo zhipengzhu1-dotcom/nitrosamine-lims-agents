@@ -5,7 +5,9 @@
 import type { Kysely } from 'kysely';
 import type { DB } from '@lims/db';
 import type { Deps } from '../commit.ts';
-import { authorise, seedCast, type Cast } from './cast.ts';
+import { reenrol } from '../commands/identity.ts';
+import type { DataClass } from '../config.ts';
+import { authorise, DEMO_ACCOUNTS, seedCast, type Cast } from './cast.ts';
 import { acceptAndReceive, assign, fullChain, openTabs, PASSING, submitOne, typeRun, type Submitted, type Tabs } from './chain.ts';
 import type { Driver } from './drive.ts';
 import { METHOD_DOCUMENTS, METHOD_GCMS, METHOD_LCMS, seedCustomers, seedReference, type Reference } from './reference.ts';
@@ -72,6 +74,24 @@ export async function seedDemo(api: Driver, deps: Deps, log: (line: string) => v
   await tabs.sam.must('test.reject', { testId: rejected.samples[0]!.tests[0]!, reason: `${METHOD_GCMS} is still in development in this Lab; request ${METHOD_LCMS} instead.` });
 
   return { cast, reference, tabs, submissions: { released, ready, requested, inProgress: { ...inProgressSubmitted, runId: typed.runId }, rejected } };
+}
+
+export type HandoverLink = { readonly username: string; readonly printedName: string; readonly role: string; readonly token: string };
+
+/**
+ * Revokes the seed's authenticators on the demo accounts and mints one enrolment link each, for
+ * the owner to scan into a real authenticator app. Only on a fictional-data deployment: one person
+ * then holds every demo account, which the demo exception allows only while the data is fictional.
+ */
+export async function handover(api: Driver, dataClass: DataClass): Promise<readonly HandoverLink[]> {
+  if (dataClass !== 'fictional') throw new Error(`the handover gives one person every demo account, so it runs only on fictional data, not ${dataClass}`);
+  const links: HandoverLink[] = [];
+  for (const [username, printedName, role] of DEMO_ACCOUNTS) {
+    const out = await api.run(api.seed, reenrol, { username });
+    if (out.kind !== 'receipt') throw new Error(`reenrol ${username}: ${out.refusal.message}`);
+    links.push({ username, printedName, role, token: (out.once?.data as { enrolmentToken: string }).enrolmentToken });
+  }
+  return links;
 }
 
 /** The counts the cap test compares. */

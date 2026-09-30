@@ -86,17 +86,20 @@ export class Client {
 export class Authenticator {
   readonly secret: string;
   readonly #used = new Set<number>();
+  /** The person's steps up to here were spent by an authenticator this one replaces. */
+  readonly #after: number;
 
-  constructor(otpauthUri: string) {
+  constructor(otpauthUri: string, replacing: Authenticator | null = null) {
     const secret = new URL(otpauthUri).searchParams.get('secret');
     if (!secret) throw new Error('the otpauth URI carries no secret');
     this.secret = secret;
+    this.#after = replacing?.lastUsedStep() ?? -Infinity;
   }
 
   async next(): Promise<string> {
     for (;;) {
       const now = totpStep(new Date());
-      const step = [now - 1, now, now + 1].find((s) => !this.#used.has(s));
+      const step = [now - 1, now, now + 1].find((s) => s > this.#after && !this.#used.has(s));
       if (step !== undefined) {
         this.#used.add(step);
         return totpCode(this.secret, new Date(), step - now);
