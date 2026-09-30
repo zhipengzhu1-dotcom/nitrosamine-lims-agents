@@ -101,6 +101,13 @@ const MUTANTS: Mutant[] = [
     replace: 'and false then',
     test: 'test/lab-scope.test.ts',
   },
+  {
+    name: 'a rejected version is reused by seal',
+    file: 'migrations/0060_seal_after_rejection.sql',
+    find: "     and not exists (select 1 from lims.version_rejection r where r.version_id = v.id)\n",
+    replace: '',
+    test: 'test/adr0001.test.ts',
+  },
 ];
 
 const root = fileURLToPath(new URL('..', import.meta.url));
