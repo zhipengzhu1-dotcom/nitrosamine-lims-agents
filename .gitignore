@@ -6,3 +6,4 @@ dist/
 todo.md
 test-results/
 playwright-report/
+.lims/

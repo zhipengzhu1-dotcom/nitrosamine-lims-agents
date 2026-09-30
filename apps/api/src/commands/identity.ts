@@ -142,4 +142,29 @@ export const unlockAccount = defineCommand({
   },
 });
 
-export const identityCommands = [createPerson, enrolStart, enrolFinish, checkIdentity, unlockAccount];
+/**
+ * Replaces a person's authenticator: the password and secret are revoked and a new one-time link
+ * is minted (decision 13 §1: replacing a lost authenticator). The seed's handover uses it so the
+ * owner enrols each demo account on a real authenticator app.
+ */
+export const reenrol = defineCommand({
+  name: 'identity.reenrol',
+  input: z.object({ username: z.string().min(1).max(64) }),
+  acting: { as: 'role', role: 'Admin' },
+  reason: { kind: 'picklist', code: 'other', text: 'authenticator replaced' },
+  ledgers: () => [],
+  run: async (tx, input) => {
+    const admin = tx.actor.kind === 'admin' || tx.actor.kind === 'service' ? tx.actor.person : null;
+    if (!admin) throw new Error('reenrol acts as Admin');
+    const account = await tx.db.selectFrom('account').select(['person_id', 'username']).where('username', '=', input.username).executeTakeFirst();
+    if (!account) return { kind: 'not-permitted', message: 'No such person.' };
+    await tx.db.updateTable('account').set({ password_hash: null, totp_secret_enc: null }).where('person_id', '=', account.person_id).execute();
+    await tx.db.updateTable('session').set({ ended_at: sql`clock_timestamp()`, end_reason: 'admin' }).where('person_id', '=', account.person_id).where('ended_at', 'is', null).execute();
+    await tx.db.insertInto('auth_event').values({ person_id: account.person_id, kind: 'totp_revoked', counts_toward_lockout: false, detail: { by: admin } }).execute();
+    const link = await newLink(tx, account.person_id as PersonId, account.username, admin);
+    return receipt(`Revoked ${account.username}'s authenticator and ended their sessions. Hand over the new enrolment link; it works once and expires in ${LINK_HOURS} hours.`, 'audited',
+      { personId: account.person_id, username: account.username, expiresAt: link.expiresAt }, { data: { enrolmentToken: link.token } });
+  },
+});
+
+export const identityCommands = [createPerson, enrolStart, enrolFinish, checkIdentity, unlockAccount, reenrol];

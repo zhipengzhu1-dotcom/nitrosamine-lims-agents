@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "codegen": "node scripts/codegen.ts",
+    "migrate": "node scripts/migrate.ts",
     "db:clean": "node scripts/clean.ts",
     "mutants": "node scripts/mutants.ts"
   },
