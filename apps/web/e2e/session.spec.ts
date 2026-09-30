@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, request, test, type Page } from '@playwright/test';
-import { Secret, TOTP } from 'otpauth';
+import { Phone } from './phone';
 
 const out = process.env['E2E_OUT'] as string;
 const shots = join(out, 'shots');
@@ -14,32 +14,6 @@ mkdirSync(shots, { recursive: true });
 type Carried = { username: string; printedName: string; password: string; secret: string; lastUsedStep: number | null };
 type State = { widget: string; people: { ann: Carried; bob: Carried }; enrolmentToken: string };
 const state = JSON.parse(readFileSync(join(out, 'state.json'), 'utf8')) as State;
-
-const PERIOD_MS = 30_000;
-
-/** The person's phone: it never repeats a step, and never reuses one the server-side setup spent. */
-class Phone {
-  readonly #totp: TOTP;
-  readonly #used = new Set<number>();
-  readonly #floor: number;
-
-  constructor(secret: string, floor: number | null) {
-    this.#totp = new TOTP({ algorithm: 'SHA1', digits: 6, period: 30, secret: Secret.fromBase32(secret) });
-    this.#floor = floor ?? -1;
-  }
-
-  async code(): Promise<string> {
-    for (;;) {
-      const now = Math.floor(Date.now() / PERIOD_MS);
-      const step = [now + 1, now, now - 1].find((s) => s > this.#floor && !this.#used.has(s));
-      if (step !== undefined) {
-        this.#used.add(step);
-        return this.#totp.generate({ timestamp: step * PERIOD_MS });
-      }
-      await new Promise((r) => setTimeout(r, PERIOD_MS - (Date.now() % PERIOD_MS) + 100));
-    }
-  }
-}
 
 const phones = { ann: new Phone(state.people.ann.secret, state.people.ann.lastUsedStep), bob: new Phone(state.people.bob.secret, state.people.bob.lastUsedStep) };
 

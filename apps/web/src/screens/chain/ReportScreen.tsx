@@ -16,8 +16,8 @@ import { Checklist } from './ReviewScreen';
 const STATE: Readonly<Record<string, string>> = { Draft: 'Draft', InQaReview: 'In QA Review', Released: 'Released', Superseded: 'Superseded' };
 const OUTCOME: Readonly<Record<string, string>> = { conforms: 'Conforms', 'does-not-conform': 'Does not conform', 'not-judged': 'Not judged' };
 
-/** The subject QA's confirmation of one Test's Section verdict is filed under. */
-const subjectOf = (testId: string, jurisdiction: string) => `${testId}/${jurisdiction}`;
+/** The subject QA's confirmation of one Test's Section verdict is filed under (the server's verdictSubject). */
+const subjectOf = (testLabel: string, jurisdiction: string) => `${testLabel}, ${jurisdiction} Section`;
 
 /**
  * A Test Report: the drafter sends it to QA; QA opens a release Review, ticks its checklist and
@@ -42,7 +42,7 @@ export function ReportScreen({ reportId }: { reportId: string }) {
     review.reload();
   };
   const r = review.status === 'ok' ? review.data : null;
-  const confirmationOf = (testId: string, jurisdiction: string) => r?.confirmations.find((c) => c.subject === subjectOf(testId, jurisdiction))?.confirmation ?? null;
+  const confirmationOf = (testLabel: string, jurisdiction: string) => r?.confirmations.find((c) => c.subject === subjectOf(testLabel, jurisdiction))?.confirmation ?? null;
   const drafter = roles.has('Reviewer') ? 'Reviewer' : roles.has('LabManager') ? 'LabManager' : null;
 
   const primary = ((): RailPrimary | null => {
@@ -56,7 +56,7 @@ export function ReportScreen({ reportId }: { reportId: string }) {
     if (!r) return null;
     const missing = [
       ...r.items.filter((i) => !i.ticked).map((i) => `tick "${i.item}"`),
-      ...d.tests.flatMap((t) => t.jurisdictions.filter((j) => confirmationOf(t.id, j) === null).map((j) => `confirm or disagree with the ${j} verdict of ${t.label}`)),
+      ...d.tests.flatMap((t) => t.jurisdictions.filter((j) => confirmationOf(t.label, j) === null).map((j) => `confirm or disagree with the ${j} verdict of ${t.label}`)),
     ];
     const signLabel = `Sign ${label} as Released`;
     return missing.length > 0
@@ -111,7 +111,7 @@ export function ReportScreen({ reportId }: { reportId: string }) {
                       </span>
                     </div>
                     {t.jurisdictions.map((j) => {
-                      const confirmation = confirmationOf(t.id, j);
+                      const confirmation = confirmationOf(t.label, j);
                       return (
                         <div key={j} className="verdict-confirm" role="group" aria-label={`${j} verdict of ${t.label}`}>
                           <span className="verdict-confirm__what">

@@ -119,4 +119,31 @@ describe('useView', () => {
     expect(await screen.findByText('b')).toBeInTheDocument();
     expect(s.calls.map((c) => `${c.method} ${c.url}`)).toEqual(['GET /api/views/record.audit?recordId=r1', 'GET /api/views/record.audit?recordId=r2']);
   });
+
+  it('keeps showing what it read while a reload of the same query is on its way, so nothing on the screen remounts', async () => {
+    let release: (r: Response) => void = () => {};
+    const answers = [
+      Promise.resolve(new Response(JSON.stringify({ entries: ['a'] }), { status: 200 })),
+      new Promise<Response>((r) => (release = r)),
+    ];
+    const fetch = vi.fn(async () => answers.shift() as Promise<Response>);
+    const api = createApi({ fetch: fetch as never, onSessionLost: () => {} });
+    let reload: () => void = () => {};
+    function Reloading() {
+      const v = useView<{ entries: string[] }>('record.audit', { recordId: 'r1' });
+      reload = v.reload;
+      return <p>{v.status === 'ok' ? v.data.entries.join(',') : v.status}</p>;
+    }
+    render(
+      <ApiContext value={api}>
+        <Reloading />
+      </ApiContext>,
+    );
+    expect(await screen.findByText('a')).toBeInTheDocument();
+    act(() => reload());
+    expect(screen.getByText('a')).toBeInTheDocument();
+    expect(screen.queryByText('loading')).toBeNull();
+    await act(async () => release(new Response(JSON.stringify({ entries: ['b'] }), { status: 200 })));
+    expect(await screen.findByText('b')).toBeInTheDocument();
+  });
 });

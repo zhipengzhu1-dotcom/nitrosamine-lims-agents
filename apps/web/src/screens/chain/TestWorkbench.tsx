@@ -182,7 +182,7 @@ export function TestWorkbench({ testId }: { testId: string }) {
               </nav>
             )}
             {editable && dd.runs.length === 0 && lab.status === 'ok' && <NewRun lab={lab.data} form={form} onChange={setForm} />}
-            {r && <RunPanel key={`run-${generation}`} run={r} editable={editable === true && r.run.state === 'Open'} onSaved={reload} />}
+            {r && <RunPanel run={r} editable={editable === true && r.run.state === 'Open'} onSaved={reload} />}
             {(editable || dd.preparations.length > 0) && (
               <section className="panel" aria-label="Preparations">
                 <h2 className="h-sec">Preparations</h2>
@@ -195,10 +195,10 @@ export function TestWorkbench({ testId }: { testId: string }) {
                         <h3 className="h-mini">Preparation {p.subject}</h3>
                         {editable ? (
                           <>
-                            <RecordedValueField key={`w-${generation}`} parent={dd.test.id} field="prep.weight" subject={p.subject} label={`${p.subject} weight`} unit="mg" role="Analyst" critical limits={[]} saved={v('prep.weight', p.subject)} onSaved={reload} />
-                            <RecordedValueField key={`d-${generation}`} parent={dd.test.id} field="prep.dilution" subject={p.subject} label={`${p.subject} dilution volume`} unit="mL" role="Analyst" critical limits={[]} saved={v('prep.dilution', p.subject)} onSaved={reload} />
+                            <RecordedValueField parent={dd.test.id} field="prep.weight" subject={p.subject} label={`${p.subject} weight`} unit="mg" role="Analyst" critical limits={[]} saved={v('prep.weight', p.subject)} onSaved={reload} />
+                            <RecordedValueField parent={dd.test.id} field="prep.dilution" subject={p.subject} label={`${p.subject} dilution volume`} unit="mL" role="Analyst" critical limits={[]} saved={v('prep.dilution', p.subject)} onSaved={reload} />
                             {(dd.method?.analytes ?? []).map((a) => (
-                              <RecordedValueField key={`${a}-${generation}`} parent={dd.test.id} field="prep.result" subject={`${p.subject}/${a}`} label={`${p.subject} ${a} result`} unit="pg/µL" role="Analyst" critical limits={[]} saved={v('prep.result', `${p.subject}/${a}`)} onSaved={reload} />
+                              <RecordedValueField key={a} parent={dd.test.id} field="prep.result" subject={`${p.subject}/${a}`} label={`${p.subject} ${a} result`} unit="pg/µL" role="Analyst" critical limits={[]} saved={v('prep.result', `${p.subject}/${a}`)} onSaved={reload} />
                             ))}
                           </>
                         ) : (

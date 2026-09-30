@@ -30,7 +30,7 @@ describe('what a prompt lists under "What you are signing"', () => {
     const run = signedValues(item({ schema: 'run@1', instrument: { equipment: 'LCMS-01' }, runChecks: [{ name: 'S/N at LOQ standard', unit: 'ratio', outcome: 'conforms' }], trueCopy: { fileSha256: H } }));
     expect(run).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: 'Instrument', value: 'LCMS-01' }),
-      expect.objectContaining({ label: 'Run Check S/N at LOQ standard', value: 'conforms' }),
+      expect.objectContaining({ label: 'Run Check S/N at LOQ standard, outcome', value: 'conforms' }),
     ]));
     expect(sourceFilesOf(item({ schema: 'run@1', trueCopy: { fileSha256: H } }))).toEqual([{ name: 'True Copy', sha256: H }]);
     const report = signedValues(item({ schema: 'test_report@1', tests: [{ test: 't', number: 'RD-S-2026-000001/T1', version: 'ver-t', sha256: H }] }));

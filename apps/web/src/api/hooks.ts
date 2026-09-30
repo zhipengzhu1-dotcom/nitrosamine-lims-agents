@@ -60,11 +60,15 @@ export function useView<T>(name: string, query: Readonly<Record<string, string>>
   const [generation, setGeneration] = useState(0);
   const queryKey = query === null ? null : new URLSearchParams(query).toString();
   const latest = useRef(0);
+  const shown = useRef<string | null>(null);
 
   useEffect(() => {
     if (queryKey === null) return;
     const ticket = ++latest.current;
-    setState({ status: 'loading' });
+    // A reload of the query already on screen keeps it there until the new answer arrives, so the
+    // fields under it are not unmounted mid-entry; a new query starts from nothing.
+    if (shown.current !== queryKey) setState({ status: 'loading' });
+    shown.current = queryKey;
     void api.view<T>(name, Object.fromEntries(new URLSearchParams(queryKey))).then((r) => {
       if (ticket !== latest.current) return;
       setState(r.kind === 'ok' ? { status: 'ok', data: r.data } : r.kind === 'refusal' ? { status: 'refused', refusal: r.refusal } : { status: 'unreachable', message: r.message });

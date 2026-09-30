@@ -106,7 +106,8 @@ export const REVIEW_FIELDS = { tick: 'checklist.item', verdict: 'verdict.confirm
 
 export const preparationSubject = (prepNo: number): string => `P${prepNo}`;
 export const resultSubject = (prepNo: number, analyte: string): string => `P${prepNo}/${analyte}`;
-export const verdictSubject = (testId: string, jurisdiction: string): string => `${testId}/${jurisdiction}`;
+/** Named by the Test's label, so the prompt QA signs from prints which Test and Section each confirmation is for. */
+export const verdictSubject = (testLabel: string, jurisdiction: string): string => `${testLabel}, ${jurisdiction} Section`;
 
 // ---------------------------------------------------------------------------------------------
 // Review Checklists (decision 20 §7). Versioned documents once the vault exists; constants here.

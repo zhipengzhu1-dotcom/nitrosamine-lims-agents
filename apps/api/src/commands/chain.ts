@@ -347,8 +347,9 @@ export const confirmVerdict = defineCommand({
     if (r.reviewer !== person(tx)) return { kind: 'not-permitted', message: 'A Review is filled by the person who opened it.' };
     if (r.reviewsKind !== 'test_report') return { kind: 'not-permitted', message: 'Verdicts are confirmed on the Review of a Test Report.' };
     const report = await loadReport(tx.db, r.reviews);
-    if (!report.tests.some((t) => t.id === testId)) return { kind: 'not-permitted', message: 'That Test is not on this report.' };
-    const saved = await tx.records.record({ parent: reviewId, field: REVIEW_FIELDS.verdict, subject: verdictSubject(testId, jurisdiction), value: { type: 'text', value: confirmation } });
+    const test = report.tests.find((t) => t.id === testId);
+    if (!test) return { kind: 'not-permitted', message: 'That Test is not on this report.' };
+    const saved = await tx.records.record({ parent: reviewId, field: REVIEW_FIELDS.verdict, subject: verdictSubject(test.label, jurisdiction), value: { type: 'text', value: confirmation } });
     if ('kind' in saved) return saved;
     return receipt(confirmation === 'confirmed' ? `Confirmed the ${jurisdiction} verdict.` : `Recorded your disagreement with the ${jurisdiction} verdict; release is refused until a Deviation resolves it.`, 'audited', { valueId: saved.value });
   },

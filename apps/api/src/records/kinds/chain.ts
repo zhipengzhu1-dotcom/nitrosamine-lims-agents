@@ -224,8 +224,8 @@ export const runKind: KindDef = {
 export const reviewKind: KindDef = {
   kind: 'review',
   fields: {
-    'checklist.item': { label: 'checklist item', critical: false, type: 'boolean', subject: 'checklist-item', verifiedEach: false },
-    'verdict.confirmation': { label: 'verdict confirmation', critical: false, type: 'text', subject: 'checklist-item', verifiedEach: false },
+    'checklist.item': { label: 'Checklist', critical: false, type: 'boolean', subject: 'checklist-item', verifiedEach: false },
+    'verdict.confirmation': { label: 'Verdict', critical: false, type: 'text', subject: 'checklist-item', verifiedEach: false },
   },
   label: async (q, record) => {
     const r = await loadReview(q, record);
@@ -300,7 +300,7 @@ export const testReportKind: KindDef = {
           performedBy: [...(t.assignedAnalyst ? [t.assignedAnalyst] : []), ...signersOf(t.standing, 'Performed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Performed'))] as PersonId[],
           reviewedBy: [...signersOf(t.standing, 'Reviewed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Reviewed'))],
           blockingHolds: t.holds,
-          verdicts: (t.specification?.data.sections ?? []).map((s) => ({ jurisdiction: s.jurisdiction, confirmation: review.confirmations.get(verdictSubject(t.id, s.jurisdiction)) ?? 'none' as const })),
+          verdicts: (t.specification?.data.sections ?? []).map((s) => ({ jurisdiction: s.jurisdiction, confirmation: review.confirmations.get(verdictSubject(t.label, s.jurisdiction)) ?? 'none' as const })),
         }));
         const [first, ...rest] = tests;
         if (!first) return { kind: 'not-permitted', message: `${r.label} holds no Test.` };

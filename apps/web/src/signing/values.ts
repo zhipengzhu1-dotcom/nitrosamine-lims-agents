@@ -68,7 +68,7 @@ const LISTERS: { readonly [schema: string]: (body: Record<string, unknown>) => r
   ],
   'run@1': (body) => [
     ...(isObject(body['instrument']) ? [line('Instrument', str(body['instrument']['equipment']))] : []),
-    ...list(body['runChecks']).map((c) => line(`Run Check ${str(c['name'])}`, str(c['outcome']))),
+    ...list(body['runChecks']).map((c) => line(`Run Check ${str(c['name'])}, outcome`, str(c['outcome']))),
   ],
   'test_report@1': (body) => list(body['tests']).map((t) => line(`Test ${str(t['number'])}`, cited(t))),
 };

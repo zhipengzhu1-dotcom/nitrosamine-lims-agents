@@ -37,8 +37,9 @@ export function fieldLabel(spec: Pick<FieldSpec, 'label' | 'subject'>, subject: 
     case 'none':
       return `${spec.label} (${subject})`;
     case 'run-check':
-    case 'checklist-item':
       return `${spec.label} ${subject}`;
+    case 'checklist-item':
+      return `${spec.label}: ${subject}`;
   }
 }
 

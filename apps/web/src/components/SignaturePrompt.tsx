@@ -57,8 +57,8 @@ function ValueList({ values }: { values: readonly SignedValue[] }) {
   if (values.length === 0) return null;
   return (
     <ul className="replist">
-      {values.map((v) => (
-        <li key={v.label}>
+      {values.map((v, i) => (
+        <li key={`${i}-${v.label}`}>
           <span className="replist__label">
             {v.label}
             {v.by && <span className="sub">by {v.by}</span>}
