@@ -83,11 +83,43 @@ A Customer's API or drug product, identified by the Customer's product code, its
 _Avoid_: Material, compound, item
 
 **Specification**:
-The set of limits for a Product that Reportable Results are judged against. A Product may have several, each with a purpose such as release or shelf-life; stability results are judged against the shelf-life one their Protocol names. The Lab builds each from a Specification Request; a Submission may use it only once QA has approved it and the Customer has accepted that version, decision rule included.
+The set of limits for a Product that Reportable Results are judged against. A Product may have several, each with a purpose such as release or shelf-life; stability results are judged against the shelf-life one their Protocol names. It has one Specification Section per Jurisdiction. The Lab builds each from a Specification Request; a Submission may use it only once QA has approved it and the Customer has accepted that version, Decision Rule included. Any change after QA approval makes a new version, which the Customer must accept again.
 _Avoid_: Spec limit, acceptance criteria (for products)
 
+**Jurisdiction**:
+A regulator whose nitrosamine limits and rules a Specification applies: FDA, EMA, NMPA or MHLW.
+_Avoid_: Region, market, authority
+
+**Specification Section**:
+The part of a Specification for one Jurisdiction: its Specification Lines, its maximum daily dose, its rule for multiple nitrosamines and its own verdict. A Test conforms only if every Section passes.
+_Avoid_: Sub-specification, regional spec
+
+**Specification Line**:
+One analyte's limit within a Specification Section. The limit is derived from an Acceptable Intake, a fixed concentration, a limit test at a stated concentration, or report only (no limit). It is kept as written, with its decimal places, together with a reporting threshold.
+_Avoid_: Spec limit, criterion
+
+**Acceptable Intake**:
+The daily intake of one nitrosamine, in ng/day, that a Jurisdiction accepts. It records its basis (compound-specific, surrogate, CPCA category, interim with an end date, FDA default, or Customer-justified) and its source.
+_Avoid_: AI limit, TTC
+
+**Acceptable Intake Table**:
+The company's QA-verified list of the Acceptable Intakes one Jurisdiction publishes, each row citing its source document, revision and effective date. A Specification copies the rows it uses. A newer row supersedes an older one; it never rewrites it.
+_Avoid_: AI list, limits database
+
+**Jurisdiction Rule Set**:
+The versioned rules that a Jurisdiction's Specification Sections follow: rounding, the share-of-limit triggers, the allowed rules for multiple nitrosamines, CPCA category values and less-than-lifetime factors. A Specification pins the version in force when QA approves it.
+_Avoid_: Regional settings, jurisdiction config
+
+**Decision Rule**:
+The agreed way a Reportable Result is judged against a limit: simple or guarded acceptance. It records its risk basis, the words printed for each outcome, and what a conditional outcome means. The Customer accepts it as part of the Specification.
+_Avoid_: Acceptance criteria, pass/fail rule
+
+**First Detection**:
+The first released GMP result at or above the LOQ for one analyte in one Product under an EMA or MHLW Specification Section, across all Labs. The Customer is told. If that result is later invalidated, the record is marked superseded, never removed.
+_Avoid_: First positive, new finding
+
 **Specification Request**:
-What a Customer sends so the Lab can build a Specification: its jurisdictions, maximum daily dose, treatment duration, purpose, basis, any pharmacopoeial conformance claim with its official edition, the nitrosamines of concern, and the Customer's own specification document. Its values count as Customer-supplied.
+What a Customer sends so the Lab can build a Specification: its Jurisdictions, maximum daily dose, treatment duration, purpose, basis, any pharmacopoeial conformance claim with its official edition, the nitrosamines of concern, and the Customer's own specification document. Its values count as Customer-supplied.
 _Avoid_: Spec sheet, limit request
 
 **Lot**:
@@ -161,7 +193,7 @@ _Avoid_: CoA, certificate, report
 ### Stability
 
 **Protocol**:
-A versioned plan for the stability testing of one Product: its Storage Conditions, the ages to test at in each, the Tests and Methods for each age, units per Pull and in reserve, the shelf-life Specification, the decision rule and whether conformity statements are wanted, Pull Windows, trend rules and GxP Class. It pins the version of each Storage Condition it uses. Written by the Customer or the Lab, owned by the company, and in force only once the Customer's approval is attached and QA has signed it Approved. It is the accepted request for every Pull made under it. An amendment is a new version, approved the same way, that applies to a Study from a named Time Point onward and never changes Time Points already pulled. It also states whether its data supports a marketing authorisation, which puts its Studies' records, and everything behind their results, under legal hold that only QA can lift.
+A versioned plan for the stability testing of one Product: its Storage Conditions, the ages to test at in each, the Tests and Methods for each age, units per Pull and in reserve, the shelf-life Specification, the Decision Rule and whether conformity statements are wanted, Pull Windows, trend rules and GxP Class. It pins the version of each Storage Condition it uses. Written by the Customer or the Lab, owned by the company, and in force only once the Customer's approval is attached and QA has signed it Approved. It is the accepted request for every Pull made under it. An amendment is a new version, approved the same way, that applies to a Study from a named Time Point onward and never changes Time Points already pulled. It also states whether its data supports a marketing authorisation, which puts its Studies' records, and everything behind their results, under legal hold that only QA can lift.
 _Avoid_: Stability plan, study plan, program
 
 **Storage Condition**:
@@ -421,7 +453,7 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, maximum daily dose, acceptable intake, the instrument a Run used, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, a Specification's maximum daily dose, Acceptable Intake, fixed or limit-test concentration, reporting threshold, less-than-lifetime factor, interim end date, rule for multiple nitrosamines, Decision Rule or basis, a Customer-supplied water or LOD value, the instrument a Run used, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
 _Avoid_: Correction, amendment
 
 **Amended Report**:

@@ -6,10 +6,14 @@ A change to critical data (a result value, weight, dilution volume, standard con
 
 - **Free correction until the Analyst signs Performed, approval only after.** Owner's first choice, rejected after the Part 11 expert review: it lets an Analyst overwrite a saved weight or result with only a reason, which is the case Art. 16 targets.
 - **Approval from first save, as a separate step.** Rejected as too costly for typo fixes.
-- **Approval from first save, folded into existing signings.** Chosen. Before Performed, any pending correction needs a Verified signing by a second person, and that signing approves every pending correction on the record. After Performed, the Reviewer (for results) or QA (for Specifications) approves it. In both cases the dialog shows each old → new value.
+- **Approval from first save, folded into existing signings.** Chosen. Before Performed, any pending correction needs a Verified signing by a second person, and that signing approves every pending correction on the record. After Performed, the Reviewer approves corrections to results. A Specification's pending corrections are approved inside QA's Approved signing. In every case the dialog shows each old → new value.
 
 ## Consequences
 
 Fixing a typo in a weight is not an edit. It creates a proposed value that a second person sees and approves. "Simplifying" this into an in-place edit with a reason would break the China alignment. Source: [Decide the audit trail and electronic signature design](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13). The Material Lot fields were added by [Decide the inventory model](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/17), because the server computes standard concentrations from them. An approved correction makes new Record Versions of every descendant Solution, so their Verified signatures show as unsigned until given again.
 
 [Decide the equipment and scheduled-check model](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/15) added Room, storage and DI water readings. Each of those readings alone decides whether an Excursion or Deviation opens, so one person must not be able to correct an out-of-limits reading into limits.
+
+[Decide the specification and limits model](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/29) added every other Specification field that decides a verdict: a fixed or limit-test concentration, reporting threshold, less-than-lifetime factor, interim end date, rule for multiple nitrosamines, Decision Rule and basis. It also added a Customer-supplied water or LOD value used for a basis correction. The server computes an AI-derived limit, so nobody types it.
+
+The same decision drew the line for Specifications at QA approval. Before QA signs Approved, a changed field is a Critical Data Change approved within that signing. After Approved, any change is a new Specification version: Authored, Approved by QA, and accepted again by the Customer, whose earlier acceptance never carries over. See ADR 0003.

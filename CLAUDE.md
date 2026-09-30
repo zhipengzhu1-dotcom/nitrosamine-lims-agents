@@ -21,4 +21,4 @@ A demo LIMS for a nitrosamine QC lab, built to 21 CFR Part 11, EU GMP Annex 11 a
 
 ## Data
 
-`OneDrive_3_9-29-2026/` holds the owner's real instrument exports. It stays local and out of git (it is in `.git/info/exclude`); read it to learn formats, and write only fictional data into the repo.
+`OneDrive_3_9-29-2026/` holds the owner's real instrument exports. It stays local and out of git (it is in `.git/info/exclude`); read it to learn formats, and write only fictional data into the repo. Published regulatory values (acceptable intakes, pharmacopoeial limits) are the exception: they are real and cite their source and revision.
