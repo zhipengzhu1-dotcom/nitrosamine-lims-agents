@@ -1,14 +1,21 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import pg from 'pg';
 import { connectionFor } from './config.ts';
 
 const MIGRATIONS_DIR = new URL('../migrations/', import.meta.url);
 const ROLES_SQL = new URL('../bootstrap/roles.sql', import.meta.url);
 
-async function migrationFiles(): Promise<readonly { name: string; sql: string }[]> {
-  const names = (await readdir(MIGRATIONS_DIR)).filter((n) => n.endsWith('.sql')).sort();
-  return Promise.all(names.map(async (name) => ({ name, sql: await readFile(new URL(name, MIGRATIONS_DIR), 'utf8') })));
+async function migrationFiles(dirs: readonly (URL | string)[] = [MIGRATIONS_DIR]): Promise<readonly { name: string; sql: string }[]> {
+  const files: { name: string; sql: string }[] = [];
+  for (const dir of dirs) {
+    const base = typeof dir === 'string' ? pathToFileURL(dir.endsWith('/') ? dir : `${dir}/`) : dir;
+    for (const name of (await readdir(base)).filter((n) => n.endsWith('.sql'))) {
+      files.push({ name, sql: await readFile(new URL(name, base), 'utf8') });
+    }
+  }
+  return files.sort((a, b) => (a.name < b.name ? -1 : 1));
 }
 
 /** Creates the cluster roles if they are missing. Runs as a superuser, once per cluster. */
@@ -34,12 +41,15 @@ export async function schemaFingerprint(): Promise<string> {
 
 /**
  * Applies the unapplied migrations in name order, each in its own transaction as lims_owner.
- * Returns the names applied. Safe to rerun: an applied migration is skipped.
+ * Returns the names applied. Safe to rerun: an applied migration is skipped. `extraDirs` adds
+ * migration directories beyond the package's own (tests use it).
  */
-export async function migrate(database: string): Promise<readonly string[]> {
+export async function migrate(database: string, extraDirs: readonly string[] = []): Promise<readonly string[]> {
   const client = new pg.Client(connectionFor('lims_migrator', database));
   await client.connect();
   try {
+    // lims_migrator is NOINHERIT and owns nothing: reading the ledger needs the owner role too.
+    await client.query('set role lims_owner');
     const ledger = await client.query<{ exists: boolean }>(`select to_regclass('lims.migration') is not null as exists`);
     const applied = new Set(
       ledger.rows[0]?.exists
@@ -47,7 +57,7 @@ export async function migrate(database: string): Promise<readonly string[]> {
         : [],
     );
     const done: string[] = [];
-    for (const f of await migrationFiles()) {
+    for (const f of await migrationFiles([MIGRATIONS_DIR, ...extraDirs])) {
       if (applied.has(f.name)) continue;
       await client.query('begin');
       try {
