@@ -8,7 +8,7 @@ import type { DB } from '../src/generated.ts';
 import type { AuditedTx, TxOutcome } from '../src/audited.ts';
 import { seal, type Sealed } from '../src/doors.ts';
 import { ledgerOf } from '../src/ledgers.ts';
-import type { LabId, RecordId, VersionRef } from '@lims/domain/ids';
+import type { LabId, PersonId, RecordId, VersionRef } from '@lims/domain/ids';
 import { GENERATED_CLASSES, type TableClasses } from '../src/scope.ts';
 import { sqlState, type TestDb } from '../src/testing/harness.ts';
 
@@ -71,6 +71,13 @@ export async function recordValue(tx: AuditedTx, lab: LabId, record: RecordId, t
     await tx.db.insertInto('recorded_value_version').values({ ledger_id: ledgerOf(lab), version_id: v.versionId, value_text: text, decimals: text.split('.')[1]?.length ?? 0 }).execute();
   }
   return v;
+}
+
+let step = 1_000_000;
+
+/** The re-authentication a signing needs: one TOTP step consumed for the signer in this commit. */
+export async function reauth(tx: AuditedTx, person: PersonId, purpose = 'signing'): Promise<void> {
+  await tx.db.insertInto('totp_step_used').values({ person_id: person, step: ++step, purpose }).execute();
 }
 
 /** The committed value of an audited transaction; a rollback is a test failure. */

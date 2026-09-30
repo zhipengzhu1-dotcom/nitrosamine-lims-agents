@@ -6,7 +6,7 @@ import { lockReleased, seal, sign, standingFailures, versionStands, type Sealed 
 import type { RecordId } from '@lims/domain/ids';
 import { seedFixture, type Fixture, type Person } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
-import { bodyBytes, expectSqlState, installWidget, newValue, newWidget, recordValue, widgets, committed } from './support.ts';
+import { bodyBytes, expectSqlState, installWidget, newValue, newWidget, reauth, recordValue, widgets, committed } from './support.ts';
 
 let db: TestDb;
 let fx: Fixture;
@@ -80,6 +80,7 @@ describe('before release', () => {
 describe('after release', () => {
   it('the Released signature locks the report, the Test, the Run and every value in the closure', async () => {
     const locked = await as(fx.cid, 'QA', async (tx) => {
+      await reauth(tx, fx.cid.id);
       const s = await sign(tx, { signer: fx.cid.id, target: reportV1, meaning: 'Released', authenticator: 'totp', group: randomUUID() });
       await widgets(tx).updateTable('widget').set({ state: 'Reported' }).where('id', '=', test).execute();
       await widgets(tx).updateTable('widget').set({ state: 'Released' }).where('id', '=', report).execute();
@@ -100,7 +101,10 @@ describe('after release', () => {
   it('LR001: the change that was pending on a locked value can be neither approved nor rejected', async () => {
     expect(await db.app.selectFrom('pending_version').select('id').where('record_id', '=', weight).execute()).toEqual([{ id: weightV2.versionId }]);
     await expectSqlState(
-      as(fx.cid, 'QA', (tx) => sign(tx, { signer: fx.cid.id, target: weightV2, meaning: 'Verified', authenticator: 'totp', group: randomUUID() })),
+      as(fx.cid, 'QA', async (tx) => {
+        await reauth(tx, fx.cid.id);
+        return sign(tx, { signer: fx.cid.id, target: weightV2, meaning: 'Verified', authenticator: 'totp', group: randomUUID() });
+      }),
       'LR001',
     );
     await expectSqlState(
@@ -131,7 +135,10 @@ describe('after release', () => {
   });
 
   it('LR003: only a Released signature locks', async () => {
-    const sig = await as(fx.bob, 'Reviewer', (tx) => sign(tx, { signer: fx.bob.id, target: testV1, meaning: 'Reviewed', authenticator: 'totp', group: randomUUID() }));
+    const sig = await as(fx.bob, 'Reviewer', async (tx) => {
+      await reauth(tx, fx.bob.id);
+      return sign(tx, { signer: fx.bob.id, target: testV1, meaning: 'Reviewed', authenticator: 'totp', group: randomUUID() });
+    });
     await expectSqlState(as(fx.bob, 'Reviewer', (tx) => lockReleased(tx, sig.signatureId), true), 'LR003');
   });
 });
@@ -163,8 +170,10 @@ describe('version_stands, the recursive rule', () => {
 
   it('an approved change to the Run\'s value unsigns the Run version and, through the cite, the Test version', async () => {
     const v2 = await db.app.selectFrom('pending_version').select(['id', 'content_hash']).where('record_id', '=', runValue2).executeTakeFirstOrThrow();
-    await as(fx.cid, 'QA', (tx) =>
-      sign(tx, { signer: fx.cid.id, target: { versionId: v2.id as never, hash: v2.content_hash!.toString('hex') as never }, meaning: 'Verified', authenticator: 'totp', group: randomUUID() }));
+    await as(fx.cid, 'QA', async (tx) => {
+      await reauth(tx, fx.cid.id);
+      await sign(tx, { signer: fx.cid.id, target: { versionId: v2.id as never, hash: v2.content_hash!.toString('hex') as never }, meaning: 'Verified', authenticator: 'totp', group: randomUUID() });
+    });
     expect(await versionStands(db.app, run2V1.versionId)).toBe(false);
     expect(await versionStands(db.app, test2V1.versionId)).toBe(false);
     const why = await standingFailures(db.app, test2V1.versionId);

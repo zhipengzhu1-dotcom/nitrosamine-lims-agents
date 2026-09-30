@@ -6,10 +6,10 @@ import { sql } from 'kysely';
 import { runAudited, type AuditContext } from '../src/audited.ts';
 import { seal, sign } from '../src/doors.ts';
 import { COMPANY_LEDGER, ledgerOf } from '../src/ledgers.ts';
-import type { CustomerId, PersonId, SessionId } from '@lims/domain/ids';
+import type { CustomerId, PersonId, RecordId, SessionId } from '@lims/domain/ids';
 import { seedFixture, type Fixture } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
-import { bodyBytes, committed, expectSqlState } from './support.ts';
+import { bodyBytes, committed, expectSqlState, reauth } from './support.ts';
 
 let db: TestDb;
 let fx: Fixture;
@@ -185,14 +185,15 @@ async function methodVersionId(method: string): Promise<string> {
 
 /** A Released Test Report version with its issued PDF, the row a download event references. */
 async function releasedReportVersion(): Promise<string> {
-  const report = randomUUID();
+  const report = randomUUID() as RecordId;
   const pdf = Buffer.from('%PDF-1.7 fictional');
   const sha = createHash('sha256').update(pdf).digest();
   const sealed = committed(await runAudited(db.app, fx.ctx(fx.ann, 'Analyst'), { kind: 'lab', labId: fx.labA }, async (tx) => {
     await tx.db.insertInto('record').values({ ledger_id: ledgerOf(fx.labA), id: report, kind: 'test_report' }).execute();
-    return { commit: await seal(tx, report as never, bodyBytes({ kind: 'report' }), 'test_report@1') };
+    return { commit: await seal(tx, report, bodyBytes({ kind: 'report' }), 'test_report@1') };
   }));
   committed(await runAudited(db.app, fx.ctx(fx.cid, 'QA', { reason: { kind: 'action' } }), { kind: 'lab', labId: fx.labA }, async (tx) => {
+    await reauth(tx, fx.cid.id);
     const s = await sign(tx, { signer: fx.cid.id, target: sealed, meaning: 'Released', authenticator: 'totp', group: randomUUID() });
     await tx.db.insertInto('blob').values({ ledger_id: ledgerOf(fx.labA), sha256: sha, size_bytes: pdf.length, media_type: 'application/pdf' }).execute();
     await tx.db.insertInto('report_issue').values({ lab_id: fx.labA, report_version_id: sealed.versionId, released_signature: s.signatureId, pdf_sha256: sha, renderer_release: 'test' }).execute();

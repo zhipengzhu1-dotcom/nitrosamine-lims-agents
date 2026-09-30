@@ -6,7 +6,7 @@ import { sign, type Sealed } from '../src/doors.ts';
 import type { RecordId } from '@lims/domain/ids';
 import { seedFixture, type Fixture, type Person } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
-import { expectSqlState, installWidget, newValue, newWidget, recordValue, committed } from './support.ts';
+import { expectSqlState, installWidget, newValue, newWidget, reauth, recordValue, committed } from './support.ts';
 
 let db: TestDb;
 let fx: Fixture;
@@ -26,7 +26,10 @@ const as = <T>(p: Person, role: string, fn: (tx: AuditedTx) => Promise<T>, reaso
     .then(committed);
 
 const verified = (signer: Person, role: string, target: Sealed) =>
-  as(signer, role, (tx) => sign(tx, { signer: signer.id, target, meaning: 'Verified', authenticator: 'totp', group: randomUUID() }));
+  as(signer, role, async (tx) => {
+    await reauth(tx, signer.id);
+    return sign(tx, { signer: signer.id, target, meaning: 'Verified', authenticator: 'totp', group: randomUUID() });
+  });
 
 const effective = (record: RecordId) =>
   db.app.selectFrom('effective_version').select(['id', 'version_no']).where('record_id', '=', record).executeTakeFirst();

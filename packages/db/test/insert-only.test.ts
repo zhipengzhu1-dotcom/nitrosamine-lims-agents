@@ -7,7 +7,7 @@ import { sign } from '../src/doors.ts';
 import { seedFixture, type Fixture } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
 import { DOOR_ONLY_TABLES, INSERT_ONLY_TABLES } from '../src/tables.generated.ts';
-import { expectSqlState, installWidget, newValue, newWidget } from './support.ts';
+import { expectSqlState, installWidget, newValue, newWidget, reauth } from './support.ts';
 
 let db: TestDb;
 let fx: Fixture;
@@ -27,6 +27,7 @@ beforeAll(async () => {
   });
   await runAudited(db.app, fx.ctx(fx.bob, 'Reviewer'), { kind: 'lab', labId: fx.labA }, async (tx) => {
     const v = await tx.db.selectFrom('record_version').select(['id', 'content_hash']).executeTakeFirstOrThrow();
+    await reauth(tx, fx.bob.id);
     await sign(tx, { signer: fx.bob.id, target: { versionId: v.id as never, hash: v.content_hash.toString('hex') as never }, meaning: 'Verified', authenticator: 'totp', group: randomUUID() });
     return { commit: null };
   });

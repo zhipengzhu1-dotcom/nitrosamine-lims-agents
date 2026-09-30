@@ -160,6 +160,34 @@ const MUTANTS: Mutant[] = [
     replace: '',
     test: 'test/sample-chain.test.ts',
   },
+  {
+    name: 'LS005 a signature with no re-authentication',
+    file: 'migrations/0063_signing_reauthentication.sql',
+    find: 'if not exists (\n    select 1 from lims.totp_step_used t',
+    replace: 'if false and not exists (\n    select 1 from lims.totp_step_used t',
+    test: 'test/signature.test.ts',
+  },
+  {
+    name: "LS005 an earlier attempt's step counts",
+    file: 'migrations/0063_signing_reauthentication.sql',
+    find: '       and t.used_at >= transaction_timestamp()\n',
+    replace: '',
+    test: 'test/signature.test.ts',
+  },
+  {
+    name: "LS005 another commit's step counts",
+    file: 'migrations/0063_signing_reauthentication.sql',
+    find: "       and t.commit_key = (ctx->>'commit_key')::uuid\n",
+    replace: '',
+    test: 'test/signature.test.ts',
+  },
+  {
+    name: 'LS005 a login step counts',
+    file: 'migrations/0063_signing_reauthentication.sql',
+    find: "t.person_id = p_signer and t.purpose = 'signing'",
+    replace: 't.person_id = p_signer',
+    test: 'test/signature.test.ts',
+  },
 ];
 
 const root = fileURLToPath(new URL('..', import.meta.url));
