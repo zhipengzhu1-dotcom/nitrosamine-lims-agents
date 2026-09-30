@@ -137,6 +137,13 @@ These come from the compliance review. Each one binds [Prototype the walking ske
 
     The comparison rule itself is the new ticket below.
 
+**Commits**
+
+25. Every commit happens exactly once.
+    - Its button disables on the first press until the server answers.
+    - Each prompt or sheet carries a one-time commit key, and the server refuses a second commit with the same key.
+    - A double press or double tap, including one during a closing animation, can never sign twice, open a second Deviation, place Holds twice or assign twice.
+
 ### Where the prototype is superseded
 
 The prototype's import, flag, Run Check, limit and weighing flows follow a brief written before #20, #29 and #36 closed. Where the prototype differs from those decisions or from the rules above, the decisions and rules govern, and nothing should be copied from it. These are the known differences:
@@ -151,7 +158,9 @@ The prototype's import, flag, Run Check, limit and weighing flows follow a brief
 - the demo credential aids;
 - the passkey replacing the typed password;
 - an alarm acknowledgement that isn't signed;
-- signature details in hover titles.
+- signature details in hover titles;
+- a reload or a new tab starting over as a fresh visit and taking the person from the address, since the prototype stores nothing;
+- a double press committing twice.
 
 ### What the arena showed
 
@@ -165,6 +174,10 @@ The prototype's import, flag, Run Check, limit and weighing flows follow a brief
   | Ledger, bottom rail | Opus, no skills (the control) | 16 / 3 / 1 |
 
   All four had a clean console and no horizontal overflow at 1366×768, and none had a target under 40 px. The merged direction passes its own 57 click-through checks.
+- **Independent re-check of the merge: 7 pass, 3 partial, 0 fail.**
+  - The three partials share one cause: the prototype stores nothing, so a reload or a new tab takes the person from the address. Rule 1 closes that for the build.
+  - The re-check also found that a double press signed a Check twice, which is rule 25.
+  - The report is `verify/chosen.md`.
 - **They converged.**
   - All four separate reading from acting.
   - Three put the actions in a single glove-sized rail.
@@ -176,7 +189,7 @@ The prototype's import, flag, Run Check, limit and weighing flows follow a brief
 
 ### Handed on
 
-- [Prototype the walking skeleton on main](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/24) builds the React 19 + TypeScript shell from the chosen tokens, the component list in `RATIONALE.md` (plus the three components in rule 12), and rules 1–24. Reading and Check entry wait for the two new tickets below: until both are decided, #24 shows them as rough screens that save nothing and make no pass or fail comparison.
+- [Prototype the walking skeleton on main](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/24) builds the React 19 + TypeScript shell from the chosen tokens, the component list in `RATIONALE.md` (plus the three components in rule 12), and rules 1–25. Reading and Check entry wait for the two new tickets below: until both are decided, #24 shows them as rough screens that save nothing and make no pass or fail comparison.
 - [Decide how Check and Run Check results are compared with their limits](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/37): the USP review's open rule, rounding to the limit's written decimals (General Notices 7.20) or not.
 - [Decide what is recorded when a failing value is first typed](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/38): the Part 11 review's open question, which would amend #15 and ADR 0001.
 
