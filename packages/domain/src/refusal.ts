@@ -50,6 +50,10 @@ export type GateReason =
   | { readonly code: 'method-adoption'; readonly status: AdoptionStatus }
   | { readonly code: 'sample-not-received' }
   | { readonly code: 'work-linked'; readonly test: string }
+  | {
+      readonly code: 'limit-not-derived'; readonly jurisdiction: Jurisdiction; readonly analyte: string;
+      readonly limit: string; readonly derived: string; readonly acceptableIntake: string; readonly maximumDailyDose: string;
+    }
   | { readonly code: 'not-built'; readonly feature: NotBuilt; readonly because: string };
 
 export type Refusal =
@@ -179,6 +183,8 @@ export function describeReason(r: GateReason): string {
     case 'method-adoption': return `The Method Adoption in this Lab is ${ADOPTION_LABEL[r.status]}; a GMP Test needs it validated here, verified or transferred in.`;
     case 'sample-not-received': return 'The Sample has not been received.';
     case 'work-linked': return `${r.test} has a Preparation or Run linked, so it can't be cancelled.`;
+    case 'limit-not-derived':
+      return `The ${r.jurisdiction} limit for ${r.analyte} is written ${r.limit} ppm, but ${r.acceptableIntake} ng/day ÷ ${r.maximumDailyDose} mg/day rounded down to ${decimals(r.limit.split('.')[1]?.length ?? 0)} is ${r.derived} ppm.`;
     case 'not-built': return `${NOT_BUILT_MESSAGE[r.feature]}: ${r.because}.`;
   }
 }

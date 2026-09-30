@@ -3,7 +3,7 @@
 // invented. Sizes stay well under the cap (4 Customers, 13 Products, 3 Methods): two Customers,
 // four Products, two Methods.
 
-import type { MethodData, SpecificationData } from '../chain/model.ts';
+import type { DecisionRule, MethodData, SpecificationData } from '../chain/model.ts';
 import { methodTrainingDocument } from '../chain/model.ts';
 import { createAdoption, createCustomer, createEquipment, createMethod, createMethodVersion, createProduct, createSpecification, createSubstance } from '../commands/reference.ts';
 import type { Cast } from './cast.ts';
@@ -49,10 +49,21 @@ export const lcmsMethodData = (): MethodData => ({
   prerequisiteDocuments: [PREREQUISITE_SOP],
 });
 
+/** Simple acceptance (ILAC-G8:09/2019, binary statement): the result at the limit's decimals is compared with the limit, without its uncertainty. */
+export const SIMPLE_ACCEPTANCE: DecisionRule = {
+  rule: 'simple-acceptance',
+  riskBasis: 'Simple acceptance, ILAC-G8:09/2019 binary statement: the Reportable Result, rounded to the limit\'s decimals, is compared with the limit without taking measurement uncertainty into account. The Customer accepts the risk of a false acceptance or rejection near the limit.',
+  wording: {
+    conforms: 'Conforms: the result does not exceed the limit (simple acceptance; measurement uncertainty not taken into account).',
+    doesNotConform: 'Does not conform: the result exceeds the limit (simple acceptance; measurement uncertainty not taken into account).',
+  },
+};
+
 /** FDA Section only: NDMA at 96 ng/day over a maximum daily dose of 320 mg/day is 0.30 ppm (rounded down to the stated digits). */
 export const fdaSpecification = (): SpecificationData => ({
   sections: [{
     jurisdiction: 'FDA', ruleSetVersion: 'FDA-RS@1', rounding: 'half-away-from-zero', maximumDailyDose: { value: '320', unit: 'mg/day' },
+    decisionRule: SIMPLE_ACCEPTANCE,
     lines: [{ analyte: 'NDMA', limit: '0.30', unit: 'ppm', uspClaim: false, basis: NDMA_AI }],
   }],
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatWritten, written } from '../src/decimal.ts';
-import { aiDerivedLimit, aiDerivationHolds } from '../src/limits.ts';
+import { toRefusal } from '../src/gates.ts';
+import { aiDerivedLimit, aiDerivationHolds, derivationGate } from '../src/limits.ts';
 
 // Decision 29: an AI-derived limit is AI ÷ MDD, computed exactly and rounded down to the limit's
 // written decimals. NDMA 96 ng/day and NDEA 26.5 ng/day are FDA, Control of Nitrosamine Impurities
@@ -30,5 +31,30 @@ describe('an AI-derived limit is AI ÷ MDD rounded down to its written decimals'
   it('keeps the limit\'s decimals in the derived value, so 0.30 and 0.3 are different writtens', () => {
     expect(aiDerivedLimit(written('96'), written('320'), 2)).toEqual({ unscaled: 30n, decimals: 2 });
     expect(aiDerivedLimit(written('96'), written('320'), 1)).toEqual({ unscaled: 3n, decimals: 1 });
+  });
+});
+
+describe('the Specification refuses a line whose limit is not its derivation', () => {
+  const ndma = { analyte: 'NDMA', acceptableIntakeNgPerDay: written('96') };
+  const ndea = { analyte: 'NDEA', acceptableIntakeNgPerDay: written('26.5') };
+
+  it('lets every derived line through', () => {
+    expect(derivationGate([{ jurisdiction: 'FDA', maximumDailyDoseMgPerDay: written('1000'), lines: [{ ...ndma, limit: written('0.096') }, { ...ndea, limit: written('0.026') }] }]))
+      .toEqual({ go: true });
+  });
+
+  it('names each line that differs, with the derivation it should have matched', () => {
+    const gate = derivationGate([
+      { jurisdiction: 'FDA', maximumDailyDoseMgPerDay: written('1000'), lines: [{ ...ndma, limit: written('0.096') }, { ...ndea, limit: written('0.027') }] },
+      { jurisdiction: 'EMA', maximumDailyDoseMgPerDay: written('320'), lines: [{ ...ndma, limit: written('0.31') }] },
+    ]);
+    expect(gate).toEqual({ go: false, reasons: [
+      { code: 'limit-not-derived', jurisdiction: 'FDA', analyte: 'NDEA', limit: '0.027', derived: '0.026', acceptableIntake: '26.5', maximumDailyDose: '1000' },
+      { code: 'limit-not-derived', jurisdiction: 'EMA', analyte: 'NDMA', limit: '0.31', derived: '0.30', acceptableIntake: '96', maximumDailyDose: '320' },
+    ] });
+    if (gate.go) throw new Error('expected a refusal');
+    expect(toRefusal(gate).message).toBe(
+      'The FDA limit for NDEA is written 0.027 ppm, but 26.5 ng/day ÷ 1000 mg/day rounded down to 3 decimals is 0.026 ppm. '
+      + 'The EMA limit for NDMA is written 0.31 ppm, but 96 ng/day ÷ 320 mg/day rounded down to 2 decimals is 0.30 ppm.');
   });
 });

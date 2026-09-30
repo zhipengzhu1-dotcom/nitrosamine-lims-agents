@@ -48,7 +48,7 @@ export const specificationKind: KindDef = {
     const s = await q.selectFrom('specification as s').innerJoin('product as p', 'p.id', 's.product_id')
       .select(['s.id', 's.purpose', 's.data', 'p.id as product_id', 'p.code', 'p.name']).where('s.id', '=', record).executeTakeFirstOrThrow();
     return {
-      body: { schema: 'specification@1', specification: s.id, product: { id: s.product_id, code: s.code, name: s.name }, purpose: s.purpose, data: asCanon(SpecificationDataSchema.parse(s.data)) },
+      body: { schema: 'specification@2', specification: s.id, product: { id: s.product_id, code: s.code, name: s.name }, purpose: s.purpose, data: asCanon(SpecificationDataSchema.parse(s.data)) },
       cites: [],
     };
   },

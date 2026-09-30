@@ -7,7 +7,9 @@ import { z } from 'zod';
 import { COMPANY_LEDGER, ledgerOf, versionStands } from '@lims/db';
 import { uuid } from '@lims/contract';
 import type { RecordId, VersionId } from '@lims/domain/ids';
-import { MethodDataSchema, SpecificationDataSchema } from '../chain/model.ts';
+import { toRefusal } from '@lims/domain/gates';
+import { derivationGate } from '@lims/domain/limits';
+import { derivedSectionsOf, MethodDataSchema, SpecificationDataSchema } from '../chain/model.ts';
 import { receipt, type CommandTx } from '../commit.ts';
 import { defineCommand } from '../doors.ts';
 import { VersionRefSchema } from '../wire.ts';
@@ -91,6 +93,8 @@ export const createSpecification = defineCommand({
   reason: { kind: 'first_save' },
   ledgers: () => [],
   run: async (tx, input) => {
+    const derivation = derivationGate(derivedSectionsOf(input.data));
+    if (!derivation.go) return toRefusal(derivation);
     const id = randomUUID() as RecordId;
     await tx.db.insertInto('record').values({ ledger_id: COMPANY_LEDGER, id, kind: 'specification' }).execute();
     await tx.db.insertInto('specification').values({ id, product_id: input.productId, purpose: input.purpose, data: JSON.stringify(input.data) }).execute();

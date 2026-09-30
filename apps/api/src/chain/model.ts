@@ -8,6 +8,7 @@ import { uuid } from '@lims/contract';
 import type { Canon } from '@lims/domain/canonical';
 import { written } from '@lims/domain/decimal';
 import type { AnalyteKey } from '@lims/domain/ids';
+import type { DerivedSection } from '@lims/domain/limits';
 import { transition, type Actor, type Machine } from '@lims/domain/machines';
 import { refuse, type Refusal } from '@lims/domain/refusal';
 import type { NonEmpty } from '@lims/domain/nonempty';
@@ -41,19 +42,36 @@ export const MethodDataSchema = z.object({
 });
 export type MethodData = z.infer<typeof MethodDataSchema>;
 
+const PositiveDecimal = Decimal.refine((s) => !s.startsWith('-') && /[1-9]/.test(s), 'must be greater than zero');
+
+/**
+ * The agreed way a Reportable Result is judged against its limit (decision 29, ISO/IEC 17025
+ * §7.1.3), with the words printed for each outcome. Only simple acceptance is built: guarded
+ * acceptance needs the Uncertainty Evaluation, so the skeleton cannot hold it.
+ */
+export const DecisionRuleSchema = z.object({
+  rule: z.literal('simple-acceptance'),
+  riskBasis: z.string().min(1).max(500),
+  wording: z.object({ conforms: z.string().min(1).max(300), doesNotConform: z.string().min(1).max(300) }),
+});
+export type DecisionRule = z.infer<typeof DecisionRuleSchema>;
+
 export const SpecificationDataSchema = z.object({
   sections: z.array(z.object({
     jurisdiction: z.enum(['FDA', 'EMA', 'NMPA', 'MHLW']),
     ruleSetVersion: z.string().min(1),
     rounding: z.enum(['half-away-from-zero', 'half-even']),
-    maximumDailyDose: z.object({ value: Decimal, unit: z.literal('mg/day') }),
+    maximumDailyDose: z.object({ value: PositiveDecimal, unit: z.literal('mg/day') }),
+    decisionRule: DecisionRuleSchema,
+    /** Every line the skeleton holds is AI-derived; fixed-concentration, limit-test and report-only lines are not built. */
     lines: z.array(z.object({
       analyte: z.string().min(1).max(32),
+      /** AI ÷ MDD rounded down to the decimals written here; the command refuses any other value. */
       limit: Decimal,
       unit: z.literal('ppm'),
       uspClaim: z.boolean(),
-      /** How the limit was derived: the published Acceptable Intake and its source, kept as written. */
-      basis: z.object({ acceptableIntakeNgPerDay: Decimal, source: z.string().min(1) }).nullable(),
+      /** The published Acceptable Intake the limit is derived from, and its source, kept as written. */
+      basis: z.object({ acceptableIntakeNgPerDay: PositiveDecimal, source: z.string().min(1) }),
     })).min(1),
   })).min(1),
 });
@@ -78,6 +96,13 @@ export const runChecksOf = (m: MethodData): readonly ExportedRunCheck[] =>
 
 export const variabilityOf = (m: MethodData): VariabilityCriterion | null =>
   m.variability ? { statistic: m.variability.statistic, limit: written(m.variability.limit), source: m.variability.source } : null;
+
+export const derivedSectionsOf = (s: SpecificationData): readonly DerivedSection[] =>
+  s.sections.map((section) => ({
+    jurisdiction: section.jurisdiction,
+    maximumDailyDoseMgPerDay: written(section.maximumDailyDose.value),
+    lines: section.lines.map((l) => ({ analyte: l.analyte, limit: written(l.limit), acceptableIntakeNgPerDay: written(l.basis.acceptableIntakeNgPerDay) })),
+  }));
 
 export const sectionsOf = (s: SpecificationData): NonEmpty<SpecificationSection> =>
   nonEmpty(s.sections.map((section) => ({
