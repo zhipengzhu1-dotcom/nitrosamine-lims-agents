@@ -20,8 +20,16 @@ _Avoid_: Client, requester
 A named person at a Customer through whom the Lab deals with it: only a Customer Contact's written request opens, changes or closes a portal account for that Customer's people.
 _Avoid_: Customer admin, account owner, sponsor
 
+**Customer User**:
+A person with a portal account for a Customer, acting for one Customer at a time: submits, tracks, downloads Test Reports and sends messages. A member of staff may also be a Customer User, under the same account.
+_Avoid_: Portal user, requester, client user
+
+**Customer Approver**:
+A Customer User whom the Customer's Quality Agreement names to decide for it in the portal: accepting Specifications and Planned Deviations, answering Holds, and supplying Phase II plans and Protocol approvals. Their accept is audited but is never an Electronic Signature, and never given on a Test they performed or reviewed.
+_Avoid_: Approver (alone, which suggests QA), signatory, authoriser
+
 **Quality Agreement**:
-The written agreement between the company and an external Customer covering GMP testing: audit access to source data, notice of data-integrity failures, record retention and what happens at contract end, who may decide for the Customer in the portal, and the duty to report leavers. The Lab accepts no GMP Test from an external Customer without a current one.
+The written agreement between the company and an external Customer covering GMP testing: audit access to source data, notice of data-integrity failures, record retention and what happens at contract end, its Customer Approvers, and the duty to report leavers. The Lab accepts no GMP Test from an external Customer without a current one.
 _Avoid_: Contract, technical agreement, QAG
 
 **Sample Custodian**:
