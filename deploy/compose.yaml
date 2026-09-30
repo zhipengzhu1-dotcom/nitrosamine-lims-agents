@@ -98,6 +98,7 @@ services:
       PGUSER: lims_app
       LIMS_DATA_CLASS: ${LIMS_DATA_CLASS:?deploy/mac/start.sh sets the data class}
       LIMS_REPORT_STORE: /var/lib/lims/reports
+      LIMS_CHRONY_HOST: 172.30.10.1
       LIMS_TOTP_ENCRYPTION_KEY_FILE: /run/secrets/totp_encryption_key
       LIMS_PASSWORD_PEPPER_FILE: /run/secrets/password_pepper
       LIMS_WORKER_UPLOAD_TOKEN_FILE: /run/secrets/worker_upload_token
@@ -146,7 +147,12 @@ networks:
   db: { internal: true }
   edge: { internal: true }
   # Outbound only (nothing is published): the API calls the Worker, cloudflared dials Cloudflare.
-  egress: {}
+  # Its subnet is fixed because chrony in the VM allows monitoring from it, at the gateway address.
+  egress:
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+          gateway: 172.30.10.1
 
 volumes:
   pgdata: {}

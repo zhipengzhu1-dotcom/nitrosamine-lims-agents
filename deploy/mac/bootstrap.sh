@@ -56,6 +56,8 @@ fi
 
 # makestep 1 -1: step the clock whenever it is more than 1 s off, not only at boot, because the VM
 # wakes with the Mac hours behind. chrony logs each step; each one is a System Incident.
+# cmdallow lets the API read the sync state (monitoring commands only, never control) from
+# Compose's egress network, whose gateway is this VM; compose.yaml fixes that subnet.
 CHRONY_CONF='# Written by deploy/mac/bootstrap.sh (ADR 0002, Time).
 server time.cloudflare.com iburst nts
 makestep 1 -1
@@ -63,7 +65,9 @@ driftfile /var/lib/chrony/chrony.drift
 ntsdumpdir /var/lib/chrony
 rtcsync
 logdir /var/log/chrony
-log tracking measurements statistics'
+log tracking measurements statistics
+bindcmdaddress 0.0.0.0
+cmdallow 172.30.10.0/24'
 
 VM_SCRIPT="$(cat <<VM
 set -eu
