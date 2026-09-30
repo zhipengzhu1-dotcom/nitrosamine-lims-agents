@@ -1,9 +1,10 @@
 // The web app may import only @lims/contract, so the few rules it needs are copied there. Each copy
 // is checked against the server's own definition here, where both are importable.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CHANGE_REASONS, SIGNS_AS, type SessionAnswer } from '@lims/contract/session';
-import { SIGNS_AS as DOMAIN_SIGNS_AS } from '@lims/domain/signing';
+import { CHANGE_REASONS, PASSWORD_RULES, SIGNS_AS, STATEMENT, type SessionAnswer } from '@lims/contract/session';
+import { SIGNS_AS as DOMAIN_SIGNS_AS, STATEMENT as DOMAIN_STATEMENT } from '@lims/domain/signing';
 import { ReasonSchema } from '../src/commands/values.ts';
+import { PASSWORD_PROBLEM_TEXT } from '../src/identity/password.ts';
 import { enrol, login, testApi, type TestApi } from '../src/testing/harness.ts';
 import { createLab } from './support.ts';
 
@@ -12,9 +13,17 @@ describe('the contract copies of server rules', () => {
     expect(SIGNS_AS).toEqual(DOMAIN_SIGNS_AS);
   });
 
+  it('each meaning\'s statement matches the domain\'s', () => {
+    expect(STATEMENT).toEqual(DOMAIN_STATEMENT);
+  });
+
   it('the Reason for Change picklist is exactly what value.change accepts, besides Other', () => {
     const [picklist] = ReasonSchema.options;
     expect(CHANGE_REASONS.map((r) => r.code)).toEqual(picklist.shape.code.options);
+  });
+
+  it('the password rules the enrolment page prints are the server\'s', () => {
+    expect(PASSWORD_RULES).toEqual(Object.values(PASSWORD_PROBLEM_TEXT));
   });
 });
 

@@ -60,3 +60,25 @@ export type ValueSavedDto = {
   readonly version: { readonly versionId: string; readonly versionNo: number; readonly hash: string };
   readonly standing: 'effective' | 'pending';
 };
+
+/**
+ * The password rules as the enrolment page prints them before the person types (decisions 7 and
+ * 22). The server's checks are the rule; this is their wording, and a test keeps the two equal.
+ */
+export const PASSWORD_RULES = [
+  'The password needs at least 15 characters.',
+  'The password needs an upper-case letter, a lower-case letter, a digit and a symbol.',
+  'The password must not contain your user ID or name.',
+  'That password appears in a published breach; choose another.',
+] as const;
+
+/** Each meaning's fixed statement, which a SignatureLine prints beside it (decision 13). */
+export const STATEMENT = {
+  Performed: 'I performed this work and recorded it completely and accurately.',
+  Verified: 'I checked this entry against its source and it is correct.',
+  Reviewed: 'I reviewed these records, including their audit trail, and they are complete and correct.',
+  Approved: 'I approve this record for use.',
+  Released: 'I release this Test Report to the Customer.',
+  Authored: 'I wrote this draft and submit it for review.',
+  Acknowledged: 'I have read and understood this.',
+} as const satisfies { readonly [meaning in keyof typeof SIGNS_AS]: string };
