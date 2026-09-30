@@ -104,7 +104,7 @@ export async function seedReference(api: Driver, cast: Cast, customers: Referenc
   for (const [productId, customer] of [[products.fic01, customers.acme], [products.fic02, customers.acme], [products.zel01, customers.acme], [products.betaApi, customers.beta]] as const) {
     specs.push({ id: (await runAs(api, createSpecification, { productId, purpose: 'release', data: fdaSpecification() })).recordId, customer });
   }
-  await mustSign(cast.tabs.lena, cast.lena, 'Approved', 'QA', specs.map((s) => s.id));
+  await mustSign(cast.tabs.cid, cast.cid, 'Approved', 'QA', specs.map((s) => s.id));
   const portal = await acceptSpecifications(api, cast, specs);
 
   const adoptions = [

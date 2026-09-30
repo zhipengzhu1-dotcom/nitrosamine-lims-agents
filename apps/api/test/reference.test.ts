@@ -137,3 +137,40 @@ describe('a Run Check criterion cites the Method version that sets it (usp 4)', 
     }
   });
 });
+
+describe('who may hold which Authorisation, and for how long (iso 6, iso 8, decision 19)', () => {
+  const grant = (personId: string, meaning: string, validFrom: string, validUntil: string) =>
+    cast.tabs.cid.command('authorisation.grant', { personId, meaning, scope: 'NA-LCMS-001', validFrom, validUntil });
+
+  it('refuses a Released Authorisation to the Lab Manager of this Lab', async () => {
+    const r = await grant(cast.lena.id, 'Released', '2026-10-01', '2027-10-01');
+    expect(r.status).toBe(403);
+    expect(r.body.refusal).toEqual({ kind: 'not-permitted', message: 'Lena Vogt is the Lab Manager in this Lab, and the Lab Manager never holds a Released Authorisation in the Lab they manage.' });
+    expect((await grant(cast.lena.id, 'Reviewed', '2026-10-01', '2027-10-01')).status).toBe(200);
+  });
+
+  it('refuses validity beyond 12 months, and allows exactly 12', async () => {
+    const r = await grant(cast.ann.id, 'Performed', '2026-10-01', '2027-10-02');
+    expect(r.status).toBe(403);
+    expect(r.body.refusal).toEqual({ kind: 'not-permitted', message: 'An Authorisation is valid for at most 12 months: from 2026-10-01 it ends by 2027-10-01. Renew it through a Competence Assessment.' });
+    expect((await grant(cast.ann.id, 'Performed', '2026-10-01', '2027-10-01')).status).toBe(200);
+  });
+
+  it('seeds Specifications signed Approved by the QA person, not the Lab Manager', async () => {
+    const signers = await api.db.app.selectFrom('signature as s').innerJoin('record_version as v', 'v.id', 's.record_version_id').innerJoin('specification as sp', 'sp.id', 'v.record_id')
+      .select(['s.signer_person_id', 's.meaning']).execute();
+    expect(signers).toHaveLength(4);
+    expect(new Set(signers.map((x) => `${x.meaning} ${x.signer_person_id}`))).toEqual(new Set([`Approved ${cast.cid.id}`]));
+  });
+});
+
+describe('a Training Record is Read and Understood until Training Runs exist (iso 8)', () => {
+  it('refuses Demonstrated as not built and logs the gap', async () => {
+    const before = (await api.db.app.selectFrom('spec_gap').select('id').where('feature', '=', 'training-run').execute()).length;
+    const r = await cast.tabs.ann.command('training.open', { documentVersion: 'SOP-PREP-011@2', level: 'demonstrated' });
+    expect(r.status).toBe(409);
+    expect(r.body.refusal).toEqual({ kind: 'not-built', feature: 'training-run', message: 'Training Runs not built in the skeleton, so a Training Record can only be Read and Understood' });
+    expect((await api.db.app.selectFrom('spec_gap').select('id').where('feature', '=', 'training-run').execute()).length).toBe(before + 1);
+    expect(await api.db.app.selectFrom('training_record').select('id').where('document_version', '=', 'SOP-PREP-011@2').execute()).toEqual([]);
+  });
+});

@@ -32,6 +32,18 @@ export type AuthorisationStanding =
   | { readonly kind: 'expired'; readonly meaning: Meaning; readonly scope: string; readonly validUntil: string }
   | { readonly kind: 'suspended'; readonly meaning: Meaning; readonly scope: string };
 
+const leapYear = (y: number): boolean => y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+
+/**
+ * Decision 19: an Authorisation is valid for 12 months. The latest valid-until (exclusive) for a
+ * valid-from date: the same day a year on, or 28 February when that day is 29 February.
+ */
+export function authorisationEndsBy(validFrom: string): string {
+  const [y, m, d] = validFrom.split('-');
+  const year = Number(y) + 1;
+  return `${year}-${m}-${m === '02' && d === '29' && !leapYear(year) ? '28' : d}`;
+}
+
 /** Decision 13's enabling steps, plus decision 19 §7's LIMS-use training. */
 export type EnablementStep = 'identity-check' | 'policy-acknowledged' | 'lims-use-training';
 

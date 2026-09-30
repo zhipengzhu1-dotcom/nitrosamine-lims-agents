@@ -101,6 +101,27 @@ const MUTANTS: Mutant[] = [
     replace: 'and false then',
     test: 'test/lab-scope.test.ts',
   },
+  {
+    name: 'an Authorisation valid for longer than 12 months',
+    file: 'migrations/0070_authorisation_limits.sql',
+    find: "check (valid_until <= (valid_from + interval '12 months')::date);",
+    replace: 'check (true);',
+    test: 'test/authorisation.test.ts',
+  },
+  {
+    name: 'LI002 the Lab Manager may hold Released in that Lab',
+    file: 'migrations/0070_authorisation_limits.sql',
+    find: "if new.meaning = 'Released' and exists (",
+    replace: 'if false and exists (',
+    test: 'test/authorisation.test.ts',
+  },
+  {
+    name: 'LI002 a Lab Manager elsewhere blocks Released here',
+    file: 'migrations/0070_authorisation_limits.sql',
+    find: "and g.lab_id = new.lab_id and g.revoked_at is null",
+    replace: 'and g.revoked_at is null',
+    test: 'test/authorisation.test.ts',
+  },
 ];
 
 const root = fileURLToPath(new URL('..', import.meta.url));

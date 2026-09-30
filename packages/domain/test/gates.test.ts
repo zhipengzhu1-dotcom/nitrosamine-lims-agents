@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { toRational, written } from '../src/decimal.ts';
 import {
-  acceptanceGate, adoptionStatusGate, assignmentGate, cancelGate, eligibleAnalysts, readyGate, releasedGate, reviewedGate,
+  acceptanceGate, adoptionStatusGate, assignmentGate, authorisationEndsBy, cancelGate, eligibleAnalysts, readyGate, releasedGate, reviewedGate,
   runPerformedGate, testPerformedGate, toRefusal, verifiedGate,
   type AnalystFacts, type AuthorisationStanding, type GateResult, type PerformerFacts, type ReleasedFacts,
   type ReviewedFacts, type RunPerformedFacts, type TestPerformedFacts, type VerifiedFacts,
@@ -83,6 +83,14 @@ describe('assignmentGate', () => {
 // ---------------------------------------------------------------------------------------------
 // Acceptance and Ready (decision 12)
 // ---------------------------------------------------------------------------------------------
+
+describe('an Authorisation lasts at most 12 calendar months (decision 19)', () => {
+  it.each([
+    ['2026-10-01', '2027-10-01'], ['2026-01-31', '2027-01-31'], ['2028-02-29', '2029-02-28'], ['2027-02-28', '2028-02-28'], ['2031-03-31', '2032-03-31'],
+  ])('from %s it ends by %s, exclusive', (from, end) => {
+    expect(authorisationEndsBy(from)).toBe(end);
+  });
+});
 
 describe('adoptionStatusGate: which status a Method\'s basis allows (decision 36 §4, usp 6)', () => {
   const statuses = ['in-development', 'validated-here', 'transferred-in', 'verified', 'verified-basic-compendial', 'retired'] as const;

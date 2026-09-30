@@ -15,7 +15,8 @@ export type NotBuilt =
   | 'computed-run-check' // a Run Check statistic the LIMS computes from raw values (#37 §4)
   | 'hold-release' | 'amended-report' | 'invalidation' | 'non-gmp-marking' | 'raise-to-gmp' | 'retest'
   | 'receipt-discrepancy' | 'sample-return' | 'sample-disposal'
-  | 'import' | 'passkey' | 'anchoring' | 'below-loq-reporting' | 'multiple-nitrosamine-sum' | 'basis-correction';
+  | 'import' | 'passkey' | 'anchoring' | 'below-loq-reporting' | 'multiple-nitrosamine-sum' | 'basis-correction'
+  | 'training-run'; // a Demonstrated Training Record, which needs a passing Training Run (decision 19 §1)
 
 export type SodRule =
   | 'reviewer-signed-performed' // on the record or a Run feeding it
@@ -92,6 +93,7 @@ export const NOT_BUILT_MESSAGE: { readonly [F in NotBuilt]: string } = {
   'below-loq-reporting': 'Results below the LOQ not built in the skeleton',
   'multiple-nitrosamine-sum': 'Multiple-nitrosamine sums not built in the skeleton',
   'basis-correction': 'Basis correction not built in the skeleton',
+  'training-run': 'Training Runs not built in the skeleton, so a Training Record can only be Read and Understood',
 };
 
 const ROLE_LABEL: { readonly [A in Actor]: string } = {

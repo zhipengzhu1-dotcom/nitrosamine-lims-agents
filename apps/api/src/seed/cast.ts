@@ -61,11 +61,18 @@ export async function acknowledge(api: Driver, person: Person, role: string, doc
 
 export type AuthorisationGrant = { readonly person: Person; readonly meaning: string; readonly scope: string };
 
+/** Twelve months from the first of this month (decision 19), so the seed's Authorisations are current whenever it runs. */
+export function twelveMonths(now: Date): { readonly validFrom: string; readonly validUntil: string } {
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  return { validFrom: `${now.getUTCFullYear()}-${month}-01`, validUntil: `${now.getUTCFullYear() + 1}-${month}-01` };
+}
+
 /** QA drafts each Authorisation, then signs them all Approved in one group signing. */
-export async function grantAuthorisations(qaTab: Client, qa: Person, grants: readonly AuthorisationGrant[], validUntil = '2027-09-30'): Promise<void> {
+export async function grantAuthorisations(qaTab: Client, qa: Person, grants: readonly AuthorisationGrant[]): Promise<void> {
+  const validity = twelveMonths(new Date());
   const drafted: string[] = [];
   for (const g of grants) {
-    drafted.push((await qaTab.must('authorisation.grant', { personId: g.person.id, meaning: g.meaning, scope: g.scope, validFrom: '2026-01-01', validUntil })).recordId);
+    drafted.push((await qaTab.must('authorisation.grant', { personId: g.person.id, meaning: g.meaning, scope: g.scope, ...validity })).recordId);
   }
   await mustSign(qaTab, qa, 'Approved', 'QA', drafted);
 }

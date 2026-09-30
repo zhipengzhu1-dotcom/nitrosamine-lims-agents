@@ -8,6 +8,8 @@ import { COMPANY_LEDGER, ledgerOf } from '@lims/db';
 import { MeaningSchema } from '@lims/contract';
 import { PersonIdSchema } from '../wire.ts';
 import type { RecordId } from '@lims/domain/ids';
+import { authorisationEndsBy } from '@lims/domain/gates';
+import { refuse } from '@lims/domain/refusal';
 import { receipt } from '../commit.ts';
 import { defineCommand } from '../doors.ts';
 
@@ -20,6 +22,7 @@ export const openTrainingRecord = defineCommand({
   run: async (tx, input) => {
     const a = tx.actor;
     if (a.kind === 'nobody' || a.kind === 'locked') throw new Error('training.open acts in a live session');
+    if (input.level === 'demonstrated') return refuse.notBuilt('training-run');
     const id = randomUUID() as RecordId;
     await tx.db.insertInto('record').values({ ledger_id: COMPANY_LEDGER, id, kind: 'training_record' }).execute();
     await tx.db.insertInto('training_record').values({ id, person_id: a.person, document_version: input.documentVersion, level: input.level }).execute();
@@ -44,6 +47,16 @@ export const grantAuthorisation = defineCommand({
     const a = tx.actor;
     const lab = a.kind === 'staff' ? a.lab : a.kind === 'service' ? a.lab : null;
     if (!lab) return { kind: 'not-permitted', message: 'An Authorisation is granted in a Lab.' };
+    const longest = authorisationEndsBy(input.validFrom);
+    if (input.validUntil > longest) {
+      return { kind: 'not-permitted', message: `An Authorisation is valid for at most 12 months: from ${input.validFrom} it ends by ${longest}. Renew it through a Competence Assessment.` };
+    }
+    if (input.meaning === 'Released') {
+      const manager = await tx.db.selectFrom('role_grant').innerJoin('person', 'person.id', 'role_grant.person_id').select('person.printed_name')
+        .where('role_grant.person_id', '=', input.personId).where('role_grant.role', '=', 'LabManager').where('role_grant.lab_id', '=', lab).where('role_grant.revoked_at', 'is', null)
+        .executeTakeFirst();
+      if (manager) return { kind: 'not-permitted', message: `${manager.printed_name} is the Lab Manager in this Lab, and the Lab Manager never holds a Released Authorisation in the Lab they manage.` };
+    }
     const id = randomUUID() as RecordId;
     await tx.db.insertInto('record').values({ ledger_id: ledgerOf(lab), id, kind: 'authorisation' }).execute();
     await tx.db.insertInto('authorisation').values({
