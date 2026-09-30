@@ -257,6 +257,7 @@ Each entry says what differs from this document or the sketches, why, and whethe
 - **`session.acting_role` is dropped.** The role is chosen per command and carried by the context; the session holds the Lab or Customer it was opened for. **`account`** is included though not in the unit's list, because `lims.sign` needs the username.
 - **Commit attribution** names the model that wrote the commits (Claude Fable 5.1), not the one the builder contract assumed.
 - **`erasableSyntaxOnly`** is on in `packages/db`, so Node 24 can run any file in the package without a build step.
+- **`dbNow` is for comparisons, not for stamping rows.** A JS `Date` keeps milliseconds and Postgres microseconds, so a `locked_at` written from `dbNow` can predate the transaction's own `now()` and read as a lock already in effect. Rows take their time from `clock_timestamp()` in SQL, which is also what decision 13 asks for.
 
 ### Spec gaps found by U2
 

@@ -1,6 +1,7 @@
 // Test-plan A9: Admin exclusivity.
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, it } from 'vitest';
+import { sql } from 'kysely';
 import { runAudited } from '../src/audited.ts';
 import { seedFixture, type Fixture } from '../src/testing/fixture.ts';
 import { testDatabase, type TestDb } from '../src/testing/harness.ts';
@@ -32,7 +33,7 @@ describe('LI001', () => {
 
   it('a revoked business role no longer blocks Admin', async () => {
     await runAudited(db.app, fx.ctx(fx.adam, 'Admin', { action: 'role.revoke', reason: { kind: 'action' } }), { kind: 'company' }, async (tx) => {
-      await tx.db.updateTable('role_grant').set({ revoked_at: tx.dbNow }).where('person_id', '=', fx.eve.id).execute();
+      await tx.db.updateTable('role_grant').set({ revoked_at: sql`clock_timestamp()` }).where('person_id', '=', fx.eve.id).execute();
       return { commit: null };
     });
     await grant(fx.eve.id, 'Admin', null);

@@ -1,5 +1,6 @@
 // Test-plan A2: no context, no write.
 import { afterAll, beforeAll, describe, it } from 'vitest';
+import { sql } from 'kysely';
 import { contextRow, runAudited } from '../src/audited.ts';
 import { ledgerOf } from '../src/ids.ts';
 import { seedFixture, type Fixture } from '../src/testing/fixture.ts';
@@ -79,7 +80,7 @@ describe('the audit context', () => {
 
   it('LA009: a locked session cannot write', async () => {
     await runAudited(db.app, fx.ctx(fx.dee, 'LabManager', { reason: { kind: 'action' } }), { kind: 'lab', labId: fx.labA }, async (tx) => {
-      await tx.db.updateTable('session').set({ locked_at: tx.dbNow, lock_reason: 'manual' }).where('id', '=', fx.dee.session).execute();
+      await tx.db.updateTable('session').set({ locked_at: sql`clock_timestamp()`, lock_reason: 'manual' }).where('id', '=', fx.dee.session).execute();
       return { commit: null };
     });
     await expectSqlState(

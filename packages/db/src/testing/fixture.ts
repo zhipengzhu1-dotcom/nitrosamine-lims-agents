@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import type { DB } from '../generated.ts';
 import { runAudited, type AuditContext, type AuditedTx } from '../audited.ts';
 import { createLab } from '../doors.ts';
@@ -95,7 +95,7 @@ export async function seedFixture(db: Kysely<DB>): Promise<Fixture> {
         workstation: 'bench-1',
         absolute_end_at: new Date(tx.dbNow.getTime() + 12 * 3600 * 1000),
       }).execute();
-      await tx.db.insertInto('session_activity').values({ session_id: session, last_activity_at: tx.dbNow }).execute();
+      await tx.db.insertInto('session_activity').values({ session_id: session, last_activity_at: sql`clock_timestamp()` }).execute();
       people[p.key] = { id, username, printedName: p.name, session, lab };
     }
     return { commit: people };

@@ -61,6 +61,11 @@ export function contextRow(ctx: AuditContext): Record<string, unknown> {
 /** A write handle: scoped like a read handle, plus the database time read under the chain locks. */
 export type AuditedTx = {
   readonly db: Kysely<DB>;
+  /**
+   * For comparisons only. A JS Date keeps milliseconds and Postgres keeps microseconds, so a
+   * row timestamp written from this value can predate the transaction's own start. Stamp rows
+   * with sql`clock_timestamp()` instead.
+   */
   readonly dbNow: Date;
   readonly scope: Scope;
   readonly ctx: AuditContext;
