@@ -62,7 +62,7 @@ describe('an AI-derived limit is checked against AI ÷ MDD (usp 1, decision 29 a
     expect(out.kind).toBe('refusal');
     if (out.kind !== 'refusal') return;
     expect(out.refusal).toMatchObject({ kind: 'gate', reasons: [{ code: 'limit-not-derived', jurisdiction: 'FDA', analyte: 'NDMA', limit: '0.04', derived: '0.038' }] });
-    expect(out.refusal.message).toBe('The FDA limit for NDMA is written 0.04 ppm, but 96 ng/day ÷ 2550 mg/day rounded half up to two significant figures is 0.038 ppm. Write 0.038 or a lower limit.');
+    expect(out.refusal.message).toBe('The FDA limit for NDMA is written 0.04 ppm, but 96 ng/day ÷ 2550 mg/day rounded half up to two significant figures is 0.038 ppm. Write 0.038, or a lower limit with at least as many decimals.');
     expect(await specificationCount()).toBe(before);
   });
 

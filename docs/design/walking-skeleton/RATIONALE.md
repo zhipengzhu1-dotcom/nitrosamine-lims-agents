@@ -525,7 +525,8 @@ The shared contract holds for every item below: reference records are still draf
 The owner ruled on 2026-09-30 that an AI-derived limit is AI ÷ MDD computed exactly, then rounded half up to two significant figures, following scientific notation, so the LIMS gives the figure FDA prints: metformin IR, 96 ng/day ÷ 2550 mg/day = 0.0376… ppm, is `0.038`, where decision 29's round-down gave `0.037`. This settles C3's spec gaps on the stated digits and on entering a regulator-published limit, and review-fixes.md's map question on the digits. The shared contract holds: the limit is still typed, checked by `derivationGate` in `reference.specification`, and kept as written; no database guard is involved, so there is no mutant.
 
 - **A line states the derived value exactly as written, or a lower value.** `0.038` and `0.0375` pass at 2550 mg/day; `0.04` and `0.0381` are refused, and the refusal names `0.038`. The derived value carries two significant figures, trailing zero included: 96 ÷ 320 is `0.30`, and 0.0995 carries to `0.10`.
-- **The same number written with other decimals is refused**, `0.3` and `0.300` where the derivation is `0.30`. The ruling says "exactly that value or a tighter (lower) one"; `0.3` is not lower, and under GN 7.20 a result is rounded to the limit's decimals, so `0.3` would pass 0.34 where `0.30` fails it.
+- **A lower limit must be written to at least the derived value's decimals** (the usp-expert's review of C3b). Under GN 7.20 a result is rounded to the limit's decimals, so fewer decimals loosen a limit: `0.3` against a derived `0.31` (96 ÷ 310) would pass 0.34. "Tighter (lower)" is read as lower and never looser in effect, so `0.03` against `0.038` is refused too, although it happens to be stricter; `0.030` passes. The refusal says "Write 0.038, or a lower limit with at least as many decimals."
+- **The same number written with other decimals is refused**, `0.3` and `0.300` where the derivation is `0.30`. The ruling names the derived value or a lower one, and neither is.
 - **A limit must be positive** (`PositiveDecimal` on the line). Once a lower limit is allowed, zero or a negative value would pass the derivation.
 - **Above 99 the derived value is an integer with its trailing zeros**, `190` for 192; a Written has no negative decimals, so the zeros are printed but not significant.
 
@@ -533,7 +534,10 @@ The owner ruled on 2026-09-30 that an AI-derived limit is AI ÷ MDD computed exa
 
 - Whether the same number with more decimals (`0.300` against `0.30`) should pass: it is stricter under GN 7.20, but the ruling names only the derived value or a lower one, so it is refused.
 - Whether an NMPA Section, whose Rule Set may round half to even (GB/T 8170), also derives its limit half up. The ruling names half up with no Jurisdiction exception, so every Section derives half up; a tie needs AI ÷ MDD to end exactly on a 5 at the third significant figure.
-- Decision 29's text on the map still reads "rounded down to the stated digits"; the ruling needs recording there.
+- Decision 29's text on the map still reads "rounded down to the stated digits"; the ruling needs recording there before #24 closes.
+- Whether "tighter (lower)" means numerically lower or stricter under GN 7.20. Assumed both: lower, and written to at least the derived value's decimals (the usp-expert's reading, for the owner to confirm).
+- Decision 29 keeps "its derivation" with the limit. The sealed version keeps the inputs (AI, its source, MDD) and the limit as written, but not the derived value or which rounding rule accepted it, so a version sealed under the round-down rule and one sealed under this one read alike (the iso17025-expert's review, 7.5.1, unclear). Storing the derived value and a rule id in each line changes the accepted body and its tag, and is left to the Specification module.
+- A version with a zero limit, which the round-down gate accepted, no longer parses under `PositiveDecimal`. The demo database is reseeded, never migrated (C3 above), so none exists.
 
 ### S1, database guards after the core review (`packages/db` migrations 0060–0063, `packages/domain/src/gates.ts`, `apps/api/src/records/kinds/chain.ts`)
 

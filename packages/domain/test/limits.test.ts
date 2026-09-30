@@ -4,7 +4,8 @@ import { toRefusal } from '../src/gates.ts';
 import { aiDerivedLimit, aiDerivationHolds, derivationGate } from '../src/limits.ts';
 
 // The owner's 2026-09-30 ruling on decision 29: an AI-derived limit is AI ÷ MDD, computed exactly
-// and rounded half up to two significant figures. A line states exactly that value or a lower one.
+// and rounded half up to two significant figures. A line states exactly that value or a lower one
+// written to at least its decimals, since GN 7.20 rounds a result to the limit's decimals.
 // NDMA 96 ng/day and NDEA 26.5 ng/day are FDA, Control of Nitrosamine Impurities in Human Drugs,
 // Rev. 2 (Sept 2024), Table 1.
 describe('an AI-derived limit is AI ÷ MDD rounded half up to two significant figures', () => {
@@ -33,6 +34,9 @@ describe('an AI-derived limit is AI ÷ MDD rounded half up to two significant fi
     ['96', '2550', '0.0381', false], // looser, with more decimals
     ['96', '2550', '0.037', true], // tighter
     ['96', '2550', '0.0375', true], // tighter, with more decimals
+    ['96', '2550', '0.030', true],
+    ['96', '2550', '0.03', false], // lower, but written with fewer decimals than 0.038: write 0.030
+    ['96', '310', '0.3', false], // lower than 0.31, yet a result of 0.34 rounds to 0.3 and would conform
     ['96', '320', '0.30', true],
     ['96', '320', '0.3', false], // the same number, but a result is then rounded to one decimal: 0.34 would conform
     ['96', '320', '0.300', false], // the same number, not the derived value as written
@@ -66,7 +70,7 @@ describe('the Specification refuses a line looser than its derivation', () => {
     ] });
     if (gate.go) throw new Error('expected a refusal');
     expect(toRefusal(gate).message).toBe(
-      'The FDA limit for NDMA is written 0.04 ppm, but 96 ng/day ÷ 2550 mg/day rounded half up to two significant figures is 0.038 ppm. Write 0.038 or a lower limit. '
-      + 'The EMA limit for NDEA is written 0.084 ppm, but 26.5 ng/day ÷ 320 mg/day rounded half up to two significant figures is 0.083 ppm. Write 0.083 or a lower limit.');
+      'The FDA limit for NDMA is written 0.04 ppm, but 96 ng/day ÷ 2550 mg/day rounded half up to two significant figures is 0.038 ppm. Write 0.038, or a lower limit with at least as many decimals. '
+      + 'The EMA limit for NDEA is written 0.084 ppm, but 26.5 ng/day ÷ 320 mg/day rounded half up to two significant figures is 0.083 ppm. Write 0.083, or a lower limit with at least as many decimals.');
   });
 });

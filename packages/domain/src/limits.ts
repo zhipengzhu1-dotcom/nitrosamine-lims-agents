@@ -1,7 +1,8 @@
 // How a Specification Line's limit is derived: decision 29, as the owner ruled on 2026-09-30. An
 // AI-derived limit is the Acceptable Intake over the Section's maximum daily dose, ng/day ÷ mg/day
 // = ppm, computed exactly and rounded half up to two significant figures, as FDA prints it
-// (metformin IR: 96 ÷ 2550 = 0.0376… is 0.038). A line states that value or a lower one.
+// (metformin IR: 96 ÷ 2550 = 0.0376… is 0.038). A line states that value, or a lower one written to
+// at least its decimals.
 
 import { compare, div, formatWritten, roundTo, toRational, type Rational, type Written } from './decimal.ts';
 import type { GateResult } from './gates.ts';
@@ -37,13 +38,14 @@ export function aiDerivedLimit(acceptableIntakeNgPerDay: Written, maximumDailyDo
 }
 
 /**
- * The limit is the derived value as written, or lower. The same number with other decimals is
- * neither: a result is rounded to the limit's decimals, so `0.3` would pass 0.34 where `0.30` fails it.
+ * The limit is the derived value as written, or a lower value written to at least its decimals.
+ * GN 7.20 rounds a result to the limit's decimals, so fewer decimals loosen it: `0.3` would pass
+ * 0.34 where a derived `0.30` or `0.31` fails it.
  */
 export function aiDerivationHolds(limit: Written, acceptableIntakeNgPerDay: Written, maximumDailyDoseMgPerDay: Written): boolean {
   const derived = aiDerivedLimit(acceptableIntakeNgPerDay, maximumDailyDoseMgPerDay);
   const exact = limit.unscaled === derived.unscaled && limit.decimals === derived.decimals;
-  return exact || compare(toRational(limit), toRational(derived)) < 0;
+  return exact || (limit.decimals >= derived.decimals && compare(toRational(limit), toRational(derived)) < 0);
 }
 
 export type DerivedLine = { readonly analyte: string; readonly limit: Written; readonly acceptableIntakeNgPerDay: Written };

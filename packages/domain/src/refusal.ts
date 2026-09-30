@@ -197,7 +197,7 @@ export function describeReason(r: GateReason): string {
     case 'sample-not-received': return 'The Sample has not been received.';
     case 'work-linked': return `${r.test} has a Preparation or Run linked, so it can't be cancelled.`;
     case 'limit-not-derived':
-      return `The ${r.jurisdiction} limit for ${r.analyte} is written ${r.limit} ppm, but ${r.acceptableIntake} ng/day ÷ ${r.maximumDailyDose} mg/day rounded half up to two significant figures is ${r.derived} ppm. Write ${r.derived} or a lower limit.`;
+      return `The ${r.jurisdiction} limit for ${r.analyte} is written ${r.limit} ppm, but ${r.acceptableIntake} ng/day ÷ ${r.maximumDailyDose} mg/day rounded half up to two significant figures is ${r.derived} ppm. Write ${r.derived}, or a lower limit with at least as many decimals.`;
     case 'not-built': return `${NOT_BUILT_MESSAGE[r.feature]}: ${r.because}.`;
   }
 }
