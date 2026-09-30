@@ -244,6 +244,40 @@ Indirect prompt injection works because "GenAI models combine the data and instr
 6. **Supplier.** Add Anthropic to ADR 0002's supplier table now. Add a quality agreement (and ZDR if obtainable) to the real-data gate.
 7. **Out of scope.** Self-hosting and Haiku 4.5 are ruled out. China labs are out of scope.
 
+## 6. Compliance review (2026-09-30)
+
+`part11-expert`, `iso17025-expert` and `usp-expert` reviewed this file. USP found no gaps. Part 11 found five and ISO/IEC 17025 six, overlapping. Each gap below is fixed by a requirement that [Decide the assistant layer](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/43) must adopt. The requirements supersede §3.2, §4 and §5 where they differ.
+
+### 6.1 Gaps and the requirement that closes each
+
+| # | Gap | Requirement for #43 |
+|---|---|---|
+| R1 | Record content sits at the provider under its keys and retention (up to 30 days, flagged content up to 2 years), and nothing stops real data reaching it (§11.30; A11d §10.4; ISO 4.2.4) | While the data class is `real`, the assistant route refuses to call the provider unless a Release Log entry signed *Approved* names Anthropic's quality agreement and either ZDR in force or a QA-signed risk acceptance covering both copies. "Assistant provider" joins the real-data gate's lapse list. Tools return only the fields the question needs. |
+| R2 | The quality-agreement list is short (A11d §7.2–7.5; ISO 4.2.4) | Add: audit rights or an accepted substitute (SOC 2, ISO 27001), support at inspections, SLAs and response times, how quality and security issues are reported, a written exit strategy, how provider staff reach retained prompts and how that is logged, sub-processors, confidentiality of Customer information, and written confirmation of the retention period. Where Anthropic won't sign GMP terms, a QA-signed supplier assessment records each missing item, as row E7 requires for the VPS. |
+| R3 | Anthropic's supplier entry has no evaluation, monitoring or re-evaluation (ISO 6.6.2, 7.11.4) | The entry records the requirements (US-only geo, no training use, retention ≤ 30 days, 60-day retirement notice, incident notice), this file as evaluation evidence, re-evaluation at every model change and at least yearly, and the person who watches deprecation notices. |
+| R4 | Portal answers give Customers interpretations no authorised person released (ISO 7.8.7.1, 6.2.6) | For Customer Users the assistant only finds, navigates and shows released report content verbatim with stored values. It refuses interpretation and conformity questions and turns them into a portal message to an authorised person. Each exchange is kept as a Customer communication record (7.1.8). A role-keyed tool registry gives Customer Users only portal queries, and a test proves they can't return an unreleased or OOS value. |
+| R5 | The model can state a verdict the LIMS didn't compute (#23 build rule 14; JIREI GMP20-11) | The system prompt forbids verdicts. A server-side check flags or strips conformity terms (pass, fail, conforms, OOS, within or out of specification). Any verdict in the assistant panel is rendered from the stored verdict and its Calculation Version (ADR 0006). |
+| R6 | Values inside drafts are unchecked transcriptions (ISO 7.11.6; A11 §6, A11d §10.2) | Drafts cite Results, limits, Lot numbers and IDs as references the server fills from the database. Any number or identifier left in free text is matched, on save, against the Record Versions the call log recorded, and a mismatch is highlighted before the person can save. Limits keep their written decimals (GN 7.10) and results their stored rounding (GN 7.20). |
+| R7 | Change control covers only the model ID, and the eval set has no pass criteria (§11.10(k)(2); A11d §6.6; ISO 7.11.2) | One versioned assistant configuration holds the model ID, system prompt, tool definitions, untrusted-content policy, effort, `inference_geo`, quotas, screening classifier and role-to-tool map. It changes only by a Release Log entry signed *Approved* with eval and red-team results attached. Every eval case has a written pass criterion. A passing run is required before first use. The server refuses a configuration hash with no Release Log entry. The eval set reruns monthly to catch provider drift. |
+| R8 | Assistant failures aren't System Incidents (ISO 7.11.3 e) | Add to ADR 0002's System Incident list: assistant unavailable (spend or rate limit, outage, retired model), a flagged or confirmed injection, and a confirmed wrong output someone saved. The last two open a Data Integrity Deviation. |
+
+### 6.2 Unclear points, settled
+
+- **Call log.** INSERT-only grant, the audit tables' blocking triggers, each row on the Lab's hash chain, database-clock timestamps, `lab_id NOT NULL`, no UI or API that turns logging off, reads restricted (rows hold Customer content), a Record Type Register row with a raw-data flag and a named data-integrity owner. Retention is at least the 4-year floor, or that of the record the draft became if longer; [Research: what an AI assistant may do in a GxP LIMS](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/39) may lengthen it.
+- **Attribution of a saved draft.** The person who saves is the author. The save's audit entry carries the call-log row ID and an "assistant-drafted" flag, and the model's pre-edit text stays in the call log.
+- **Documents.** Document tools return only the Effective version, or the version the Test pins, and answers cite Document ID and version. Methods are limited to this Lab's Method Adoptions.
+- **Transport and console.** HTTPS with certificate verification and no TLS-terminating proxy. The Anthropic Console account goes in the access-rights register with MFA, named key holders and a rotation interval.
+
+### 6.3 Procedural
+
+- Assistant use is enabled per person only with a current Training Record on an assistant-use SOP (building on the training decision). The assistant's instructions and limits are a controlled document in the vault.
+- Before real Customer data, each Customer's Quality Agreement names the model provider as a sub-processor. A per-Customer flag disables Customer-scoped tools until that is recorded.
+- The assistant route is in the penetration-test scope.
+
+### 6.4 For the owner
+
+`iso17025-expert` found that ADR 0002's supplier table for IT providers (Cloudflare, AWS, Apple, now Anthropic) has no evaluation, approval or re-evaluation fields, and the glossary's **Supplier** covers only Materials and calibration services. This predates the assistant and is left for the owner to decide.
+
 ## Sources (read 2026-09-30)
 
 - [A1] Anthropic, Pricing: https://platform.claude.com/docs/en/about-claude/pricing
