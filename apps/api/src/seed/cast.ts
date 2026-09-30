@@ -21,9 +21,9 @@ export type Cast = {
   readonly cara: Person;
   readonly sam: Person; // Sample Custodian
   readonly lena: Person; // Lab Manager, and the second QA
-  readonly ann: Person; // Analyst
+  readonly ann: Person; // Analyst, and a Reviewer who may not review her own work
   readonly dee: Person; // Analyst; the second person for Verified
-  readonly bob: Person; // Reviewer
+  readonly bob: Person; // Reviewer, and an Analyst with no Performed Authorisation, so never assignable
   readonly cid: Person; // QA
   readonly adam: Person; // Admin
   /** Each person's first tab: a login spends a TOTP step, so the seed keeps them. */
@@ -32,7 +32,7 @@ export type Cast = {
 
 export const DEMO_ACCOUNTS = [
   ['cara', 'Cara Okafor', 'Customer User'], ['sam', 'Sam Reyes', 'Sample Custodian'], ['lena', 'Lena Vogt', 'Lab Manager'],
-  ['ann', 'Ann Kowalczyk', 'Analyst'], ['dee', 'Dee Nakamura', 'Analyst (second person for Verified)'], ['bob', 'Bob Achebe', 'Reviewer'],
+  ['ann', 'Ann Kowalczyk', 'Analyst and Reviewer'], ['dee', 'Dee Nakamura', 'Analyst (second person for Verified)'], ['bob', 'Bob Achebe', 'Reviewer, and an Analyst not authorised to perform'],
   ['cid', 'Cid Marchetti', 'QA'], ['adam', 'Adam Lindqvist', 'Admin'],
 ] as const;
 
@@ -77,9 +77,9 @@ export async function seedCast(api: Driver, deps: Deps, customers: { acme: strin
     enrol(api, { username: 'cara', printedName: 'Cara Okafor', grants: [{ role: 'CustomerUser', customer: customers.acme }, { role: 'CustomerApprover', customer: customers.acme }, { role: 'CustomerUser', customer: customers.beta }, { role: 'CustomerApprover', customer: customers.beta }] }),
     enrol(api, { username: 'sam', printedName: 'Sam Reyes', grants: [{ role: 'SampleCustodian', lab: l }] }),
     enrol(api, { username: 'lena', printedName: 'Lena Vogt', grants: [{ role: 'LabManager', lab: l }, { role: 'QA', lab: l }] }),
-    enrol(api, { username: 'ann', printedName: 'Ann Kowalczyk', grants: [{ role: 'Analyst', lab: l }] }),
+    enrol(api, { username: 'ann', printedName: 'Ann Kowalczyk', grants: [{ role: 'Analyst', lab: l }, { role: 'Reviewer', lab: l }] }),
     enrol(api, { username: 'dee', printedName: 'Dee Nakamura', grants: [{ role: 'Analyst', lab: l }] }),
-    enrol(api, { username: 'bob', printedName: 'Bob Achebe', grants: [{ role: 'Reviewer', lab: l }] }),
+    enrol(api, { username: 'bob', printedName: 'Bob Achebe', grants: [{ role: 'Reviewer', lab: l }, { role: 'Analyst', lab: l }] }),
     enrol(api, { username: 'cid', printedName: 'Cid Marchetti', grants: [{ role: 'QA', lab: l }] }),
     enrol(api, { username: 'adam', printedName: 'Adam Lindqvist', grants: [{ role: 'Admin' }] }),
   ]);
@@ -103,7 +103,7 @@ export async function seedCast(api: Driver, deps: Deps, customers: { acme: strin
 export async function authorise(cast: Cast, methodNumbers: readonly string[]): Promise<void> {
   const onMethods = (person: Person, meaning: string) => methodNumbers.map((m) => ({ person, meaning, scope: m }));
   await grantAuthorisations(cast.tabs.cid, cast.cid, [
-    ...onMethods(cast.ann, 'Performed'), ...onMethods(cast.dee, 'Performed'), ...onMethods(cast.bob, 'Reviewed'),
+    ...onMethods(cast.ann, 'Performed'), ...onMethods(cast.ann, 'Reviewed'), ...onMethods(cast.dee, 'Performed'), ...onMethods(cast.bob, 'Reviewed'),
   ]);
   await grantAuthorisations(cast.tabs.lena, cast.lena, [
     { person: cast.cid, meaning: 'Released', scope: RELEASE_SCOPE }, { person: cast.cid, meaning: 'Released', scope: CONFORMITY_SCOPE },

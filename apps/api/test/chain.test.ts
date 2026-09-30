@@ -129,6 +129,11 @@ describe('D21: the not-built path', () => {
     const run = await seed.tabs.ann.view('run.detail', { runId: typed.runId });
     expect(run.body.runChecks.find((c: { name: string }) => c.name === 'S/N at LOQ standard')).toMatchObject({ value: '8', criterion: 'NLT 10', source: expect.stringMatching(/<621>/), outcome: 'does-not-conform' });
     expect(run.body.signatures).toEqual([]);
+    const test = await seed.tabs.ann.view('test.detail', { testId });
+    const runStep = test.body.test.steps.find((s: { name: string }) => s.name === 'Run');
+    expect(runStep).toMatchObject({ state: 'blocked', reasons: [expect.stringMatching(/Run Check S\/N at LOQ standard failed \(8 against NLT 10\)\. The Deviation workflow is not built/)] });
+    expect(test.body.judgement.sections[0].lines[0].outcome).toBe('conforms');
+    expect(test.body.performedStands).toBe(false);
   });
 });
 
@@ -191,11 +196,43 @@ describe('the chain\'s views', () => {
     expect(await tableState()).toEqual(before);
   });
 
-  it('the assignment view offers only eligible Analysts', async () => {
+  it('the assignment view answers for every Analyst: the eligible, and the others with the gate\'s reasons', async () => {
+    type Candidate = { username: string; eligible: boolean; reasons: string[] };
     const r = await seed.tabs.lena.view('test.assignment', { testId: seed.submissions.requested.samples[0]!.tests[0]! });
-    expect(r.body.eligible).toEqual([]); // not accepted yet: no Method version to be trained on
+    expect(r.body.candidates.every((c: Candidate) => !c.eligible && /not accepted yet/.test(c.reasons.join(' ')))).toBe(true);
     const ready = await seed.tabs.lena.view('test.assignment', { testId: seed.submissions.ready.samples[0]!.tests[0]! });
-    expect(ready.body.eligible.map((a: { username: string }) => a.username).sort()).toEqual(['ann', 'dee']);
+    const candidates = ready.body.candidates as Candidate[];
+    expect(candidates.filter((c) => c.eligible).map((c) => c.username).sort()).toEqual(['ann', 'dee']);
+    const bob = candidates.find((c) => c.username === 'bob')!;
+    expect(bob.eligible).toBe(false);
+    expect(bob.reasons.join(' ')).toMatch(/Performed/);
+  });
+
+  it('the Test screen prints the judgement by Section at full precision, the value rounded once and the share of the limit', async () => {
+    const r = await seed.tabs.ann.view('test.detail', { testId: seed.submissions.released.testId });
+    expect(r.body.performedStands).toBe(true);
+    expect(r.body.judgement.sections).toEqual([expect.objectContaining({
+      jurisdiction: 'FDA', ruleSetVersion: 'FDA-RS@1', outcome: 'conforms',
+      lines: [expect.objectContaining({
+        analyte: 'NDMA', limit: '0.30', unit: 'ppm', fullPrecision: expect.stringMatching(/^0\.121754\d*…$/), compared: '0.12', sharePercent: '40.6', outcome: 'conforms',
+        preparations: [
+          expect.objectContaining({ preparation: 'P1', fullPrecision: expect.stringMatching(/^0\.123252\d*…$/), compared: '0.12', sharePercent: '41.1', conforms: true }),
+          expect.objectContaining({ preparation: 'P2', fullPrecision: expect.stringMatching(/^0\.120256\d*…$/), compared: '0.12', sharePercent: '40.1', conforms: true }),
+        ],
+      })],
+    })]);
+    expect(r.body.reviews).toEqual([expect.objectContaining({ reviewer: { printedName: 'Bob Achebe', username: 'bob' }, checklistVersion: 'CL-TEST@1' })]);
+    expect(r.body.test.steps.map((s: { state: string }) => s.state)).toEqual(Array(7).fill('done'));
+    expect(r.body.test.stateLabel).toBe('Reported');
+  });
+
+  it('the queue\'s step model starts a Requested Test at Acceptance and ends a rejected one there with the reason', async () => {
+    const q = await seed.tabs.sam.view('queue.tests');
+    type Row = { id: string; steps: { name: string; state: string; reasons: string[] }[] };
+    const requested = (q.body.tests as Row[]).find((t) => t.id === seed.submissions.requested.samples[0]!.tests[0]!)!;
+    expect(requested.steps[0]).toMatchObject({ name: 'Accepted', state: 'current', reasons: [] });
+    const rejected = (q.body.tests as Row[]).find((t) => t.id === seed.submissions.rejected.samples[0]!.tests[0]!)!;
+    expect(rejected.steps[0]).toMatchObject({ name: 'Accepted', state: 'blocked', reasons: [expect.stringMatching(/Rejected at Acceptance: .*in development/)] });
   });
 });
 

@@ -229,6 +229,8 @@ export type TestFacts = {
   /** Fields with no value yet, as the gate names them. */
   readonly missingValues: readonly string[];
   readonly judgement: TestJudgement | null;
+  /** Each Preparation's results at full precision, where every input is in. */
+  readonly calculated: readonly PreparationResults[];
   readonly holds: readonly string[];
 };
 
@@ -292,7 +294,7 @@ export async function loadTest(q: Q, id: string): Promise<TestFacts> {
     submission: { id: t.submission_id, number: t.submission_number },
     sample: { id: t.sample_id, number: t.sample_number, lotNumber: t.lot_number, state: t.sample_state, product: { id: t.product_id, code: t.product_code, name: t.product_name } },
     acceptanceReason: t.acceptance_reason, assignedAnalyst: t.assigned_analyst as PersonId | null,
-    method, specification, values, preparations, runs, missingValues: missing, judgement, holds: await openHolds(q, t.id),
+    method, specification, values, preparations, runs, missingValues: missing, judgement, calculated: inputs, holds: await openHolds(q, t.id),
   };
 }
 

@@ -6,16 +6,21 @@ import { z } from 'zod';
 import { verifyChain, COMPANY_LEDGER } from '@lims/db';
 import type {
   AssignmentDto, ChainVerdictDto, LabReferenceDto, PortalCatalogueDto, PortalReportDto, PortalSubmissionDto, QueueTestDto, ReportDetailDto,
-  ReviewDetailDto, RunDetailDto, SignatureLineDto, TestDetailDto,
+  ReviewDetailDto, ReviewRefDto, RunDetailDto, SignatureLineDto, TestDetailDto,
 } from '@lims/contract';
 import { formatWritten } from '@lims/domain/decimal';
-import { eligibleAnalysts } from '@lims/domain/gates';
-import { submissionState } from '@lims/domain/machines';
-import { analystsIn, labOf, loadMethodVersion, loadReport, loadReview, loadRun, loadTest, performerFacts, recordStanding, type Q, type RecordStanding, type TestFacts } from '../chain/facts.ts';
+import { assignmentGate } from '@lims/domain/gates';
+import { describeReasons } from '@lims/domain/refusal';
+import { submissionState, TestMachine } from '@lims/domain/machines';
+import {
+  analystsIn, labOf, loadMethodVersion, loadReport, loadReview, loadRun, loadTest, performerFacts, recordStanding, signedAndStanding,
+  type Q, type RecordStanding, type RunFacts, type TestFacts,
+} from '../chain/facts.ts';
 import { valueDto } from '../records/values.ts';
 import { runKind, testKind } from '../records/kinds/chain.ts';
 import { STATEMENT } from '@lims/domain/signing';
 import { checklistFor, preparationSubject } from '../chain/model.ts';
+import { holdsOn, judgementDto, testSteps } from '../chain/steps.ts';
 import { defineView } from '../doors.ts';
 import { RecordIdSchema } from '../wire.ts';
 
@@ -25,13 +30,26 @@ const signatureLines = (s: RecordStanding): SignatureLineDto[] => s.signatures.m
 }));
 
 async function queueRow(q: Q, t: TestFacts): Promise<QueueTestDto> {
-  const analyst = t.assignedAnalyst ? await q.selectFrom('person').select('printed_name').where('id', '=', t.assignedAnalyst).executeTakeFirst() : null;
+  const analyst = t.assignedAnalyst
+    ? await q.selectFrom('person').innerJoin('account', 'account.person_id', 'person.id').select(['person.printed_name', 'account.username']).where('person.id', '=', t.assignedAnalyst).executeTakeFirst()
+    : null;
   const requested = t.method ? `${t.method.number} v${t.method.version}` : (await q.selectFrom('test as x').innerJoin('method as m', 'm.id', 'x.method_id').select('m.number').where('x.id', '=', t.id).executeTakeFirstOrThrow()).number;
+  const runs: RunFacts[] = [];
+  for (const r of t.runs) runs.push(await loadRun(q, r.id));
+  const holds = await holdsOn(q, t.id);
   return {
-    id: t.id, label: t.label, number: t.number, state: t.state, gxpClass: t.gxpClass, customer: t.customer.name, product: t.sample.product.code, lotNumber: t.sample.lotNumber,
+    id: t.id, label: t.label, number: t.number, state: t.state, stateLabel: TestMachine.states[t.state], steps: testSteps(t, runs, holds), holds,
+    sampleId: t.sample.id, sampleState: t.sample.state, submissionId: t.submission.id,
+    gxpClass: t.gxpClass, customer: t.customer.name, product: t.sample.product.code, lotNumber: t.sample.lotNumber,
     sampleNumber: t.sample.number, submissionNumber: t.submission.number, method: requested,
-    assignedAnalyst: t.assignedAnalyst && analyst ? { id: t.assignedAnalyst, printedName: analyst.printed_name } : null,
+    assignedAnalyst: t.assignedAnalyst && analyst ? { id: t.assignedAnalyst, printedName: analyst.printed_name, username: analyst.username } : null,
   };
+}
+
+async function reviewsOf(q: Q, recordId: string): Promise<ReviewRefDto[]> {
+  const rows = await q.selectFrom('review as r').innerJoin('person as p', 'p.id', 'r.reviewer_id').innerJoin('account as a', 'a.person_id', 'p.id')
+    .select(['r.id', 'r.checklist_version', 'p.printed_name', 'a.username']).where('r.reviews_record_id', '=', recordId).execute();
+  return rows.map((r) => ({ id: r.id, checklistVersion: r.checklist_version, reviewer: { printedName: r.printed_name, username: r.username } }));
 }
 
 export const queue = defineView({
@@ -57,7 +75,7 @@ export const testDetail = defineView({
       ? await q.selectFrom('section_verdict').selectAll().where('test_version_id', '=', standing.version.versionId).orderBy('jurisdiction').orderBy('analyte').execute()
       : [];
     return {
-      test: { ...(await queueRow(q, t)), sampleId: t.sample.id, submissionId: t.submission.id, acceptanceReason: t.acceptanceReason, methodVersionId: t.method?.id ?? null, specificationVersionId: t.specification?.ref.versionId ?? null },
+      test: { ...(await queueRow(q, t)), acceptanceReason: t.acceptanceReason, methodVersionId: t.method?.id ?? null, specificationVersionId: t.specification?.ref.versionId ?? null },
       method: t.method ? { number: t.method.number, title: t.method.title, version: t.method.version, analytes: t.method.data.analytes.map((a) => a.key), minimumPreparations: t.method.data.preparations } : null,
       specification: t.specification ? {
         purpose: t.specification.purpose, versionNo: t.specification.ref.versionNo, hash: t.specification.ref.hash,
@@ -73,7 +91,9 @@ export const testDetail = defineView({
         jurisdiction: v.jurisdiction, analyte: v.analyte, limit: v.limit_text, compared: v.compared_text, sharePercent: v.share_percent, outcome: v.outcome,
         ruleSetVersion: v.rule_set_version, calculationVersion: v.calculation_version, preparations: v.preparations as unknown as TestDetailDto['verdicts'][number]['preparations'],
       })),
-      holds: t.holds,
+      judgement: judgementDto(t, t.judgement),
+      performedStands: signedAndStanding(standing, 'Performed'),
+      reviews: await reviewsOf(q, t.id),
     };
   },
 });
@@ -96,9 +116,13 @@ export const runDetail = defineView({
         source: c.check.criterion.source.kind === 'compendial' ? c.check.criterion.source.citation : c.check.criterion.source.kind === 'method' ? c.check.criterion.source.methodVersion : c.check.criterion.source.sopVersion,
         value: c.value?.effective.text ?? null,
         outcome: c.outcome.kind === 'judged' ? (c.outcome.conforms ? 'conforms' : 'does-not-conform') : c.outcome.kind,
+        limit: c.check.criterion.op === 'range'
+          ? { op: 'range' as const, low: formatWritten(c.check.criterion.low), high: formatWritten(c.check.criterion.high) }
+          : { op: c.check.criterion.op, limit: formatWritten(c.check.criterion.limit) },
       })),
       signatures: signatureLines(r.standing),
       missingValues: r.missingValues,
+      reviews: await reviewsOf(q, r.id),
     };
   },
 });
@@ -132,11 +156,16 @@ export const reportDetail = defineView({
         performedStands: t.standing.stands && t.standing.signatures.some((s) => s.meaning === 'Performed'),
         reviewedStands: t.standing.stands && t.standing.signatures.some((s) => s.meaning === 'Reviewed'),
         jurisdictions: t.specification?.data.sections.map((s) => s.jurisdiction) ?? [],
+        verdicts: t.standing.version
+          ? (await q.selectFrom('section_verdict').select(['jurisdiction', 'analyte', 'limit_text', 'compared_text', 'share_percent', 'outcome']).where('test_version_id', '=', t.standing.version.versionId).orderBy('jurisdiction').orderBy('analyte').execute())
+            .map((v) => ({ jurisdiction: v.jurisdiction, analyte: v.analyte, limit: v.limit_text, compared: v.compared_text, sharePercent: v.share_percent, outcome: v.outcome }))
+          : [],
       });
     }
     return {
       report: { id: r.id, number: r.number, state: r.state, customer: r.customer.name, submissionNumber: r.submission.number, version: r.standing.version },
       tests, signatures: signatureLines(r.standing), issue: r.issue ? { pdfSha256: r.issue.pdfSha256, rendererRelease: r.issue.rendererRelease } : null,
+      reviews: await reviewsOf(q, r.id),
     };
   },
 });
@@ -148,14 +177,19 @@ export const assignment = defineView({
   read: async (q, { testId }, actor): Promise<AssignmentDto> => {
     const t = await loadTest(q, testId);
     const test = await queueRow(q, t);
-    if (!t.method) return { test, eligible: [] };
+    const analysts = await analystsIn(q, t.labId);
+    const method = t.method;
+    if (!method) {
+      return { test, candidates: analysts.map((a) => ({ ...a, eligible: false, reasons: [`${t.label} is not accepted yet, so no Method version is pinned to be trained on.`] })) };
+    }
     const lab = actor.kind === 'staff' ? actor.lab : actor.kind === 'service' ? actor.lab : null;
     const dbNow = new Date();
     const candidates = [];
-    for (const a of await analystsIn(q, t.labId)) {
-      candidates.push({ ...a, ...(await performerFacts(q, a.id, t.method, lab, dbNow)), holdsAnalystRole: true });
+    for (const a of analysts) {
+      const gate = assignmentGate({ ...(await performerFacts(q, a.id, method, lab, dbNow)), holdsAnalystRole: true });
+      candidates.push({ ...a, eligible: gate.go, reasons: gate.go ? [] : gate.reasons.map((r) => describeReasons([r])) });
     }
-    return { test, eligible: eligibleAnalysts(candidates).map((c) => ({ id: c.id, printedName: c.printedName, username: c.username })) };
+    return { test, candidates };
   },
 });
 

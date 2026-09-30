@@ -172,11 +172,27 @@ export type SignatureLineDto = SignatureDto & { readonly stands: boolean };
 
 export type RunSummaryDto = { readonly id: string; readonly number: string; readonly state: 'Open' | 'Performed' | 'Reviewed'; readonly version: VersionDto | null };
 
+/** One step of a Test as the server's step model computes it; a blocked step says why in words (rules 15, 17). */
+export type StepDto = { readonly name: string; readonly state: 'done' | 'current' | 'next' | 'blocked'; readonly note: string | null; readonly reasons: readonly string[] };
+
+/** A Hold is its own tag, never a state; it names its kind and the step it blocks (decision 23). */
+export type HoldDto = { readonly id: string; readonly kind: string; readonly blocks: string };
+
+/** Who opened a Review on a record, so each reviewer finds their own. */
+export type ReviewRefDto = { readonly id: string; readonly reviewer: { readonly printedName: string; readonly username: string }; readonly checklistVersion: string };
+
 export type QueueTestDto = {
   readonly id: string;
   readonly label: string;
   readonly number: string | null;
   readonly state: string;
+  /** The state as a person reads it, e.g. "Submitted for Review". */
+  readonly stateLabel: string;
+  readonly steps: readonly StepDto[];
+  readonly holds: readonly HoldDto[];
+  readonly sampleId: string;
+  readonly sampleState: string;
+  readonly submissionId: string;
   readonly gxpClass: string;
   readonly customer: string;
   readonly product: string;
@@ -184,11 +200,32 @@ export type QueueTestDto = {
   readonly sampleNumber: string | null;
   readonly submissionNumber: string;
   readonly method: string;
-  readonly assignedAnalyst: { readonly id: string; readonly printedName: string } | null;
+  readonly assignedAnalyst: { readonly id: string; readonly printedName: string; readonly username: string } | null;
+};
+
+/**
+ * The Test's judgement grouped by Specification Section (rule 22): each value at full precision,
+ * labelled as such, beside the value rounded once by the Section's Rule Set and the limit as
+ * written, with the share of the limit per Preparation and for the mean.
+ */
+export type JudgementDto = {
+  readonly outcome: string;
+  readonly variability: readonly {
+    readonly analyte: string; readonly limit: string | null; readonly outcome: string;
+    readonly pairs: readonly { readonly preparations: string; readonly fullPrecision: string; readonly compared: string; readonly within: boolean }[];
+  }[];
+  readonly sections: readonly {
+    readonly jurisdiction: string; readonly ruleSetVersion: string; readonly rounding: string; readonly outcome: string;
+    readonly lines: readonly {
+      readonly analyte: string; readonly limit: string; readonly unit: string;
+      readonly fullPrecision: string; readonly compared: string | null; readonly sharePercent: string | null; readonly outcome: string; readonly because: string | null;
+      readonly preparations: readonly { readonly preparation: string; readonly fullPrecision: string; readonly compared: string; readonly sharePercent: string; readonly conforms: boolean }[];
+    }[];
+  }[];
 };
 
 export type TestDetailDto = {
-  readonly test: QueueTestDto & { readonly sampleId: string; readonly submissionId: string; readonly acceptanceReason: string | null; readonly methodVersionId: string | null; readonly specificationVersionId: string | null };
+  readonly test: QueueTestDto & { readonly acceptanceReason: string | null; readonly methodVersionId: string | null; readonly specificationVersionId: string | null };
   readonly method: { readonly number: string; readonly title: string; readonly version: number; readonly analytes: readonly string[]; readonly minimumPreparations: string } | null;
   readonly specification: { readonly purpose: string; readonly versionNo: number; readonly hash: string; readonly sections: readonly { readonly jurisdiction: string; readonly ruleSetVersion: string; readonly lines: readonly { readonly analyte: string; readonly limit: string; readonly unit: string }[] }[] } | null;
   readonly preparations: readonly { readonly id: string; readonly prepNo: number; readonly subject: string }[];
@@ -198,17 +235,28 @@ export type TestDetailDto = {
   readonly version: VersionDto | null;
   readonly signatures: readonly SignatureLineDto[];
   /** The server's verdicts on the current version, as stored; empty until the Test is signed Performed. */
+  /**
+   * The judgement of the current values. While Performed does not stand on the current version it
+   * is Provisional; once it stands it is what the signed version recorded, and `verdicts` are its rows.
+   */
+  readonly judgement: JudgementDto | null;
+  readonly performedStands: boolean;
+  readonly reviews: readonly ReviewRefDto[];
   readonly verdicts: readonly { readonly jurisdiction: string; readonly analyte: string; readonly limit: string; readonly compared: string | null; readonly sharePercent: string | null; readonly outcome: string; readonly ruleSetVersion: string; readonly calculationVersion: string; readonly preparations: readonly { readonly preparation: string; readonly compared: string; readonly conforms: boolean }[] }[];
-  readonly holds: readonly string[];
 };
 
 export type RunDetailDto = {
   readonly run: RunSummaryDto & { readonly method: string; readonly acquiredBy: string; readonly tests: readonly { readonly id: string; readonly label: string }[] };
   readonly values: readonly ValueDto[];
   readonly instrument: { readonly code: string; readonly kind: string; readonly fitness: string } | null;
-  readonly runChecks: readonly { readonly name: string; readonly unit: string; readonly criterion: string; readonly source: string; readonly value: string | null; readonly outcome: string }[];
+  readonly runChecks: readonly {
+    readonly name: string; readonly unit: string; readonly criterion: string; readonly source: string; readonly value: string | null; readonly outcome: string;
+    /** The criterion's parts as written, for the entry field's limit line (rule 20). */
+    readonly limit: { readonly op: 'NMT' | 'NLT'; readonly limit: string } | { readonly op: 'range'; readonly low: string; readonly high: string };
+  }[];
   readonly signatures: readonly SignatureLineDto[];
   readonly missingValues: readonly string[];
+  readonly reviews: readonly ReviewRefDto[];
 };
 
 export type ReviewDetailDto = {
@@ -221,15 +269,20 @@ export type ReviewDetailDto = {
 
 export type ReportDetailDto = {
   readonly report: { readonly id: string; readonly number: string; readonly state: string; readonly customer: string; readonly submissionNumber: string; readonly version: VersionDto | null };
-  readonly tests: readonly (QueueTestDto & { readonly version: VersionDto | null; readonly performedStands: boolean; readonly reviewedStands: boolean; readonly jurisdictions: readonly string[] })[];
+  readonly tests: readonly (QueueTestDto & {
+    readonly version: VersionDto | null; readonly performedStands: boolean; readonly reviewedStands: boolean; readonly jurisdictions: readonly string[];
+    /** The verdicts the Test's signed version recorded, one per Section and Analyte, for QA to confirm. */
+    readonly verdicts: readonly { readonly jurisdiction: string; readonly analyte: string; readonly limit: string; readonly compared: string | null; readonly sharePercent: string | null; readonly outcome: string }[];
+  })[];
   readonly signatures: readonly SignatureLineDto[];
   readonly issue: { readonly pdfSha256: string; readonly rendererRelease: string } | null;
+  readonly reviews: readonly ReviewRefDto[];
 };
 
 export type AssignmentDto = {
   readonly test: QueueTestDto;
-  /** Only the Analysts the assignment gate lets through (decision 19 §4). */
-  readonly eligible: readonly { readonly id: string; readonly printedName: string; readonly username: string }[];
+  /** Every Analyst in the Lab with the assignment gate's answer; only the eligible may be assigned (decision 19 §4). */
+  readonly candidates: readonly { readonly id: string; readonly printedName: string; readonly username: string; readonly eligible: boolean; readonly reasons: readonly string[] }[];
 };
 
 export type LabReferenceDto = {
