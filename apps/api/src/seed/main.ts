@@ -3,7 +3,8 @@
 // Seeds the demo dataset into the configured database through the real API (built in-process),
 // then, with --handover, revokes the seed's authenticators on the demo accounts and prints one
 // one-time enrolment link per account for the owner to scan into a real authenticator app. Both
-// are audited. Reads the same environment the API does (deploy/README.md, "Runtime contract").
+// are audited. Whatever happens, the run ends by retiring svc:seed, so it runs once per database.
+// Reads the same environment the API does (deploy/README.md, "Runtime contract").
 
 import { randomUUID } from 'node:crypto';
 import { createDb, SERVICE } from '@lims/db';
@@ -12,10 +13,8 @@ import { buildApp } from '../app.ts';
 import { CHAIN } from '../chain/index.ts';
 import { commit } from '../commit.ts';
 import { loadConfig } from '../config.ts';
-import { reenrol } from '../commands/identity.ts';
-import { DEMO_ACCOUNTS } from './cast.ts';
 import { Client } from './drive.ts';
-import { alreadySeeded, seedDemo } from './index.ts';
+import { alreadySeeded, handover as handOver, retireSeed, seedDemo, seedRetired } from './index.ts';
 
 const handover = process.argv.includes('--handover');
 const config = loadConfig();
@@ -29,6 +28,9 @@ const driver = {
 };
 
 try {
+  if (await seedRetired(db)) {
+    throw new Error('the seed already ran on this database and retired svc:seed. The Admin re-enrols a person with identity.reenrol.');
+  }
   if (await alreadySeeded(db)) {
     console.log('Already seeded; leaving the data as it is.');
   } else {
@@ -36,15 +38,16 @@ try {
     console.log('Seeded.');
   }
   if (handover) {
-    console.log('\nHandover: the seed\'s authenticators are revoked; enrol each account through its link within 24 hours.\n');
-    for (const [username, printedName, role] of DEMO_ACCOUNTS) {
-      const out = await driver.run(seed, reenrol, { username });
-      if (out.kind !== 'receipt') throw new Error(`reenrol ${username}: ${out.refusal.message}`);
-      const token = (out.once?.data as { enrolmentToken: string }).enrolmentToken;
+    const links = await handOver(driver, config.dataClass);
+    console.log('\nHandover: the seed\'s authenticators are revoked; enrol each account through its link within 24 hours.');
+    console.log('Enrol adam first; as the Admin, record a new identity check for each person before they sign.\n');
+    for (const { username, printedName, role, token } of links) {
       console.log(`${username.padEnd(6)} ${printedName.padEnd(16)} ${role.padEnd(40)} /enrol#${token}`);
     }
   }
 } finally {
+  await retireSeed(api.deps);
+  console.log('svc:seed retired.');
   await api.app.close();
   await db.destroy();
 }

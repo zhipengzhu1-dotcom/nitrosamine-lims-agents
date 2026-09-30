@@ -11,13 +11,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIR="$ROOT/.lims"
 DB="${PGDATABASE:-lims_dev}"
 mkdir -p "$DIR/reports"
-for key in pepper totp-key; do
+for key in pepper totp-key commit-input-key; do
   [ -f "$DIR/$key" ] || { umask 077; openssl rand -base64 32 > "$DIR/$key"; }
 done
 export PGDATABASE="$DB"
 export LIMS_RELEASE="${LIMS_RELEASE:-dev-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo local)}"
 export LIMS_PASSWORD_PEPPER_FILE="$DIR/pepper"
 export LIMS_TOTP_ENCRYPTION_KEY_FILE="$DIR/totp-key"
+export LIMS_COMMIT_INPUT_KEY_FILE="$DIR/commit-input-key"
 export LIMS_REPORT_STORE="$DIR/reports"
 "$ROOT/scripts/pg.sh" up >/dev/null
 case "${1:-}" in

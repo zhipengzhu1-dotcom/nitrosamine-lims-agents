@@ -2,12 +2,16 @@
 // through the real link and signs with full re-authentication; the seed acts as their phone.
 // It refuses to run twice on a database that already holds a Customer.
 
-import type { Kysely } from 'kysely';
-import type { DB } from '@lims/db';
+import { randomUUID } from 'node:crypto';
+import { sql, type Kysely } from 'kysely';
+import { COMPANY_LEDGER, runAudited, SERVICE, type DB } from '@lims/db';
+import type { CommitKey } from '@lims/domain/ids';
 import type { Deps } from '../commit.ts';
-import { authorise, seedCast, type Cast } from './cast.ts';
+import { reenrol } from '../commands/identity.ts';
+import type { DataClass } from '../config.ts';
+import { authorise, DEMO_ACCOUNTS, seedCast, type Cast } from './cast.ts';
 import { acceptAndReceive, assign, fullChain, openTabs, PASSING, submitOne, typeRun, type Submitted, type Tabs } from './chain.ts';
-import type { Driver } from './drive.ts';
+import { SEED_WORKSTATION, type Driver } from './drive.ts';
 import { METHOD_DOCUMENTS, METHOD_GCMS, METHOD_LCMS, seedCustomers, seedReference, type Reference } from './reference.ts';
 
 /** 30 % of the #23 prototype's counts, the owner's cap for the seed and the tests. */
@@ -35,8 +39,10 @@ export async function alreadySeeded(db: Kysely<DB>): Promise<boolean> {
   return (await db.selectFrom('customer').select('id').executeTakeFirst()) !== undefined;
 }
 
-export async function seedDemo(api: Driver, deps: Deps, log: (line: string) => void = () => {}): Promise<SeedResult> {
+export async function seedDemo(driver: Driver, deps: Deps, log: (line: string) => void = () => {}): Promise<SeedResult> {
   if (await alreadySeeded(deps.db)) throw new Error('this database is already seeded');
+  if (deps.dataClass !== 'fictional') throw new Error(`the seed signs as fictional people, so it runs only on fictional data, not ${deps.dataClass}`);
+  const api: Driver = { ...driver, workstation: SEED_WORKSTATION };
   log('Customers');
   const customers = await seedCustomers(api);
   log('People: enrolment, identity checks, Training Records');
@@ -72,6 +78,45 @@ export async function seedDemo(api: Driver, deps: Deps, log: (line: string) => v
   await tabs.sam.must('test.reject', { testId: rejected.samples[0]!.tests[0]!, reason: `${METHOD_GCMS} is still in development in this Lab; request ${METHOD_LCMS} instead.` });
 
   return { cast, reference, tabs, submissions: { released, ready, requested, inProgress: { ...inProgressSubmitted, runId: typed.runId }, rejected } };
+}
+
+export type HandoverLink = { readonly username: string; readonly printedName: string; readonly role: string; readonly token: string };
+
+/**
+ * Revokes the seed's authenticators on the demo accounts and mints one enrolment link each, for
+ * the owner to scan into a real authenticator app. Only on a fictional-data deployment: one person
+ * then holds every demo account, which the demo exception allows only while the data is fictional.
+ */
+export async function handover(api: Driver, dataClass: DataClass): Promise<readonly HandoverLink[]> {
+  if (dataClass !== 'fictional') throw new Error(`the handover gives one person every demo account, so it runs only on fictional data, not ${dataClass}`);
+  const links: HandoverLink[] = [];
+  for (const [username, printedName, role] of DEMO_ACCOUNTS) {
+    const out = await api.run(api.seed, reenrol, { username });
+    if (out.kind !== 'receipt') throw new Error(`reenrol ${username}: ${out.refusal.message}`);
+    links.push({ username, printedName, role, token: (out.once?.data as { enrolmentToken: string }).enrolmentToken });
+  }
+  return links;
+}
+
+/**
+ * Revokes svc:seed's grant, so nothing can write as the seed once it has finished (part11 G7). The
+ * seed cannot revoke its own grant, since the database checks the acting grant on every write
+ * including that one, so svc:auth records it. Retiring twice changes nothing.
+ */
+export async function retireSeed(deps: Deps): Promise<void> {
+  await runAudited(deps.db, {
+    person: SERVICE.auth.person, role: SERVICE.auth.role, actingLab: null, customer: null, action: 'seed.retire', reason: { kind: 'action' },
+    appRelease: deps.release, session: null, commitKey: randomUUID() as CommitKey, ledgers: [COMPANY_LEDGER],
+  }, { kind: 'company' }, async (tx) => {
+    await tx.db.updateTable('role_grant').set({ revoked_at: sql`clock_timestamp()` })
+      .where('person_id', '=', SERVICE.seed.person).where('role', '=', SERVICE.seed.role).where('revoked_at', 'is', null).execute();
+    return { commit: null };
+  });
+}
+
+/** Whether the seed has finished on this database and retired its identity. */
+export async function seedRetired(db: Kysely<DB>): Promise<boolean> {
+  return (await db.selectFrom('role_grant').select('id').where('person_id', '=', SERVICE.seed.person).where('revoked_at', 'is', null).executeTakeFirst()) === undefined;
 }
 
 /** The counts the cap test compares. */

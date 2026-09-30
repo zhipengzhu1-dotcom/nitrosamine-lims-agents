@@ -41,7 +41,7 @@ case "$SECRETS_DIR/" in
 esac
 [ -d "$SECRETS_DIR" ] || refuse "no secrets folder at $SECRETS_DIR; run deploy/mac/secrets.sh"
 [ "$(stat -f %Lp "$SECRETS_DIR")" = 700 ] || refuse "$SECRETS_DIR must be mode 700"
-required=(db_superuser_password db_migrator_password db_app_password totp_encryption_key password_pepper
+required=(db_superuser_password db_migrator_password db_app_password totp_encryption_key password_pepper commit_input_key
   worker_upload_token worker_alarm_token age_public_key)
 [ "$MODE" = tunnel ] && required+=(cloudflared.yml tunnel_credentials.json approved_releases)
 for name in "${required[@]}"; do

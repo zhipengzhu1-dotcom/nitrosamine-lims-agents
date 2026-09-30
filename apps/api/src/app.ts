@@ -25,7 +25,7 @@ export const CORE_VIEWS: readonly AnyViewDef[] = recordViews;
 
 export type AppOptions = {
   readonly db: Kysely<DB>;
-  readonly config: Pick<Config, 'release' | 'pepper' | 'totpKey' | 'reportStore' | 'dataClass'>;
+  readonly config: Pick<Config, 'release' | 'pepper' | 'totpKey' | 'commitInputKey' | 'reportStore' | 'dataClass'>;
   /** The sample-chain kinds, commands and views plug in here. */
   readonly kinds?: readonly KindDef[];
   readonly commands?: readonly AnyCommandDef[];
@@ -48,6 +48,7 @@ export async function buildApp(opts: AppOptions): Promise<Api> {
     release: opts.config.release,
     pepper: opts.config.pepper,
     totpKey: opts.config.totpKey,
+    commitInputKey: opts.config.commitInputKey,
     kinds: new KindRegistry([...CORE_KINDS, ...(opts.kinds ?? [])]),
     reportStore: opts.config.reportStore,
     dataClass: opts.config.dataClass,

@@ -85,10 +85,16 @@ describe('signing refusals', () => {
     expect(changed.status).toBe(200);
     expect((changed.body as { data: { standing: string } }).data.standing).toBe('pending');
     const dee = await login(api, people.dee);
-    const r = await dee.command('signing.sign', { meaning: 'Verified', role: 'Analyst', targets: [shown], attestation: null, credentials: await credentials(people.dee) });
+    const typed = await credentials(people.dee);
+    const r = await dee.command('signing.sign', { meaning: 'Verified', role: 'Analyst', targets: [shown], attestation: null, credentials: typed });
     expect(r.status).toBe(409);
     expect(refusalOf(r).kind).toBe('stale-version');
     expect(refusalOf(r).message).toMatch(/changed after this prompt opened/);
+
+    // The version was checked before the credentials: the code dee typed is still unspent.
+    const other = await recordWeight(ann, await newWidget(ann, 'W4b'), '5.7');
+    const retry = await dee.command('signing.sign', { meaning: 'Verified', role: 'Analyst', targets: [other.version], attestation: null, credentials: typed });
+    expect(retry.status).toBe(200);
   });
 
   it('Reviewed without its checklist attestation is refused', async () => {

@@ -1,4 +1,4 @@
-// Boot configuration, parsed once from the environment deploy/compose.yaml sets. The two keys are
+// Boot configuration, parsed once from the environment deploy/compose.yaml sets. The three keys are
 // read from files the operator owns (Compose secrets); they are never in the environment or the repo.
 
 import { readFileSync } from 'node:fs';
@@ -12,6 +12,8 @@ export type Config = {
   readonly pepper: Buffer;
   /** AES-256-GCM key for TOTP secrets at rest. */
   readonly totpKey: Buffer;
+  /** HMAC-SHA256 key for commit_outcome.input_hash, so a stored hash is no offline verifier of a password or code. */
+  readonly commitInputKey: Buffer;
   /** The report-store volume: True Copies and issued PDFs, content-addressed. */
   readonly reportStore: string;
   /** While fictional, every page shows the banner (#34). */
@@ -47,6 +49,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     release: need('LIMS_RELEASE'),
     pepper: key(need('LIMS_PASSWORD_PEPPER_FILE')),
     totpKey: key(need('LIMS_TOTP_ENCRYPTION_KEY_FILE')),
+    commitInputKey: key(need('LIMS_COMMIT_INPUT_KEY_FILE')),
     reportStore: need('LIMS_REPORT_STORE'),
     dataClass: dataClassOf(env['LIMS_DATA_CLASS']),
   };

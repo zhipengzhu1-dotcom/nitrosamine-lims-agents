@@ -5,8 +5,8 @@
 //   signing.prepare  seals each target (idempotent), returns what is being signed (version, full
 //                    hash, body, pending changes old -> new), the consequence, and the server's
 //                    eligibility answer per role, before any credential is asked for (rule 5).
-//   signing.sign     re-authenticates in full, then Records.sign with the version refs the prompt
-//                    showed. One commit key per attempt.
+//   signing.sign     checks the version refs the prompt showed are still the ones to sign, then
+//                    re-authenticates in full, then Records.sign. One commit key per attempt.
 // Both act under the role the meaning requires: the signature row and the audit entry take it
 // from the same context, so there is no "self" role.
 
@@ -102,9 +102,11 @@ export const sign = defineCommand({
     if (actor.kind !== 'staff' && actor.kind !== 'admin' && actor.kind !== 'customer') {
       return { kind: 'not-permitted', message: 'A signature is given in the signer\'s own session.' };
     }
+    const shown = await tx.records.shown({ meaning: input.meaning, targets: input.targets, attestation: input.attestation });
+    if ('kind' in shown) return shown;
     const signer = await reauthenticate(tx, actor, input.role, input.credentials, 'signing');
     if ('kind' in signer) return signer;
-    const rows = await tx.records.sign({ signer, meaning: input.meaning, targets: input.targets, attestation: input.attestation });
+    const rows = await tx.records.sign({ signer, shown });
     if ('kind' in rows) return rows;
     return receipt(`Signed ${input.meaning}: ${rows.length} record${rows.length === 1 ? '' : 's'}.`, 'signed', {
       signatures: rows.map((r) => ({ id: r.id, record: r.record, version: versionDto(r.version), meaning: r.meaning, signedAtUtc: r.signedAt.toISOString() })),

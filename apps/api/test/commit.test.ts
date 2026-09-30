@@ -1,14 +1,34 @@
 // Test-plan C14: every commit happens once.
+import { randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { CredentialsSchema } from '@lims/contract';
+import { inputHash } from '../src/commit.ts';
+import { defineCommand } from '../src/doors.ts';
+import { reauthenticate } from '../src/identity/reauth.ts';
 import { credentials, login, testApi, type Client, type TestApi } from '../src/testing/harness.ts';
 import { cast, createWidget, installWidget, newWidget, note, recordWeight, widgetKind, type People } from './support.ts';
+
+/** Re-authenticates, then fails with a bug: an error no refusal maps. */
+const reauthThenBug = defineCommand({
+  name: 'test.reauthThenBug',
+  input: CredentialsSchema,
+  acting: { as: 'session' },
+  reason: { kind: 'action' },
+  ledgers: () => [],
+  run: async (tx, creds) => {
+    if (tx.actor.kind !== 'staff') throw new Error('acts in a Lab session');
+    const signer = await reauthenticate(tx, tx.actor, 'Analyst', creds, 'signing');
+    if ('kind' in signer) return signer;
+    throw new Error('a bug after re-authentication');
+  },
+});
 
 let api: TestApi;
 let people: People;
 let ann: Client;
 
 beforeAll(async () => {
-  api = await testApi({ kinds: [widgetKind], commands: [createWidget, note] });
+  api = await testApi({ kinds: [widgetKind], commands: [createWidget, note, reauthThenBug] });
   await installWidget(api);
   people = await cast(api);
   ann = await login(api, people.ann);
@@ -72,6 +92,26 @@ describe('commit once', () => {
     expect(await api.db.app.selectFrom('signature').select('meaning').where('record_version_id', '=', v.version.versionId).execute()).toEqual([{ meaning: 'Verified' }]);
     const again = await bob.command('signing.sign', right, key);
     expect(again.body['replayed']).toBe(true);
+    const retyped = await bob.command('signing.sign', { ...right, credentials: await credentials(people.bob) }, key);
+    expect(retyped.status).toBe(200);
+    expect(retyped.body['replayed']).toBe(true);
+    expect(await api.db.app.selectFrom('signature').select('meaning').where('record_version_id', '=', v.version.versionId).execute()).toHaveLength(1);
+
+    const stored = await api.db.app.selectFrom('commit_outcome').select('input_hash').where('commit_key', '=', key).where('outcome', '=', 'receipt').executeTakeFirstOrThrow();
+    expect(stored.input_hash.length, 'a receipt keeps no verifier of the password it was signed with').toBe(32);
+
+    const otherSession = await login(api, people.bob);
+    const elsewhere = await otherSession.command('signing.sign', right, key);
+    expect(elsewhere.status).toBe(409);
+    expect((elsewhere.body as { refusal: { kind: string } }).refusal.kind).toBe('commit-key-reused');
+  });
+
+  it('the stored input hash is keyed by the server, so nobody holding the table can test a password guess against it', () => {
+    const input = { meaning: 'Verified', credentials: { typedUserId: 'bob', password: 'guess-1', totp: '123456' } };
+    const key = randomBytes(32);
+    expect(inputHash(key, input).equals(inputHash(Buffer.from(key), input))).toBe(true);
+    expect(inputHash(key, input).equals(inputHash(randomBytes(32), input))).toBe(false);
+    expect(inputHash(key, input).equals(inputHash(key, { ...input, credentials: { ...input.credentials, password: 'guess-2' } }))).toBe(false);
   });
 
   it('a crash between the command\'s writes and COMMIT leaves no outcome; the retry with the same key runs once and succeeds', async () => {
@@ -84,6 +124,14 @@ describe('commit once', () => {
     expect(retry.status).toBe(200);
     expect(retry.body['replayed']).toBeUndefined();
     expect(await notes('crash')).toHaveLength(1);
+  });
+
+  it('a bug after re-authentication rolls the effect back but keeps the TOTP step used, so the code cannot be replayed', async () => {
+    const typed = await credentials(people.ann);
+    expect((await ann.command('test.reauthThenBug', typed)).status).toBe(500);
+    const replay = await ann.command('test.reauthThenBug', typed);
+    expect(replay.status).toBe(409);
+    expect((replay.body as { refusal: { kind: string } }).refusal.kind).toBe('totp-already-used');
   });
 
   it('a not-built refusal rolls its effect back and keeps one spec_gap row', async () => {

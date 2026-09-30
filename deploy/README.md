@@ -45,7 +45,7 @@ All of these live in `~/.config/nitrosamine-lims/secrets/`, outside the repo. Th
 
 - [ ] Run `deploy/mac/secrets.sh --dry-run`, then `deploy/mac/secrets.sh`. It creates the secrets that are random values, and it never overwrites an existing file:
   - `db_superuser_password`, `db_migrator_password` and `db_app_password`;
-  - `totp_encryption_key` and `password_pepper`;
+  - `totp_encryption_key`, `password_pepper` and `commit_input_key` (the HMAC key for the stored hash of each command's input, so no stored hash lets anyone test a password or code offline);
   - `worker_upload_token` and `worker_alarm_token`. When the Worker is deployed, give it the same two values with `wrangler secret put`.
 - [ ] Check that `age_public_key` is already there. It was made on 2026-09-30 (#34). The private key stays offline.
 - [ ] Save a copy of the TOTP key and the pepper in the password manager. Losing either locks out every account.
@@ -174,7 +174,7 @@ Compose gives the API these, and `apps/api` reads them:
 - **`LIMS_DATA_CLASS`** is `fictional` or `real`. `db-init` has already checked it against the stored class.
 - **`LIMS_REPORT_STORE`** is the report-store volume, writable by the API.
 - **`LIMS_CHRONY_HOST`** is `172.30.10.1`, chrony in the VM, which answers monitoring requests (`tracking`) on UDP 323.
-- **`LIMS_*_FILE`** gives the paths of the TOTP key, the pepper, the two Worker tokens and the `age` public key.
+- **`LIMS_*_FILE`** gives the paths of the TOTP key, the pepper, the commit-input key, the two Worker tokens and the `age` public key.
 
 The root filesystem is read-only. Only the report store, `/tmp` and `/run/lims` are writable.
 

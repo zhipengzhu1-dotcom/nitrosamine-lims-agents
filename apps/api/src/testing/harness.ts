@@ -26,7 +26,7 @@ export type TestApi = Api & Driver & {
 
 export async function testApi(extra: Omit<AppOptions, 'db' | 'config'> = {}): Promise<TestApi> {
   const db = await testDatabase();
-  const config = { release: TEST_RELEASE, pepper: randomBytes(32), totpKey: randomBytes(32), reportStore: mkdtempSync(join(tmpdir(), 'lims-reports-')), dataClass: 'fictional' as const };
+  const config = { release: TEST_RELEASE, pepper: randomBytes(32), totpKey: randomBytes(32), commitInputKey: randomBytes(32), reportStore: mkdtempSync(join(tmpdir(), 'lims-reports-')), dataClass: 'fictional' as const };
   const api = await buildApp({ db: db.app, config, ...extra });
   const seed = serviceActor('svc:seed', SERVICE.seed.person);
   return {
