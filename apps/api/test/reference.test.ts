@@ -189,8 +189,8 @@ describe('the Review Checklists follow decision 20 §7 for typed entry (iso 7)',
   // Changing an item means a new version here and in chain/model.ts.
   it('pins each version\'s items', () => {
     expect([RUN_CHECKLIST, TEST_CHECKLIST, RELEASE_CHECKLIST]).toEqual([
-      { version: 'CL-RUN@2', items: ['LIMS audit trail reviewed', 'chromatograms inspected', 'excluded Injections justified', 'Notebook Entries read'] },
-      { version: 'CL-TEST@2', items: ['LIMS audit trail reviewed', 'calculations checked', 'Notebook Entries read', 'outlier, OOT, trend and Conditional Pass flags acknowledged with a comment'] },
+      { version: 'CL-RUN@2', items: ['LIMS audit trail reviewed', 'chromatograms inspected'] },
+      { version: 'CL-TEST@2', items: ['LIMS audit trail reviewed', 'calculations checked'] },
       { version: 'CL-RELEASE@1', items: ['audit trail reviewed', 'every Test Reviewed on its current version', 'report content matches the signed Tests'] },
     ]);
     expect([checklistFor('run'), checklistFor('test'), checklistFor('test_report')]).toEqual([RUN_CHECKLIST, TEST_CHECKLIST, RELEASE_CHECKLIST]);
@@ -198,5 +198,9 @@ describe('the Review Checklists follow decision 20 §7 for typed entry (iso 7)',
 
   it('ticks no item the system proves as evidence (Fitness Status, Run Checks, Training and Authorisation)', () => {
     for (const item of [...RUN_CHECKLIST.items, ...TEST_CHECKLIST.items]) expect(item).not.toMatch(/In use|Run Checks|Training|Authoris|Verified|True Copy/);
+  });
+
+  it('ticks nothing the LIMS does not yet hold: Injections, Notebook Entries, result flags or comments (iso17025 review of C3)', () => {
+    for (const item of [...RUN_CHECKLIST.items, ...TEST_CHECKLIST.items]) expect(item).not.toMatch(/Injection|Notebook|flag|comment|Integration Declaration/);
   });
 });
