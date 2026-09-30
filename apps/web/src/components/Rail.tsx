@@ -63,6 +63,8 @@ export function Rail(props: {
   primary: RailPrimary | null;
   onSwitchUser: () => void;
   onLock: () => void;
+  /** Ends the session on the server; the next person signs in afresh. */
+  onSignOut?: () => void;
 }) {
   const [refusedLabel, setRefusedLabel] = useState<string | null>(null);
   const primary = props.primary;
@@ -112,6 +114,12 @@ export function Rail(props: {
           <Glyph name="lock" size={20} />
           Lock
         </button>
+        {props.onSignOut && (
+          <button type="button" className="rbtn rbtn--quiet" onClick={props.onSignOut}>
+            <Glyph name="back" size={20} />
+            Sign out
+          </button>
+        )}
       </div>
     </footer>
   );

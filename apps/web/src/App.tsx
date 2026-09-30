@@ -35,7 +35,7 @@ export function App({ location, wiring }: { location: { pathname: string; hash: 
   const route = resolve(location.pathname);
   return (
     <ApiContext value={api}>
-      <SessionGate store={store} destination={location.pathname === '/' ? null : (route?.title ?? location.pathname)}>
+      <SessionGate store={store} destination={location.pathname === '/' ? null : (route?.route.title ?? location.pathname)}>
         <Workspace path={location.pathname} />
       </SessionGate>
     </ApiContext>

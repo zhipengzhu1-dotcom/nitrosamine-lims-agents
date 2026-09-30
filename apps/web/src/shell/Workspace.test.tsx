@@ -52,6 +52,20 @@ describe('Workspace', () => {
     expect(screen.getByText(/Locks in 4[12] s without input/)).toBeInTheDocument();
   });
 
+  it('lands a Customer User on the portal and keeps them out of Lab screens', () => {
+    const customer: ActiveSession = { ...staff(600_000), lab: null, customer: { id: 'c-1' }, roles: ['CustomerUser'], person: { printedName: 'Cara Okafor', nativeName: null, username: 'cara', role: 'Customer User' } };
+    mount(customer, '/');
+    expect(screen.getByRole('heading', { name: 'Submissions' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'New Submission' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Intake' })).toBeNull();
+  });
+
+  it('offers Sign out beside Switch user and Lock', () => {
+    mount(staff(600_000), '/deviations');
+    const rail = screen.getByRole('contentinfo', { name: 'Signed-in person and actions' });
+    expect(within(rail).getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+  });
+
   it('keeps the Admin out of Lab screens', () => {
     mount({ ...staff(600_000), lab: null, roles: ['Admin'], person: { printedName: 'Adam Admin', nativeName: null, username: 'adam', role: 'Admin' } }, '/deviations');
     expect(screen.getByRole('heading', { name: 'Not for this account' })).toBeInTheDocument();

@@ -6,15 +6,15 @@ import type { Receipt as ReceiptFact } from '../model';
 import { useServerNow, useSession } from '../session/context';
 import type { ActiveSession } from '../session/store';
 import { RailContext, type RailSlot } from './rail';
-import { homeFor, resolve, routes, type Audience, type Route } from './routes';
+import { homeFor, resolve, routes, type Audience, type Resolved } from './routes';
 
-const audienceOf = (s: ActiveSession): Audience | null => (s.lab ? 'staff' : s.roles.includes('Admin') ? 'admin' : null);
+const audienceOf = (s: ActiveSession): Audience | null => (s.lab ? 'staff' : s.customer ? 'customer' : s.roles.includes('Admin') ? 'admin' : null);
 
 /** The routed screen for this path and audience; the Admin's "/" is the People screen. */
-function screenFor(path: string, audience: Audience): Route | 'wrong-audience' | null {
-  const route = resolve(path === '/' ? homeFor(audience) : path);
-  if (!route) return null;
-  return route.audience === audience ? route : 'wrong-audience';
+function screenFor(path: string, audience: Audience): Resolved | 'wrong-audience' | null {
+  const resolved = resolve(path === '/' ? homeFor(audience) : path, audience);
+  if (!resolved) return null;
+  return resolved.route.audience === audience ? resolved : 'wrong-audience';
 }
 
 /**
@@ -27,6 +27,7 @@ export function Workspace({ path }: { path: string }) {
   const now = useServerNow(store.skewMs(), active.zone);
   const lock = useCommand<Record<string, never>>('session.lock');
   const switchUser = useCommand<Record<string, never>>('session.switchUser');
+  const logout = useCommand<Record<string, never>>('session.logout');
   const [slot, setSlot] = useState<RailSlot>({ context: null, primary: null });
   const [receipt, setReceipt] = useState<ReceiptFact | null>(null);
   const clear = useCallback(() => {
@@ -38,7 +39,7 @@ export function Workspace({ path }: { path: string }) {
   const audience = audienceOf(active);
   const screen = audience ? screenFor(path, audience) : null;
   // The clock ticks every second; the routed screen should not re-render with it.
-  const content = useMemo(() => (screen && screen !== 'wrong-audience' ? screen.render() : null), [screen]);
+  const content = useMemo(() => (screen && screen !== 'wrong-audience' ? screen.route.render(screen.params) : null), [screen]);
   const secondsLeft = Math.ceil((Date.parse(active.idleLockAt.utc) - Date.parse(now.utc)) / 1000);
 
   const sessionAct = (command: typeof lock) => async () => {
@@ -50,7 +51,7 @@ export function Workspace({ path }: { path: string }) {
   const nav = audience
     ? routes()
         .filter((r) => r.nav && r.audience === audience)
-        .map((r) => ({ label: r.title, href: r.path, current: screen !== 'wrong-audience' && screen?.path === r.path }))
+        .map((r) => ({ label: r.title, href: r.path, current: screen !== 'wrong-audience' && screen?.route === r }))
     : [];
 
   return (
@@ -65,15 +66,16 @@ export function Workspace({ path }: { path: string }) {
             primary={slot.primary}
             onSwitchUser={sessionAct(switchUser)}
             onLock={sessionAct(lock)}
+            onSignOut={sessionAct(logout)}
           />
         }
       >
         {audience === null ? (
-          <Notice title="No screen for this account yet" text="The Customer portal is not built in the skeleton." />
+          <Notice title="No screen for this account" text="This account holds no role that has a screen." />
         ) : screen === null ? (
           <Notice title="No such screen" text={`Nothing lives at ${path}.`} />
         ) : screen === 'wrong-audience' ? (
-          <Notice title="Not for this account" text={audience === 'admin' ? 'The Admin acts for the company and does not read Lab screens.' : 'This screen is for the Admin.'} />
+          <Notice title="Not for this account" text={audience === 'admin' ? 'The Admin acts for the company and does not read Lab screens.' : audience === 'customer' ? 'This screen is for the Lab.' : 'This screen is for another kind of account.'} />
         ) : (
           content
         )}
