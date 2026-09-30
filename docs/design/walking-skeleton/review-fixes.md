@@ -32,7 +32,7 @@ Every unit appends its database guards to `packages/db/scripts/mutants.ts`.
 | 4 | Anyone in the Lab may write any Recorded Value, including another person's checklist ticks and QA's verdict confirmations; values change under Tests in any state | part11 G3, iso 2 | C2 | each field spec names its writer and the parent states it may be written in: Review fields only by the reviewer and never after a signature cites the Review; Test fields only by the assignee while In Progress; Run fields only by the acquirer while the Run is open. The gates count only ticks and confirmations authored by the signer |
 | 5 | A failing Run Check or Preparation can be corrected into a pass with nothing on the record | iso 3 | C2 | the `spec_gap` row carries `record_id`; the same settle opens a Hold (source `deviation-workflow`) on the Test or Run that blocks Performed; nothing can release it until the Deviation module exists, so the work stays halted |
 | 6 | Units are not checked; dilution and concentration may be zero or negative | usp 3, part11 G6 | C1, C2 | a value whose unit differs from the field spec's unit is refused, and so is a change of unit; `calculatePreparation` refuses a dilution volume ≤ 0 and a negative concentration |
-| 7 | The AI-derived limit is typed and never checked against the Acceptable Intake and maximum daily dose | usp 1 | C3 | the Specification command computes AI ÷ MDD exactly and refuses a version whose limit differs from it truncated to the limit's written decimals; `basis` is required on a nitrosamine line |
+| 7 | The AI-derived limit is typed and never checked against the Acceptable Intake and maximum daily dose | usp 1 | C3 | the Specification command computes AI ÷ MDD exactly and refuses a version whose limit differs from it truncated to the limit's written decimals; `basis` is required on a nitrosamine line. Amended by the owner on 2026-09-30 (C3b): AI ÷ MDD is rounded half up to two significant figures, and a line states that value or a lower one |
 | 8 | The Reportable Result averages however many Preparations exist | usp 5 | C1 | the Method's Preparation count is exact: `preparation.create` refuses beyond it and `loadTest` flags any other count |
 | 9 | An in-house Method is adopted as `verified` | usp 6 | C3 | the Adoption's Approved check allows `verified` and `verified-basic-compendial` only for a compendial basis, never `verified-basic-compendial` with nitrosamine Analytes; the seed adopts the LC-MS/MS Method as `validated-here` |
 | 10 | The S/N Run Check cites `<621>` without the Method's S/N settings | usp 4 | C3 | the seeded criterion cites the Method version, which is the right basis for an in-house Method |
@@ -76,7 +76,7 @@ The Audit Trail showing a Test's descendants and a value's own text (part11 G5),
 
 ## Map (questions for the owner, recorded when #24 closes)
 
-- How many digits an AI-derived limit is stated to (usp, unclear): `0.3` is more lenient than `0.30` under GN 7.20.
+- ~~How many digits an AI-derived limit is stated to (usp, unclear): `0.3` is more lenient than `0.30` under GN 7.20.~~ Settled by the owner on 2026-09-30: two significant figures, half up (C3b).
 - Whether a Method may omit a variability limit (usp, unclear).
 - Recording one Run Check value per injection, so a second bracketing CCV can fail (usp).
 - Whether the same QA person may draft and approve a Specification (part11, interpretation).
