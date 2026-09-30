@@ -311,6 +311,29 @@ The shared contract holds: module names, the `Measured` type, `Written`, `parseW
 - **Run Checks say how their value is compared (#37 §4).** `RunCheck` is `as-exported` (S/N, %Rec), whose typed value is `Measured` as exported, or `lims-computed` with a named statistic, which takes raw inputs and returns `computed-run-check` not built. `judgeRunCheck` produces the outcome, and `RunPerformedFacts.runChecks` carries `{ check, outcome }` instead of `verdict | null`.
 - **GN 7.20's twelve illustration values** and −9.5 against NLT −9 are golden vectors, along with a non-terminating mean just below a tie and variability vectors at, just over and past the limit.
 
+### U8, deploy packaging (`deploy/`)
+
+This design says nothing about packaging, so these entries record what `deploy/` chose against ADR 0002 and decision #34. The shared contract holds for all of them; the API's side of it is the runtime contract in `deploy/README.md`.
+
+- **Three more Compose secrets.** ADR 0002 lists five. The database needs passwords once Postgres leaves trust auth, so `db_superuser_password`, `db_migrator_password` and `db_app_password` join them. Each container gets only the secrets it needs: the API gets `lims_app`'s, `db-init` the superuser's and the migrator's.
+- **`db-init` sets the passwords as SCRAM verifiers.** `deploy/db/init.ts` calls `bootstrapRoles` and `migrate` from `packages/db`, and between them runs `alter role … password '<SCRAM-SHA-256 verifier>'`. The plaintext never reaches a server log. It also creates the database `lims` owned by `lims_owner`. The roles themselves stay defined only in `bootstrap/roles.sql`.
+- **The password reaches node-postgres through pgpass.** `connectionFor` takes no password, so the image's entrypoint writes the granted secrets into a pgpass file on a tmpfs and sets `PGPASSFILE`. The API needs no change for it. node-postgres deprecates pgpass for pg 9; when the pin moves, `connectionFor` should take a password function instead.
+- **Bug in `packages/db`: `migrate()` fails on an already-migrated database.** It reads `lims.migration` as the session user `lims_migrator` before `set local role lims_owner`, and `lims_migrator` is `noinherit` with no usage on schema `lims`, so the second run fails with "permission denied for schema lims" (42501). The test harness migrates each template once, so no test sees it. Deployed, `db-init` runs on every start, and the stack cannot restart after its first start. The fix belongs to `packages/db`: take the owner role before reading the ledger. `deploy/` doesn't work around it.
+- **Caddy config is baked into the web image**, not mounted, so the image digest in the Release Log covers the proxy configuration. `Caddyfile.tunnel` and the inactive `Caddyfile.vps` share `site.caddy`.
+- **cloudflared runs as a Compose service** under the `tunnel` profile, on the internal `edge` network plus an outbound-only network. So nothing is published on the Mac, not even on localhost. `compose.local.yaml` publishes Caddy on `127.0.0.1:8080` for a smoke test before the tunnel exists.
+- **The mount check also confines secret and config files to the secrets folder.** It judges `docker compose config` output, so short and long syntax and `driver_opts` volumes are caught alike.
+- **The build context is an allowlist** (`.dockerignore`), so the real exports folder cannot enter a Docker build, whatever it is called.
+- **The scripts use Homebrew's Docker tools and their own Docker client config** (`~/.config/nitrosamine-lims/docker`), never Docker Desktop's CLI plugins or credential helper. Colima starts with `--activate=false` and mounts only the secrets folder.
+
+### Spec gaps found by U8
+
+- Where the first Release Log entry lives. The skeleton has no Release Log record kind. The runbook's default is a comment by the owner on #24.
+- How the API learns the VM clock's sync state (ADR 0002 "Time": audited writes wait for sync within 1 s). chrony runs in the Colima VM, outside every container. `start.sh` checks it once at launch; nothing checks it while running.
+- How a clock step becomes a System Incident. chrony logs steps in the VM, and nothing carries them to the company chain.
+- The formats of the TOTP key and pepper. `secrets.sh` makes 32 random bytes, base64. Tokens and passwords are 32 bytes, hex.
+- Statement logging for the owner role (ADR 0002 "Operator logs") needs pgaudit, which the official Postgres image lacks. A custom image would be the first image not pulled by digest. Only `log_connections` is on.
+- Backups and anchoring are not built, so until the Worker exists the named volumes on the Mac are the only copy (RPO 24 h is not met).
+
 ## Open questions and risks
 
 - **Recorded Value as a glossary term.** Should "Recorded Value" enter `CONTEXT.md` ("One typed or chosen value on a signable record, with who recorded it and when; the unit of Verified signing and Critical Data Change")? Or does an existing term fit that I missed?
