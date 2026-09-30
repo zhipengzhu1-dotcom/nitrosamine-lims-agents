@@ -37,11 +37,15 @@ export const SESSION_COOKIE = 'lims_session';
 // Responses
 // ---------------------------------------------------------------------------------------------
 
+/** While fictional, every page shows the banner (#34). */
+export type DataClass = 'fictional' | 'real';
+
 export type SessionDto =
-  | { readonly state: 'none' }
-  | { readonly state: 'locked'; readonly owner: { readonly printedName: string; readonly username: string }; readonly lockReason: 'manual' | 'switch-user' | 'idle' }
+  | { readonly state: 'none'; readonly dataClass: DataClass }
+  | { readonly state: 'locked'; readonly dataClass: DataClass; readonly owner: { readonly printedName: string; readonly username: string }; readonly lockReason: 'manual' | 'switch-user' | 'idle' }
   | {
       readonly state: 'active';
+      readonly dataClass: DataClass;
       readonly person: { readonly printedName: string; readonly nativeName: string | null; readonly username: string };
       readonly lab: { readonly id: string; readonly code: string; readonly zone: string } | null;
       readonly customer: { readonly id: string } | null;

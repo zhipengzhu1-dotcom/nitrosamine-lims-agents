@@ -42,4 +42,14 @@ describe('loadConfig reads the runtime contract deploy/compose.yaml sets', () =>
     delete env['LIMS_LISTEN_HOST'];
     expect(loadConfig(env).host).toBe('127.0.0.1');
   });
+
+  it('is a fictional-data deployment unless LIMS_DATA_CLASS says otherwise', () => {
+    expect(loadConfig(deployEnv(secretsDir())).dataClass).toBe('fictional');
+    expect(loadConfig({ ...deployEnv(secretsDir()), LIMS_DATA_CLASS: 'fictional' }).dataClass).toBe('fictional');
+  });
+
+  it('refuses to start as real, since anchoring is not built (#34), and refuses an unknown class', () => {
+    expect(() => loadConfig({ ...deployEnv(secretsDir()), LIMS_DATA_CLASS: 'real' })).toThrow(/anchoring/);
+    expect(() => loadConfig({ ...deployEnv(secretsDir()), LIMS_DATA_CLASS: 'demo' })).toThrow(/fictional or real/);
+  });
 });

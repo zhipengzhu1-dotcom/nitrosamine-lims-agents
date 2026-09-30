@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import type { DataClass } from '@lims/contract';
 import type { CommandOutcome } from '../api/client';
 import { useApi, useCommand } from '../api/hooks';
 import { LockScreen, SignIn } from '../components/LockScreen';
@@ -39,7 +40,7 @@ export function SessionGate(props: { store: SessionStore; destination: string | 
         </GateMessage>
       );
     case 'none':
-      return <SignInGate store={store} destination={props.destination} />;
+      return <SignInGate store={store} destination={props.destination} dataClass={phase.dataClass} />;
     case 'locked':
       return <LockGate store={store} locked={phase.locked} />;
     case 'active':
@@ -73,7 +74,7 @@ function answered(out: CommandOutcome<unknown>, setRefusal: (r: string | null) =
   return 'refused';
 }
 
-function SignInGate(props: { store: SessionStore; destination: string | null }) {
+function SignInGate(props: { store: SessionStore; destination: string | null; dataClass: DataClass }) {
   const login = useCommand('session.login');
   const attempt = useAttemptKey();
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -93,6 +94,7 @@ function SignInGate(props: { store: SessionStore; destination: string | null }) 
       workstation={{ name: workstation, room: null }}
       now={now}
       destination={props.destination}
+      dataClass={props.dataClass}
       refusal={refusal}
       passkeyAllowed={false}
       commitKey={attempt.key}
@@ -123,6 +125,7 @@ function LockGate(props: { store: SessionStore; locked: LockedSession }) {
       owner={props.locked.owner}
       reason={props.locked.reason}
       lockedAt={props.locked.lockedAt}
+      dataClass={props.locked.dataClass}
       refusal={refusal}
       passkeyAllowed={false}
       commitKey={attempt.key}

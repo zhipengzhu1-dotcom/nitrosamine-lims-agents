@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
+import type { DataClass } from '@lims/contract';
 import type { CommitKey, CommitOutcome, Credentials, LockReason, Person, ServerInstant, Workstation } from '../model';
 import { labTime, shortLabTime } from '../time';
 import { CommitButton, useCommitKeyOnce } from './CommitButton';
@@ -11,7 +12,7 @@ import './lock.css';
 type Submit = (credentials: Credentials, commitKey: CommitKey) => Promise<CommitOutcome>;
 
 /** The dark full-screen frame both the lock and sign-in screens use. It shows no record. */
-function BenchScreen(props: { workstation: Workstation; now: ServerInstant; children: ReactNode }) {
+function BenchScreen(props: { workstation: Workstation; now: ServerInstant; dataClass: DataClass; children: ReactNode }) {
   const t = labTime(props.now);
   return (
     <div className="lock">
@@ -24,7 +25,7 @@ function BenchScreen(props: { workstation: Workstation; now: ServerInstant; chil
           {props.workstation.name}
           {props.workstation.room && `, in ${props.workstation.room}`}
         </span>
-        <span className="fict fict--dark">Fictional data</span>
+        {props.dataClass === 'fictional' && <span className="fict fict--dark">Fictional data</span>}
       </div>
       <div className="lock__body">
         <div className="lock__clock">
@@ -102,6 +103,7 @@ export function LockScreen(props: {
   owner: Person;
   reason: LockReason;
   lockedAt: ServerInstant;
+  dataClass: DataClass;
   refusal: string | null;
   passkeyAllowed: boolean;
   commitKey: CommitKey;
@@ -112,7 +114,7 @@ export function LockScreen(props: {
   const keyOnce = useCommitKeyOnce(props.commitKey);
   const owner = props.owner;
   return (
-    <BenchScreen workstation={props.workstation} now={props.now}>
+    <BenchScreen workstation={props.workstation} now={props.now} dataClass={props.dataClass}>
       <h1>
         <Glyph name="lock" size={28} />
         Locked
@@ -158,6 +160,7 @@ export function SignIn(props: {
   now: ServerInstant;
   /** Where the person goes after signing in, as a person reads it, e.g. "Test T26-04175". */
   destination: string | null;
+  dataClass: DataClass;
   refusal: string | null;
   passkeyAllowed: boolean;
   commitKey: CommitKey;
@@ -165,7 +168,7 @@ export function SignIn(props: {
 }) {
   const keyOnce = useCommitKeyOnce(props.commitKey);
   return (
-    <BenchScreen workstation={props.workstation} now={props.now}>
+    <BenchScreen workstation={props.workstation} now={props.now} dataClass={props.dataClass}>
       <h1>Sign in</h1>
       <p className="lock__why">
         {props.destination ? `After you sign in, ${props.destination} opens.` : 'Type your user ID, password and a fresh code.'}

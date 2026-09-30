@@ -13,7 +13,7 @@ function lock() {
   const onTakeover = vi.fn<(c: Credentials, k: CommitKey) => Promise<CommitOutcome>>(async () => 'done');
   const key = keys()();
   render(
-    <LockScreen
+    <LockScreen dataClass="fictional"
       workstation={workstation}
       now={now}
       owner={mei}
@@ -71,7 +71,7 @@ describe('SignIn', () => {
   it('names the deep link as a destination only, and signs in with typed credentials', async () => {
     const onSignIn = vi.fn<(c: Credentials, k: CommitKey) => Promise<CommitOutcome>>(async () => 'done');
     render(
-      <SignIn workstation={workstation} now={now} destination="Test T26-04175" refusal={null} passkeyAllowed={false} commitKey={keys()()} onSignIn={onSignIn} />,
+      <SignIn dataClass="fictional" workstation={workstation} now={now} destination="Test T26-04175" refusal={null} passkeyAllowed={false} commitKey={keys()()} onSignIn={onSignIn} />,
     );
     expect(screen.getByText('After you sign in, Test T26-04175 opens.')).toBeInTheDocument();
     const user = userEvent.setup();

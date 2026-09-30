@@ -20,6 +20,8 @@ const staff = (idleInMs: number): ActiveSession => ({
   signedInAt: { utc: '2026-09-30T13:02:00Z', zone: ZONE },
   idleLockAt: { utc: new Date(Date.now() + idleInMs).toISOString(), zone: ZONE },
   epoch: 's1:0',
+  dataClass: 'fictional',
+  customer: null,
 });
 
 function mount(active: ActiveSession, path: string) {
@@ -58,6 +60,11 @@ describe('Workspace', () => {
 });
 
 describe('the Fictional data banner (#34)', () => {
+  it('reads the deployment\'s data class from the server session', () => {
+    mount({ ...staff(600_000), dataClass: 'real' }, '/deviations');
+    expect(screen.queryByText('Fictional data')).toBeNull();
+  });
+
   it('is never hidden by any stylesheet, at any width', () => {
     const src = join(import.meta.dirname, '..');
     const css = readdirSync(src, { recursive: true, encoding: 'utf8' })

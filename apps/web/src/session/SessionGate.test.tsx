@@ -13,6 +13,7 @@ const ZONE = 'America/New_York';
 
 const active = (username: string, epoch: string, idleLockAt = new Date(Date.now() + 10 * 60_000).toISOString()): SessionAnswer => ({
   state: 'active',
+  dataClass: 'fictional',
   person: { printedName: username === 'ann' ? 'Ann Analyst' : 'Bob Reviewer', nativeName: null, username },
   lab: { id: 'lab-1', code: 'RD', zone: ZONE },
   customer: null,
@@ -26,6 +27,7 @@ const active = (username: string, epoch: string, idleLockAt = new Date(Date.now(
 
 const locked = (reason: 'manual' | 'switch-user' | 'idle' = 'manual'): SessionAnswer => ({
   state: 'locked',
+  dataClass: 'fictional',
   owner: { printedName: 'Ann Analyst', username: 'ann', nativeName: null, roles: ['Analyst'] },
   lockReason: reason,
   lockedAt: '2026-09-30T14:30:00.000Z',
@@ -141,7 +143,7 @@ async function typeCredentials(user: ReturnType<typeof userEvent.setup>, userId:
 
 describe('SessionGate', () => {
   it('asks the server before anything renders, and shows no record until it answers', async () => {
-    const server = fakeServer({ state: 'none' });
+    const server = fakeServer({ state: 'none', dataClass: 'fictional' });
     mount(server);
     expect(screen.getByText('Checking the session')).toBeInTheDocument();
     expect(server.requests[0]).toMatchObject({ method: 'GET', path: '/api/session' });
@@ -151,7 +153,7 @@ describe('SessionGate', () => {
   });
 
   it('opens a deep link only after sign-in, with the typed credentials and this PC\'s name', async () => {
-    const server = fakeServer({ state: 'none' });
+    const server = fakeServer({ state: 'none', dataClass: 'fictional' });
     server.commands['session.login'] = () => ok('Signed in as Ann Analyst.', active('ann', 's1:0'));
     const { user } = mount(server, 'Deviations');
     expect(await screen.findByText('After you sign in, Deviations opens.')).toBeInTheDocument();
@@ -163,7 +165,7 @@ describe('SessionGate', () => {
   });
 
   it('prints a refused sign-in with the server\'s words, and the next attempt carries a new key', async () => {
-    const server = fakeServer({ state: 'none' });
+    const server = fakeServer({ state: 'none', dataClass: 'fictional' });
     server.commands['session.login'] = () => ({ status: 401, body: { kind: 'refusal', refusal: { kind: 'credentials', attemptsLeft: 4, message: 'The user ID, password or code is wrong. 4 attempts left.' } } });
     const { user } = mount(server);
     await screen.findByRole('heading', { name: 'Sign in' });

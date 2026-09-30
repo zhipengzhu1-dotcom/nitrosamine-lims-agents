@@ -126,7 +126,7 @@ test('sessions, a Recorded Value Verified by a second person, and one signature 
   await expect(tab2.getByRole('contentinfo').getByText('Bob Reviewer')).toBeVisible();
   await expect(tab2.getByText('Ann Analyst')).toHaveCount(0);
   const annTab = await request.newContext({ baseURL: baseURL as string, extraHTTPHeaders: { cookie: `lims_session=${annCookie}` } });
-  expect(await (await annTab.get('/api/session')).json(), "Ann's session ended with the takeover").toEqual({ state: 'none' });
+  expect(await (await annTab.get('/api/session')).json(), "Ann's session ended with the takeover").toEqual({ state: 'none', dataClass: 'fictional' });
   expect((await annTab.get(`/api/views/record.audit?recordId=${valueId}`)).status()).toBe(401);
   await annTab.dispose();
 

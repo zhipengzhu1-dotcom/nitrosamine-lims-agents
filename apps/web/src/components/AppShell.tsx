@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { DataClass } from '@lims/contract';
 import type { ServerInstant, Workstation } from '../model';
 import { labTime } from '../time';
 import { Glyph } from './Glyph';
@@ -19,7 +20,7 @@ export function LabClock({ now }: { now: ServerInstant }) {
 }
 
 /** The header belongs to the PC, not the person, so Switch user never changes it. */
-export function TopBar(props: { workstation: Workstation; now: ServerInstant; nav: readonly NavItem[] }) {
+export function TopBar(props: { workstation: Workstation; now: ServerInstant; nav: readonly NavItem[]; dataClass: DataClass }) {
   return (
     <header className="top">
       <span className="brand">
@@ -40,7 +41,7 @@ export function TopBar(props: { workstation: Workstation; now: ServerInstant; na
         {props.workstation.name}
       </span>
       <LabClock now={props.now} />
-      <span className="fict">Fictional data</span>
+      {props.dataClass === 'fictional' && <span className="fict">Fictional data</span>}
     </header>
   );
 }

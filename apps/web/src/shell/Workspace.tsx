@@ -56,7 +56,7 @@ export function Workspace({ path }: { path: string }) {
   return (
     <RailContext value={rail}>
       <AppShell
-        top={<TopBar workstation={{ name: active.workstation, room: null }} now={now} nav={nav} />}
+        top={<TopBar workstation={{ name: active.workstation, room: null }} now={now} nav={nav} dataClass={active.dataClass} />}
         rail={
           <Rail
             identity={{ person: active.person, signedInAt: active.signedInAt, idleLockAt: active.idleLockAt, idleSecondsLeft: secondsLeft <= 60 ? Math.max(secondsLeft, 0) : null }}

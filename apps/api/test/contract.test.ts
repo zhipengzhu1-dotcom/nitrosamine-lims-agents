@@ -41,7 +41,7 @@ describe('GET /api/session when locked', () => {
     const locked = await tab.command('session.lock', {});
     const s = (await tab.session()).body as SessionAnswer;
     expect(s).toMatchObject({
-      state: 'locked', lockReason: 'manual', zone: 'America/New_York', workstation: 'bench-9',
+      state: 'locked', dataClass: 'fictional', lockReason: 'manual', zone: 'America/New_York', workstation: 'bench-9',
       owner: { printedName: 'Ann Analyst', username: 'ann', nativeName: null, roles: ['Analyst', 'Reviewer'] },
     });
     if (s.state !== 'locked') throw new Error('not locked');

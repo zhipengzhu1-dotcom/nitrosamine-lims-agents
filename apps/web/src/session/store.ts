@@ -2,6 +2,7 @@
 // state; this store only holds its last answer, asks again whenever anything suggests the answer
 // changed, and tells the other tabs to ask too. It never decides who is signed in.
 
+import type { DataClass } from '@lims/contract';
 import type { SessionAnswer } from '@lims/contract/session';
 import { STAFF_ROLE_LABEL } from '@lims/contract/session';
 import type { Api } from '../api/client';
@@ -18,6 +19,9 @@ export type ActiveSession = {
   readonly idleLockAt: ServerInstant;
   /** Changes on every sign-in and unlock; the routed screens are keyed on it. */
   readonly epoch: string;
+  /** The Customer a portal session acts for; null for staff and the Admin. */
+  readonly customer: { readonly id: string } | null;
+  readonly dataClass: DataClass;
 };
 
 export type LockedSession = {
@@ -26,12 +30,13 @@ export type LockedSession = {
   readonly lockedAt: ServerInstant;
   readonly workstation: string;
   readonly zone: string;
+  readonly dataClass: DataClass;
 };
 
 export type SessionPhase =
   | { readonly phase: 'asking' }
   | { readonly phase: 'unreachable'; readonly message: string }
-  | { readonly phase: 'none' }
+  | { readonly phase: 'none'; readonly dataClass: DataClass }
   | { readonly phase: 'locked'; readonly locked: LockedSession }
   | { readonly phase: 'active'; readonly active: ActiveSession };
 
@@ -58,7 +63,7 @@ export const roleLabel = (role: string): string => STAFF_ROLE_LABEL[role] ?? rol
 export function phaseOf(answer: SessionAnswer): SessionPhase {
   switch (answer.state) {
     case 'none':
-      return { phase: 'none' };
+      return { phase: 'none', dataClass: answer.dataClass };
     case 'locked': {
       const zone = answer.zone ?? browserZone();
       return {
@@ -74,6 +79,7 @@ export function phaseOf(answer: SessionAnswer): SessionPhase {
           lockedAt: { utc: answer.lockedAt, zone },
           workstation: answer.workstation,
           zone,
+          dataClass: answer.dataClass,
         },
       };
     }
@@ -90,6 +96,8 @@ export function phaseOf(answer: SessionAnswer): SessionPhase {
           signedInAt: { utc: answer.startedAt, zone },
           idleLockAt: { utc: answer.idleLockAt, zone },
           epoch: answer.epoch,
+          customer: answer.customer,
+          dataClass: answer.dataClass,
         },
       };
     }
@@ -154,7 +162,7 @@ export function createSessionStore(api: Pick<Api, 'session'>, bus: SessionBus): 
       if (phase.phase !== 'active') return;
       const a = phase.active;
       idleFired = a.idleLockAt.utc;
-      set({ phase: 'locked', locked: { owner: a.person, reason: 'idle', lockedAt: a.idleLockAt, workstation: a.workstation, zone: a.zone } });
+      set({ phase: 'locked', locked: { owner: a.person, reason: 'idle', lockedAt: a.idleLockAt, workstation: a.workstation, zone: a.zone, dataClass: a.dataClass } });
       void refresh().then(() => bus.post());
     },
     idleFiredFor: () => idleFired,

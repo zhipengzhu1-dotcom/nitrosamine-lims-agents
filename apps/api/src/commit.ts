@@ -24,6 +24,7 @@ import { actingLab, holdsRole, primaryRole, scopeOf, type Requester } from './ac
 import type { AnyCommandDef, CookieAction, Receipt } from './doors.ts';
 import type { KindRegistry } from './records/kinds.ts';
 import type { FileTokens } from './files.ts';
+import type { DataClass } from './config.ts';
 import { records, type Records } from './records/index.ts';
 
 export type Deps = {
@@ -34,6 +35,7 @@ export type Deps = {
   readonly kinds: KindRegistry;
   readonly reportStore: string;
   readonly fileTokens: FileTokens;
+  readonly dataClass: DataClass;
 };
 
 /** A row that must outlive a refusal: written now, and again after the savepoint rolls back. */

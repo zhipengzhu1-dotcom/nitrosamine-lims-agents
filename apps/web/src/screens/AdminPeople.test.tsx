@@ -17,6 +17,8 @@ const admin: ActiveSession = {
   signedInAt: { utc: '2026-09-30T14:00:00Z', zone: 'America/New_York' },
   idleLockAt: { utc: '2026-09-30T14:15:00Z', zone: 'America/New_York' },
   epoch: 's1:0',
+  customer: null,
+  dataClass: 'fictional',
 };
 
 describe('AdminPeople', () => {

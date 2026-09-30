@@ -32,7 +32,7 @@ const ageActivity = (session: string, minutes: number) =>
 describe('the derived state', () => {
   it('no cookie is state none, and a view or command then answers 401', async () => {
     const tab = api.client();
-    expect((await tab.session()).body).toEqual({ state: 'none' });
+    expect((await tab.session()).body).toEqual({ state: 'none', dataClass: 'fictional' });
     expect((await tab.view('record.audit', { recordId: crypto.randomUUID() })).status).toBe(401);
     expect((await tab.command('session.lock', {})).status).toBe(401);
   });
@@ -40,7 +40,7 @@ describe('the derived state', () => {
   it('after sign-in the state is active, with the Lab, roles, epoch and an idle lock 15 minutes ahead', async () => {
     const tab = await login(api, ann, 'bench-7');
     const s = await tab.session();
-    expect(s.body).toMatchObject({ state: 'active', person: { username: 'ann', printedName: 'Ann Analyst' }, lab: { code: 'RD' }, roles: ['Analyst'], workstation: 'bench-7' });
+    expect(s.body).toMatchObject({ state: 'active', dataClass: 'fictional', person: { username: 'ann', printedName: 'Ann Analyst' }, lab: { code: 'RD' }, roles: ['Analyst'], workstation: 'bench-7' });
     const idle = new Date(s.body['idleLockAt'] as string).getTime() - new Date(s.body['startedAt'] as string).getTime();
     expect(idle).toBeGreaterThan(14 * 60_000);
     expect(idle).toBeLessThanOrEqual(15 * 60_000 + 1000);
@@ -87,7 +87,7 @@ describe('the derived state', () => {
       await su.query('set session_replication_role = origin');
       su.release();
     }
-    expect((await tab.session()).body).toEqual({ state: 'none' });
+    expect((await tab.session()).body).toEqual({ state: 'none', dataClass: 'fictional' });
     expect((await tab.view('record.audit', { recordId: crypto.randomUUID() })).status).toBe(401);
     expect((await tab.view('record.audit', { recordId: crypto.randomUUID() })).body).toMatchObject({ refusal: { kind: 'session', state: 'ended' } });
   });
@@ -126,7 +126,7 @@ describe('lock, unlock, switch user, takeover, logout', () => {
     const took = await tab1.command('session.takeover', await credentials(bob));
     expect(took.status).toBe(200);
     expect((await tab1.session()).body).toMatchObject({ state: 'active', person: { username: 'bob' } });
-    expect((await tab2.session()).body).toEqual({ state: 'none' });
+    expect((await tab2.session()).body).toEqual({ state: 'none', dataClass: 'fictional' });
     expect((await tab2.view('record.audit', { recordId: crypto.randomUUID() })).body).toMatchObject({ refusal: { state: 'ended' } });
     const ended = await api.db.app.selectFrom('session').select(['end_reason']).innerJoin('account', 'account.person_id', 'session.person_id')
       .where('account.username', '=', 'cid').where('session.ended_at', 'is not', null).orderBy('session.started_at', 'desc').executeTakeFirstOrThrow();
@@ -139,7 +139,7 @@ describe('lock, unlock, switch user, takeover, logout', () => {
     const tab = await login(api, bob);
     expect((await tab.command('session.logout', {})).status).toBe(200);
     expect(tab.cookie).toBeUndefined();
-    expect((await tab.session()).body).toEqual({ state: 'none' });
+    expect((await tab.session()).body).toEqual({ state: 'none', dataClass: 'fictional' });
   });
 
   it('the cookie is HttpOnly and SameSite=Strict, and Secure off localhost', async () => {

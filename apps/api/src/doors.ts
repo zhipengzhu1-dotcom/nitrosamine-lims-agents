@@ -24,6 +24,7 @@ import { COMMAND_HEADER, CommandEnvelope, SESSION_COOKIE } from '@lims/contract'
 import type { SessionAnswer } from '@lims/contract/session';
 import { readSession, scopeOf, type ActorContext, type CustomerRole, type Requester, type StaffRole } from './actor.ts';
 import { commit, type CommandTx, type Deps, type Outcome } from './commit.ts';
+import type { DataClass } from './config.ts';
 
 // ---------------------------------------------------------------------------------------------
 // Definitions
@@ -141,14 +142,15 @@ function applyCookie(req: FastifyRequest, reply: FastifyReply, action: CookieAct
   else reply.setCookie(SESSION_COOKIE, action.set, opts);
 }
 
-export function sessionDto(s: Awaited<ReturnType<typeof readSession>>): SessionAnswer {
+export function sessionDto(s: Awaited<ReturnType<typeof readSession>>, dataClass: DataClass): SessionAnswer {
   switch (s.state) {
     case 'none':
     case 'ended':
-      return { state: 'none' };
+      return { state: 'none', dataClass };
     case 'locked':
       return {
         state: 'locked',
+        dataClass,
         owner: { printedName: s.locked.printedName, username: s.locked.username, nativeName: s.locked.nativeName, roles: s.locked.roles },
         lockReason: s.locked.lockReason,
         lockedAt: s.locked.lockedAt.toISOString(),
@@ -159,6 +161,7 @@ export function sessionDto(s: Awaited<ReturnType<typeof readSession>>): SessionA
       const a = s.actor;
       return {
         state: 'active',
+        dataClass,
         person: { printedName: a.printedName, nativeName: s.nativeName, username: a.username },
         lab: a.kind === 'staff' ? { id: a.lab, code: a.labCode, zone: a.zone } : null,
         customer: a.kind === 'customer' ? { id: a.customer } : null,
@@ -196,13 +199,13 @@ export function registerDoors(app: FastifyInstance, deps: Deps, doors: Doors): v
 
   app.get('/api/session', async (req, reply) => {
     reply.header('cache-control', 'no-store');
-    return sessionDto(await readSession(deps.db, req.cookies[SESSION_COOKIE]));
+    return sessionDto(await readSession(deps.db, req.cookies[SESSION_COOKIE]), deps.dataClass);
   });
 
   app.post('/api/session/activity', async (req, reply) => {
     if (req.headers[COMMAND_HEADER] !== '1') return reply.code(403).send({ kind: 'refusal', refusal: refuse.notPermitted('Analyst') });
     const s = await readSession(deps.db, req.cookies[SESSION_COOKIE]);
-    if (s.state !== 'active') return reply.code(s.state === 'locked' ? 423 : 401).send(sessionDto(s));
+    if (s.state !== 'active') return reply.code(s.state === 'locked' ? 423 : 401).send(sessionDto(s, deps.dataClass));
     await deps.db.insertInto('session_activity').values({ session_id: s.actor.session, last_activity_at: sql`clock_timestamp()` })
       .onConflict((oc) => oc.column('session_id').doUpdateSet({ last_activity_at: sql`clock_timestamp()` })).execute();
     return reply.code(204).send();

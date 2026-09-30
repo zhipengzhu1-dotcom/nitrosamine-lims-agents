@@ -22,6 +22,8 @@ const session: ActiveSession = {
   signedInAt: { utc: '2026-09-30T14:00:00Z', zone: ZONE },
   idleLockAt: { utc: '2026-09-30T14:15:00Z', zone: ZONE },
   epoch: 's1:0',
+  customer: null,
+  dataClass: 'fictional',
 };
 
 type Sent = { name: string; commitKey: string; input: Record<string, unknown> };

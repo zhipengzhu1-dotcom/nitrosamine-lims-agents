@@ -14,7 +14,18 @@ export type Config = {
   readonly totpKey: Buffer;
   /** The report-store volume: True Copies and issued PDFs, content-addressed. */
   readonly reportStore: string;
+  /** While fictional, every page shows the banner (#34). */
+  readonly dataClass: DataClass;
 };
+
+export type DataClass = 'fictional' | 'real';
+
+// #34: the server refuses `real` unless anchoring is live, and anchoring is not built.
+function dataClassOf(value: string | undefined): DataClass {
+  if (value === undefined || value === 'fictional') return 'fictional';
+  if (value === 'real') throw new Error('LIMS_DATA_CLASS=real needs live anchoring (#34), which is not built; the server starts only as fictional');
+  throw new Error(`LIMS_DATA_CLASS must be fictional or real, not ${value}`);
+}
 
 // deploy/mac/secrets.sh writes each key as 32 random bytes in base64.
 function key(path: string): Buffer {
@@ -37,5 +48,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     pepper: key(need('LIMS_PASSWORD_PEPPER_FILE')),
     totpKey: key(need('LIMS_TOTP_ENCRYPTION_KEY_FILE')),
     reportStore: need('LIMS_REPORT_STORE'),
+    dataClass: dataClassOf(env['LIMS_DATA_CLASS']),
   };
 }

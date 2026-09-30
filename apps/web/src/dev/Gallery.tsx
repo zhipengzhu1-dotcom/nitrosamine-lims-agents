@@ -196,7 +196,7 @@ function ShellDemo({ receipt }: { receipt: Receipt | null }) {
   return (
     <div className="gal__frame">
       <AppShell
-        top={<TopBar workstation={workstation} now={nowAt()} nav={nav} />}
+        top={<TopBar workstation={workstation} now={nowAt()} nav={nav} dataClass="fictional" />}
         rail={
           <Rail
             identity={{ person: mei, signedInAt: { utc: '2026-09-30T12:02:00Z', zone: LAB_ZONE }, idleLockAt: { utc: '2026-09-30T14:55:00Z', zone: LAB_ZONE }, idleSecondsLeft: null }}
@@ -218,7 +218,7 @@ function ShellDemo({ receipt }: { receipt: Receipt | null }) {
         {current && <RoughScreen module={current} />}
       </AppShell>
       {locked && (
-        <LockScreen
+        <LockScreen dataClass="fictional"
           workstation={workstation}
           now={nowAt()}
           owner={mei}
@@ -256,7 +256,7 @@ export function Gallery() {
   if (screen === 'signin') {
     return (
       <div data-gallery={GALLERY_MARKER}>
-        <SignIn
+        <SignIn dataClass="fictional"
           workstation={workstation}
           now={nowAt()}
           destination="Test T26-04175"

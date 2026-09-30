@@ -11,7 +11,7 @@ type Active = Extract<SessionDto, { state: 'active' }>;
  * owner is in full, because the LockScreen names them and the lock reason without any other read.
  */
 export type SessionAnswer =
-  | { readonly state: 'none' }
+  | Extract<SessionDto, { state: 'none' }>
   | (Locked & {
       readonly owner: Locked['owner'] & { readonly nativeName: string | null; readonly roles: readonly string[] };
       readonly lockedAt: string;
