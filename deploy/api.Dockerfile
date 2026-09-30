@@ -29,5 +29,7 @@ COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/api ./apps/api
 COPY --from=build /app/deploy/api ./deploy/api
 COPY --from=build /app/deploy/db ./deploy/db
+# A new named volume takes its owner from the image's directory, so the node user can write these.
+RUN mkdir -p /var/lib/lims/reports /var/lib/lims/state && chown node:node /var/lib/lims/reports /var/lib/lims/state
 USER node
 ENTRYPOINT ["/app/deploy/api/entrypoint.sh"]

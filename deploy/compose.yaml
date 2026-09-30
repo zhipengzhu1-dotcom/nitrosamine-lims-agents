@@ -56,6 +56,10 @@ services:
       PGHOST: postgres
       PGPORT: "5432"
       PGDATABASE: lims
+      LIMS_DATA_CLASS: ${LIMS_DATA_CLASS:?deploy/mac/start.sh sets the data class}
+      LIMS_STATE_DIR: /var/lib/lims/state
+    volumes:
+      - state:/var/lib/lims/state
     secrets:
       - { source: db_superuser_password, uid: "1000", gid: "1000", mode: 0400 }
       - { source: db_migrator_password, uid: "1000", gid: "1000", mode: 0400 }
@@ -130,6 +134,8 @@ networks:
 volumes:
   pgdata: {}
   reports: {}
+  # The data class marker and its change history (deploy/db/data-class.ts).
+  state: {}
 
 # Owner-only files (directory 700, files 600) outside the repo; deploy/mac/secrets.sh creates the
 # generated ones and deploy/mac/start.sh refuses to launch if any is missing or readable by others.
