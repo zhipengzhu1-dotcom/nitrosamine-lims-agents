@@ -128,6 +128,7 @@ const STATUS: { readonly [K in Refusal['kind']]: number } = {
   'wrong-user': 403,
   'not-built': 409,
   'commit-key-reused': 409,
+  'choose-place': 409,
 };
 
 export function statusOf(r: Refusal): number {

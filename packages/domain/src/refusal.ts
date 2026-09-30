@@ -63,7 +63,11 @@ export type Refusal =
   | { readonly kind: 'totp-already-used'; readonly message: string }
   | { readonly kind: 'wrong-user'; readonly message: string }
   | { readonly kind: 'not-built'; readonly feature: NotBuilt; readonly message: string }
-  | { readonly kind: 'commit-key-reused'; readonly message: string };
+  | { readonly kind: 'commit-key-reused'; readonly message: string }
+  /** The sign-in was right, and the person's grants span several Labs or Customers (decision 22: one at a time). */
+  | { readonly kind: 'choose-place'; readonly places: readonly Place[]; readonly message: string };
+
+export type Place = { readonly kind: 'lab' | 'customer'; readonly id: string; readonly name: string };
 
 /** The words for each out-of-slice refusal. Each such refusal is also written as a spec_gap row. */
 export const NOT_BUILT_MESSAGE: { readonly [F in NotBuilt]: string } = {

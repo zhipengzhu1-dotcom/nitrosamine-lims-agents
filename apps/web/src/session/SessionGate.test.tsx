@@ -183,6 +183,29 @@ describe('SessionGate', () => {
     expect(a).not.toBe(b);
   });
 
+  it('asks which Customer to sign in for when the server says the grants span several, and signs in for the one chosen', async () => {
+    const server = fakeServer({ state: 'none', dataClass: 'fictional' });
+    const places = [{ kind: 'customer', id: 'c-acme', name: 'Acme Pharma (fictional)' }, { kind: 'customer', id: 'c-beta', name: 'Beta Biologics (fictional)' }];
+    let asked = 0;
+    server.commands['session.login'] = () =>
+      ++asked === 1
+        ? { status: 409, body: { kind: 'refusal', refusal: { kind: 'choose-place', places, message: 'Choose which one to sign in for, then type the next code.' } } }
+        : ok('Signed in as Ann Analyst.', active('ann', 's1:0'));
+    const { user } = mount(server);
+    await screen.findByRole('heading', { name: 'Sign in' });
+    await typeCredentials(user, 'cara');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    const choice = await screen.findByRole('radiogroup', { name: 'Sign in for' });
+    await user.click(within(choice).getByRole('radio', { name: 'Acme Pharma (fictional)' }));
+    await user.type(screen.getByLabelText('Password'), 'Bench-password-1!');
+    const pad = screen.getByRole('group', { name: 'Code keypad' });
+    for (const d of '654321') await user.click(within(pad).getByRole('button', { name: d }));
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByText('record for ann')).toBeInTheDocument();
+    const logins = server.requests.filter((r) => r.path === '/api/commands/session.login');
+    expect(logins[1]?.body?.input).toMatchObject({ typedUserId: 'cara', customer: 'c-acme', totp: '654321' });
+  });
+
   it('on lock, unmounts the record and drops what it read; unlock remounts it and reads again', async () => {
     const server = fakeServer(active('ann', 's1:0'));
     server.commands['session.lock'] = () => ok('Locked.', locked('manual'));

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { DataClass } from '@lims/contract';
-import type { CommandOutcome } from '../api/client';
+import type { CommandOutcome, Place } from '../api/client';
 import { useApi, useCommand } from '../api/hooks';
 import { LockScreen, SignIn } from '../components/LockScreen';
 import type { CommitKey, CommitOutcome, Credentials } from '../model';
@@ -78,12 +78,16 @@ function SignInGate(props: { store: SessionStore; destination: string | null; da
   const login = useCommand('session.login');
   const attempt = useAttemptKey();
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [places, setPlaces] = useState<readonly Place[]>([]);
+  const [place, setPlace] = useState<string | null>(null);
   const workstation = workstationName();
   const now = useServerNow(props.store.skewMs(), browserZone());
 
   const signIn = async (credentials: Credentials, key: CommitKey) => {
-    const out = await login.run({ ...wireCredentials(credentials), workstation }, key);
+    const chosen = places.find((p) => p.id === place);
+    const out = await login.run({ ...wireCredentials(credentials), workstation, ...(chosen ? { [chosen.kind]: chosen.id } : {}) }, key);
     attempt.next();
+    if (out.kind === 'refusal' && out.refusal.kind === 'choose-place' && out.refusal.places) setPlaces(out.refusal.places);
     const result = answered(out, setRefusal);
     if (result === 'done') await props.store.changed();
     return result;
@@ -95,6 +99,9 @@ function SignInGate(props: { store: SessionStore; destination: string | null; da
       now={now}
       destination={props.destination}
       dataClass={props.dataClass}
+      places={places}
+      place={place}
+      onPlace={setPlace}
       refusal={refusal}
       passkeyAllowed={false}
       commitKey={attempt.key}

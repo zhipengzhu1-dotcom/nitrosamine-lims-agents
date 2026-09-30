@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { CredentialsSchema } from '@lims/contract';
 import { CustomerIdSchema, LabIdSchema } from '../wire.ts';
 import type { CustomerId, LabId, PersonId, SessionId } from '@lims/domain/ids';
-import { refuse } from '@lims/domain/refusal';
+import { refuse, type Refusal } from '@lims/domain/refusal';
 import { newSessionToken, tokenHash } from '../actor.ts';
 import { receipt, type CommandTx, type Detail } from '../commit.ts';
 import { defineCommand } from '../doors.ts';
@@ -17,16 +17,24 @@ import { checkCredentials, findAccount, reauthenticate, LOCKOUT_AFTER } from '..
 const ABSOLUTE_HOURS = 12;
 
 /** Which Lab or Customer a session is opened for: the one named, else the only one the person's grants allow. */
-async function placeOf(tx: CommandTx, person: PersonId, wanted: { lab?: LabId; customer?: CustomerId }) {
+async function placeOf(tx: CommandTx, person: PersonId, wanted: { lab?: LabId; customer?: CustomerId }): Promise<{ lab: LabId | null; customer: CustomerId | null } | Refusal> {
   const grants = await tx.db.selectFrom('role_grant').select(['role', 'lab_id', 'customer_id']).where('person_id', '=', person).where('revoked_at', 'is', null).execute();
   const labs = [...new Set(grants.map((g) => g.lab_id).filter((l): l is string => l !== null))];
   const customers = [...new Set(grants.map((g) => g.customer_id).filter((c): c is string => c !== null))];
-  if (wanted.lab) return labs.includes(wanted.lab) ? { lab: wanted.lab, customer: null } : null;
-  if (wanted.customer) return customers.includes(wanted.customer) ? { lab: null, customer: wanted.customer as CustomerId } : null;
+  if (wanted.lab && labs.includes(wanted.lab)) return { lab: wanted.lab, customer: null };
+  if (wanted.customer && customers.includes(wanted.customer)) return { lab: null, customer: wanted.customer as CustomerId };
+  if (wanted.lab || wanted.customer) return { kind: 'not-permitted', message: 'You hold no role there.' };
   if (labs.length === 1) return { lab: labs[0] as LabId, customer: null };
   if (labs.length === 0 && customers.length === 1) return { lab: null, customer: customers[0] as CustomerId };
   if (labs.length === 0 && customers.length === 0 && grants.some((g) => g.role === 'Admin')) return { lab: null, customer: null };
-  return null;
+  if (labs.length + customers.length === 0) return { kind: 'not-permitted', message: 'You hold no role in any Lab or for any Customer.' };
+  const labRows = labs.length === 0 ? [] : await tx.db.selectFrom('lab').select(['id', 'code']).where('id', 'in', labs).orderBy('code').execute();
+  const customerRows = customers.length === 0 ? [] : await tx.db.selectFrom('customer').select(['id', 'name']).where('id', 'in', customers).orderBy('name').execute();
+  return {
+    kind: 'choose-place',
+    places: [...labRows.map((l) => ({ kind: 'lab' as const, id: l.id, name: `Lab ${l.code}` })), ...customerRows.map((c) => ({ kind: 'customer' as const, id: c.id, name: c.name }))],
+    message: 'Choose which one to sign in for, then type the next code.',
+  };
 }
 
 async function openSession(tx: CommandTx, person: PersonId, place: { lab: LabId | null; customer: CustomerId | null }, workstation: string): Promise<{ id: SessionId; token: string }> {
@@ -68,7 +76,7 @@ export const login = defineCommand({
     const refused = await checkCredentials(tx, account, input, 'login', null);
     if (refused) return refused;
     const place = await placeOf(tx, account.person, { ...(input.lab ? { lab: input.lab } : {}), ...(input.customer ? { customer: input.customer } : {}) });
-    if (!place) return { kind: 'not-permitted', message: 'Choose the Lab or Customer to sign in for.' };
+    if ('kind' in place) return place;
     const previous = tx.actor;
     if (previous.kind === 'staff' || previous.kind === 'admin' || previous.kind === 'customer') {
       await endSession(tx, previous.session, previous.person, previous.person === account.person ? 'logout' : 'takeover', { by: 'login' });
@@ -143,7 +151,7 @@ export const takeover = defineCommand({
     const refused = await checkCredentials(tx, account, input, 'takeover', previous.session);
     if (refused) return refused;
     const place = await placeOf(tx, account.person, { ...(input.lab ? { lab: input.lab } : {}), ...(input.customer ? { customer: input.customer } : {}) });
-    if (!place) return { kind: 'not-permitted', message: 'Choose the Lab or Customer to sign in for.' };
+    if ('kind' in place) return place;
     await endSession(tx, previous.session, previous.person, 'takeover', { by: account.person, workstation: previous.workstation });
     const s = await openSession(tx, account.person, place, previous.workstation);
     await tx.db.insertInto('auth_event').values({ person_id: account.person, typed_user: input.typedUserId, session_id: s.id, kind: 'login_ok', counts_toward_lockout: false, detail: { by: 'takeover' } }).execute();

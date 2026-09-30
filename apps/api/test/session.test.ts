@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
 import { credentials, enrol, login, testApi, type Person, type TestApi } from '../src/testing/harness.ts';
 import { sweepIdleSessions } from '../src/sweeper.ts';
+import { createCustomer } from '../src/commands/reference.ts';
 import { createLab, createWidget, installWidget, widgetKind, type Lab } from './support.ts';
 
 let api: TestApi;
@@ -151,5 +152,29 @@ describe('lock, unlock, switch user, takeover, logout', () => {
     expect(String(cookie)).toMatch(/SameSite=Strict/);
     expect(String(cookie)).toMatch(/Secure/);
     void tab;
+  });
+});
+
+describe('signing in when the grants span several Customers or Labs', () => {
+  it('asks which one after a correct password and code, and signs in for the one chosen with the next code', async () => {
+    const customer = async (code: string, name: string) => {
+      const out = await api.run(api.seed, createCustomer, { code, name });
+      if (out.kind !== 'receipt') throw new Error(out.refusal.message);
+      return (out.receipt.data as { customerId: string }).customerId;
+    };
+    const acme = await customer('ACME', 'Acme Pharma (fictional)');
+    const beta = await customer('BETA', 'Beta Biologics (fictional)');
+    const cara = await enrol(api, { username: 'cara', printedName: 'Cara Customer', grants: [{ role: 'CustomerUser', customer: acme }, { role: 'CustomerUser', customer: beta }] });
+    const tab = api.client();
+    const asked = await tab.command('session.login', { ...(await credentials(cara)), workstation: 'portal' });
+    expect(asked.status).toBe(409);
+    expect(asked.body.refusal).toMatchObject({
+      kind: 'choose-place',
+      places: [{ kind: 'customer', id: acme, name: 'Acme Pharma (fictional)' }, { kind: 'customer', id: beta, name: 'Beta Biologics (fictional)' }],
+    });
+    expect((await tab.session()).body).toEqual({ state: 'none', dataClass: 'fictional' });
+    const signed = await tab.command('session.login', { ...(await credentials(cara)), workstation: 'portal', customer: beta });
+    expect(signed.status).toBe(200);
+    expect((await tab.session()).body).toMatchObject({ state: 'active', customer: { id: beta } });
   });
 });

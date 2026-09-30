@@ -156,6 +156,10 @@ export function LockScreen(props: {
 
 /** Sign-in. A deep link opens only after it, and the destination is only a destination (rule 1). */
 export function SignIn(props: {
+  /** Set when the server asked which Lab or Customer to sign in for (decision 22: one at a time). */
+  places?: readonly { readonly id: string; readonly name: string }[];
+  place?: string | null;
+  onPlace?: (id: string) => void;
   workstation: Workstation;
   now: ServerInstant;
   /** Where the person goes after signing in, as a person reads it, e.g. "Test T26-04175". */
@@ -173,6 +177,17 @@ export function SignIn(props: {
       <p className="lock__why">
         {props.destination ? `After you sign in, ${props.destination} opens.` : 'Type your user ID, password and a fresh code.'}
       </p>
+      {props.places && props.places.length > 0 && (
+        <div className="tiles tiles--places" role="radiogroup" aria-label="Sign in for">
+          {props.places.map((p) => (
+            <button key={p.id} type="button" role="radio" aria-checked={props.place === p.id} className="tile" onClick={() => props.onPlace?.(p.id)}>
+              <span className="tile__text">
+                <span className="tile__name">{p.name}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       <CredentialForm
         actionLabel="Sign in"
         refusal={props.refusal}

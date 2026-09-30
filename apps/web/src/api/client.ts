@@ -14,7 +14,11 @@ export type Refusal = {
   readonly message: string;
   readonly attemptsLeft?: number;
   readonly state?: 'none' | 'locked' | 'ended';
+  /** For `choose-place`: the Labs and Customers the person's grants span. */
+  readonly places?: readonly Place[];
 };
+
+export type Place = { readonly kind: 'lab' | 'customer'; readonly id: string; readonly name: string };
 
 export type Receipt<D> = {
   readonly kind: 'receipt';
