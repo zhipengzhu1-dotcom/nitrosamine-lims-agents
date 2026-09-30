@@ -1,0 +1,23 @@
+{
+  "name": "@lims/db",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "codegen": "node scripts/codegen.ts",
+    "db:clean": "node scripts/clean.ts"
+  },
+  "dependencies": {
+    "kysely": "0.29.6",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.0"
+  }
+}
