@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
-# Stops the demo's containers. Keeps every volume: stopping never deletes records.
-#   deploy/mac/stop.sh [--dry-run]
+# Stops the demo's containers and keeps them, their volumes and networks.
+#   deploy/mac/stop.sh [--dry-run] [--down]
+#     --down  also removes the containers and networks (never the volumes)
 set -euo pipefail
+source "$(dirname "$0")/env.sh"
 
-DEPLOY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PROFILE="${LIMS_COLIMA_PROFILE:-lims}"
-export DOCKER_HOST="unix://$HOME/.colima/$PROFILE/docker.sock"
-export DOCKER_CONFIG="$HOME/.config/nitrosamine-lims/docker"
-export LIMS_SECRETS_DIR="${LIMS_SECRETS_DIR:-$HOME/.config/nitrosamine-lims/secrets}" LIMS_DATA_CLASS=fictional
-compose=("$(brew --prefix)/bin/docker-compose" --project-directory "$DEPLOY_DIR" -f "$DEPLOY_DIR/compose.yaml"
-  -f "$DEPLOY_DIR/compose.local.yaml" --profile tunnel)
+action=stop DRY_RUN=false
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    --down) action=down ;;
+    *) echo "unknown option $arg" >&2; exit 2 ;;
+  esac
+done
 
-if [ "${1:-}" = "--dry-run" ]; then
-  echo "would run: DOCKER_HOST=$DOCKER_HOST ${compose[*]} down"
+if [ "$action" = down ]; then
+  echo "WARNING: --down removes the containers and networks. The volumes stay, but never add -v:"
+  echo "         the pgdata, reports and state volumes are the only copy until backup.sh has run."
+fi
+if $DRY_RUN; then
+  echo "would run: DOCKER_HOST=$DOCKER_HOST ${compose[*]} $action"
 else
-  "${compose[@]}" down
+  "${compose[@]}" "$action"
 fi
