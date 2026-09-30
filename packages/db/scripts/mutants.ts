@@ -80,28 +80,6 @@ const MUTANTS: Mutant[] = [
     package: 'apps/api',
   },
   {
-    name: "LA006 a Customer may write another Customer's Lab row",
-    file: 'migrations/0050_sample_chain.sql',
-    find: "(tg_table_name = 'record' or coalesce(newj->>'customer_id' = ctx->>'customer_id', false))",
-    replace: 'true',
-    test: 'test/sample-chain.test.ts',
-  },
-  {
-    name: 'LA006 a Customer may change a Lab row in place',
-    file: 'migrations/0050_sample_chain.sql',
-    find: "customer_own := tg_op = 'INSERT' and",
-    replace: 'customer_own :=',
-    test: 'test/sample-chain.test.ts',
-  },
-  // 0050 replaces lims.capture(), so the Lab guard is mutated where it now lives.
-  {
-    name: 'LA006 other Lab writable',
-    file: 'migrations/0050_sample_chain.sql',
-    find: "and ledger is distinct from (ctx->>'acting_lab_id')::uuid\n     and not customer_own then",
-    replace: 'and false then',
-    test: 'test/lab-scope.test.ts',
-  },
-  {
     name: 'a rejected version is reused by seal',
     file: 'migrations/0060_seal_after_rejection.sql',
     find: "     and not exists (select 1 from lims.version_rejection r where r.version_id = v.id)\n",
@@ -128,6 +106,56 @@ const MUTANTS: Mutant[] = [
     find: 'if not exists (select 1 from lims.pending_version p where p.id = new.version_id) then',
     replace: 'if false then',
     test: 'test/release-lock.test.ts',
+  },
+  // 0062 replaces lims.capture() again, so the Customer and Lab guards are mutated where they now live.
+  {
+    name: "LA006 a Customer may write another Customer's Lab row",
+    file: 'migrations/0062_customer_writes.sql',
+    find: "when 'sample' then newj->>'customer_id' = ctx->>'customer_id'",
+    replace: "when 'sample' then true",
+    test: 'test/sample-chain.test.ts',
+  },
+  {
+    name: 'LA006 a Customer may change a Lab row in place',
+    file: 'migrations/0062_customer_writes.sql',
+    find: "customer_own := tg_op = 'INSERT' and",
+    replace: 'customer_own :=',
+    test: 'test/sample-chain.test.ts',
+  },
+  {
+    name: 'LA006 other Lab writable',
+    file: 'migrations/0062_customer_writes.sql',
+    find: "and ledger is distinct from (ctx->>'acting_lab_id')::uuid\n     and not customer_own then",
+    replace: 'and false then',
+    test: 'test/lab-scope.test.ts',
+  },
+  {
+    name: 'LA006 a Customer writes a bare record row of any kind',
+    file: 'migrations/0062_customer_writes.sql',
+    find: "when 'record' then newj->>'kind' = 'test'",
+    replace: "when 'record' then true",
+    test: 'test/sample-chain.test.ts',
+  },
+  {
+    name: "LA006 a Customer's Sample arrives numbered or received",
+    file: 'migrations/0062_customer_writes.sql',
+    find: "                       and newj->>'state' = 'Expected' and newj->>'number' is null\n                       and newj->>'received_at' is null and newj->>'received_by' is null\n",
+    replace: '',
+    test: 'test/sample-chain.test.ts',
+  },
+  {
+    name: "LA006 a Customer's Test arrives pinned, numbered or assigned",
+    file: 'migrations/0062_customer_writes.sql',
+    find: "                     and newj->>'state' = 'Requested' and newj->>'number' is null\n                     and newj->>'method_version_id' is null and newj->>'specification_version_id' is null\n                     and newj->>'assigned_analyst' is null and newj->>'acceptance_reason' is null\n",
+    replace: '',
+    test: 'test/sample-chain.test.ts',
+  },
+  {
+    name: "LA006 a Customer's download event names another person",
+    file: 'migrations/0062_customer_writes.sql',
+    find: "and newj->>'person_id' = ctx->>'person_id'",
+    replace: '',
+    test: 'test/sample-chain.test.ts',
   },
 ];
 
