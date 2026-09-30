@@ -410,6 +410,7 @@ The shared contract holds for every item below unless it says otherwise: one mig
 - **The seed refuses to run twice** on a database that holds a Customer, rather than reconciling; `--handover` runs on a seeded database and needs none of the seed's secrets, since `identity.reenrol` (Admin) revokes the password and secret, ends the person's sessions, and mints a new link.
 - **Sizes.** Two Customers, four Products, two Methods, five Submissions, eight people: about 4 % of the #23 prototype's counts, well inside the 30 % cap; `chain.test.ts` fails if any count exceeds the cap.
 - **Two Kysely deprecations** (`orderBy(array)`) were replaced by chained calls when the chain test printed the warning.
+- **The LA006 mutant moved to migration 0050.** It edited `lims.capture()` in 0010, which 0050 now replaces, so the mutation never reached the running function and the mutant survived; it now edits the Lab guard where it lives. A mutant of a replaced function is a stale mutant the runner cannot detect, so a migration that replaces a guarded function must move its mutants.
 
 ### Spec gaps found by U5
 

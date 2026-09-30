@@ -93,10 +93,11 @@ const MUTANTS: Mutant[] = [
     replace: 'customer_own :=',
     test: 'test/sample-chain.test.ts',
   },
+  // 0050 replaces lims.capture(), so the Lab guard is mutated where it now lives.
   {
     name: 'LA006 other Lab writable',
-    file: 'migrations/0010_ledger_audit.sql',
-    find: "and ledger is distinct from (ctx->>'acting_lab_id')::uuid then",
+    file: 'migrations/0050_sample_chain.sql',
+    find: "and ledger is distinct from (ctx->>'acting_lab_id')::uuid\n     and not customer_own then",
     replace: 'and false then',
     test: 'test/lab-scope.test.ts',
   },
