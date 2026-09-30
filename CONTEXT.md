@@ -79,7 +79,7 @@ A controlled, versioned analytical procedure, owned by the company and kept in t
 _Avoid_: Procedure, assay, analysis
 
 **Method Adoption**:
-A Lab's record of its status on one Method (in development, validated here, transferred in, verified, retired).
+A Lab's record of its status on one Method version (in development, validated here, transferred in, verified, retired) for a stated scope of Products, with their supplier or route where the impurity profile may differ. When a new Method version is approved, QA records whether each Lab's Adoption carries forward or must be re-verified, re-validated or re-transferred.
 _Avoid_: Method status, qualification
 
 **Test**:
@@ -261,6 +261,52 @@ _Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failure
 **Training Record**:
 Evidence that a person is qualified on a specific method or SOP version, required before they can be assigned tests under it.
 _Avoid_: Qualification, certificate
+
+### Document vault
+
+**Document**:
+A controlled document in the vault, owned by the company or by one Lab, with a Document Type and a number such as `RD-SOP-0012`. The number is assigned when the first draft is created and never changes or gets reused; a document brought in from the old system keeps its old number as a Former Number and its old version label. The Document's content lives in its versions, each a Record Version with a whole-number version.
+_Avoid_: File, attachment, controlled copy
+
+**Document Owner**:
+The person answerable for a Document's content and its Periodic Review; the author of its first version unless QA reassigns it.
+_Avoid_: Author (for this), custodian
+
+**Document Type**:
+The fixed kind of a Document: Quality Manual, Policy, SOP, Work Instruction, Method, Method Protocol, Method Report, Form, Worksheet or External Document. A Method is a Document whose versions also carry the Method's structured data.
+_Avoid_: Category, document class
+
+**Method Protocol**:
+A Lab's plan, Effective before the work starts, for validating, verifying or transferring in one Method version: what will be tested, how, and the acceptance criteria.
+_Avoid_: Protocol (alone, which means a stability Protocol), validation plan
+
+**Method Report**:
+A Lab's approved account of validating, verifying or transferring in one Method version, citing the Method Protocol it followed, the Tests and Runs behind it, and any departures. A Method Adoption becomes validated here, verified or transferred in only by citing an Effective Method Report of that purpose, and the purpose must suit the Method's basis: an alternative Method needs validation, and a transfer in must cite a validation.
+_Avoid_: Validation report (alone), qualification report
+
+**Document Status**:
+Where one version of a Document stands: Draft, In Review, Approved, Effective, Superseded or Retired. A Draft, or an Approved version before its Effective Date, that goes no further is Abandoned. A Draft is signed Authored, then Reviewed by at least one authorised person who is not the author, then Approved by QA, who neither wrote nor reviewed it. Only one version of a Document is Effective at a time.
+_Avoid_: Stage, lifecycle state
+
+**Effective Date**:
+The date QA sets at approval on which a version replaces the previous one, which then becomes Superseded.
+_Avoid_: Release date, issue date
+
+**Distribution**:
+The roles and people a Document version applies to. When the version requires training, each of them signs it Acknowledged before its Effective Date.
+_Avoid_: Audience, recipients
+
+**Periodic Review**:
+The scheduled check that an Effective Document is still correct, every 2 years by default, or yearly for the Quality Manual and Policies. It ends in either No Change, which moves the next review date on without a new version, or a new Draft. An overdue review only raises alerts.
+_Avoid_: Annual review, re-approval
+
+**External Document**:
+A Document the Lab did not write, such as a CoA, an SDS, a standard, a guidance document or a vendor manual, registered with its issuer's identifier and version and the date it was received. A standard, guidance or manual is Approved by QA for use and checked yearly against the issuer's current version. A pharmacopeial text takes effect on its Official Date, not when it is published.
+_Avoid_: Reference document, third-party document
+
+**Issued Copy**:
+One numbered paper copy of an Effective Form or Worksheet, recorded against who took it and why. Every Issued Copy is reconciled as Returned (scanned and linked to what it records), Voided with a reason and kept, or Missing, and a Missing one opens a Deviation.
+_Avoid_: Controlled copy, printout
 
 ### Records and signatures
 
