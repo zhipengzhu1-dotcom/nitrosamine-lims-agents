@@ -236,6 +236,37 @@ Three candidates (opus, fable, sonnet) sketched the core from one brief. A fable
 
 ## Implementation reconciliation
 
+### U2, the database core (`packages/db`)
+
+Each entry says what differs from this document or the sketches, why, and whether the shared contract still holds. Codes in brackets are the SQLSTATEs the tests assert.
+
+- **`register_table` reads the primary key from the catalog** instead of taking an expression, and takes `record_col` (defaulting to a `record_id` column when one exists) and `redact` (columns whose values the trail shows as `[changed]`). Stricter than the judge's fix: a wrong key cannot be passed. `row_pk` is a JSON array of the key values. Contract holds.
+- **`lock_chains()` takes no argument.** It reads the ledgers from the context, so the declared set and the locked set cannot differ, and it validates the whole context at transaction start (a declared ledger with no chain is LA010). Contract holds.
+- **`assert_actor` is LA009 inside `require_context`.** A human's context must name a live session of that person opened for the same Lab or Customer; service identities (`svc:%`) need none. The session is judged as of the transaction's start (`now()`), because the capture trigger runs after the row changed, and a person locking or ending their own session would otherwise refuse itself. `session_state(s, last_activity, at)` is therefore "the state at instant `at`", with a lock or end stamped later than `at` not yet in effect. The sketch's version ignored `at` for those two columns; that is a sketch bug JUDGE.md did not list.
+- **PUBLIC execute is revoked by a global default privilege for `lims_owner`**, not per schema. The per-schema form can only add to Postgres's built-in default, never revoke from it, so the sketch's fix as first written left every function callable. The grant audit test enumerates the functions `lims_app` may execute, so a future migration cannot widen the set unnoticed.
+- **Two more door-only tables.** `record_version_cite` is written only by `lims.seal`, which checks each cite against the cited version's stored hash (LV002) and requires the hash to appear in the content bytes (LV003), closing the sketch's TODO. `record_lock` is written only by `lims.lock_released(signature)`, which walks the cite closure. `lims_app` has SELECT only on both.
+- **`lims.seal(record, content, schema, cites)`** returns the latest version when the bytes are identical (idempotent prompt re-open) and otherwise the next version. **`lims.sign(signer, version, hash, meaning, authenticator, group, attestation…)`** takes the signer explicitly so a mismatch with the context is refused by the door (LS000) and testable as `lims_app`; every other signature column comes from the context and the account. LS003 refuses a meaning the kind does not carry; LS004 a signer without an account.
+- **The head guard** (`lims.head_guard`, the sketch's `refuse_if_locked`) lets an identity column be set once from null, which resolves the sketch's TODO for the pinned Specification, and refuses any later change (LR002). A locked head refuses every in-place change (LR001), so the releasing transaction updates its heads (Test to Reported, report to Released) before calling `lock_released`. That ordering replaces the sketch's TODO about recognising the releasing transaction.
+- **LS002 is strict** as the Synthesis decision says: any author of any version of a value is refused Verified on it.
+- **Service identities are the trust root.** Migration 0030 inserts the three `svc:` persons and grants with the capture trigger disabled for those statements, since the first role grant cannot be audited under itself. Everything after is written under one of them.
+- **`release` is exempt from capture and insertable by `lims_app`** (`on conflict do nothing`), because it is the referent of every `app_release`. The harness inserts `test`; who registers a release in production is a spec gap below.
+- **`section_verdict` and `blobs.ts` are left to the sample-chain unit.** The verdict rows reference Specification Sections and Lines, and the blob store has no part A test.
+- **Branded ids live in `packages/db/src/ids.ts` for now**, with `COMPANY_LEDGER` and the `SERVICE` identities. When `packages/domain/ids.ts` lands, `db` imports from it and this file goes.
+- **The scope plugin refuses raw SQL** as a root query and in FROM or JOIN position, aliased or not. The door functions are typed wrappers that run on the unscoped transaction held in a WeakMap keyed by the write handle, so the API never writes SQL text.
+- **The chain link** is `head = sha256(prev_head || sha256(entry_bytes))`, and `entry_bytes` includes `prev_hash`, so each entry commits to its position. `verify_chain` checks entry k against entry k+1's `prev_hash` (or the head), which names a tampered entry at its own seq.
+- **`session.acting_role` is dropped.** The role is chosen per command and carried by the context; the session holds the Lab or Customer it was opened for. **`account`** is included though not in the unit's list, because `lims.sign` needs the username.
+- **Commit attribution** names the model that wrote the commits (Claude Fable 5.1), not the one the builder contract assumed.
+- **`erasableSyntaxOnly`** is on in `packages/db`, so Node 24 can run any file in the package without a build step.
+
+### Spec gaps found by U2
+
+- Who registers an app release (decision 13 stores the release id on every entry; nothing says how a release comes to exist). Assumed: the API inserts its own id at boot.
+- Whether a service identity may write any Lab's rows without acting in a Lab (decision 13 names service identities but not their reach). Assumed yes; LA006 exempts `svc:%`.
+- Whether an Admin's session has a Lab. Assumed none, and Admin's context has no Lab.
+- Which meanings approve a pending value version. The sketch's `Verified` or `Approved` is kept (decision 13 says Reviewer signs Approved after Performed).
+- Turning down a proposal (`version_rejection`) is an audited, unsigned action like a Return (decision 13 does not say).
+- Whether a transaction from an idle session (15 minutes) is refused in the database as well as with 423 at the API. Assumed yes.
+
 ## Open questions and risks
 
 - **Recorded Value as a glossary term.** Should "Recorded Value" enter `CONTEXT.md` ("One typed or chosen value on a signable record, with who recorded it and when; the unit of Verified signing and Critical Data Change")? Or does an existing term fit that I missed?
