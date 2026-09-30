@@ -45,6 +45,9 @@ export type AdoptionStatus =
   | 'in-development' | 'validated-here' | 'transferred-in' | 'verified' | 'verified-basic-compendial' | 'retired'
   | 'none'; // no Adoption of this Method version in this Lab
 
+/** A Method version's basis (decision 36). */
+export type MethodBasis = 'compendial' | 'alternative' | 'in-house';
+
 // ---------------------------------------------------------------------------------------------
 // Who may act. Each signer type holds exactly what decision 19 checks for that meaning.
 // ---------------------------------------------------------------------------------------------
@@ -197,6 +200,25 @@ const QUALIFIED: ReadonlySet<AdoptionStatus> = new Set(['validated-here', 'verif
 // ---------------------------------------------------------------------------------------------
 // The gates
 // ---------------------------------------------------------------------------------------------
+
+export type AdoptionStatusFacts = {
+  readonly status: Exclude<AdoptionStatus, 'none'>;
+  readonly basis: MethodBasis;
+  readonly nitrosamineAnalytes: readonly string[];
+};
+
+/**
+ * Decision 36 §4: verification is for a compendial Method, and the basic compendial status never
+ * covers nitrosamine Analytes. An in-house or alternative Method is validated here or transferred in.
+ */
+export function adoptionStatusGate(f: AdoptionStatusFacts): GateResult {
+  const verifiedKind = f.status === 'verified' || f.status === 'verified-basic-compendial';
+  const [first, ...rest] = f.nitrosamineAnalytes;
+  return result([
+    ...(verifiedKind && f.basis !== 'compendial' ? [{ code: 'adoption-status-for-basis', status: f.status, basis: f.basis } as const] : []),
+    ...(f.status === 'verified-basic-compendial' && first !== undefined ? [{ code: 'basic-compendial-nitrosamine', analytes: [first, ...rest] } as const] : []),
+  ]);
+}
 
 /** Decision 12: a GMP Test is accepted only on a qualified Method Adoption in this Lab. */
 export function acceptanceGate(f: AcceptanceFacts): GateResult {

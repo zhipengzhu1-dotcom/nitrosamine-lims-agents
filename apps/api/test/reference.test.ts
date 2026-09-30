@@ -1,19 +1,43 @@
 // The reference data the seed drives through the real commands: what a Specification version must
 // hold before the Customer can accept it, which Method Adoption statuses QA may approve, who may
 // hold which Authorisation and for how long, and the Review Checklists' pinned items.
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { ledgerOf } from '@lims/db';
+import { uuid } from '@lims/contract';
+import type { RecordId } from '@lims/domain/ids';
 import { CHAIN } from '../src/chain/index.ts';
-import { createSpecification } from '../src/commands/reference.ts';
+import { receipt } from '../src/commit.ts';
+import { createAdoption, createSpecification } from '../src/commands/reference.ts';
+import { defineCommand } from '../src/doors.ts';
 import { seedCast, type Cast } from '../src/seed/cast.ts';
 import { fdaSpecification, METHOD_DOCUMENTS, seedCustomers, seedReference, SIMPLE_ACCEPTANCE, type Reference } from '../src/seed/reference.ts';
-import { testApi, type TestApi } from '../src/testing/harness.ts';
+import { signAs, testApi, type TestApi } from '../src/testing/harness.ts';
+
+/** Drafts an Adoption without the command's status check, so the Approved signing's own check is proved. */
+const draftAdoptionUnchecked = defineCommand({
+  name: 'test.draftAdoptionUnchecked',
+  input: z.object({ lab: uuid, methodVersionId: uuid, status: z.enum(['verified', 'verified-basic-compendial']), productId: uuid }),
+  acting: { as: 'role', role: 'QA' },
+  reason: { kind: 'first_save' },
+  ledgers: () => [],
+  run: async (tx, input) => {
+    const id = randomUUID() as RecordId;
+    await tx.db.insertInto('record').values({ ledger_id: ledgerOf(input.lab as never), id, kind: 'method_adoption' }).execute();
+    await tx.db.insertInto('method_adoption').values({ lab_id: input.lab, id, method_version_id: input.methodVersionId, status: input.status }).execute();
+    await tx.db.insertInto('method_adoption_scope').values({ lab_id: input.lab, adoption_id: id, product_id: input.productId }).execute();
+    await tx.records.seal(id);
+    return receipt('Drafted.', 'audited', { recordId: id });
+  },
+});
 
 let api: TestApi;
 let cast: Cast;
 let reference: Reference;
 
 beforeAll(async () => {
-  api = await testApi(CHAIN);
+  api = await testApi({ ...CHAIN, commands: [...CHAIN.commands, draftAdoptionUnchecked] });
   const customers = await seedCustomers(api);
   cast = await seedCast(api, api.deps, customers, METHOD_DOCUMENTS);
   reference = await seedReference(api, cast, customers);
@@ -72,6 +96,44 @@ describe('the Decision Rule is part of the Specification version the Customer ac
       expect(a.accepted_hash.equals(a.content_hash!)).toBe(true);
       const body = JSON.parse(a.content!.toString('utf8')) as { data: { sections: { decisionRule: unknown }[] } };
       expect(body.data.sections.map((s) => s.decisionRule)).toEqual([SIMPLE_ACCEPTANCE]);
+    }
+  });
+});
+
+describe('a Method Adoption\'s status suits the Method\'s basis (usp 6, decision 36 §4)', () => {
+  const inLab = () => ({ ...api.seed, lab: cast.lab.id }) as never;
+
+  it('refuses to draft the in-house LC-MS/MS Method as verified or verified (basic compendial)', async () => {
+    const verified = await api.run(inLab(), createAdoption, { methodVersionId: reference.methods.lcms.versionId, status: 'verified', productIds: [reference.products.fic01] });
+    expect(verified).toMatchObject({ kind: 'refusal', refusal: { kind: 'gate', reasons: [{ code: 'adoption-status-for-basis', status: 'verified', basis: 'in-house' }] } });
+    const basic = await api.run(inLab(), createAdoption, { methodVersionId: reference.methods.lcms.versionId, status: 'verified-basic-compendial', productIds: [reference.products.fic01] });
+    expect(basic).toMatchObject({ kind: 'refusal', refusal: { kind: 'gate', reasons: [{ code: 'adoption-status-for-basis' }, { code: 'basic-compendial-nitrosamine', analytes: ['NDMA'] }] } });
+  });
+
+  it('refuses QA\'s Approved signing on such an Adoption however it was drafted', async () => {
+    const drafted = await api.run(inLab(), draftAdoptionUnchecked, { lab: cast.lab.id, methodVersionId: reference.methods.lcms.versionId, status: 'verified', productId: reference.products.fic01 });
+    if (drafted.kind !== 'receipt') throw new Error('draft refused');
+    const signed = await signAs(cast.tabs.cid, cast.cid, 'Approved', 'QA', [(drafted.receipt.data as { recordId: string }).recordId]);
+    expect(signed.status).toBe(409);
+    expect(signed.body.refusal.message).toMatch(/An in-house Method can't be adopted as verified/);
+  });
+
+  it('seeds the LC-MS/MS Method adopted as validated here, and it stands Approved', async () => {
+    const rows = await api.db.app.selectFrom('method_adoption as a').innerJoin('method_version as mv', 'mv.id', 'a.method_version_id').innerJoin('method as m', 'm.id', 'mv.method_id')
+      .innerJoin('effective_version as v', 'v.record_id', 'a.id').innerJoin('signature as s', 's.record_version_id', 'v.id')
+      .select(['m.number', 'a.status', 's.meaning']).orderBy('m.number').execute();
+    expect(rows).toEqual([{ number: 'NA-GCMS-002', status: 'in-development', meaning: 'Approved' }, { number: 'NA-LCMS-001', status: 'validated-here', meaning: 'Approved' }]);
+  });
+});
+
+describe('a Run Check criterion cites the Method version that sets it (usp 4)', () => {
+  it('the S/N check on each seeded in-house or alternative Method cites that Method\'s own version, not <621>', async () => {
+    const versions = await api.db.app.selectFrom('method_version as mv').innerJoin('method as m', 'm.id', 'mv.method_id').select(['m.number', 'mv.version', 'mv.data']).execute();
+    expect(versions).toHaveLength(2);
+    for (const v of versions) {
+      const data = v.data as { runChecks: { name: string; criterion: { source: unknown } }[]; variability: { source: unknown } | null };
+      for (const check of data.runChecks) expect(check.criterion.source, `${v.number} ${check.name}`).toEqual({ kind: 'method', methodVersion: `${v.number}@${v.version}` });
+      if (data.variability) expect(data.variability.source).toEqual({ kind: 'method', methodVersion: `${v.number}@${v.version}` });
     }
   });
 });

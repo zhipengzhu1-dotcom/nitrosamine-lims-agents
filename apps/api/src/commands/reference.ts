@@ -7,8 +7,9 @@ import { z } from 'zod';
 import { COMPANY_LEDGER, ledgerOf, versionStands } from '@lims/db';
 import { uuid } from '@lims/contract';
 import type { RecordId, VersionId } from '@lims/domain/ids';
-import { toRefusal } from '@lims/domain/gates';
+import { adoptionStatusGate, toRefusal } from '@lims/domain/gates';
 import { derivationGate } from '@lims/domain/limits';
+import { adoptionStatusFacts, loadMethodVersion } from '../chain/facts.ts';
 import { derivedSectionsOf, MethodDataSchema, SpecificationDataSchema } from '../chain/model.ts';
 import { receipt, type CommandTx } from '../commit.ts';
 import { defineCommand } from '../doors.ts';
@@ -138,6 +139,8 @@ export const createAdoption = defineCommand({
   run: async (tx, input) => {
     const lab = labOf(tx);
     if (!lab) return { kind: 'not-permitted', message: 'A Method Adoption belongs to a Lab.' };
+    const gate = adoptionStatusGate(await adoptionStatusFacts(tx.db, await loadMethodVersion(tx.db, input.methodVersionId), input.status));
+    if (!gate.go) return toRefusal(gate);
     const id = randomUUID() as RecordId;
     await tx.db.insertInto('record').values({ ledger_id: ledgerOf(lab), id, kind: 'method_adoption' }).execute();
     await tx.db.insertInto('method_adoption').values({ lab_id: lab, id, method_version_id: input.methodVersionId, status: input.status }).execute();

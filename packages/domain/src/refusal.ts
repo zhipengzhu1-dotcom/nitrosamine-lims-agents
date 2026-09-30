@@ -1,7 +1,7 @@
 // Every way the server says no, as values. The server renders each message; the UI prints it and
 // never writes consequence text of its own (decision 23 rule 18).
 
-import type { AdoptionStatus, AuthorisationStanding, EnablementStep, FitnessStatus, TrainingStanding } from './gates.ts';
+import type { AdoptionStatus, AuthorisationStanding, EnablementStep, FitnessStatus, MethodBasis, TrainingStanding } from './gates.ts';
 import type { VersionId } from './ids.ts';
 import type { Actor, Machine, Role, TransitionResult } from './machines.ts';
 import type { NonEmpty } from './nonempty.ts';
@@ -48,6 +48,8 @@ export type GateReason =
   | { readonly code: 'checklist-incomplete'; readonly items: NonEmpty<string> }
   | { readonly code: 'verdict-not-confirmed'; readonly test: string; readonly jurisdiction: Jurisdiction }
   | { readonly code: 'method-adoption'; readonly status: AdoptionStatus }
+  | { readonly code: 'adoption-status-for-basis'; readonly status: 'verified' | 'verified-basic-compendial'; readonly basis: Exclude<MethodBasis, 'compendial'> }
+  | { readonly code: 'basic-compendial-nitrosamine'; readonly analytes: NonEmpty<string> }
   | { readonly code: 'sample-not-received' }
   | { readonly code: 'work-linked'; readonly test: string }
   | {
@@ -181,6 +183,9 @@ export function describeReason(r: GateReason): string {
     case 'checklist-incomplete': return `The Review Checklist is not complete: ${andList(r.items.map((i) => `"${i}"`))} not ticked.`;
     case 'verdict-not-confirmed': return `Confirm or disagree with the ${r.jurisdiction} verdict on ${r.test}.`;
     case 'method-adoption': return `The Method Adoption in this Lab is ${ADOPTION_LABEL[r.status]}; a GMP Test needs it validated here, verified or transferred in.`;
+    case 'adoption-status-for-basis':
+      return `${r.basis === 'in-house' ? 'An in-house' : 'An alternative'} Method can't be adopted as ${ADOPTION_LABEL[r.status]}: verification is only for a compendial Method. Adopt it as validated here or transferred in.`;
+    case 'basic-compendial-nitrosamine': return `A Method with nitrosamine Analytes (${andList(r.analytes)}) is never verified (basic compendial).`;
     case 'sample-not-received': return 'The Sample has not been received.';
     case 'work-linked': return `${r.test} has a Preparation or Run linked, so it can't be cancelled.`;
     case 'limit-not-derived':

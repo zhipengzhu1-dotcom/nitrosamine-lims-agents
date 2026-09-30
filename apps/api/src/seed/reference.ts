@@ -36,18 +36,22 @@ async function runAs(api: Driver, def: Parameters<Driver['run']>[1], input: unkn
   return out.receipt.data;
 }
 
-export const lcmsMethodData = (): MethodData => ({
-  basis: 'in-house',
-  analytes: [],
-  dilutionFactor: '1',
-  preparations: '2',
-  variability: { statistic: 'relative-difference', limit: '20.0', source: { kind: 'method', methodVersion: `${METHOD_LCMS}@1` } },
-  runChecks: [
-    { name: 'S/N at LOQ standard', unit: 'ratio', comparedAs: 'as-exported', criterion: { op: 'NLT', limit: '10', source: { kind: 'compendial', citation: 'USP <621> (USP-NF 2026 Issue 1)' } } },
-    { name: 'Check standard recovery', unit: '%', comparedAs: 'as-exported', criterion: { op: 'range', low: '80.0', high: '120.0', source: { kind: 'method', methodVersion: `${METHOD_LCMS}@1` } } },
-  ],
-  prerequisiteDocuments: [PREREQUISITE_SOP],
-});
+/** A seeded Method version's data. Its criteria are the lab's own, so each cites the Method version that sets it. */
+export const methodData = (number: string, basis: MethodData['basis'], variability: boolean): MethodData => {
+  const source = { kind: 'method', methodVersion: `${number}@1` } as const;
+  return {
+    basis,
+    analytes: [],
+    dilutionFactor: '1',
+    preparations: '2',
+    variability: variability ? { statistic: 'relative-difference', limit: '20.0', source } : null,
+    runChecks: [
+      { name: 'S/N at LOQ standard', unit: 'ratio', comparedAs: 'as-exported', criterion: { op: 'NLT', limit: '10', source } },
+      { name: 'Check standard recovery', unit: '%', comparedAs: 'as-exported', criterion: { op: 'range', low: '80.0', high: '120.0', source } },
+    ],
+    prerequisiteDocuments: [PREREQUISITE_SOP],
+  };
+};
 
 /** Simple acceptance (ILAC-G8:09/2019, binary statement): the result at the limit's decimals is compared with the limit, without its uncertainty. */
 export const SIMPLE_ACCEPTANCE: DecisionRule = {
@@ -92,8 +96,8 @@ export async function seedReference(api: Driver, cast: Cast, customers: Referenc
   const analytes = [{ key: 'NDMA', substanceId: substances.ndma, name: 'N-Nitrosodimethylamine' }];
   const lcmsId = (await runAs(api, createMethod, { number: METHOD_LCMS, title: 'Nitrosamines in APIs by LC-MS/MS' })).methodId;
   const gcmsId = (await runAs(api, createMethod, { number: METHOD_GCMS, title: 'Volatile nitrosamines by GC-MS' })).methodId;
-  const lcmsVersion = (await runAs(api, createMethodVersion, { methodId: lcmsId, version: 1, data: { ...lcmsMethodData(), analytes } })).recordId;
-  const gcmsVersion = (await runAs(api, createMethodVersion, { methodId: gcmsId, version: 1, data: { ...lcmsMethodData(), analytes, basis: 'alternative', variability: null } })).recordId;
+  const lcmsVersion = (await runAs(api, createMethodVersion, { methodId: lcmsId, version: 1, data: { ...methodData(METHOD_LCMS, 'in-house', true), analytes } })).recordId;
+  const gcmsVersion = (await runAs(api, createMethodVersion, { methodId: gcmsId, version: 1, data: { ...methodData(METHOD_GCMS, 'alternative', false), analytes } })).recordId;
   await mustSign(cast.tabs.cid, cast.cid, 'Approved', 'QA', [lcmsVersion, gcmsVersion]);
 
   const specs: { id: string; customer: string }[] = [];
@@ -104,7 +108,7 @@ export async function seedReference(api: Driver, cast: Cast, customers: Referenc
   const portal = await acceptSpecifications(api, cast, specs);
 
   const adoptions = [
-    (await runAs(api, createAdoption, { methodVersionId: lcmsVersion, status: 'verified', productIds: [products.fic01, products.fic02, products.zel01, products.betaApi] }, lab)).recordId,
+    (await runAs(api, createAdoption, { methodVersionId: lcmsVersion, status: 'validated-here', productIds: [products.fic01, products.fic02, products.zel01, products.betaApi] }, lab)).recordId,
     (await runAs(api, createAdoption, { methodVersionId: gcmsVersion, status: 'in-development', productIds: [products.zel01] }, lab)).recordId,
   ];
   await mustSign(cast.tabs.cid, cast.cid, 'Approved', 'QA', adoptions);

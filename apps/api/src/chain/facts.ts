@@ -6,7 +6,7 @@
 import { versionStands, type DB, type ReadDb } from '@lims/db';
 import { calculatePreparation, type PreparationResults } from '@lims/domain/calculation';
 import { written, type Written } from '@lims/domain/decimal';
-import type { PerformerFacts, ReleaserFacts, ReviewerFacts, FitnessStatus } from '@lims/domain/gates';
+import type { AdoptionStatusFacts, PerformerFacts, ReleaserFacts, ReviewerFacts, FitnessStatus } from '@lims/domain/gates';
 import type { AnalyteKey, LabId, PersonId, PreparationId, RecordId, Sha256Hex, ValueRecordId, VersionId, VersionRef } from '@lims/domain/ids';
 import { runState, type RunState, type TestState } from '@lims/domain/machines';
 import { nonEmpty } from '@lims/domain/nonempty';
@@ -174,6 +174,16 @@ export async function adoptionStatus(q: Q, lab: LabId, methodVersionId: string, 
     if (signedAndStanding(s, 'Approved')) return { status: r.status as AdoptionStatusOf, adoptionId: r.id as RecordId };
   }
   return { status: 'none', adoptionId: null };
+}
+
+const NITROSAMINE_KINDS = ['small-nitrosamine', 'ndsri'] as const;
+
+/** What decision 36 §4 checks of a status on a Method version: its basis and which Analytes are nitrosamines. */
+export async function adoptionStatusFacts(q: Q, method: MethodVersionFacts, status: AdoptionStatusFacts['status']): Promise<AdoptionStatusFacts> {
+  const ids = method.data.analytes.map((a) => a.substanceId);
+  const nitrosamines = new Set(ids.length === 0 ? [] : (await q.selectFrom('substance').select('id')
+    .where('id', 'in', ids).where('kind', 'in', NITROSAMINE_KINDS).execute()).map((s) => s.id));
+  return { status, basis: method.data.basis, nitrosamineAnalytes: method.data.analytes.filter((a) => nitrosamines.has(a.substanceId)).map((a) => a.key) };
 }
 
 /** The current Approved Method version of a Method, for a Test being accepted. */

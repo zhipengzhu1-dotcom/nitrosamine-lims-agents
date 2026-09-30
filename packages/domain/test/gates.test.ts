@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { toRational, written } from '../src/decimal.ts';
 import {
-  acceptanceGate, assignmentGate, cancelGate, eligibleAnalysts, readyGate, releasedGate, reviewedGate,
-  runPerformedGate, testPerformedGate, verifiedGate,
+  acceptanceGate, adoptionStatusGate, assignmentGate, cancelGate, eligibleAnalysts, readyGate, releasedGate, reviewedGate,
+  runPerformedGate, testPerformedGate, toRefusal, verifiedGate,
   type AnalystFacts, type AuthorisationStanding, type GateResult, type PerformerFacts, type ReleasedFacts,
   type ReviewedFacts, type RunPerformedFacts, type TestPerformedFacts, type VerifiedFacts,
 } from '../src/gates.ts';
@@ -83,6 +83,33 @@ describe('assignmentGate', () => {
 // ---------------------------------------------------------------------------------------------
 // Acceptance and Ready (decision 12)
 // ---------------------------------------------------------------------------------------------
+
+describe('adoptionStatusGate: which status a Method\'s basis allows (decision 36 §4, usp 6)', () => {
+  const statuses = ['in-development', 'validated-here', 'transferred-in', 'verified', 'verified-basic-compendial', 'retired'] as const;
+  const allowed = {
+    'compendial': { plain: statuses, nitrosamine: statuses.filter((s) => s !== 'verified-basic-compendial') },
+    'alternative': { plain: statuses.filter((s) => !s.startsWith('verified')), nitrosamine: statuses.filter((s) => !s.startsWith('verified')) },
+    'in-house': { plain: statuses.filter((s) => !s.startsWith('verified')), nitrosamine: statuses.filter((s) => !s.startsWith('verified')) },
+  } as const;
+
+  it.each((['compendial', 'alternative', 'in-house'] as const).flatMap((basis) => [false, true].flatMap((nitro) => statuses.map((status) => [basis, nitro, status] as const))))(
+    'a %s Method, nitrosamine Analytes %s, adopted as %s',
+    (basis, nitro, status) => {
+      const gate = adoptionStatusGate({ status, basis, nitrosamineAnalytes: nitro ? ['NDMA'] : [] });
+      expect(gate.go).toBe((allowed[basis][nitro ? 'nitrosamine' : 'plain'] as readonly string[]).includes(status));
+    },
+  );
+
+  it('says why, naming the basis or the nitrosamine Analytes', () => {
+    const verified = adoptionStatusGate({ status: 'verified', basis: 'in-house', nitrosamineAnalytes: ['NDMA'] });
+    expect(verified).toEqual({ go: false, reasons: [{ code: 'adoption-status-for-basis', status: 'verified', basis: 'in-house' }] });
+    const basic = adoptionStatusGate({ status: 'verified-basic-compendial', basis: 'compendial', nitrosamineAnalytes: ['NDMA', 'NDEA'] });
+    expect(basic).toEqual({ go: false, reasons: [{ code: 'basic-compendial-nitrosamine', analytes: ['NDMA', 'NDEA'] }] });
+    if (verified.go || basic.go) throw new Error('expected refusals');
+    expect(toRefusal(verified).message).toBe('An in-house Method can\'t be adopted as verified: verification is only for a compendial Method. Adopt it as validated here or transferred in.');
+    expect(toRefusal(basic).message).toBe('A Method with nitrosamine Analytes (NDMA and NDEA) is never verified (basic compendial).');
+  });
+});
 
 describe('acceptanceGate and readyGate', () => {
   it.each([
