@@ -111,8 +111,8 @@ export function RecordBench() {
           {signing.refusal}
         </p>
       )}
-      {ids.value && <VersionSignatures key={generation} valueId={ids.value} record={record} lab={lab} zone={zone} />}
-      {ids.value && <RecordAuditTrail key={generation} recordId={ids.value} zone={zone} title={`Audit Trail of ${record}`} />}
+      {ids.value && <VersionSignatures key={`signatures-${generation}`} valueId={ids.value} record={record} lab={lab} zone={zone} />}
+      {ids.value && <RecordAuditTrail key={`trail-${generation}`} recordId={ids.value} zone={zone} title={`Audit Trail of ${record}`} />}
       {signing.sheet}
     </div>
   );

@@ -67,7 +67,7 @@ function mount(s: ReturnType<typeof server>, critical = true) {
   render(
     <ApiContext value={createApi({ fetch: s.fetch, onSessionLost: () => {} })}>
       <SessionContext value={{ active: session, store: { skewMs: () => 0 } as unknown as SessionStore }}>
-        <RailContext value={{ setSlot: () => {}, showReceipt: (r) => receipts.push(r) }}>
+        <RailContext value={{ setSlot: () => {}, clear: () => {}, showReceipt: (r) => receipts.push(r) }}>
           <Host critical={critical} onSaved={onSaved} />
         </RailContext>
       </SessionContext>

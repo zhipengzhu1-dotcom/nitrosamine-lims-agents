@@ -30,7 +30,7 @@ describe('AdminPeople', () => {
     render(
       <ApiContext value={createApi({ fetch: fetch as never, onSessionLost: () => {} })}>
         <SessionContext value={{ active: admin, store: { skewMs: () => 0 } as unknown as SessionStore }}>
-          <RailContext value={{ setSlot: (s) => (slot = s), showReceipt: () => {} }}>
+          <RailContext value={{ setSlot: (s) => (slot = s), clear: () => {}, showReceipt: () => {} }}>
             <AdminPeople />
           </RailContext>
         </SessionContext>
@@ -56,7 +56,7 @@ describe('AdminPeople', () => {
     render(
       <ApiContext value={createApi({ fetch: vi.fn() as never, onSessionLost: () => {} })}>
         <SessionContext value={{ active: admin, store: { skewMs: () => 0 } as unknown as SessionStore }}>
-          <RailContext value={{ setSlot: () => {}, showReceipt: () => {} }}>
+          <RailContext value={{ setSlot: () => {}, clear: () => {}, showReceipt: () => {} }}>
             <AdminPeople />
           </RailContext>
         </SessionContext>

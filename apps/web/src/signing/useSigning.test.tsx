@@ -87,7 +87,7 @@ function mount(s: ReturnType<typeof server>) {
   const wrap = (children: ReactNode) => (
     <ApiContext value={createApi({ fetch: s.fetch, onSessionLost: () => {} })}>
       <SessionContext value={{ active: session, store: { skewMs: () => 0 } as unknown as SessionStore }}>
-        <RailContext value={{ setSlot: () => {}, showReceipt: (r) => receipts.push(r) }}>{children}</RailContext>
+        <RailContext value={{ setSlot: () => {}, clear: () => {}, showReceipt: (r) => receipts.push(r) }}>{children}</RailContext>
       </SessionContext>
     </ApiContext>
   );

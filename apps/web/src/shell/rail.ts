@@ -9,7 +9,10 @@ export type RailSlot = {
 };
 
 export type RailControl = {
+  /** Replaces what the rail offers; the last receipt stays until the screen goes or another arrives. */
   readonly setSlot: (slot: RailSlot) => void;
+  /** The screen went: nothing it offered or was told stays in the rail. */
+  readonly clear: () => void;
   /** Called only with a receipt the server confirmed (rule 9). */
   readonly showReceipt: (receipt: ReceiptFact) => void;
 };
@@ -27,7 +30,7 @@ export function useRailControl(): RailControl {
  * never holds a stale closure; the slot is replaced only when what it shows changes.
  */
 export function useRail(slot: RailSlot): void {
-  const { setSlot } = useRailControl();
+  const { setSlot, clear } = useRailControl();
   const latest = useRef(slot);
   latest.current = slot;
   const p = slot.primary;
@@ -40,5 +43,5 @@ export function useRail(slot: RailSlot): void {
         : s.primary;
     setSlot({ context: s.context, primary });
   }, [shown, setSlot]);
-  useEffect(() => () => setSlot({ context: null, primary: null }), [setSlot]);
+  useEffect(() => clear, [clear]);
 }

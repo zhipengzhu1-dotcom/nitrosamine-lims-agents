@@ -27,19 +27,21 @@ export function Workspace({ path }: { path: string }) {
   const now = useServerNow(store.skewMs(), active.zone);
   const lock = useCommand<Record<string, never>>('session.lock');
   const switchUser = useCommand<Record<string, never>>('session.switchUser');
-  const [slot, setSlotState] = useState<RailSlot>({ context: null, primary: null });
+  const [slot, setSlot] = useState<RailSlot>({ context: null, primary: null });
   const [receipt, setReceipt] = useState<ReceiptFact | null>(null);
-  const setSlot = useCallback((next: RailSlot) => {
-    setSlotState(next);
+  const clear = useCallback(() => {
+    setSlot({ context: null, primary: null });
     setReceipt(null);
   }, []);
-  const rail = useMemo(() => ({ setSlot, showReceipt: setReceipt }), [setSlot]);
+  const rail = useMemo(() => ({ setSlot, clear, showReceipt: setReceipt }), [clear]);
 
   const audience = audienceOf(active);
   const screen = audience ? screenFor(path, audience) : null;
+  // The clock ticks every second; the routed screen should not re-render with it.
+  const content = useMemo(() => (screen && screen !== 'wrong-audience' ? screen.render() : null), [screen]);
   const secondsLeft = Math.ceil((Date.parse(active.idleLockAt.utc) - Date.parse(now.utc)) / 1000);
 
-  const endAnd = (command: typeof lock) => async () => {
+  const sessionAct = (command: typeof lock) => async () => {
     if (command.busy) return;
     const out = await command.run({});
     if (out.kind === 'receipt' || (out.kind === 'refusal' && out.refusal.kind === 'session')) await store.changed();
@@ -61,8 +63,8 @@ export function Workspace({ path }: { path: string }) {
             context={slot.context}
             receipt={receipt}
             primary={slot.primary}
-            onSwitchUser={endAnd(switchUser)}
-            onLock={endAnd(lock)}
+            onSwitchUser={sessionAct(switchUser)}
+            onLock={sessionAct(lock)}
           />
         }
       >
@@ -73,7 +75,7 @@ export function Workspace({ path }: { path: string }) {
         ) : screen === 'wrong-audience' ? (
           <Notice title="Not for this account" text={audience === 'admin' ? 'The Admin acts for the company and does not read Lab screens.' : 'This screen is for the Admin.'} />
         ) : (
-          screen.render()
+          content
         )}
       </AppShell>
     </RailContext>

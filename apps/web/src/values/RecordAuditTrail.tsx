@@ -20,10 +20,11 @@ const text = (v: unknown): string | null => (v === null || v === undefined ? nul
 
 /**
  * One panel row per changed column, since the trail stores each entry's columns as
- * {column: [old, new]}; an entry that changed no column (an event) is one row of its own.
+ * {column: [old, new]}; an entry that changed no column (an event) is one row of its own. Each
+ * ledger numbers its own chain, so a row's key is its place in the answer, not its seq.
  */
 export function auditRows(entries: readonly AuditEntryDto[], zone: string): AuditEntry[] {
-  return entries.flatMap((e): AuditEntry[] => {
+  return entries.flatMap((e, i): AuditEntry[] => {
     const base = {
       at: { utc: e.atUtc, zone },
       actor: { printedName: e.person, nativeName: null, username: '', role: roleLabel(e.role) },
@@ -33,8 +34,8 @@ export function auditRows(entries: readonly AuditEntryDto[], zone: string): Audi
       afterFirstSave: e.afterFirstSave,
     };
     const changes = Object.entries(e.changes);
-    if (changes.length === 0) return [{ ...base, id: `${e.seq}`, field: null, oldValue: null, newValue: null }];
-    return changes.map(([column, [from, to]]) => ({ ...base, id: `${e.seq}:${column}`, field: column, oldValue: text(from), newValue: text(to) }));
+    if (changes.length === 0) return [{ ...base, id: `${i}`, field: null, oldValue: null, newValue: null }];
+    return changes.map(([column, [from, to]]) => ({ ...base, id: `${i}:${column}`, field: column, oldValue: text(from), newValue: text(to) }));
   });
 }
 

@@ -22,3 +22,4 @@ th[aria-sort] .audit__sort .ic { color: var(--act); }
 .audit__new { font-weight: 700; }
 .audit__empty { padding: 16px 10px; color: var(--ink-2); }
 .audit__none { color: var(--ink-3); font-style: italic; }
+.audit__old, .audit__new { overflow-wrap: anywhere; }
