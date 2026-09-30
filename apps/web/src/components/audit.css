@@ -1,0 +1,24 @@
+.audit { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.audit__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.audit__search { position: relative; flex: 1 1 220px; max-width: 360px; display: block; }
+.audit__search .ic { position: absolute; left: 10px; top: 11px; color: var(--ink-3); }
+.audit__search input { width: 100%; height: var(--hit-desk); padding: 0 10px 0 34px; border: 1px solid var(--edge); border-radius: var(--r-control); background: var(--sheet); font-size: var(--t-14); }
+.audit__search input::placeholder { color: var(--ink-3); }
+.audit__count { font-size: var(--t-13); color: var(--ink-2); }
+.audit__scroll { position: relative; overflow-x: auto; min-width: 0; }
+.audit__table { width: 100%; border-collapse: collapse; font-size: var(--t-13); }
+.audit__table th, .audit__table td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.audit__table thead th { font-size: var(--t-12); color: var(--ink-2); font-weight: 700; background: var(--sheet-2); border-bottom-color: var(--line-2); white-space: nowrap; }
+.audit__sort { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 4px; margin: 0 -4px; border: 0; background: none; font-weight: 700; color: inherit; border-radius: var(--r-tag); }
+.audit__sort .ic { width: 14px; height: 14px; color: var(--ink-3); }
+th[aria-sort] .audit__sort { color: var(--ink); }
+th[aria-sort] .audit__sort .ic { color: var(--act); }
+.audit__utc { white-space: nowrap; font-weight: 600; }
+.audit__table .sub { white-space: nowrap; }
+.audit__table tr.is-later td { background: var(--warn-tint); }
+.audit__table tr.is-later td:first-child { box-shadow: inset 4px 0 0 var(--warn-line); }
+.audit__later { display: flex; align-items: center; gap: 4px; font-size: var(--t-12); font-weight: 700; color: var(--warn); margin-bottom: 2px; }
+.audit__old { color: var(--ink-2); text-decoration: line-through; text-decoration-color: var(--ink-3); }
+.audit__new { font-weight: 700; }
+.audit__empty { padding: 16px 10px; color: var(--ink-2); }
+.audit__none { color: var(--ink-3); font-style: italic; }

@@ -1,0 +1,47 @@
+@import '@fontsource-variable/atkinson-hyperlegible-next/wght.css';
+@import '@fontsource/atkinson-hyperlegible-mono/400.css';
+@import '@fontsource/atkinson-hyperlegible-mono/600.css';
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font: 400 var(--t-14)/var(--lh-dense) var(--font);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+h1, h2, h3, p, ul, ol, dl, dd, figure { margin: 0; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.ic { width: 18px; height: 18px; flex: none; vertical-align: -3px; }
+.sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.mono { font-family: var(--mono); font-size: 0.93em; letter-spacing: 0; }
+.sub { display: block; font-size: var(--t-12); color: var(--ink-3); line-height: 1.35; }
+.h-screen { font-size: var(--t-24); font-weight: 800; line-height: 1.15; }
+.h-sec { font-size: var(--t-16); font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.h-mini { font-size: var(--t-13); font-weight: 700; color: var(--ink-2); margin-bottom: 6px; }
+
+.skip { position: fixed; left: 8px; top: 8px; z-index: 100; padding: 10px 14px; border-radius: var(--r-control); background: var(--bench); color: var(--on-bench); font-weight: 700; text-decoration: none; transform: translateY(-160%); }
+.skip:focus { transform: none; outline: 3px solid var(--focus-on-bench); }
+
+.panel { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-sheet); padding: 12px 14px 14px; min-width: 0; }
+
+/* Pencil and ink: an imported value is a draft until the Analyst signs Performed. */
+.v-draft { color: var(--pencil); text-decoration: underline dashed 1.5px; text-underline-offset: 4px; }
+.v-ink { color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-property: opacity, background-color, border-color, color !important; }
+  *:active { transform: none !important; }
+}
+
+/* A server refusal, printed where the hand acted. */
+.refusal { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-control); background: var(--bad-tint); color: var(--bad); font-weight: 600; font-size: 13.5px; border: 1px solid var(--bad-line); }
+.refusal .ic { margin-top: 1px; }
+
+.not-wired { padding: 48px 24px; display: grid; gap: 8px; max-width: 70ch; }

@@ -1,0 +1,65 @@
+/* Read above, act below. */
+.frame { display: grid; grid-template-rows: var(--top-h) minmax(0, 1fr) minmax(var(--rail-h), auto); height: 100vh; height: 100dvh; }
+.view { min-height: 0; min-width: 0; overflow: auto; outline: none; overscroll-behavior: contain; }
+
+.top { display: flex; align-items: center; gap: var(--s-4); padding: 0 var(--s-4); background: var(--sheet); border-bottom: 1px solid var(--line); min-width: 0; }
+.brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.brand__mark { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; background: var(--bench); color: var(--on-bench); font-weight: 800; font-size: var(--t-13); letter-spacing: 0.02em; }
+.brand__name { font-weight: 700; font-size: 15px; white-space: nowrap; }
+.nav { display: flex; align-self: stretch; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.nav__tab { display: flex; align-items: center; padding: 0 var(--s-4); color: var(--ink-2); text-decoration: none; font-weight: 600; font-size: 15px; border-bottom: 3px solid transparent; border-top: 3px solid transparent; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) { .nav__tab:hover { color: var(--ink); background: var(--sheet-2); } }
+.nav__tab[aria-current='page'] { color: var(--ink); font-weight: 800; border-bottom-color: var(--act); }
+.station { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding-right: 12px; border-right: 1px solid var(--line); font-weight: 700; font-size: var(--t-14); color: var(--ink-2); white-space: nowrap; }
+.station .ic { color: var(--ink-3); }
+.clock { display: flex; gap: 12px; align-items: baseline; white-space: nowrap; }
+.clock__local { font-weight: 700; font-size: 15px; }
+.clock__utc { color: var(--ink-3); font-size: var(--t-13); }
+.fict { flex: none; font-size: var(--t-12); font-weight: 700; color: var(--ink-2); border: 1px solid var(--line-2); background: var(--sheet-2); border-radius: var(--r-tag); padding: 4px 8px; white-space: nowrap; }
+
+/* The bench rail */
+.rail { display: flex; align-items: center; gap: var(--s-4); padding: 8px var(--s-4) 12px; background: var(--bench); color: var(--on-bench); min-width: 0; }
+.rail :focus-visible { outline-color: var(--focus-on-bench); }
+.who { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 0 1 310px; }
+.mono-av { display: inline-grid; place-items: center; width: 46px; height: 46px; border-radius: 11px; background: var(--bench-2); border: 1px solid var(--bench-line); color: var(--on-bench); font-weight: 800; font-size: 17px; letter-spacing: 0.02em; flex: none; }
+.who__text { display: flex; flex-direction: column; min-width: 0; }
+.who__name { font-size: var(--t-20); font-weight: 800; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who__native { font-weight: 500; font-size: var(--t-16); }
+.who__meta, .who__idle { font-size: var(--t-12); color: var(--on-bench-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.who__meta { font-size: var(--t-13); }
+.who__idle--warn { color: var(--warn-text-on-bench); font-weight: 700; }
+.rail__context { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-left: var(--s-4); border-left: 1px solid var(--bench-line); }
+.ctx__main { font-size: var(--t-16); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+.ctx__sub { font-size: var(--t-13); color: var(--on-bench-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx__sub--wrap { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; font-size: 12.5px; }
+.rail__actions { display: flex; gap: var(--s-2); flex: none; }
+.rail__session { display: flex; gap: var(--s-2); flex: none; padding-left: var(--s-3); border-left: 1px solid var(--bench-line); }
+
+/* Receipts and refusals answer in the rail's context slot, next to where the hand acted. */
+.rail__context--receipt, .rail__context--bad { border-left-width: 4px; animation: answer 700ms var(--ease-out) both; }
+.rail__context--ok { border-left-color: var(--ok-on-bench); }
+.rail__context--ok .ctx__main > .ic { color: var(--ok-on-bench); }
+.rail__context--sig { border-left-color: var(--sig-on-bench); }
+.rail__context--sig .ctx__main > .ic { color: var(--sig-on-bench); }
+.rail__context--bad { border-left-color: var(--bad-on-bench); }
+.rail__context--bad .ctx__main > .ic { color: var(--bad-on-bench); }
+.rail__context--bad .ctx__sub { color: var(--bad-text-on-bench); }
+@keyframes answer { from { background: rgba(255, 255, 255, 0.09); } to { background: transparent; } }
+
+@media (max-width: 1500px) {
+  .brand__name { display: none; }
+  .nav__tab { padding: 0 14px; }
+  .who { flex-basis: 270px; }
+  .station { font-size: var(--t-13); }
+}
+/* Narrow screens keep every rail control; the rail wraps rather than scrolling sideways. */
+@media (max-width: 900px) {
+  .top { gap: var(--s-2); padding: 0 var(--s-2); }
+  .clock__utc, .fict { display: none; }
+  .rail { flex-wrap: wrap; padding: 8px 12px 12px; gap: var(--s-2); }
+  .rail__context { order: -1; flex-basis: 100%; border-left: 0; padding-left: 0; }
+  .who { flex: 1 1 200px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail__context--receipt, .rail__context--bad { animation: none; }
+}

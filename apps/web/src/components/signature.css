@@ -1,0 +1,32 @@
+/* Signature blue is for Electronic Signatures and nothing else. */
+.sig { border: 1.5px solid var(--sig); border-radius: var(--r-control); background: var(--sig-tint); color: var(--sig); padding: 10px 14px 12px; }
+.sig--failed { border: 2px solid var(--bad); background: var(--bad-tint); color: var(--bad); }
+.sig__head { display: flex; align-items: center; gap: 8px; }
+.sig__head .ic { width: 20px; height: 20px; }
+.sig__meaning { font-size: 18px; font-weight: 800; }
+.sig__kind { margin-left: auto; font-size: var(--t-12); font-weight: 700; }
+.sig__failed-note { margin-top: 4px; font-size: var(--t-13); font-weight: 600; color: var(--ink); }
+.sig__statement { font-style: italic; margin: 6px 0 8px; font-size: 13.5px; }
+.sig--failed .sig__statement, .sig--failed .sig__grid { color: var(--ink-2); }
+.sig__grid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; font-size: var(--t-13); }
+.sig__grid dt { font-weight: 500; }
+.sig__grid dd { font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.sig__native { font-weight: 500; }
+
+.hash { display: inline-flex; flex-wrap: wrap; gap: 0 0.45em; font-weight: 500; line-height: 1.5; }
+.hash b { font-weight: 800; background: var(--sig-tint); color: var(--sig); padding: 0 4px; border-radius: 3px; }
+
+.sigline-wrap { display: grid; gap: 6px; }
+.sigline {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; justify-self: start;
+  min-height: var(--hit-desk); padding: 6px 12px; border-radius: var(--r-control);
+  font-size: var(--t-13); text-align: left;
+  transition: transform var(--dur-press) var(--ease-out);
+}
+.sigline:active { transform: scale(0.98); }
+.sigline--stands { color: var(--sig); background: var(--sig-tint); border: 1.5px solid var(--sig-line); }
+.sigline--failed { color: var(--bad); background: var(--bad-tint); border: 1.5px solid var(--bad-line); }
+.sigline__meaning { font-weight: 800; }
+.sigline__who { color: var(--ink); font-weight: 600; }
+.sigline__at { color: var(--ink-2); font-weight: 600; }
+.sigline[aria-expanded='true'] { box-shadow: inset 0 -3px 0 currentColor; }

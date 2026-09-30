@@ -1,0 +1,19 @@
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.key {
+  height: var(--hit-key); border-radius: var(--r-glove); border: 1px solid var(--edge); background: var(--sheet);
+  font-weight: 800; font-size: var(--t-24); box-shadow: 0 2px 0 var(--line-2);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform var(--dur-press) var(--ease-out), background-color 80ms ease;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+.key:active { transform: scale(0.96); background: var(--act-tint); }
+.key--fn { font-size: var(--t-16); color: var(--ink-2); }
+.key--next { grid-column: 1 / -1; color: var(--act-ink); }
+.keypad--sign .key { height: var(--hit-glove); font-size: 22px; }
+.keypad--sign .key--next { font-size: 15px; }
+/* On the dark lock screen */
+.keypad--bench .key { background: var(--bench-2); color: var(--on-bench); border-color: var(--bench-line); box-shadow: 0 2px 0 #111419; }
+.keypad--bench .key:active { background: var(--bench-selected); }
+.keypad--bench .key--fn { color: var(--on-bench-2); }
+.keypad--bench .key--next { color: var(--focus-on-bench); }
+.keypad--bench .key:focus-visible { outline-color: var(--focus-on-bench); }
