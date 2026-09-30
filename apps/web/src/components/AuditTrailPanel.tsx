@@ -103,7 +103,12 @@ export function AuditTrailPanel({ entries, title = 'Audit Trail' }: { entries: r
                   <td>
                     <b>{e.actor.printedName}</b>
                     <span className="sub">
-                      {e.actor.role}, <span className="mono">{e.actor.username}</span>
+                      {e.actor.role}
+                      {e.actor.username && (
+                        <>
+                          , <span className="mono">{e.actor.username}</span>
+                        </>
+                      )}
                     </span>
                   </td>
                   <td>
