@@ -11,7 +11,7 @@ import {
   AliasNode, AndNode, ColumnNode, IdentifierNode, OnNode, OperationNodeTransformer, RawNode, ReferenceNode, TableNode,
   ValueNode, WhereNode, BinaryOperationNode, OperatorNode, ValueListNode,
   type DeleteQueryNode, type InsertQueryNode, type JoinNode, type Kysely, type KyselyPlugin, type OperationNode,
-  type PluginTransformQueryArgs, type PluginTransformResultArgs, type QueryResult, type RootOperationNode,
+  type PluginTransformQueryArgs, type PluginTransformResultArgs, type QueryId, type QueryResult, type RootOperationNode,
   type SelectQueryNode, type UnknownRow, type UpdateQueryNode,
 } from 'kysely';
 import type { DB } from './generated.ts';
@@ -32,8 +32,12 @@ export type ReadFor<S extends Scope> =
   S extends { kind: 'lab' } ? LabRead : S extends { kind: 'customer' } ? CustomerRead : CompanyRead;
 
 export class ScopeViolation extends Error {
-  constructor(readonly table: string, readonly scope: Scope['kind']) {
+  readonly table: string;
+  readonly scope: Scope['kind'];
+  constructor(table: string, scope: Scope['kind']) {
     super(`${table} queried in ${scope} scope`);
+    this.table = table;
+    this.scope = scope;
   }
 }
 
@@ -69,24 +73,30 @@ const andAll = (nodes: readonly OperationNode[]): OperationNode | undefined =>
   nodes.reduce<OperationNode | undefined>((acc, n) => (acc ? AndNode.create(acc, n) : n), undefined);
 
 class ScopeTransformer extends OperationNodeTransformer {
-  constructor(private readonly scope: Scope, private readonly classes: TableClasses) {
+  readonly #scope: Scope;
+  readonly #classes: TableClasses;
+
+  constructor(scope: Scope, classes: TableClasses) {
     super();
+    this.#scope = scope;
+    this.#classes = classes;
   }
 
   /** The table a FROM or JOIN item names, with the name a predicate must use to reach it. */
-  private tableRef(item: OperationNode): { table: string; ref: string } | null {
-    if (TableNode.is(item)) return { table: item.table.identifier.name, ref: item.table.identifier.name };
-    if (AliasNode.is(item) && TableNode.is(item.node) && IdentifierNode.is(item.alias)) {
-      return { table: item.node.table.identifier.name, ref: item.alias.name };
-    }
-    if (RawNode.is(item)) throw new ScopeViolation('raw sql', this.scope.kind);
-    return null;
+  #tableRef(item: OperationNode): { table: string; ref: string } | null {
+    const inner = AliasNode.is(item) ? item.node : item;
+    if (RawNode.is(inner)) throw new ScopeViolation('raw sql', this.#scope.kind);
+    if (!TableNode.is(inner)) return null;
+    const table = inner.table.identifier.name;
+    const ref = AliasNode.is(item) && IdentifierNode.is(item.alias) ? item.alias.name : table;
+    return { table, ref };
   }
 
-  private predicateFor(item: OperationNode): OperationNode | undefined {
-    const t = this.tableRef(item);
+  #predicateFor(item: OperationNode): OperationNode | undefined {
+    const t = this.#tableRef(item);
     if (!t) return undefined;
-    const { scope, classes } = this;
+    const scope = this.#scope;
+    const classes = this.#classes;
     if (classes.lab.has(t.table)) {
       if (scope.kind !== 'lab') throw new ScopeViolation(t.table, scope.kind);
       return eq(t.ref, 'lab_id', scope.labId);
@@ -100,54 +110,51 @@ class ScopeTransformer extends OperationNodeTransformer {
     if (classes.portal.has(t.table)) {
       return scope.kind === 'customer' ? eq(t.ref, 'customer_id', scope.customerId) : undefined;
     }
-    if (classes.company.has(t.table)) {
-      if (scope.kind === 'customer') throw new ScopeViolation(t.table, scope.kind);
-      return undefined;
-    }
+    if (classes.company.has(t.table) && scope.kind === 'customer') throw new ScopeViolation(t.table, scope.kind);
     return undefined;
   }
 
-  private scopeJoins(joins: ReadonlyArray<JoinNode> | undefined): ReadonlyArray<JoinNode> | undefined {
+  #scopeJoins(joins: ReadonlyArray<JoinNode> | undefined): ReadonlyArray<JoinNode> | undefined {
     return joins?.map((j) => {
-      const p = this.predicateFor(j.table);
+      const p = this.#predicateFor(j.table);
       if (!p) return j;
       return { ...j, on: OnNode.create(j.on ? AndNode.create(j.on.on, p) : p) };
     });
   }
 
-  private scopeWhere(where: WhereNode | undefined, items: ReadonlyArray<OperationNode>): WhereNode | undefined {
-    const preds = items.map((i) => this.predicateFor(i)).filter((p): p is OperationNode => p !== undefined);
+  #scopeWhere(where: WhereNode | undefined, items: ReadonlyArray<OperationNode>): WhereNode | undefined {
+    const preds = items.map((i) => this.#predicateFor(i)).filter((p): p is OperationNode => p !== undefined);
     const extra = andAll(preds);
     if (!extra) return where;
     return WhereNode.create(where ? AndNode.create(where.where, extra) : extra);
   }
 
-  protected override transformSelectQuery(node: SelectQueryNode, queryId?: Parameters<OperationNodeTransformer['transformNode']>[1]): SelectQueryNode {
+  protected override transformSelectQuery(node: SelectQueryNode, queryId?: QueryId): SelectQueryNode {
     const n = super.transformSelectQuery(node, queryId);
-    const where = this.scopeWhere(n.where, n.from?.froms ?? []);
-    const joins = this.scopeJoins(n.joins);
+    const where = this.#scopeWhere(n.where, n.from?.froms ?? []);
+    const joins = this.#scopeJoins(n.joins);
     return { ...n, ...(where ? { where } : {}), ...(joins ? { joins } : {}) };
   }
 
-  protected override transformUpdateQuery(node: UpdateQueryNode, queryId?: Parameters<OperationNodeTransformer['transformNode']>[1]): UpdateQueryNode {
+  protected override transformUpdateQuery(node: UpdateQueryNode, queryId?: QueryId): UpdateQueryNode {
     const n = super.transformUpdateQuery(node, queryId);
     const targets = [...(n.table ? [n.table] : []), ...(n.from?.froms ?? [])];
-    const where = this.scopeWhere(n.where, targets);
-    const joins = this.scopeJoins(n.joins);
+    const where = this.#scopeWhere(n.where, targets);
+    const joins = this.#scopeJoins(n.joins);
     return { ...n, ...(where ? { where } : {}), ...(joins ? { joins } : {}) };
   }
 
-  protected override transformDeleteQuery(node: DeleteQueryNode, queryId?: Parameters<OperationNodeTransformer['transformNode']>[1]): DeleteQueryNode {
+  protected override transformDeleteQuery(node: DeleteQueryNode, queryId?: QueryId): DeleteQueryNode {
     const n = super.transformDeleteQuery(node, queryId);
     const targets = [...n.from.froms, ...(n.using?.tables ?? [])];
-    const where = this.scopeWhere(n.where, targets);
-    const joins = this.scopeJoins(n.joins);
+    const where = this.#scopeWhere(n.where, targets);
+    const joins = this.#scopeJoins(n.joins);
     return { ...n, ...(where ? { where } : {}), ...(joins ? { joins } : {}) };
   }
 
-  protected override transformInsertQuery(node: InsertQueryNode, queryId?: Parameters<OperationNodeTransformer['transformNode']>[1]): InsertQueryNode {
+  protected override transformInsertQuery(node: InsertQueryNode, queryId?: QueryId): InsertQueryNode {
     const n = super.transformInsertQuery(node, queryId);
-    if (n.into) this.predicateFor(n.into);
+    if (n.into) this.#predicateFor(n.into);
     return n;
   }
 }

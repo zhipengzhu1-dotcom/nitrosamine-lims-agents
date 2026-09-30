@@ -109,7 +109,7 @@ begin
      where s.id = v_sess and s.person_id = v_person
        and s.acting_lab_id is not distinct from v_lab
        and s.customer_id is not distinct from v_customer
-       and lims.session_state(s, coalesce(a.last_activity_at, s.started_at), clock_timestamp()) = 'active'
+       and lims.session_state(s, coalesce(a.last_activity_at, s.started_at), now()) = 'active'
   ) then
     raise exception 'no live session of this person in the acting Lab' using errcode = 'LA009';
   end if;

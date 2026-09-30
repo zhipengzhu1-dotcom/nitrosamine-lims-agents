@@ -85,11 +85,14 @@ create table lims.session_activity (
 );
 grant select, insert, update on lims.session_activity to lims_app;
 
+-- The session's state at instant `at`. A lock or end stamped later than `at` has not happened
+-- yet at `at`, which is what lets a person lock or end their own session: the capture trigger
+-- judges the session as of the transaction's start.
 create function lims.session_state(s lims.session, last_activity timestamptz, at timestamptz) returns text
 language sql immutable as $$
   select case
-    when s.ended_at is not null or at >= s.absolute_end_at then 'ended'
-    when s.locked_at is not null or at >= last_activity + interval '15 minutes' then 'locked'
+    when s.ended_at <= at or at >= s.absolute_end_at then 'ended'
+    when s.locked_at <= at or at >= last_activity + interval '15 minutes' then 'locked'
     else 'active'
   end
 $$;

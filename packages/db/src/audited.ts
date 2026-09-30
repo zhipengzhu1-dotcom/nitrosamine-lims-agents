@@ -12,7 +12,7 @@
 
 import { sql, type Kysely, type Transaction } from 'kysely';
 import type { DB } from './generated.ts';
-import { scopePlugin, type Scope } from './scope.ts';
+import { GENERATED_CLASSES, scopePlugin, type Scope, type TableClasses } from './scope.ts';
 import type { CommitKey, CustomerId, LabId, LedgerId, PersonId, SessionId } from './ids.ts';
 
 export type ReasonCode = 'transcription-error' | 'wrong-unit' | 'wrong-item-selected' | 'instrument-reprint' | 'other';
@@ -88,6 +88,7 @@ export async function runAudited<T>(
   ctx: AuditContext,
   scope: Scope,
   fn: (tx: AuditedTx) => Promise<TxOutcome<T>>,
+  classes: TableClasses = GENERATED_CLASSES,
 ): Promise<TxOutcome<T>> {
   const trx = await db.startTransaction().setIsolationLevel('read committed').execute();
   let settled = false;
@@ -95,7 +96,7 @@ export async function runAudited<T>(
     await sql`select pg_advisory_xact_lock(hashtextextended(${ctx.commitKey}, 0))`.execute(trx);
     await sql`select set_config('lims.ctx', ${JSON.stringify(contextRow(ctx))}, true)`.execute(trx);
     const { rows } = await sql<{ now: Date }>`select lims.lock_chains() as now`.execute(trx);
-    const tx: AuditedTx = { db: trx.withPlugin(scopePlugin(scope)), dbNow: rows[0]!.now, scope, ctx };
+    const tx: AuditedTx = { db: trx.withPlugin(scopePlugin(scope, classes)), dbNow: rows[0]!.now, scope, ctx };
     unscopedOf.set(tx, trx);
     const out = await fn(tx);
     settled = true;
