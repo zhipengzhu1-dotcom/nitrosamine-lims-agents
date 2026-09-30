@@ -79,7 +79,7 @@ A Lab's list of what it offers Customers: for each Method and service level (Sta
 _Avoid_: Catalogue, rate card, quote
 
 **Product**:
-A Customer's API or drug product, identified by the Customer's product code, its manufacturer and its synthesis route or process, and for a drug product its dosage form and composition. The same API from two manufacturers is two Products. A change of route or formulation, which the Customer must declare, makes a new version of the Product.
+A Customer's API or drug product, identified by the Customer's product code, its manufacturer and its synthesis route or process, and for a drug product its dosage form and composition. Its API is named as a Substance. The same API from two manufacturers is two Products. A change of route or formulation, which the Customer must declare, makes a new version of the Product.
 _Avoid_: Material, compound, item
 
 **Specification**:
@@ -134,13 +134,33 @@ _Avoid_: Specimen, item
 A physical bottle, vial or bag received for a Sample; used for custody and storage, never for results. Stability units are Containers: placed into a Study Condition, then moved into a Pull's Sample.
 _Avoid_: Vial (for received material), unit
 
+**Substance**:
+A company catalogue entry for one chemical entity, such as an API, a nitrosamine or an internal standard, fixed by its CAS number and structure, which a second person checks when the entry is created, with its names (native-script ones included) and its kind (API, small nitrosamine, NDSRI or other impurity). Its identity is never edited: a wrong one is corrected by retiring the entry with a reason and creating a new one. Its names and kind change only by a QA-approved revision.
+_Avoid_: Compound, chemical, analyte (for the catalogue entry)
+
+**Analyte**:
+A Substance that a Method measures. Acceptable Intakes, Specification Lines, Results and First Detections all name their Analyte as a Substance.
+_Avoid_: Target, parameter, component
+
 **Method**:
-A controlled, versioned analytical procedure, owned by the company and kept in the document vault.
+A controlled, versioned analytical procedure, owned by the company and kept in the document vault. Each version fixes its Analytes, calculation, Preparations and injections, variability limit, Run Checks, Solution Recipes, how long a Preparation stays usable, the Equipment performance and Material grades it needs, and its basis: compendial, alternative or in-house. A Method is compendial only when its Analytes and Products are covered by the pharmacopoeial text it cites.
 _Avoid_: Procedure, assay, analysis
 
 **Method Adoption**:
-A Lab's record of its status on one Method version (in development, validated here, transferred in, verified, retired) for a stated scope of Products, with their supplier or route where the impurity profile may differ. When a new Method version is approved, QA records whether each Lab's Adoption carries forward or must be re-verified, re-validated or re-transferred.
+A Lab's record of its status on one Method version (in development, validated here, transferred in, verified, verified (basic compendial), retired) for a stated scope of Products, with their supplier or route where the impurity profile may differ, and the LOQ, LOD, range and maximum dilution per Analyte and scope entry that a cited Method Report established. When a new Method version is approved, QA records whether each Lab's Adoption carries forward or must be re-verified, re-validated or re-transferred.
 _Avoid_: Method status, qualification
+
+**Verified (basic compendial)**:
+The Method Adoption status for a basic compendial procedure (loss on drying, residue on ignition, pH) that `<1226>` exempts from a verification study: QA approves a justification for the named Products, backed by one passing Run on a known sample. It is never allowed for a Method with nitrosamine Analytes.
+_Avoid_: Verification not required, exempt
+
+**Run Check**:
+One criterion a Run must meet before any of its results count, such as S/N at the LOQ-level standard, replicate-injection RSD, resolution, or check-sample recovery. It is set by the Method with its limit and source (the Method, a monograph, or `<621>`), and every Run records its observed value; a failed or unrecorded one blocks the Run's results and opens a Run Check Failure Deviation.
+_Avoid_: SST, system suitability test (alone), acceptance check
+
+**Uncertainty Evaluation**:
+A Lab's signed estimate of the measurement uncertainty of one Analyte under one Method Adoption, for the matrices and instrument units its evidence covers, citing a Method Report or a fixed set of QC Results, and redone when the Method, an instrument, the range or the matrix changes.
+_Avoid_: MU budget, uncertainty (alone, for the record)
 
 **Test**:
 One Method requested on one Sample; the unit of work assigned to an Analyst in one Lab.
@@ -306,6 +326,10 @@ _Avoid_: MSDS
 A record that something departed from its acceptance criteria or procedure and must be investigated and closed by QA; this project's name for ISO/IEC 17025 nonconforming work. Its Kind is one of OOS, OOT, Equipment, Room, Excursion, Run Check Failure, Material, Procedure, Data Integrity, Proficiency Testing or Other, and it is Open, Investigating, In QA Review or Closed. Its Kind is fixed once opened, except that QA may reclassify Other. A Deviation raised in error is closed with that finding, never cancelled, and a Closed one never reopens or changes.
 _Avoid_: Incident, nonconformance, NCR
 
+**Accreditation Scope**:
+The Lab's current scope of accreditation from ANAB, registered from its certificate, listing the Methods, Analytes, matrices and ranges it covers, which entries are flexible, and any suspension, withdrawal or reduction. Whether a result is accredited is read from it, never set by hand, and a released Test Report keeps the scope revision it was judged against.
+_Avoid_: ANAB flag, accredited list
+
 **Planned Deviation**:
 A Deviation approved by QA and accepted by the Customer before the work, allowing a stated, technically justified departure from a Method on named Tests.
 _Avoid_: Waiver, exception, concession
@@ -365,11 +389,11 @@ The fixed kind of a Document: Quality Manual, Policy, SOP, Work Instruction, Met
 _Avoid_: Category, document class
 
 **Method Protocol**:
-A Lab's plan, Effective before the work starts, for validating, verifying or transferring in one Method version: what will be tested, how, and the acceptance criteria.
+A Lab's plan, Effective before the work starts, for validating, verifying or transferring in one Method version: the requirements the Method must meet, such as the lowest limit it must serve, what will be tested, how, and the acceptance criteria. A transfer's Protocol also names the sending unit and the transfer type.
 _Avoid_: Protocol (alone, which means a stability Protocol), validation plan
 
 **Method Report**:
-A Lab's approved account of validating, verifying or transferring in one Method version, citing the Method Protocol it followed, the Tests and Runs behind it, and any departures. A Method Adoption becomes validated here, verified or transferred in only by citing an Effective Method Report of that purpose, and the purpose must suit the Method's basis: an alternative Method needs validation, and a transfer in must cite a validation.
+A Lab's approved account of validating, verifying or transferring in one Method version, citing the Method Protocol it followed, the Tests and Runs behind it, and any departures, with each result against its criterion and a signed statement that the Method is fit for its intended use. A Method Adoption becomes validated here, verified or transferred in only by citing an Effective Method Report of that purpose, and the purpose must suit the Method's basis: an alternative Method needs validation, and a transfer in must cite a validation.
 _Avoid_: Validation report (alone), qualification report
 
 **Document Status**:
@@ -453,7 +477,7 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date, a manually entered Run Check value, any structured field of a Method version, a Method Report's results, a validation impact decision, a Method Adoption's status, scope entries, LOQ, LOD, range, maximum dilution or cited Method Report, any field of an Uncertainty Evaluation or Accreditation Scope, or a Substance's kind. It stays a proposal until a second person approves it. Once a versioned record such as a Method or Specification is approved, a change is a new version instead.
 _Avoid_: Correction, amendment
 
 **Amended Report**:
