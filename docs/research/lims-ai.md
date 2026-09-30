@@ -8,7 +8,7 @@ Research for ticket #41 (map #1). It feeds [Decide the assistant layer](https://
 2. **The ELN vendors are ahead, and Benchling documents the most.** Benchling AI (GA 7 Oct 2025) has a side-panel chat, in-context buttons, a data-entry agent and agent modes. It names its model hosts and training terms. It also labels each AI write in the audit log. Dotmatics requires approval for every agent write.
 3. **No chromatography vendor puts AI into its validated quantitation path.** Waters ships no AI in Empower, MassLynx or TargetLynx. Its only ML (anomaly detection) sits in a read-only cloud viewer outside Empower. Its QUAN Review "Exception Focused Review" is rules the lab sets, not AI. Shimadzu sells a locked ML peak integrator. Agilent sells a cloud model that keeps learning from each user. SCIEX OS 5.0 ships an LLM help chat, restricted to research-use-only products.
 4. **Nobody has published a real GxP defence for LLM features.** No vendor states a position on the draft EU Annex 22. None publishes a validation package or intended-use statement for an LLM feature. The defences on offer are three: bullets ("GxP-ready", "Part 11 compliance"), human-in-the-loop wording, and audit-log labelling. The draft Annex 22 says generative AI and LLMs "should not be used in critical GMP applications" ([draft Annex 22 §1](https://health.ec.europa.eu/document/download/5f38a92d-bb8e-4264-8898-ea076e926db6_en?filename=mp_vol4_chap4_annex22_consultation_guideline_en.pdf)). So the vendors' silence is itself the finding: they keep LLMs out of the GMP record, or they don't say.
-5. **For this LIMS:** copy draft-then-accept, attribution to the person with an AI label, answers that cite records, per-role switches, and keeping AI off Results and verdicts. Avoid standing autonomous write modes, learning models, predicted results, undisclosed hosting, and compliance-by-bullet. The full lists are at the end.
+5. **For this LIMS:** copy prose-only drafts that a person saves, an assistant-drafted mark that no one can remove, citations the server builds from the records it read, read access no wider than the person's, one versioned configuration under change control, and keeping AI off Results and verdicts. Avoid standing autonomous write modes, bulk value extraction, learning models, predicted results, undisclosed hosting, outside AI clients, LLM audit-trail review and compliance-by-bullet. The compliance review at the end rewords both pattern lists and takes precedence over them.
 
 ## The yardstick: draft EU GMP Annex 22
 
@@ -119,6 +119,8 @@ EMA held a workshop on 30 June–1 July 2026 to "help shape a risk-based approac
 
 ## Patterns worth copying
 
+As first written. [Compliance review](#compliance-review-2026-09-30) rewords this list and takes precedence where the two differ.
+
 1. **AI output is a draft that a named person accepts.** Benchling's default agent mode creates drafts that "you choose whether to save". Its Data Entry Agent waits for "Approve and insert rows". Dotmatics approves every write. In this LIMS, an assistant proposal would sit beside the record, like the pencil drafts from the UI prototype (#23). It becomes a Record Version only when the signed-in person saves it. It never carries an Electronic Signature or a Signature Meaning of its own.
 2. **Attribute the change to the person, and label it as AI.** Benchling records the initiating user plus "performed by Benchling AI" in the Audit Trail and version history. The Audit Trail entry here could carry the person, their role and Lab, and an assistant marker with the model version and prompt reference.
 3. **Answers cite the records they came from.** Benchling Chat answers with "citations and chip links". An explain-and-find answer about a Deviation or a Run should link each claim to the record it came from, so the reader checks the source, not the prose.
@@ -131,7 +133,9 @@ EMA held a workshop on 30 June–1 July 2026 to "help shape a risk-based approac
 
 ## Patterns to avoid
 
-1. **Standing autonomous write modes.** Benchling's "Full actions" mode, where "most actions happen without further approval", is one. So is LabVantage's "executing intelligent sample routing" (CLAIM), and SampleManager ATR's review "without user intervention". Each lets AI change the record without a person accepting that change. That clashes with Annex 22 §1's human-in-the-loop for LLMs and with this map's "act is never" proposal.
+As first written. [Compliance review](#compliance-review-2026-09-30) adds to this list and takes precedence where the two differ.
+
+1. **Standing autonomous write modes.** Benchling's "Full actions" mode, where "most actions happen without further approval", is one. So is LabVantage's "executing intelligent sample routing" (CLAIM), and SampleManager ATR's review "without user intervention". Each lets AI change the record without a person accepting that change. That clashes with Annex 22 §1's human-in-the-loop for LLMs and with this map's settled rule that the assistant never acts (#40, #42).
 2. **Docs that contradict the product.** Benchling's security article says every write "requires the user to accept", while Full actions skips acceptance. A GxP customer's validation leans on those words. This LIMS's intended-use statement must match what the code allows.
 3. **Models that keep learning in use.** Agilent's cloud model is trained continuously from users' manual integrations. The draft Annex 22 says dynamic models "should not be used in critical GMP applications".
 4. **Predicting results instead of measuring them.** SampleManager Profiling estimates "the outcome of unexecuted tests" and can "fail early samples that would not pass". A predicted outcome is not a Result. Showing one breaks the rule that the system never shows a verdict it did not compute from a measurement.
@@ -140,9 +144,37 @@ EMA held a workshop on 30 June–1 July 2026 to "help shape a risk-based approac
 7. **Letting outside AI clients configure the system.** Dotmatics exposes configuration writes to external Claude or ChatGPT clients over MCP. In this LIMS, configuration such as Check Plans, Specifications and roles is QA-approved and versioned. It must never be reachable from an assistant.
 8. **Features that are really roadmap.** LabVantage's agents are "in development… built bespoke for each customer". Thermo's OpenAI and NVIDIA deals name no lab product. Treat these as intent, not evidence of what a regulator has accepted.
 
+## Compliance review (2026-09-30)
+
+`part11-expert`, `iso17025-expert` and `usp-expert` reviewed this file. The vendor facts stand. The two pattern lists are reworded below to match the requirements that [Research: running an assistant within the demo's hosting, cost and security limits](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/42) (`research/ai-hosting` §6, R1–R8) and [Research: how always-on AI agents make AI invisible](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/40) (`research/ai-agents` §6, A1–A4) set for [Decide the assistant layer](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/43). Where these lists and the earlier ones differ, these take precedence. USP found no gaps. The Part 11 and ISO/IEC 17025 gaps overlapped, and each is closed by a rewording below.
+
+### Patterns worth copying, reworded
+
+1. **Drafts are prose only, and a named person saves them (A1, R6).** The assistant never proposes a result, reading, Check value, verdict, limit, Specification field or Deviation impact-list entry. Those come only from typed entry, the validated import parser or a Calculation Version. Numbers and identifiers in a draft's prose are references the server fills from the database, or are matched against the Record Versions the call log recorded when the draft is saved. A draft becomes a Record Version only when the signed-in person saves it. It never carries an Electronic Signature or a Signature Meaning. Benchling's Data Entry Agent is kept only as a UI example of an accept step. Its bulk value extraction is a pattern to avoid (below).
+2. **The person who saves is the author, and the server marks the draft (hosting §6.2, agents §6.2).** On save, the server writes an "assistant-drafted" flag and the call-log row ID into that save's audit row. No one can remove the flag. It shows in the inline trail and in PDF and JSON exports, and the model's pre-edit text stays in the call log. Benchling's "AI write attributed to the user", where the AI acts under the person's identity, is the pattern `ai-agents` §4 rejects. Here the assistant only drafts and the person writes.
+3. **Citations come from the call log, never from the model.** The server builds each citation from the Record Versions the call log recorded as read. Any citation the model offers for a record that was not retrieved is dropped, and the event opens a System Incident (R8). Documents are cited by Document ID and Effective version, or the version the Test pins.
+4. **Never more than the person's read access, through the seam, with no write path.** The assistant reads through the same lab-scoped seam as every other read. Its database role has SELECT on business tables and INSERT only on the call log, and `ActorContext` comes from the server session. For Customer Users, R4 and A2 apply. The assistant finds and shows released content only. A role-keyed tool registry gives Customer Users only portal queries, and a test proves no unreleased or OOS value comes back.
+5. **One versioned configuration, enabled per trained person (R7, hosting §6.3).** This replaces the per-role Admin switch. The model ID, system prompt, tool definitions, role-to-tool map and the other settings are one configuration that changes only by a Release Log entry signed *Approved*. Use is enabled per person only with a current Training Record. A per-Customer flag disables Customer-scoped tools until that Customer's Quality Agreement names the model provider as a sub-processor. Each use is written to the call log, not the Audit Trail, as [Decide the audit trail and electronic signature design](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13) set.
+6. **Keep AI off the path that computes Results and verdicts.** As first written, but the assistant **never proposes or sets** any item on A1's list, and never an Integration Declaration or Run Check outcome either. It may point a reviewer at a problem only by showing a flag that is stored and computed, not generated. Conformity terms in its output are stripped or flagged (R5). Under USP `<1010>` it never proposes or drafts the exclusion of a value. An anomaly flag may point a reviewer at a value, but the exclusion reason is the person's ([Decide how results are entered, imported, and reviewed](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/20)).
+7. **Deterministic exception review, named honestly.** Unchanged.
+8. **A named, pinned configuration from an evaluated supplier (R7, R3).** Pin the whole configuration, not only the model ID. The supplier entry records the requirements, this research as evaluation evidence, and re-evaluation at every model change and at least yearly. Hosting is settled in [Research: running an assistant within the demo's hosting, cost and security limits](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/42).
+9. **If ML ever touches chromatography, lock it and keep the analyst's check.** Unchanged. If a locked ML integrator is ever adopted, its model version is data-system software under USP `<1058>`.
+
+### Patterns to avoid, added and reworded
+
+- **Avoid 1** now cites the settled rule that the assistant never acts (#40, #42), not a proposal.
+- **Avoid 7, reworded: no outside AI client reaches the LIMS.** No external AI client or MCP connector reaches the LIMS, for reading or writing. The only route is the server-side assistant under R1. Dotmatics' MCP exposure is the example.
+- **New: bulk value extraction into records.** Benchling's Data Entry Agent turns PDF and Excel files into result rows, and the user inserts them. That breaks A1. Values here come only from typed entry or the validated import parser.
+- **New: "insert despite failed verification".** Benchling's "Acknowledge verification failure and insert rows" lets a known-unverified value into the record. Here no value reaches a record from the assistant at all (A1), and a number in a draft's prose that doesn't match the records read is highlighted before the person can save (R6).
+- **New: LLM audit-trail review in place of a person.** Zifo's LLM checklist and log parsing is the example. An LLM never reviews the audit trail in place of a Reviewer or QA. No Review Checklist item is ticked from assistant output, and "audit trail reviewed" is allowed only after the trail itself was shown (`ai-agents` §6.3).
+
+### For Decide the assistant layer
+
+The two §6 sections disagree on training. `research/ai-hosting` §6.3 asks for a separate assistant-use SOP. `research/ai-agents` §6.3 folds assistant use into the LIMS-use training. [Decide the assistant layer](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/43) must pick one.
+
 ## Not settled here
 
 - What an assistant may do under Part 11, Annex 11, draft Annex 22 and FDA guidance is ticket #39.
-- Invisible, always-on patterns are ticket #40.
-- Model prices, retention terms, prompt injection and version pinning are ticket #42.
+- Invisible, always-on patterns are settled in `research/ai-agents` (#40).
+- Model prices, retention terms, prompt injection and version pinning are settled in `research/ai-hosting` (#42).
 - Empower 3.10 and waters_connect 4.5 release notes could not be read. They may contain AI features this survey missed.
