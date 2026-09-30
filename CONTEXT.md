@@ -155,7 +155,7 @@ The Method Adoption status for a basic compendial procedure (loss on drying, res
 _Avoid_: Verification not required, exempt
 
 **Run Check**:
-One criterion a Run must meet before any of its results count, such as S/N at the LOQ-level standard, replicate-injection RSD, resolution, or check-sample recovery. It is set by the Method with its limit and source (the Method, a monograph, or `<621>`), and every Run records its observed value; a failed or unrecorded one blocks the Run's results and opens a Run Check Failure Deviation.
+One Acceptance Criterion a Run must meet before any of its results count, such as S/N at the LOQ-level standard, replicate-injection RSD, resolution, or check-sample recovery. It is set by the Method with its limit and source (the Method, a monograph, or `<621>`), and every Run records its observed value and the verdict the system computes; a failed or unrecorded one blocks the Run's results and opens a Run Check Failure Deviation.
 _Avoid_: SST, system suitability test (alone), acceptance check
 
 **Uncertainty Evaluation**:
@@ -295,11 +295,11 @@ A space in a Lab where Equipment stands and work is done, with its own Checks of
 _Avoid_: Area, location
 
 **Check Plan**:
-What must be checked on one piece of Equipment or one Room: the kind of Check, its schedule, its acceptance criteria, whether it blocks use, and the controlled document it comes from.
+What must be checked on one piece of Equipment or one Room: the kind of Check, its schedule, its Acceptance Criteria, whether it blocks use, and the controlled document it comes from.
 _Avoid_: Schedule, maintenance plan
 
 **Check**:
-One performance of a Check Plan (a reading, verification, calibration, maintenance or qualification), with its outcome against the acceptance criteria.
+One performance of a Check Plan (a reading, verification, calibration, maintenance or qualification), with the outcome the system computes against its Acceptance Criteria.
 _Avoid_: Test (reserved for work on Samples), inspection, calibration (for the general case)
 
 **Excursion**:
@@ -353,6 +353,10 @@ A supplier's Safety Data Sheet for a material, kept at its current version.
 _Avoid_: MSDS
 
 ### Quality
+
+**Acceptance Criterion**:
+A limit, set by a Check Plan, a Method or a Method Protocol, that a value from a Check, a Run, a validation study or a Training Run must meet, kept exactly as written with its decimals, operator, unit and source, and for a tolerance its reference and whether it is relative or absolute. The value is rounded once, to the limit's written decimals, before it is compared, except that readings, times and counts are compared exactly, and a value the instrument's software already rounded is compared as exported, against a limit written to the same decimals. Specification Lines, plausibility ranges, and gates on whether a measurement counts at all, such as a net weight against the balance's smallest net weight, are not Acceptance Criteria.
+_Avoid_: Tolerance (alone), target, spec limit
 
 **Deviation**:
 A record that something departed from its acceptance criteria or procedure and must be investigated and closed by QA; this project's name for ISO/IEC 17025 nonconforming work. Its Kind is one of OOS, OOT, Equipment, Room, Excursion, Run Check Failure, Material, Procedure, Data Integrity, Proficiency Testing or Other, and it is Open, Investigating, In QA Review or Closed. Its Kind is fixed once opened, except that QA may reclassify Other. A Deviation raised in error is closed with that finding, never cancelled, and a Closed one never reopens or changes.
@@ -509,7 +513,7 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, an Injection's match to a Preparation or standard or its exclusion, a typed Injection's ID or acquisition time, a Run Adjustment's values, a Room, storage or DI water reading, a Check's typed value such as a balance or pipette weighing, a Customer Lot's expiry or retest date, a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date, a manually entered Run Check value, any structured field of a Method version, a Method Report's results, a validation impact decision, a Method Adoption's status, scope entries, LOQ, LOD, range, maximum dilution or cited Method Report, any field of an Uncertainty Evaluation or Accreditation Scope, or a Substance's kind. It stays a proposal until a second person approves it. Once a versioned record such as a Method or Specification is approved, a change is a new version instead.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, an Injection's match to a Preparation or standard or its exclusion, a typed Injection's ID or acquisition time, a Run Adjustment's values, a Room, storage or DI water reading, a Check's typed value such as a balance or pipette weighing, a Customer Lot's expiry or retest date, a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date, any value typed from a calibration certificate (its certified values, corrections, uncertainty and k, calibrated range, as-found and as-left values, or its Supplier's verdict and decision rule), a manually entered Run Check value, any structured field of a Method version, a Method Report's results, a validation impact decision, a Method Adoption's status, scope entries, LOQ, LOD, range, maximum dilution or cited Method Report, any field of an Uncertainty Evaluation or Accreditation Scope, or a Substance's kind. It stays a proposal until a second person approves it. Once a versioned record such as a Method or Specification is approved, a change is a new version instead.
 _Avoid_: Correction, amendment
 
 **Unconfirmed Value**:
@@ -527,3 +531,7 @@ _Avoid_: Revised report, reissue
 **Record Type Register**:
 The QA-approved list of record types, stating for each whether it is a Part 11 record, whether it needs a legally binding signature, whether it is raw data, whether its primary form is electronic or paper, its retention class and its data-integrity owner.
 _Avoid_: Record catalogue
+
+**Calculation Version**:
+One QA-approved version of the system's calculations, including how values are compared with Acceptance Criteria, naming the version of the SOP it implements. Every computed value and verdict records the Calculation Version that produced it, and a later version never changes a recorded verdict in place: a corrected verdict is a new record linked to it.
+_Avoid_: Algorithm version, software version, release
