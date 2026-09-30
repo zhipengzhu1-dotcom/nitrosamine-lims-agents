@@ -34,12 +34,18 @@ beforeAll(async () => {
       { id: productB, customer_id: customerB, code: 'BET-01', name: 'Betanib API', api_substance_id: substance },
     ]).execute();
     await tx.db.insertInto('person').values({ id: cara.id, printed_name: 'Cara Customer' }).execute();
+    await tx.db.insertInto('account').values({ person_id: cara.id, username: 'cara', password_hash: 'x', totp_secret_enc: Buffer.from('x') }).execute();
+    await tx.db.insertInto('role_grant').values({ id: randomUUID(), person_id: cara.id, role: 'CustomerUser', customer_id: customerA }).execute();
+    return { commit: null };
+  }));
+  committed(await runAudited(db.app, fx.ctx(fx.dee, 'LabManager'), { kind: 'lab', labId: fx.labA }, async (tx) => {
     await tx.db.insertInto('submission').values([
       { id: submission, customer_id: customerA, number: 'SUB-2026-000001', entered_by: cara.id, submitted_at: sql`clock_timestamp()` },
       { id: submissionB, customer_id: customerB, number: 'SUB-2026-000002', entered_by: cara.id, submitted_at: sql`clock_timestamp()` },
     ]).execute();
-    await tx.db.insertInto('account').values({ person_id: cara.id, username: 'cara', password_hash: 'x', totp_secret_enc: Buffer.from('x') }).execute();
-    await tx.db.insertInto('role_grant').values({ id: randomUUID(), person_id: cara.id, role: 'CustomerUser', customer_id: customerA }).execute();
+    return { commit: null };
+  }));
+  committed(await runAudited(db.app, fx.authCtx(), { kind: 'company' }, async (tx) => {
     await tx.db.insertInto('session').values({
       id: cara.session, token_hash: createHash('sha256').update(cara.session).digest(), person_id: cara.id, customer_id: customerA,
       workstation: 'portal', absolute_end_at: new Date(tx.dbNow.getTime() + 3600_000),
@@ -123,7 +129,7 @@ describe('a Customer writing into a Lab', () => {
       '23503',
     );
     const sampleB = sampleRow(customerB);
-    committed(await runAudited(db.app, fx.seedCtx({ ledgers: [ledgerOf(fx.labA), COMPANY_LEDGER] }), { kind: 'lab', labId: fx.labA }, async (tx) => {
+    committed(await runAudited(db.app, fx.ctx(fx.dee, 'LabManager'), { kind: 'lab', labId: fx.labA }, async (tx) => {
       await tx.db.insertInto('sample').values(sampleB).execute();
       return { commit: null };
     }));

@@ -36,16 +36,20 @@ export type Fixture = {
   readonly ctx: (person: Person, role: string, over?: Partial<AuditContext>) => AuditContext;
   /** A context for the seed service identity on the company ledger. */
   readonly seedCtx: (over?: Partial<AuditContext>) => AuditContext;
+  /** A context for svc:auth, which opens sessions and writes the access log. */
+  readonly authCtx: (over?: Partial<AuditContext>) => AuditContext;
 };
 
 export const commitKey = (): CommitKey => randomUUID() as CommitKey;
 
 const ledgersFor = (lab: LabId | null): readonly LedgerId[] => (lab ? [ledgerOf(lab), COMPANY_LEDGER] : [COMPANY_LEDGER]);
 
-export function serviceContext(over: Partial<AuditContext> = {}): AuditContext {
+export type Service = (typeof SERVICE)[keyof typeof SERVICE];
+
+export function serviceContext(service: Service, over: Partial<AuditContext> = {}): AuditContext {
   return {
-    person: SERVICE.seed.person,
-    role: SERVICE.seed.role,
+    person: service.person,
+    role: service.role,
     actingLab: null,
     customer: null,
     action: 'seed',
@@ -58,7 +62,7 @@ export function serviceContext(over: Partial<AuditContext> = {}): AuditContext {
   };
 }
 
-/** Seeds two Labs, six people with accounts, roles and live sessions, and the test release. */
+/** Seeds two Labs and six people with accounts and roles as svc:seed, their live sessions as svc:auth, and the test release. */
 export async function seedFixture(db: Kysely<DB>): Promise<Fixture> {
   const labA = randomUUID() as LabId;
   const labB = randomUUID() as LabId;
@@ -75,7 +79,7 @@ export async function seedFixture(db: Kysely<DB>): Promise<Fixture> {
 
   await db.insertInto('release').values({ id: TEST_RELEASE }).onConflict((oc) => oc.doNothing()).execute();
 
-  const out = await runAudited(db, serviceContext(), { kind: 'company' }, async (tx: AuditedTx) => {
+  const out = await runAudited(db, serviceContext(SERVICE.seed), { kind: 'company' }, async (tx: AuditedTx) => {
     await createLab(tx, { id: labA, code: 'RD', ianaZone: 'America/New_York' });
     await createLab(tx, { id: labB, code: 'QC', ianaZone: 'Asia/Shanghai' });
     for (const p of spec) {
@@ -87,26 +91,32 @@ export async function seedFixture(db: Kysely<DB>): Promise<Fixture> {
       for (const [role, roleLab] of p.roles) {
         await tx.db.insertInto('role_grant').values({ id: randomUUID(), person_id: id, role, lab_id: roleLab }).execute();
       }
-      const session = randomUUID() as SessionId;
+      people[p.key] = { id, username, printedName: p.name, session: randomUUID() as SessionId, lab };
+    }
+    return { commit: null };
+  });
+  if (!('commit' in out)) throw new Error('fixture rolled back');
+
+  const sessions = await runAudited(db, serviceContext(SERVICE.auth, { action: 'session.login' }), { kind: 'company' }, async (tx: AuditedTx) => {
+    for (const p of Object.values(people)) {
       await tx.db.insertInto('session').values({
-        id: session,
-        token_hash: createHash('sha256').update(session).digest(),
-        person_id: id,
-        acting_lab_id: lab,
+        id: p.session,
+        token_hash: createHash('sha256').update(p.session).digest(),
+        person_id: p.id,
+        acting_lab_id: p.lab,
         workstation: 'bench-1',
         absolute_end_at: new Date(tx.dbNow.getTime() + 12 * 3600 * 1000),
       }).execute();
-      await tx.db.insertInto('session_activity').values({ session_id: session, last_activity_at: sql`clock_timestamp()` }).execute();
-      people[p.key] = { id, username, printedName: p.name, session, lab };
+      await tx.db.insertInto('session_activity').values({ session_id: p.session, last_activity_at: sql`clock_timestamp()` }).execute();
     }
-    return { commit: people };
+    return { commit: null };
   });
-  if (!('commit' in out)) throw new Error('fixture rolled back');
+  if (!('commit' in sessions)) throw new Error('fixture sessions rolled back');
 
   return {
     labA,
     labB,
-    ...out.commit,
+    ...people,
     ctx: (person, role, over = {}) => ({
       person: person.id,
       role,
@@ -120,6 +130,7 @@ export async function seedFixture(db: Kysely<DB>): Promise<Fixture> {
       ledgers: ledgersFor(person.lab),
       ...over,
     }),
-    seedCtx: serviceContext,
+    seedCtx: (over) => serviceContext(SERVICE.seed, over),
+    authCtx: (over) => serviceContext(SERVICE.auth, over),
   };
 }
