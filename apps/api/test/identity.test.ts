@@ -6,7 +6,7 @@ import { CORE_COMMANDS } from '../src/app.ts';
 import { CHAIN } from '../src/chain/index.ts';
 import { checkIdentity, createPerson } from '../src/commands/identity.ts';
 import { ENABLEMENT_DOCUMENTS } from '../src/records/facts.ts';
-import { handover, retireSeed } from '../src/seed/index.ts';
+import { handover, retireSeed, seedDemo } from '../src/seed/index.ts';
 import { Authenticator, credentials, enrol, login, signAs, testApi, type Person, type TestApi } from '../src/testing/harness.ts';
 import { createLab, type Lab } from './support.ts';
 
@@ -121,6 +121,11 @@ describe('re-enrolment', () => {
 
     await adminTab.must('identity.checkIdentity', { personId: hal.id, method: 'passport seen in person, new phone' });
     expect((await signAs(tab, halAgain, 'Acknowledged', 'Analyst', [recordId])).status).toBe(200);
+  });
+
+  it('the seed runs only on a fictional-data deployment, and writes nothing otherwise', async () => {
+    await expect(seedDemo(api, { ...api.deps, dataClass: 'real' })).rejects.toThrow(/fictional/);
+    expect(await api.db.app.selectFrom('customer').select('id').execute()).toEqual([]);
   });
 
   it('the seed hands the demo accounts over only on a fictional-data deployment', async () => {

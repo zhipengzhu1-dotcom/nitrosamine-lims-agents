@@ -2,9 +2,11 @@
 //
 // The prompt mints a key per attempt. The server, under the key's advisory lock:
 //   1. reads commit_outcome for the key:
-//        a receipt with the same input        -> the stored receipt, marked replayed, whatever
+//        a receipt with the same input, from the same session
+//                                             -> the stored receipt, marked replayed, whatever
 //                                                password or code was typed again;
-//        a receipt with another input         -> commit-key-reused (nothing runs);
+//        a receipt with another input or from another session
+//                                             -> commit-key-reused (nothing runs);
 //        a refusal with the same input hash   -> the stored refusal, marked replayed (a network
 //                                                retry of a failed signing is not counted twice);
 //        a refusal with other input or secrets -> the corrected attempt runs;
@@ -95,16 +97,17 @@ const mac = (key: Buffer, part: 'input' | 'secrets', v: unknown): Buffer => crea
 const INPUT_MAC_BYTES = 32;
 
 /**
- * commit_outcome.input_hash: an HMAC of the input with its secrets removed, followed, when it has
- * any, by an HMAC of the secrets. Both are keyed by the server, so the table is no offline verifier
- * for a password or code; the first part alone says whether a retry asks for the same thing.
+ * An HMAC of the input with its secrets removed, followed, when it has any, by an HMAC of the
+ * secrets. Both are keyed by the server, so commit_outcome is no offline verifier for a password
+ * or code. The first part alone says whether a retry asks for the same thing, and it is all a
+ * receipt row keeps; only a refusal row, which a retry with the same secrets must replay, keeps both.
  */
 export function inputHash(key: Buffer, input: unknown): Buffer {
   const { open, secret } = splitSecrets(input);
   return secret ? Buffer.concat([mac(key, 'input', open), mac(key, 'secrets', secret)]) : mac(key, 'input', open);
 }
 
-const sameRequest = (a: Buffer, b: Buffer): boolean => a.subarray(0, INPUT_MAC_BYTES).equals(b.subarray(0, INPUT_MAC_BYTES));
+const requestPart = (hash: Buffer): Buffer => hash.subarray(0, INPUT_MAC_BYTES);
 
 type Acted = { readonly person: PersonId; readonly role: string; readonly lab: LabId | null; readonly customer: string | null; readonly session: SessionId | null; readonly scope: Scope };
 
@@ -171,10 +174,10 @@ export async function commit(deps: Deps, who: Requester, key: CommitKey | string
 
   const scope = def.scope ? def.scope(input, who) : acted.scope;
   const out = await runAudited(deps.db, ctx, scope, async (tx): Promise<{ commit: Outcome | Bug } | { rollback: Outcome }> => {
-    const prior = await tx.db.selectFrom('commit_outcome').select(['input_hash', 'outcome', 'body']).where('commit_key', '=', key).execute();
+    const prior = await tx.db.selectFrom('commit_outcome').select(['input_hash', 'outcome', 'body', 'session_id']).where('commit_key', '=', key).execute();
     const receipt = prior.find((p) => p.outcome === 'receipt');
     if (receipt) {
-      return sameRequest(receipt.input_hash, hash)
+      return receipt.session_id === acted.session && receipt.input_hash.equals(requestPart(hash))
         ? { rollback: { kind: 'receipt', receipt: receipt.body as StoredReceipt, replayed: true } }
         : { rollback: { kind: 'refusal', refusal: refuse.commitKeyReused() } };
     }
@@ -226,7 +229,7 @@ export async function commit(deps: Deps, who: Requester, key: CommitKey | string
     if ('commit' in result) {
       const { once, ...stored } = result.commit;
       const body: StoredReceipt = { summary: stored.summary, at, act: stored.act, data: stored.data };
-      await tx.db.insertInto('commit_outcome').values({ commit_key: key, session_id: acted.session, command: def.name, input_hash: hash, outcome: 'receipt', body: body as never }).execute();
+      await tx.db.insertInto('commit_outcome').values({ commit_key: key, session_id: acted.session, command: def.name, input_hash: requestPart(hash), outcome: 'receipt', body: body as never }).execute();
       return { commit: { kind: 'receipt', receipt: body, ...(once ? { once } : {}) } };
     }
     const refusal = result.rollback;

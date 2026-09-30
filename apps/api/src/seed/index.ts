@@ -41,6 +41,7 @@ export async function alreadySeeded(db: Kysely<DB>): Promise<boolean> {
 
 export async function seedDemo(driver: Driver, deps: Deps, log: (line: string) => void = () => {}): Promise<SeedResult> {
   if (await alreadySeeded(deps.db)) throw new Error('this database is already seeded');
+  if (deps.dataClass !== 'fictional') throw new Error(`the seed signs as fictional people, so it runs only on fictional data, not ${deps.dataClass}`);
   const api: Driver = { ...driver, workstation: SEED_WORKSTATION };
   log('Customers');
   const customers = await seedCustomers(api);

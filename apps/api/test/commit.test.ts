@@ -96,6 +96,14 @@ describe('commit once', () => {
     expect(retyped.status).toBe(200);
     expect(retyped.body['replayed']).toBe(true);
     expect(await api.db.app.selectFrom('signature').select('meaning').where('record_version_id', '=', v.version.versionId).execute()).toHaveLength(1);
+
+    const stored = await api.db.app.selectFrom('commit_outcome').select('input_hash').where('commit_key', '=', key).where('outcome', '=', 'receipt').executeTakeFirstOrThrow();
+    expect(stored.input_hash.length, 'a receipt keeps no verifier of the password it was signed with').toBe(32);
+
+    const otherSession = await login(api, people.bob);
+    const elsewhere = await otherSession.command('signing.sign', right, key);
+    expect(elsewhere.status).toBe(409);
+    expect((elsewhere.body as { refusal: { kind: string } }).refusal.kind).toBe('commit-key-reused');
   });
 
   it('the stored input hash is keyed by the server, so nobody holding the table can test a password guess against it', () => {
