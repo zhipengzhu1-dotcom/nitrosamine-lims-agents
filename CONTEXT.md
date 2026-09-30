@@ -59,7 +59,7 @@ A Customer's API or drug, identified by the Customer's product code. The same AP
 _Avoid_: Material, compound, item
 
 **Specification**:
-The set of limits for a Product that Reportable Results are judged against.
+The set of limits for a Product that Reportable Results are judged against. A Product may have several, each with a purpose such as release or shelf-life; stability results are judged against the shelf-life one their Protocol names.
 _Avoid_: Spec limit, acceptance criteria (for products)
 
 **Lot**:
@@ -71,7 +71,7 @@ The smallest identified portion of material that gets its own results. Material 
 _Avoid_: Specimen, item
 
 **Container**:
-A physical bottle or vial received for a Sample; used for custody and storage, never for results.
+A physical bottle, vial or bag received for a Sample; used for custody and storage, never for results. Stability units are Containers: placed into a Study Condition, then moved into a Pull's Sample.
 _Avoid_: Vial (for received material), unit
 
 **Method**:
@@ -129,6 +129,52 @@ _Avoid_: Move, relocation
 **Test Report**:
 The signed document a Lab issues to a Customer with Reportable Results. It may be titled "Certificate of Analysis" when printed, but is never called a CoA in the system. Once released it changes only through a Deviation: superseded by an Amended Report, or Withdrawn when its results cannot be corrected.
 _Avoid_: CoA, certificate, report
+
+### Stability
+
+**Protocol**:
+A versioned plan for the stability testing of one Product: its Storage Conditions, the ages to test at in each, the Tests and Methods for each age, units per Pull and in reserve, the shelf-life Specification, the decision rule and whether conformity statements are wanted, Pull Windows, trend rules and GxP Class. It pins the version of each Storage Condition it uses. Written by the Customer or the Lab, owned by the company, and in force only once the Customer's approval is attached and QA has signed it Approved. It is the accepted request for every Pull made under it. An amendment is a new version, approved the same way, that applies to a Study from a named Time Point onward and never changes Time Points already pulled. It also states whether its data supports a marketing authorisation, which puts its Studies' records, and everything behind their results, under legal hold that only QA can lift.
+_Avoid_: Stability plan, study plan, program
+
+**Storage Condition**:
+A company reference entry for a storage environment: temperature set-point and tolerance, humidity set-point and tolerance where controlled, its kind (long-term, intermediate, accelerated, refrigerated, frozen, stress) and the guideline it comes from. Each version is approved by QA.
+_Avoid_: Condition (alone, which clashes with Fitness Status), climate, zone
+
+**Study**:
+One Lot on stability in one Lab under one Protocol version. It is created only when the Lab has adopted every Method the Protocol uses and has a chamber for each Storage Condition, unless QA accepts what is missing. The Studies of several Lots under the same Protocol are seen together through the Protocol, not through a separate record. It is Planned until Placement, then Active, and ends Completed when every Time Point is Reported, Missed or Cancelled and no Pull's Tests are still open, or Cancelled early with its remaining Containers disposed of or returned. It is never paused; Holds apply to its Pulls' Tests and Samples.
+_Avoid_: Program, stability batch, variant
+
+**Study Condition**:
+One Storage Condition within a Study, holding the Containers placed in it. Its chamber must be In use for placements and run at the same Storage Condition. Moves between chambers in the same Lab are location changes, recorded with their times. A conditional Study Condition, such as intermediate storage, has its Containers placed at T0 but no Time Points until QA signs its activation at the Customer's request.
+_Avoid_: Arm, variant, leg
+
+**Placement**:
+Putting a Study's Containers into their Study Conditions. The placement date is the Study's **T0**; every due date is T0 plus whole calendar months.
+_Avoid_: Loading, set-down, start date
+
+**Time Point**:
+One scheduled age of one Study Condition, with its due date and Pull Window. It is Scheduled, then Due while its window is open, then Pulled, then Reported once its Test Report is released; or Missed or Cancelled. It is never deleted: one not pulled by the end of its window becomes Missed, opens a Deviation and stays Missed even if a late Pull follows. The initial Time Point may reuse a released Test the Lab itself made on the same Lot shortly before Placement, if the Protocol allows it and the Test is of the same Method version and at least the Protocol's GxP Class.
+_Avoid_: Interval, station, pull point
+
+**Pull Window**:
+The days before and after a Time Point's due date within which its Pull is on time, set per Protocol and changed only by amendment, never once the Time Point is Due. A Pull outside it needs a reason and opens a Deviation.
+_Avoid_: Grace period, tolerance
+
+**Pull**:
+The signed removal of a Time Point's Containers from their chamber. It creates a new Sample (different storage history) with the Protocol's Tests already Accepted, and is stamped with every Excursion whose span overlaps the time its Containers spent in the chamber, including one found afterwards.
+_Avoid_: Withdrawal, sampling, time-point pull
+
+**Impact Assessment**:
+The QA-approved judgement, on an Excursion's Deviation, of what it means for one Study Condition stored in that chamber during it: none, assess at next Pull, or invalidate, which cancels the Study Condition's remaining Time Points. It also decides, for each overlapping Pull already reported, whether its Test Report is amended.
+_Avoid_: Excursion assessment, risk assessment
+
+**OOT Flag**:
+A mark on a stability result that breaks one of its Protocol's trend rules (change from initial, step change, first detection, crossing a share of the limit, projected failure). It only flags: the Reviewer acknowledges it and the Lab Manager signs whether to open a Deviation, both before QA review.
+_Avoid_: OOT result, trend alert, atypical result
+
+**Study Summary**:
+A compilation of one Study's released Test Reports, released by QA: every attribute at every Time Point, charts with limits, and Excursions. It is not a Test Report and carries no accreditation mark; it is superseded when any report it cites is amended. It holds data only: no fitted trend, shelf life or retest period, which are the Customer's to claim.
+_Avoid_: Stability report, study report, evaluation
 
 ### Equipment
 
