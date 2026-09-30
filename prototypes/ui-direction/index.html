@@ -1,0 +1,199 @@
+<title>Bench UI Directions</title>
+<style>
+/* One prototype at a time, full size, behind the fixed picker. Narrow screens get a scaled 1366-wide view. */
+:root { --bg: #eef0ee; --fg: #1c211e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #151816; --fg: #e4e8e5; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #151816; --fg: #e4e8e5; color-scheme: dark }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); overflow: hidden; }
+#stage { position: fixed; top: 0; left: 0; width: 100%; height: 100%; border: 0; background: var(--bg); transform-origin: 0 0; }
+
+.proto-picker {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(10, 10, 10, 0.82);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 8px 24px rgba(0, 0, 0, 0.24),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.proto-picker-highlight {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  will-change: transform;
+}
+
+/* The slide is enabled only after first paint (data-ready), so load doesn't animate. */
+.proto-picker[data-ready] .proto-picker-highlight {
+  transition:
+    transform 250ms cubic-bezier(0.23, 1, 0.32, 1),
+    width 250ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proto-picker[data-ready] .proto-picker-highlight { transition: none; }
+}
+
+.proto-picker-item {
+  position: relative; /* sits above the highlight */
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font: inherit;
+  cursor: pointer;
+  transition: color 150ms ease-out;
+}
+
+.proto-picker-item:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.proto-picker-item:active {
+  transform: scale(0.97);
+}
+
+.proto-picker-item:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.4);
+  outline-offset: 2px;
+}
+
+.proto-picker-item[data-active] {
+  color: #fff;
+}
+
+.proto-picker-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.proto-picker-replay {
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.proto-picker[data-position="top"] {
+  bottom: auto;
+  top: 24px;
+}
+</style>
+
+<iframe id="stage" title="UI direction prototype"></iframe>
+
+<nav class="proto-picker" data-position="top" aria-label="Prototype variants">
+  <span class="proto-picker-highlight" aria-hidden="true"></span>
+  <button class="proto-picker-item" data-active aria-current="true">Bench Rail, merged</button>
+  <button class="proto-picker-item">Bench Rail</button>
+  <button class="proto-picker-item">Ledger, side rail</button>
+  <button class="proto-picker-item">Interlock</button>
+  <button class="proto-picker-item">Ledger, bottom rail</button>
+</nav>
+
+<script>
+const variants = ['candidates/chosen/index.html', 'candidates/c1/index.html', 'candidates/c2/index.html', 'candidates/c3/index.html', 'candidates/c4/index.html'];
+const ROUTES = ['queue', 'assign', 'test', 'imported', 'sign', 'checks', 'check-fail'];
+const stage = document.getElementById('stage');
+const picker = document.querySelector('.proto-picker');
+const highlight = picker.querySelector('.proto-picker-highlight');
+const items = [...picker.querySelectorAll('.proto-picker-item:not(.proto-picker-replay)')];
+let current = 0;
+let route = ROUTES.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'queue';
+
+function moveHighlight() {
+  const el = items[current];
+  highlight.style.width = el.offsetWidth + 'px';
+  highlight.style.transform = `translateX(${el.offsetLeft}px)`;
+}
+
+function fit() {
+  const narrow = innerWidth < 1100;
+  const scale = narrow ? innerWidth / 1366 : 1;
+  stage.style.width = narrow ? '1366px' : '100%';
+  stage.style.height = narrow ? innerHeight / scale + 'px' : '100%';
+  stage.style.transform = narrow ? `scale(${scale})` : '';
+}
+
+function currentRoute() {
+  try { const h = stage.contentWindow.location.hash.slice(1); if (ROUTES.includes(h)) route = h; } catch {}
+  return route;
+}
+
+function mount(i) {
+  stage.src = `${variants[i]}#${currentRoute()}`;
+}
+
+function setActive(i) {
+  if (i < 0 || i >= variants.length) return;
+  const r = currentRoute();
+  current = i;
+  items.forEach((el, j) => {
+    el.toggleAttribute('data-active', j === i);
+    if (j === i) el.setAttribute('aria-current', 'true');
+    else el.removeAttribute('aria-current');
+  });
+  moveHighlight();
+  const url = new URL(location);
+  url.searchParams.set('v', i + 1);
+  url.hash = r;
+  history.replaceState(null, '', url);
+  mount(i);
+}
+
+function onKey(e) {
+  const t = e.target;
+  if (e.defaultPrevented || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const num = parseInt(e.key, 10);
+  if (num >= 1 && num <= variants.length) setActive(num - 1);
+  else if (e.key === 'ArrowRight' && e.currentTarget === document) setActive((current + 1) % variants.length);
+  else if (e.key === 'ArrowLeft' && e.currentTarget === document) setActive((current - 1 + variants.length) % variants.length);
+}
+
+// Keep the harness URL on the prototype's current screen, and let number keys switch
+// variants even while focus is inside the prototype (same-origin only; ignored otherwise).
+stage.addEventListener('load', () => {
+  try {
+    const win = stage.contentWindow;
+    const sync = () => { currentRoute(); const url = new URL(location); url.hash = route; history.replaceState(null, '', url); };
+    win.addEventListener('hashchange', sync);
+    win.document.addEventListener('keydown', onKey);
+    sync();
+  } catch {}
+});
+
+items.forEach((el, i) => el.addEventListener('click', () => setActive(i)));
+window.addEventListener('resize', () => { moveHighlight(); fit(); });
+document.addEventListener('keydown', onKey);
+
+fit();
+setActive((parseInt(new URLSearchParams(location.search).get('v'), 10) || 1) - 1);
+// Enable the slide only after first paint, so load doesn't animate.
+requestAnimationFrame(() => requestAnimationFrame(() => picker.setAttribute('data-ready', '')));
+</script>

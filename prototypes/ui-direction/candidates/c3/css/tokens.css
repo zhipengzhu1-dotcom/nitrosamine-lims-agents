@@ -1,0 +1,81 @@
+/* Interlock design tokens.
+   Ink and paper carry structure and the primary action. Colour is reserved for status
+   (go, watch, stop, iso, dead), and every status also has a glyph and a word. */
+
+:root {
+  color-scheme: light;
+
+  /* surfaces */
+  --housing: #E6ECEF;      /* page: the instrument housing */
+  --paper: #FFFFFF;        /* content surfaces */
+  --paper-2: #F3F6F8;      /* quiet panels, table stripes */
+  --paper-3: #E9EEF1;      /* pressed and unpowered surfaces */
+  --rule: #CDD6DC;         /* hairlines */
+  --rule-2: #6B7E8B;       /* control borders (3:1 on every surface) */
+
+  /* ink */
+  --ink: #0F2230;          /* text, structure, primary key */
+  --ink-2: #3A4E5C;        /* secondary text */
+  --ink-3: #4F6270;        /* tertiary text (5.3:1 on housing) */
+  --pencil: #556674;       /* draft values: graphite until signed */
+  --pencil-line: #8494A0;
+
+  /* action */
+  --key: #0F2230;
+  --key-hover: #1C3649;
+  --key-press: #0A1822;
+  --accent: #2340C8;       /* focus, selection, the current step */
+  --accent-ink: #1B32A4;
+  --accent-tint: #E6EBFC;
+  --focus: #2340C8;
+  --focus-dark: #FFD24A;
+
+  /* status: text, tint, solid, icon */
+  --go: #14653B;      --go-tint: #DDF1E4;    --go-solid: #1A7A46;
+  --watch: #6B4100;   --watch-tint: #FFEDBF; --watch-solid: #E3A100; --watch-icon: #9A6200;
+  --stop: #A4141E;    --stop-tint: #FBE3E1;  --stop-solid: #C4222C;
+  --iso: #56308B;     --iso-tint: #ECE4F7;   --iso-solid: #7645BE;
+  --dead: #43535E;    --dead-tint: #E2E8EC;  --dead-solid: #6C7E8A;
+  --row-overdue: #FDF1F0;
+  --tape: #F0B000;    /* hazard tape amber, only ever hatched against ink */
+
+  --hatch: repeating-linear-gradient(135deg, var(--tape) 0 0.3125rem, var(--ink) 0.3125rem 0.625rem);
+  --pencil-shade: repeating-linear-gradient(135deg, rgba(85, 102, 116, 0.09) 0 1px, transparent 1px 5px);
+
+  /* type */
+  --font: "Atkinson Hyperlegible Next", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  --fs-xs: 0.75rem;      /* 12  captions, never below */
+  --fs-s: 0.8125rem;     /* 13  second lines in dense tables */
+  --fs-m: 0.9375rem;     /* 15  reading gear */
+  --fs-l: 1.125rem;      /* 18  acting gear labels */
+  --fs-xl: 1.5rem;       /* 24  headings, IDs */
+  --fs-2xl: 2rem;        /* 32  entry fields */
+  --fs-3xl: 2.75rem;     /* 44  readouts */
+
+  /* space (4pt) */
+  --s-1: 0.25rem; --s-2: 0.5rem; --s-3: 0.75rem; --s-4: 1rem;
+  --s-6: 1.5rem; --s-8: 2rem; --s-12: 3rem;
+
+  /* targets */
+  --t-read: 2.75rem;     /* 44: reading gear, rows and controls */
+  --t-act: 4rem;         /* 64: acting gear, keys and entry */
+  --bar-h: 3.5rem;
+
+  /* radii */
+  --r-tag: 0.25rem; --r-ctl: 0.5rem; --r-key: 0.75rem; --r-sheet: 1rem;
+
+  /* motion */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --d-press: 120ms;
+  --d-enter: 220ms;
+  --d-exit: 140ms;
+
+  /* elevation, floating layers only */
+  --shadow-pop: 0 0.5rem 1.5rem rgba(15, 34, 48, 0.22), 0 0 0 1px rgba(15, 34, 48, 0.12);
+  --shadow-sheet: -0.75rem 0 2rem rgba(15, 34, 48, 0.2);
+}
+
+html { font-size: 16px; }
+@media (min-width: 1700px) { html { font-size: 18px; } }

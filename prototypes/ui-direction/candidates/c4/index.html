@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledger &amp; Rail · Nitrosamine LIMS prototype (fictional data)</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;600&family=Atkinson+Hyperlegible+Next:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<!-- Glyphs. Every status pairs one of these shapes with a word, so colour is never the only signal. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-hold" viewBox="0 0 20 20"><rect x="4.5" y="3.5" width="4" height="13" rx="1" fill="currentColor"/><rect x="11.5" y="3.5" width="4" height="13" rx="1" fill="currentColor"/></symbol>
+    <symbol id="i-dev" viewBox="0 0 20 20"><path d="M10 2.2 18.6 17.3H1.4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 7.6v4.6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="10" cy="14.6" r="1.25" fill="currentColor"/></symbol>
+    <symbol id="i-alarm" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8.6" fill="currentColor"/><path d="M10 5.2v5.6" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/><circle cx="10" cy="14.4" r="1.35" fill="#fff"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 5.6V10l3 2.1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 20 20"><path d="M4 10.6 8.2 14.6 16.2 5.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-cross" viewBox="0 0 20 20"><path d="M5.2 5.2l9.6 9.6M14.8 5.2l-9.6 9.6" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-dot" viewBox="0 0 20 20"><circle cx="10" cy="10" r="5.6" fill="currentColor"/></symbol>
+    <symbol id="i-slash" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.4" fill="none" stroke="currentColor" stroke-width="2.3"/><path d="M4.9 4.9l10.2 10.2" stroke="currentColor" stroke-width="2.3"/></symbol>
+    <symbol id="i-hourglass" viewBox="0 0 20 20"><path d="M5.2 2.6h9.6M5.2 17.4h9.6M6.4 2.6v2.3c0 1.9 3.6 3.4 3.6 5.1s-3.6 3.2-3.6 5.1v2.3M13.6 2.6v2.3c0 1.9-3.6 3.4-3.6 5.1s3.6 3.2 3.6 5.1v2.3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-dashed" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-dasharray="3.2 2.4"/></symbol>
+    <symbol id="i-retired" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 10h8" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-ring" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.4" fill="none" stroke="currentColor" stroke-width="2.4"/></symbol>
+    <symbol id="i-half" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 3.4a6.6 6.6 0 0 1 0 13.2z" fill="currentColor"/></symbol>
+    <symbol id="i-dash" viewBox="0 0 20 20"><path d="M5 10h10" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 20 20"><rect x="3.8" y="8.6" width="12.4" height="9.2" rx="2" fill="currentColor"/><path d="M6.6 8.6V6.4a3.4 3.4 0 0 1 6.8 0v2.2" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-nib" viewBox="0 0 20 20"><path d="M10 1.8 15.4 8 10 18.2 4.6 8z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M10 8.2v3.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="10" cy="12.6" r="1.3" fill="currentColor"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 20 20"><path d="M3.4 16.6l.9-3.8 8.9-8.9a1.9 1.9 0 0 1 2.7 0l.2.2a1.9 1.9 0 0 1 0 2.7l-8.9 8.9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M11.6 5.6l2.8 2.8" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 20 20"><path d="M5 18.2V2.8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M5.4 3.2h10.2l-2.4 3.7 2.4 3.7H5.4z" fill="currentColor"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 20 20"><path d="M10 12.8V3.4M6 7.2l4-3.9 4 3.9" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.4 12.4v3.2c0 .9.7 1.6 1.6 1.6h10c.9 0 1.6-.7 1.6-1.6v-3.2" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/></symbol>
+    <symbol id="i-back" viewBox="0 0 20 20"><path d="M7 4.4h9c.8 0 1.5.7 1.5 1.5v8.2c0 .8-.7 1.5-1.5 1.5H7L2.4 10z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M9.6 7.4l4.8 5.2M14.4 7.4l-4.8 5.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.4" fill="none" stroke="currentColor" stroke-width="2.1"/><path d="M12.7 12.7l4.4 4.4" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M10 9v5.2" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><circle cx="10" cy="6.1" r="1.25" fill="currentColor"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 20 20"><path d="M4.8 14.2V9.2a5.2 5.2 0 0 1 10.4 0v5l1.6 1.4H3.2z" fill="currentColor"/><path d="M8.2 17.2a1.9 1.9 0 0 0 3.6 0" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-file" viewBox="0 0 20 20"><path d="M5 2.4h6.6l3.9 3.9v11.1c0 .2-.2.4-.4.4H5c-.2 0-.4-.2-.4-.4V2.8c0-.2.2-.4.4-.4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M11.4 2.6v4h4" fill="none" stroke="currentColor" stroke-width="1.8"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 20 20"><path d="M3.6 6.8h11.6l-3.2-3.2M16.4 13.2H4.8l3.2 3.2" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 20 20"><path d="M3.6 10h12M11.2 5.4 15.8 10l-4.6 4.6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-user" viewBox="0 0 20 20"><circle cx="10" cy="6.6" r="3.6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M3.4 17.6c.8-3.6 3.5-5.6 6.6-5.6s5.8 2 6.6 5.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-pc" viewBox="0 0 20 20"><rect x="2.4" y="3.2" width="15.2" height="10.4" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6.8 17.2h6.4M10 13.6v3.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-key" viewBox="0 0 20 20"><circle cx="6.8" cy="10" r="3.6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M10.4 10h7.2M15 10v3M17.6 10v2.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-audit" viewBox="0 0 20 20"><rect x="4.2" y="2.8" width="11.6" height="14.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M7 7h6M7 10h6M7 13h3.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  </defs>
+</svg>
+
+<div id="app">
+  <header id="topbar" class="topbar"></header>
+  <main id="main" class="main" tabindex="-1"></main>
+  <div id="rail" class="rail" role="region" aria-label="Signed-in person and actions"></div>
+</div>
+<div id="layer-sheet"></div>
+<div id="layer-lock"></div>
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
+<script src="../../data.js"></script>
+<script src="lib.js"></script>
+<script src="ui.js"></script>
+<script src="screens.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
