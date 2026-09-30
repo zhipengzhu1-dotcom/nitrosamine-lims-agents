@@ -167,12 +167,36 @@ One Method requested on one Sample; the unit of work assigned to an Analyst in o
 _Avoid_: Analysis, assay, job
 
 **GxP Class**:
-Whether a Test is GMP or non-GMP. Every Test is GMP unless marked non-GMP at acceptance with a signed reason. Once results exist it can be raised to GMP, never lowered. Non-GMP covers only method development, feasibility, and Customer-labelled research or screening samples. Validation, verification, transfer and Phase 1 material are always GMP. Non-GMP work is still audit-trailed, signed and second-checked where data is typed or corrected, but skips the Reviewer and QA release, and its Test Reports carry no accreditation mark.
+Whether a Test is GMP or non-GMP. Every Test is GMP unless marked non-GMP at acceptance with a signed reason. Once results exist it can be raised to GMP, never lowered. Non-GMP covers only method development, feasibility, and Customer-labelled research or screening samples. Validation, verification, transfer and Phase 1 material are always GMP. Non-GMP work is still audit-trailed, signed and second-checked where data is typed or corrected, and still needs a Reviewed signing before its Test Report issues, but skips QA release, and its Test Reports carry no accreditation mark.
 _Avoid_: GMP flag, regulated/unregulated
 
 **Run**:
-One instrument sequence, such as one quantitation file, holding injections for many Tests alongside standards and check samples.
+One instrument sequence, such as one quantitation file, holding Injections for many Tests alongside standards and check samples. It is signed Performed and Reviewed on its own, before any Test that uses it can be (for a Run holding only non-GMP Tests, those Tests' Reviewed signing covers it), and where its Method allows it may use the calibration of an earlier Run on the same instrument.
 _Avoid_: Batch, sequence, sample list
+
+**Injection**:
+One acquisition from a vial within a Run, identified in the instrument's export by the ID the LIMS put in the Run's sample list. Every Injection in an imported Run is either matched to a Preparation, standard, check sample or blank, or excluded with a reason.
+_Avoid_: Shot, row, acquisition (alone)
+
+**Import**:
+One upload of an instrument's export (the results file and its printed report) into a Run. The Analyst confirms it or rejects it as a whole with a reason, never edits it, and it is kept either way.
+_Avoid_: Upload (alone), file
+
+**Raw-Data Manifest**:
+The Analyst's attested list of every file in a Run's raw data on the instrument's data system, with its name, size and SHA-256 hash, and where the raw data is archived. The raw data itself stays in the instrument's data system; the manifest proves later that it is unchanged.
+_Avoid_: Raw data (for the manifest), file list
+
+**Integration Declaration**:
+The Analyst's statement, made when signing a Run Performed, of each manually integrated Injection and Analyte and each calibration point excluded, with its reason, or that there were none, citing the integration SOP version it follows. The Reviewer checks it against the instrument's own processing history.
+_Avoid_: Manual integration flag, integration log
+
+**Run Adjustment**:
+A change to a chromatographic condition of a Run's procedure within the allowance its source permits (`<621>` for a compendial Method, the validation's robustness data otherwise), recorded with the original and adjusted values. An already adjusted procedure is never adjusted again.
+_Avoid_: Modification, SST adjustment
+
+**Review Checklist**:
+The QA-approved, versioned list of what a Reviewer confirms on a Run or a Test. Items the system proves are shown as evidence; the rest are ticked by the Reviewer, and each Reviewed signature keeps the checklist version it used.
+_Avoid_: Checklist (alone), review form
 
 **Preparation**:
 One weighed and diluted solution made from a Sample for a Test.
@@ -183,12 +207,16 @@ The value for one analyte from one Preparation.
 _Avoid_: Reading, value
 
 **Reportable Result**:
-The value for one analyte on one Test that is compared with the Specification and printed on the Test Report: the mean of the Test's Preparations, each the mean of its injections.
+The value for one analyte on one Test that is compared with the Specification and printed on the Test Report: the mean of the Test's Preparations, each the mean of the Injections its Method counts.
 _Avoid_: Final result, reported value
 
 **Reinjection**:
-Injecting the same Preparation again.
+Injecting the same Preparation again, in a new Run, for a reason recorded before it is acquired. The Method sets which original Injections it replaces.
 _Avoid_: Rerun
+
+**Reprocessing**:
+Integrating or quantifying a Run's existing Injections again in the instrument's software and importing the outcome, which makes a new Record Version of the Run. It never closes an OOS.
+_Avoid_: Reintegration, recalculation, reanalysis
 
 **Re-preparation**:
 Making a new Preparation from the same Sample within the same Test.
@@ -477,7 +505,7 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date, a manually entered Run Check value, any structured field of a Method version, a Method Report's results, a validation impact decision, a Method Adoption's status, scope entries, LOQ, LOD, range, maximum dilution or cited Method Report, any field of an Uncertainty Evaluation or Accreditation Scope, or a Substance's kind. It stays a proposal until a second person approves it. Once a versioned record such as a Method or Specification is approved, a change is a new version instead.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, an Injection's match to a Preparation or standard or its exclusion, a typed Injection's ID or acquisition time, a Run Adjustment's values, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date, a manually entered Run Check value, any structured field of a Method version, a Method Report's results, a validation impact decision, a Method Adoption's status, scope entries, LOQ, LOD, range, maximum dilution or cited Method Report, any field of an Uncertainty Evaluation or Accreditation Scope, or a Substance's kind. It stays a proposal until a second person approves it. Once a versioned record such as a Method or Specification is approved, a change is a new version instead.
 _Avoid_: Correction, amendment
 
 **Amended Report**:
