@@ -155,6 +155,7 @@ describe('who may hold which Authorisation, and for how long (iso 6, iso 8, deci
     expect(r.status).toBe(403);
     expect(r.body.refusal).toEqual({ kind: 'not-permitted', message: 'An Authorisation is valid for at most 12 months: from 2026-10-01 it ends by 2027-10-01. Renew it through a Competence Assessment.' });
     expect((await grant(cast.ann.id, 'Performed', '2026-10-01', '2027-10-01')).status).toBe(200);
+    expect((await grant(cast.ann.id, 'Performed', '2026-10-01', '2026-10-01')).body.refusal).toEqual({ kind: 'not-permitted', message: 'An Authorisation ends after the day it starts.' });
   });
 
   it('seeds Specifications signed Approved by the QA person, not the Lab Manager', async () => {

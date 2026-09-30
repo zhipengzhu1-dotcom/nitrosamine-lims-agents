@@ -47,6 +47,7 @@ export const grantAuthorisation = defineCommand({
     const a = tx.actor;
     const lab = a.kind === 'staff' ? a.lab : a.kind === 'service' ? a.lab : null;
     if (!lab) return { kind: 'not-permitted', message: 'An Authorisation is granted in a Lab.' };
+    if (input.validUntil <= input.validFrom) return { kind: 'not-permitted', message: 'An Authorisation ends after the day it starts.' };
     const longest = authorisationEndsBy(input.validFrom);
     if (input.validUntil > longest) {
       return { kind: 'not-permitted', message: `An Authorisation is valid for at most 12 months: from ${input.validFrom} it ends by ${longest}. Renew it through a Competence Assessment.` };

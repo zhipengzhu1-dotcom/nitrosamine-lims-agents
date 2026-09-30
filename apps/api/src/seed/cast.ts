@@ -62,7 +62,7 @@ export async function acknowledge(api: Driver, person: Person, role: string, doc
 export type AuthorisationGrant = { readonly person: Person; readonly meaning: string; readonly scope: string };
 
 /** Twelve months from the first of this month (decision 19), so the seed's Authorisations are current whenever it runs. */
-export function twelveMonths(now: Date): { readonly validFrom: string; readonly validUntil: string } {
+function twelveMonths(now: Date): { readonly validFrom: string; readonly validUntil: string } {
   const month = String(now.getUTCMonth() + 1).padStart(2, '0');
   return { validFrom: `${now.getUTCFullYear()}-${month}-01`, validUntil: `${now.getUTCFullYear() + 1}-${month}-01` };
 }
