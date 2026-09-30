@@ -310,6 +310,10 @@ _Avoid_: Alarm, out-of-range, spike
 The chronological record of everything that happened to one piece of Equipment: each use, Check, cleaning, repair, software change, status change, Deviation and Transfer.
 _Avoid_: Log, usage log
 
+**Abandoned Check**:
+A Check ended with a reason before it was signed Performed. It keeps every value typed into it, still takes a second person's Reviewed signature, and never counts as a pass. A Check holding an Unconfirmed Value or a pending Critical Data Change cannot be Abandoned.
+_Avoid_: Cancelled Check, deleted Check, void
+
 ### Inventory
 
 **Material**:
@@ -505,8 +509,16 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, an Injection's match to a Preparation or standard or its exclusion, a typed Injection's ID or acquisition time, a Run Adjustment's values, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date, a manually entered Run Check value, any structured field of a Method version, a Method Report's results, a validation impact decision, a Method Adoption's status, scope entries, LOQ, LOD, range, maximum dilution or cited Method Report, any field of an Uncertainty Evaluation or Accreditation Scope, or a Substance's kind. It stays a proposal until a second person approves it. Once a versioned record such as a Method or Specification is approved, a change is a new version instead.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, an Injection's match to a Preparation or standard or its exclusion, a typed Injection's ID or acquisition time, a Run Adjustment's values, a Room, storage or DI water reading, a Check's typed value such as a balance or pipette weighing, a Customer Lot's expiry or retest date, a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date, a manually entered Run Check value, any structured field of a Method version, a Method Report's results, a validation impact decision, a Method Adoption's status, scope entries, LOQ, LOD, range, maximum dilution or cited Method Report, any field of an Uncertainty Evaluation or Accreditation Scope, or a Substance's kind. It stays a proposal until a second person approves it. Once a versioned record such as a Method or Specification is approved, a change is a new version instead.
 _Avoid_: Correction, amendment
+
+**Unconfirmed Value**:
+A typed reading or Check value that is implausible or fails its Acceptance Criterion, saved at its first entry but not yet the value of record. Only the person who typed it confirms it, by typing it again; replacing it is a Critical Data Change. Until it is resolved it blocks use as if it had failed, and if it is still unresolved at the end of the Lab day it becomes the value of record, flagged as not confirmed.
+_Avoid_: Draft, pending value, unsaved entry
+
+**Refused Entry**:
+A typed value the system refused outright because a gate said the measurement cannot count, such as a net weight below the balance's smallest net weight or a balance that is not In use. It is kept with its reason on the record it was attempted on, but it is never a value of that record.
+_Avoid_: Rejected value, invalid entry, error
 
 **Amended Report**:
 A new version of a released Test Report that corrects it, linked to a Deviation and stating what changed and why. The original stays on record, marked Superseded.
