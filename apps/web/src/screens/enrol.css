@@ -1,0 +1,15 @@
+.enrol { min-height: 100%; display: grid; grid-template-rows: var(--top-h) 1fr; }
+.enrol__bar { display: flex; align-items: center; gap: 10px; padding: 0 var(--s-4); background: var(--sheet); border-bottom: 1px solid var(--line); }
+.enrol__bar .fict { margin-left: auto; }
+.enrol__main { display: grid; gap: var(--s-3); align-content: start; padding: 24px 20px 48px; max-width: 1100px; width: 100%; margin: 0 auto; }
+.enrol__steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--s-3); align-items: start; }
+.enrol__step { display: grid; gap: var(--s-2); }
+.enrol__rules { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13.5px; display: grid; gap: 2px; }
+.enrol__mismatch { color: var(--bad); font-weight: 700; }
+.enrol__actions { display: flex; gap: var(--s-2); }
+.enrol__go { justify-self: start; display: inline-flex; align-items: center; text-decoration: none; }
+.qr { width: min(280px, 100%); height: auto; justify-self: center; border: 1px solid var(--line); border-radius: var(--r-control); }
+@media (max-width: 600px) {
+  .enrol__main { padding: 16px 16px 32px; }
+  .enrol__bar .brand__name { display: none; }
+}

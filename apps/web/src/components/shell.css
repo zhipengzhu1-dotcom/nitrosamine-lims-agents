@@ -1,5 +1,5 @@
 /* Read above, act below. */
-.frame { display: grid; grid-template-rows: var(--top-h) minmax(0, 1fr) minmax(var(--rail-h), auto); height: 100vh; height: 100dvh; }
+.frame { display: grid; grid-template-rows: minmax(var(--top-h), auto) minmax(0, 1fr) minmax(var(--rail-h), auto); height: 100vh; height: 100dvh; }
 .view { min-height: 0; min-width: 0; overflow: auto; outline: none; overscroll-behavior: contain; }
 
 .top { display: flex; align-items: center; gap: var(--s-4); padding: 0 var(--s-4); background: var(--sheet); border-bottom: 1px solid var(--line); min-width: 0; }
@@ -55,10 +55,16 @@
 /* Narrow screens keep every rail control; the rail wraps rather than scrolling sideways. */
 @media (max-width: 900px) {
   .top { gap: var(--s-2); padding: 0 var(--s-2); }
-  .clock__utc, .fict { display: none; }
+  .clock__utc { display: none; }
   .rail { flex-wrap: wrap; padding: 8px 12px 12px; gap: var(--s-2); }
   .rail__context { order: -1; flex-basis: 100%; border-left: 0; padding-left: 0; }
   .who { flex: 1 1 200px; }
+}
+/* A phone-width header wraps to two rows; the Fictional data banner stays on every page (#34). */
+@media (max-width: 600px) {
+  .top { flex-wrap: wrap; row-gap: 0; }
+  .nav { order: 1; flex-basis: 100%; min-height: 40px; }
+  .station { margin-left: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   .rail__context--receipt, .rail__context--bad { animation: none; }

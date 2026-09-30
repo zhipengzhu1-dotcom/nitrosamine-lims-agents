@@ -21,6 +21,8 @@ export function CriticalDataChangeDialog(props: {
   /** The server's picklist. Other is always offered after it. */
   reasons: readonly ReasonOption[];
   refusal: string | null;
+  /** False for a non-critical field: the change still needs its reason but takes effect at once. */
+  requiresApproval?: boolean;
   commitKey: CommitKey;
   onSubmit: (request: CriticalDataChangeRequest) => Promise<CommitOutcome>;
   onClosed: () => void;
@@ -30,6 +32,7 @@ export function CriticalDataChangeDialog(props: {
   const [otherText, setOtherText] = useState('');
   const { leaving, close } = useSheetExit(props.onClosed);
   const key = useCommitKeyOnce(props.commitKey);
+  const approval = props.requiresApproval ?? true;
 
   const reason: ReasonForChange | null =
     code === OTHER ? (otherText.trim() === '' ? null : { kind: 'other', text: otherText.trim() }) : code === '' ? null : { kind: 'picklist', code };
@@ -53,14 +56,14 @@ export function CriticalDataChangeDialog(props: {
       footer={
         <>
           <div className="sheet__rail-who">
-            <b>Critical Data Change</b>
-            <span>Pending until a second person approves it</span>
+            <b>{approval ? 'Critical Data Change' : 'Change after first save'}</b>
+            <span>{approval ? 'Pending until a second person approves it' : 'Takes effect when saved, with its reason'}</span>
           </div>
           <button type="button" className="rbtn rbtn--secondary" onClick={close}>
             Cancel
           </button>
           <CommitButton className="rbtn--commit" disabled={leaving || !reason || key.spent} onCommit={submit}>
-            Propose the change for approval
+            {approval ? 'Propose the change for approval' : 'Save the change'}
           </CommitButton>
         </>
       }
@@ -95,10 +98,12 @@ export function CriticalDataChangeDialog(props: {
               ))}
             </tbody>
           </table>
-          <p className="cdc__pending">
-            <Glyph name="clock" size={16} />
-            The current value stays in effect until someone other than you approves this change with their signature.
-          </p>
+          {approval && (
+            <p className="cdc__pending">
+              <Glyph name="clock" size={16} />
+              The current value stays in effect until someone other than you approves this change with their signature.
+            </p>
+          )}
         </section>
         <section className="panel cdc__why" aria-labelledby={`${id}-why`}>
           <h3 className="h-mini" id={`${id}-why`}>

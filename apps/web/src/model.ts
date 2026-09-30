@@ -74,12 +74,13 @@ export type Signature = {
 export type EligibilityAnswer =
   | {
       readonly eligible: true;
+      /** Null for a meaning no Authorisation governs, such as Acknowledged on a Training Record. */
       readonly authorisation: {
         readonly meaning: SignatureMeaning;
         readonly scope: string;
         /** A Lab date as the server wrote it, e.g. "2027-03-31". */
         readonly validUntil: string;
-      };
+      } | null;
       /** For a Check or a Method: the Training Record on the Document version in use. */
       readonly trainingRecord: { readonly document: string; readonly version: string } | null;
     }

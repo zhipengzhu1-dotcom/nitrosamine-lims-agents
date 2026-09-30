@@ -20,7 +20,8 @@ import type { DB, CompanyRead, CustomerRead, LabRead, ReasonForChange, Scope } f
 import { openRead, readBlob } from '@lims/db';
 import type { LedgerId } from '@lims/domain/ids';
 import { refuse, type Refusal } from '@lims/domain/refusal';
-import { COMMAND_HEADER, CommandEnvelope, SESSION_COOKIE, type SessionDto } from '@lims/contract';
+import { COMMAND_HEADER, CommandEnvelope, SESSION_COOKIE } from '@lims/contract';
+import type { SessionAnswer } from '@lims/contract/session';
 import { readSession, scopeOf, type ActorContext, type CustomerRole, type Requester, type StaffRole } from './actor.ts';
 import { commit, type CommandTx, type Deps, type Outcome } from './commit.ts';
 
@@ -140,13 +141,20 @@ function applyCookie(req: FastifyRequest, reply: FastifyReply, action: CookieAct
   else reply.setCookie(SESSION_COOKIE, action.set, opts);
 }
 
-export function sessionDto(s: Awaited<ReturnType<typeof readSession>>): SessionDto {
+export function sessionDto(s: Awaited<ReturnType<typeof readSession>>): SessionAnswer {
   switch (s.state) {
     case 'none':
     case 'ended':
       return { state: 'none' };
     case 'locked':
-      return { state: 'locked', owner: { printedName: s.locked.printedName, username: s.locked.username }, lockReason: s.locked.lockReason };
+      return {
+        state: 'locked',
+        owner: { printedName: s.locked.printedName, username: s.locked.username, nativeName: s.locked.nativeName, roles: s.locked.roles },
+        lockReason: s.locked.lockReason,
+        lockedAt: s.locked.lockedAt.toISOString(),
+        zone: s.locked.zone,
+        workstation: s.locked.workstation,
+      };
     case 'active': {
       const a = s.actor;
       return {

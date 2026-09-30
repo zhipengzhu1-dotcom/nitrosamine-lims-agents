@@ -106,6 +106,11 @@ export class Authenticator {
     }
   }
 
+  /** The latest step this authenticator spent, so a second authenticator for the person can start after it. */
+  lastUsedStep(): number | null {
+    return this.#used.size === 0 ? null : Math.max(...this.#used);
+  }
+
   /** A code the server has already accepted, for the "wait for the next code" test. */
   used(): string {
     const now = totpStep(new Date());

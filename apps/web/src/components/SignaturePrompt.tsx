@@ -221,11 +221,15 @@ export function SignaturePrompt(props: SignaturePromptProps) {
           {props.eligibility.eligible ? (
             <>
               <dl className="eligibility">
-                <dt>Authorisation</dt>
-                <dd>
-                  {props.eligibility.authorisation.meaning} for {props.eligibility.authorisation.scope}, valid until{' '}
-                  {props.eligibility.authorisation.validUntil}
-                </dd>
+                {props.eligibility.authorisation && (
+                  <>
+                    <dt>Authorisation</dt>
+                    <dd>
+                      {props.eligibility.authorisation.meaning} for {props.eligibility.authorisation.scope}, valid until{' '}
+                      {props.eligibility.authorisation.validUntil}
+                    </dd>
+                  </>
+                )}
                 {props.eligibility.trainingRecord && (
                   <>
                     <dt>Training Record</dt>
