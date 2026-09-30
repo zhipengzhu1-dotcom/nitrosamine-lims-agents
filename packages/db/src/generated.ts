@@ -464,6 +464,13 @@ export interface SectionVerdict {
   test_version_id: string;
 }
 
+export interface ServiceWrite {
+  columns: string[] | null;
+  op: string;
+  role: string;
+  table_name: string;
+}
+
 export interface Session {
   absolute_end_at: Timestamp;
   acting_lab_id: string | null;
@@ -651,6 +658,7 @@ export interface DB {
   run_test: RunTest;
   sample: Sample;
   section_verdict: SectionVerdict;
+  service_write: ServiceWrite;
   session: Session;
   session_activity: SessionActivity;
   signature: Signature;

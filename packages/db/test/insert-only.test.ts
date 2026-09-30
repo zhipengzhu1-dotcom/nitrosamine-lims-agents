@@ -75,7 +75,7 @@ describe('the grant audit', () => {
           and not exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'capture')
         order by 1`);
     expect(rows.rows.map((r) => r.relname)).toEqual([
-      'audit_chain_head', 'audit_entry', 'commit_outcome', 'counter', 'ledger', 'migration', 'record_kind', 'release', 'session_activity',
+      'audit_chain_head', 'audit_entry', 'commit_outcome', 'counter', 'ledger', 'migration', 'record_kind', 'release', 'service_write', 'session_activity',
     ]);
   });
 
