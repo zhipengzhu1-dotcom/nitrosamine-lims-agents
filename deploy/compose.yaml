@@ -103,6 +103,7 @@ services:
       LIMS_CHRONY_HOST: 172.30.10.1
       LIMS_TOTP_ENCRYPTION_KEY_FILE: /run/secrets/totp_encryption_key
       LIMS_PASSWORD_PEPPER_FILE: /run/secrets/password_pepper
+      LIMS_COMMIT_INPUT_KEY_FILE: /run/secrets/commit_input_key
       LIMS_WORKER_UPLOAD_TOKEN_FILE: /run/secrets/worker_upload_token
       LIMS_WORKER_ALARM_TOKEN_FILE: /run/secrets/worker_alarm_token
       LIMS_AGE_PUBLIC_KEY_FILE: /run/secrets/age_public_key
@@ -110,6 +111,7 @@ services:
       - db_app_password
       - totp_encryption_key
       - password_pepper
+      - commit_input_key
       - worker_upload_token
       - worker_alarm_token
       - age_public_key
@@ -170,6 +172,7 @@ secrets:
   db_app_password: { file: "${LIMS_SECRETS_DIR:?}/db_app_password" }
   totp_encryption_key: { file: "${LIMS_SECRETS_DIR:?}/totp_encryption_key" }
   password_pepper: { file: "${LIMS_SECRETS_DIR:?}/password_pepper" }
+  commit_input_key: { file: "${LIMS_SECRETS_DIR:?}/commit_input_key" }
   worker_upload_token: { file: "${LIMS_SECRETS_DIR:?}/worker_upload_token" }
   worker_alarm_token: { file: "${LIMS_SECRETS_DIR:?}/worker_alarm_token" }
   age_public_key: { file: "${LIMS_SECRETS_DIR:?}/age_public_key" }

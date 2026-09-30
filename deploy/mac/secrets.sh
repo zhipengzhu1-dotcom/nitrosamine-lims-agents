@@ -15,6 +15,7 @@ GENERATED=(
   db_app_password:hex
   totp_encryption_key:base64
   password_pepper:base64
+  commit_input_key:base64
   worker_upload_token:hex
   worker_alarm_token:hex
 )

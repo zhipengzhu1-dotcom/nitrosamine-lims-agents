@@ -2,11 +2,12 @@
 //
 // The prompt mints a key per attempt. The server, under the key's advisory lock:
 //   1. reads commit_outcome for the key:
-//        a receipt with the same input hash   -> the stored receipt, marked replayed;
+//        a receipt with the same input        -> the stored receipt, marked replayed, whatever
+//                                                password or code was typed again;
 //        a receipt with another input         -> commit-key-reused (nothing runs);
 //        a refusal with the same input hash   -> the stored refusal, marked replayed (a network
 //                                                retry of a failed signing is not counted twice);
-//        a refusal with another input         -> the corrected attempt runs;
+//        a refusal with other input or secrets -> the corrected attempt runs;
 //   2. runs the command's body in a savepoint (AuditedTx.attempt);
 //   3. a Receipt keeps the savepoint and stores the outcome; a Refusal rolls the savepoint back,
 //      then the rows that must survive it (auth failures, the used TOTP step, spec gaps) are
@@ -16,7 +17,7 @@
 // Nothing leaves this function between the effect and its outcome row, so a crash anywhere
 // leaves no outcome and the retry runs once.
 
-import { createHash } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import type { Insertable, Kysely } from 'kysely';
 import { COMPANY_LEDGER, SERVICE, ledgerOf, runAudited, type AuditContext, type AuditedTx, type DB, type Scope } from '@lims/db';
 import type { Alert, AuthEvent, TotpStepUsed } from '@lims/db';
@@ -34,6 +35,7 @@ export type Deps = {
   readonly release: string;
   readonly pepper: Buffer;
   readonly totpKey: Buffer;
+  readonly commitInputKey: Buffer;
   readonly kinds: KindRegistry;
   readonly reportStore: string;
   readonly fileTokens: FileTokens;
@@ -70,7 +72,39 @@ const stableJson = (v: unknown): string =>
   JSON.stringify(v, (_k, x: unknown) =>
     x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1))) : x);
 
-export const inputHash = (input: unknown): Buffer => createHash('sha256').update(stableJson(input ?? null)).digest();
+/** The input fields, at any depth, that authenticate the person rather than say what they ask for. */
+const SECRET_FIELDS: ReadonlySet<string> = new Set(['password', 'totp']);
+
+function splitSecrets(v: unknown): { readonly open: unknown; readonly secret: Record<string, unknown> | null } {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return { open: v ?? null, secret: null };
+  const open: Record<string, unknown> = {};
+  const secret: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v)) {
+    if (SECRET_FIELDS.has(k)) {
+      secret[k] = x;
+      continue;
+    }
+    const inner = splitSecrets(x);
+    open[k] = inner.open;
+    if (inner.secret) secret[k] = inner.secret;
+  }
+  return { open, secret: Object.keys(secret).length ? secret : null };
+}
+
+const mac = (key: Buffer, part: 'input' | 'secrets', v: unknown): Buffer => createHmac('sha256', key).update(`${part}\0${stableJson(v)}`).digest();
+const INPUT_MAC_BYTES = 32;
+
+/**
+ * commit_outcome.input_hash: an HMAC of the input with its secrets removed, followed, when it has
+ * any, by an HMAC of the secrets. Both are keyed by the server, so the table is no offline verifier
+ * for a password or code; the first part alone says whether a retry asks for the same thing.
+ */
+export function inputHash(key: Buffer, input: unknown): Buffer {
+  const { open, secret } = splitSecrets(input);
+  return secret ? Buffer.concat([mac(key, 'input', open), mac(key, 'secrets', secret)]) : mac(key, 'input', open);
+}
+
+const sameRequest = (a: Buffer, b: Buffer): boolean => a.subarray(0, INPUT_MAC_BYTES).equals(b.subarray(0, INPUT_MAC_BYTES));
 
 type Acted = { readonly person: PersonId; readonly role: string; readonly lab: LabId | null; readonly customer: string | null; readonly session: SessionId | null; readonly scope: Scope };
 
@@ -115,7 +149,7 @@ export async function commit(deps: Deps, who: Requester, key: CommitKey | string
   const input = parsedInput as never;
   const acted = resolveActing(def, who, input);
   if ('kind' in acted) return { kind: 'refusal', refusal: acted };
-  const hash = inputHash(input);
+  const hash = inputHash(deps.commitInputKey, input);
   const labLedgers = def.ledgers(input, who);
   const ctx: AuditContext = {
     person: acted.person,
@@ -136,7 +170,7 @@ export async function commit(deps: Deps, who: Requester, key: CommitKey | string
     const prior = await tx.db.selectFrom('commit_outcome').select(['input_hash', 'outcome', 'body']).where('commit_key', '=', key).execute();
     const receipt = prior.find((p) => p.outcome === 'receipt');
     if (receipt) {
-      return receipt.input_hash.equals(hash)
+      return sameRequest(receipt.input_hash, hash)
         ? { rollback: { kind: 'receipt', receipt: receipt.body as StoredReceipt, replayed: true } }
         : { rollback: { kind: 'refusal', refusal: refuse.commitKeyReused() } };
     }
