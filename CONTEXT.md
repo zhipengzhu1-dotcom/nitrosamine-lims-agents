@@ -327,7 +327,7 @@ _Avoid_: Controlled copy, printout
 ### ELN
 
 **Notebook**:
-A Lab's electronic notebook for one stated purpose, such as one Method's development, the year's Deviation investigations, or one person's general work, with an Owner and a number such as `RD-NB-0007` that is never reused.
+A Lab's electronic notebook for one stated purpose, such as one Method's development, the year's Deviation investigations, or one person's general work, with an Owner and a number such as `RD-NB-0007` that is never reused. It is Open until its Owner closes it, and a Closed Notebook takes no new entries except Addenda and never reopens.
 _Avoid_: Project, folder, lab book
 
 **Notebook Entry**:
@@ -339,8 +339,12 @@ A Notebook Entry that corrects or adds to a signed one, linked to it and signed 
 _Avoid_: Amendment, correction entry
 
 **Late Entry**:
-A record whose work date is earlier than the Lab's current day when it is first saved. It carries a reason and stays flagged.
+A record whose work date is earlier than the Lab's current day when it is first saved. It carries a reason and stays flagged, however late. A work date after the Lab's current day is never allowed.
 _Avoid_: Backdated entry, retrospective entry
+
+**Development Plan**:
+The first Notebook Entry of a method-development Notebook, which states what the development will establish and how; later entries link back to it, and it changes only by Addenda.
+_Avoid_: Project plan, development protocol (a Method Protocol is for validation)
 
 **True Copy**:
 A scan of a paper record, such as a returned Issued Copy, a legacy logbook page or a supplier CoA, that a second person has signed Verified as complete and legible. The paper original is Retained, with its location, unless QA approves an assessment allowing its destruction.
