@@ -1,0 +1,22 @@
+# Inactive until the VPS move (ADR 0002): layered over compose.yaml as
+#   docker compose -f compose.yaml -f compose.vps.yaml up -d
+# DNS is grey-cloud, Caddy terminates TLS on 80/443 and keeps its certificates in a named volume,
+# and the tunnel profile stays off.
+services:
+  web:
+    build:
+      args:
+        CADDYFILE: Caddyfile.vps
+    environment:
+      LIMS_DOMAIN: nitrolims-demo.com
+    ports: ["80:80", "443:443", "443:443/udp"]
+    networks: [edge, published]
+    tmpfs: !override ["/config"]
+    volumes:
+      - caddy_data:/data
+
+networks:
+  published: {}
+
+volumes:
+  caddy_data: {}

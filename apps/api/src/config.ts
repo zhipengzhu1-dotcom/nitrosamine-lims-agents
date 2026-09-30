@@ -1,11 +1,12 @@
-// Boot configuration, parsed once from the environment. The two secrets are read from files the
-// operator owns (Compose secrets in production); they are never in the environment or the repo.
+// Boot configuration, parsed once from the environment deploy/compose.yaml sets. The two keys are
+// read from files the operator owns (Compose secrets); they are never in the environment or the repo.
 
 import { readFileSync } from 'node:fs';
 
 export type Config = {
   readonly database: string;
   readonly port: number;
+  readonly host: string;
   /** The app release id, registered in lims.release at boot and stamped on every audit entry. */
   readonly release: string;
   readonly pepper: Buffer;
@@ -13,11 +14,11 @@ export type Config = {
   readonly totpKey: Buffer;
 };
 
-function secret(path: string, bytes: number): Buffer {
-  const raw = readFileSync(path);
-  const trimmed = raw.subarray(0, raw.length - (raw.at(-1) === 0x0a ? 1 : 0));
-  if (trimmed.length < bytes) throw new Error(`${path} must hold at least ${bytes} bytes`);
-  return trimmed;
+// deploy/mac/secrets.sh writes each key as 32 random bytes in base64.
+function key(path: string): Buffer {
+  const decoded = Buffer.from(readFileSync(path, 'utf8').trim(), 'base64');
+  if (decoded.length !== 32) throw new Error(`${path} must hold 32 bytes in base64`);
+  return decoded;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -27,10 +28,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     return v;
   };
   return {
-    database: need('LIMS_DATABASE'),
-    port: Number(env['LIMS_PORT'] ?? 3000),
+    database: need('PGDATABASE'),
+    port: Number(env['PORT'] ?? 3000),
+    host: env['LIMS_LISTEN_HOST'] ?? '127.0.0.1',
     release: need('LIMS_RELEASE'),
-    pepper: secret(need('LIMS_PEPPER_FILE'), 32),
-    totpKey: secret(need('LIMS_TOTP_KEY_FILE'), 32),
+    pepper: key(need('LIMS_PASSWORD_PEPPER_FILE')),
+    totpKey: key(need('LIMS_TOTP_ENCRYPTION_KEY_FILE')),
   };
 }

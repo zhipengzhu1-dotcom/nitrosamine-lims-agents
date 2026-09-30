@@ -8,7 +8,8 @@
     "db:up": "scripts/pg.sh up",
     "db:down": "scripts/pg.sh down",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "check:deploy": "tsc --noEmit -p deploy && vitest run --root deploy && node deploy/checks/compose-mounts.ts && pnpm --filter @lims/web exec vitest run src/bundle.test.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

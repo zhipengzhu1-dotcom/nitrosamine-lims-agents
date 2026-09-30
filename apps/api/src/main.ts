@@ -7,7 +7,7 @@ const config = loadConfig();
 const db = createDb(config.database);
 const { app } = await buildApp({ db, config });
 const sweeper = setInterval(() => void sweepIdleSessions(db, config.release).catch((e) => app.log.error(e)), 60_000);
-await app.listen({ port: config.port, host: '127.0.0.1' });
+await app.listen({ port: config.port, host: config.host });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, async () => {

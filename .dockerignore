@@ -1,0 +1,18 @@
+# An allowlist. The build context carries only what the images build from, so the owner's real
+# instrument exports in the repo folder can never reach a Docker daemon.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+!apps/
+!packages/
+!deploy/
+**/node_modules
+**/.env*
+**/*.tsbuildinfo
+**/dist
+**/test
+**/*.test.ts
+**/*.test.tsx
+deploy/checks

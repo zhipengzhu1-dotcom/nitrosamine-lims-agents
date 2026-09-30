@@ -1,0 +1,11 @@
+# Rendered by the owner into the secrets folder as cloudflared.yml (mode 600); never committed.
+# Replace <TUNNEL_ID> with the id `cloudflared tunnel create nitrolims-demo` printed. The
+# credentials JSON that command wrote goes beside it as tunnel_credentials.json; compose hands it
+# to the container at the path below.
+tunnel: <TUNNEL_ID>
+credentials-file: /run/secrets/tunnel_credentials
+no-autoupdate: true
+ingress:
+  - hostname: nitrolims-demo.com
+    service: http://web:80
+  - service: http_status:404
