@@ -169,7 +169,7 @@ What an Electronic Signature attests: Performed, Verified, Reviewed, Approved, R
 _Avoid_: Signature type, status
 
 **Authorisation**:
-QA's grant allowing a person to sign with a given Signature Meaning. It is separate from a Training Record: being trained is not being authorised.
+QA's grant allowing a person to sign with a given Signature Meaning within a scope (a Method or record type) for a stated period. It is separate from a Training Record: being trained is not being authorised.
 _Avoid_: Permission, access right, qualification
 
 **Return**:
@@ -181,7 +181,7 @@ A change, after its first save, to a result value, weight, dilution volume, stan
 _Avoid_: Correction, amendment
 
 **Amended Report**:
-A new version of a released Test Report that corrects it, linked to a Deviation and stating what changed. The original stays on record.
+A new version of a released Test Report that corrects it, linked to a Deviation and stating what changed and why. The original stays on record, marked Superseded.
 _Avoid_: Revised report, reissue
 
 **Record Type Register**:
