@@ -103,11 +103,11 @@ The daily intake of one nitrosamine, in ng/day, that a Jurisdiction accepts. It 
 _Avoid_: AI limit, TTC
 
 **Acceptable Intake Table**:
-The company's QA-verified list of the Acceptable Intakes one Jurisdiction publishes, each row citing its source document, revision and effective date. A Specification copies the rows it uses. A newer row supersedes an older one; it never rewrites it.
+The company's QA-verified list of the Acceptable Intakes one Jurisdiction publishes, each row citing its source document, revision and effective date. A Specification copies only Verified rows. A newer row supersedes an older one; it never rewrites it.
 _Avoid_: AI list, limits database
 
 **Jurisdiction Rule Set**:
-The versioned rules that a Jurisdiction's Specification Sections follow: rounding, the share-of-limit triggers, the allowed rules for multiple nitrosamines, CPCA category values and less-than-lifetime factors. A Specification pins the version in force when QA approves it.
+The versioned rules that a Jurisdiction's Specification Sections follow: rounding, the share-of-limit triggers, the allowed rules for multiple nitrosamines, how values below the LOQ enter a sum, CPCA category values and less-than-lifetime factors. Each version is signed Verified by a second QA person. A Specification pins the version in force when QA approves it.
 _Avoid_: Regional settings, jurisdiction config
 
 **Decision Rule**:
@@ -453,7 +453,7 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, a Specification's maximum daily dose, Acceptable Intake, fixed or limit-test concentration, reporting threshold, less-than-lifetime factor, interim end date, rule for multiple nitrosamines, Decision Rule or basis, a Customer-supplied water or LOD value, the instrument a Run used, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, a Room, storage or DI water reading, a Customer Lot's expiry or retest date, or a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date. It stays a proposal until a second person approves it.
 _Avoid_: Correction, amendment
 
 **Amended Report**:
