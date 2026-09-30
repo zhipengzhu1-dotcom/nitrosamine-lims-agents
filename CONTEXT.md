@@ -13,8 +13,16 @@ _Avoid_: Site, tenant, location
 ### People and parties
 
 **Customer**:
-An internal department or external organization that submits samples for testing. A Customer may log in to the portal.
+An internal department or external organization that submits samples for testing. Its people may log in to the portal, where they see only that Customer's work. A department that needs its work kept apart from the rest of its organization is its own Customer.
 _Avoid_: Client, requester
+
+**Customer Contact**:
+A named person at a Customer through whom the Lab deals with it: only a Customer Contact's written request opens, changes or closes a portal account for that Customer's people.
+_Avoid_: Customer admin, account owner, sponsor
+
+**Quality Agreement**:
+The written agreement between the company and an external Customer covering GMP testing: audit access to source data, notice of data-integrity failures, record retention and what happens at contract end, who may decide for the Customer in the portal, and the duty to report leavers. The Lab accepts no GMP Test from an external Customer without a current one.
+_Avoid_: Contract, technical agreement, QAG
 
 **Sample Custodian**:
 The lab role that accepts or rejects submissions and physically receives samples.
@@ -51,16 +59,28 @@ One request from a Customer to the company, listing the Samples sent and the Tes
 _Avoid_: Order, request, job
 
 **Acceptance**:
-The Sample Custodian's review of each requested Test before testing starts, which accepts or rejects that Test with a reason. A Submission is accepted if any of its Tests is.
+The Sample Custodian's review of each requested Test before testing starts: that the Lab can do it for this Product, that the Method suits the request, and that any Specification it will be judged against is agreed. It accepts or rejects that Test with a reason the Customer sees. A Submission is accepted if any of its Tests is.
 _Avoid_: Contract review, approval, intake
 
+**Change Request**:
+A Customer's request to change a Submission after it is Submitted, which sends each Test it affects back to Acceptance. A Test that already has a Preparation is never changed; the Customer gets a new Test instead.
+_Avoid_: Amendment, revision, edit request
+
+**Price List**:
+A Lab's list of what it offers Customers: for each Method and service level (Standard or Expedited), a price and a turnaround target in business days. A Customer may have its own contract price for an entry. The price and turnaround in force are copied onto a Test when it is accepted.
+_Avoid_: Catalogue, rate card, quote
+
 **Product**:
-A Customer's API or drug, identified by the Customer's product code. The same API from two manufacturers is two Products.
+A Customer's API or drug product, identified by the Customer's product code, its manufacturer and its synthesis route or process, and for a drug product its dosage form and composition. The same API from two manufacturers is two Products. A change of route or formulation, which the Customer must declare, makes a new version of the Product.
 _Avoid_: Material, compound, item
 
 **Specification**:
-The set of limits for a Product that Reportable Results are judged against. A Product may have several, each with a purpose such as release or shelf-life; stability results are judged against the shelf-life one their Protocol names.
+The set of limits for a Product that Reportable Results are judged against. A Product may have several, each with a purpose such as release or shelf-life; stability results are judged against the shelf-life one their Protocol names. The Lab builds each from a Specification Request; a Submission may use it only once QA has approved it and the Customer has accepted that version, decision rule included.
 _Avoid_: Spec limit, acceptance criteria (for products)
+
+**Specification Request**:
+What a Customer sends so the Lab can build a Specification: its jurisdictions, maximum daily dose, treatment duration, purpose, basis, any pharmacopoeial conformance claim with its official edition, the nitrosamines of concern, and the Customer's own specification document. Its values count as Customer-supplied.
+_Avoid_: Spec sheet, limit request
 
 **Lot**:
 One manufactured quantity of a Product, identified by the manufacturer's lot number.
