@@ -33,8 +33,9 @@ async function box(target: Locator) {
 async function atLeast(target: Locator, width: number, height: number) {
   await target.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   const b = await box(target);
-  expect(b.width, 'touch target width').toBeGreaterThanOrEqual(width);
-  expect(b.height, 'touch target height').toBeGreaterThanOrEqual(height);
+  // A box at a fractional position measures up to 0.0001 px short of its CSS size.
+  expect(b.width + 0.01, 'touch target width').toBeGreaterThanOrEqual(width);
+  expect(b.height + 0.01, 'touch target height').toBeGreaterThanOrEqual(height);
 }
 
 test('the whole chain through the UI, ending in a Test Report with three Signatures', async ({ page }) => {
