@@ -74,7 +74,11 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   const id = await submitTestTo('Assigned');
   assert.equal((await take(as.ana, 'enterResult', id, result, ana)).status, 200);
   assert.equal((await take(as.rui, 'review', id, {}, rui)).status, 200);
-  refusedWith(await as.cora.call(routes.report, { id }), 'notFound');
+  assert.equal(
+    refusedWith(await as.cora.call(routes.report, { id }), 'notFound'),
+    'this Test has no released Test Report',
+    'no Test Report for the Customer before release',
+  );
   assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
 
   const reported = await view(id, as.quinn);

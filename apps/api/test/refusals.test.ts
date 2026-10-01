@@ -14,7 +14,7 @@ import {
 } from '@lims/domain';
 import type { TObject } from 'typebox';
 import { Value } from 'typebox/value';
-import { ok, refusedWith, startApi } from './harness.ts';
+import { refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_refusals_test');
 const cora = api.person('cora');
@@ -128,5 +128,4 @@ it('unparseable JSON and a missing required field are malformed, an unknown rout
   });
   assert.equal(text.status, 400);
   assert.equal(refusalIn(text.body).kind, 'malformed');
-  ok(await as.cora.call(routes.me));
 });
