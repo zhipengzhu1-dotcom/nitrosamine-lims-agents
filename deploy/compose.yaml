@@ -57,9 +57,9 @@ services:
     restart: unless-stopped
 
 secrets:
-  postgres: { file: "${LIMS_SECRETS:?set LIMS_SECRETS to the owner-only secrets folder}/postgres" }
-  lims_app: { file: "${LIMS_SECRETS:?set LIMS_SECRETS to the owner-only secrets folder}/lims_app" }
-  tunnel_token: { file: "${LIMS_SECRETS:?set LIMS_SECRETS to the owner-only secrets folder}/tunnel_token" }
+  postgres: { file: "${SECRETS_DIR:?set SECRETS_DIR to the owner-only secrets folder}/postgres" }
+  lims_app: { file: "${SECRETS_DIR:?set SECRETS_DIR to the owner-only secrets folder}/lims_app" }
+  tunnel_token: { file: "${SECRETS_DIR:?set SECRETS_DIR to the owner-only secrets folder}/tunnel_token" }
 
 volumes:
   pgdata:

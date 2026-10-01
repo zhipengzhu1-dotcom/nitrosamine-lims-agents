@@ -25,7 +25,7 @@ Every command below runs from the repo root.
 
    Use hex passwords. They go into a connection URL unescaped.
 3. In the Cloudflare dashboard, create a tunnel (Zero Trust, Networks, Tunnels). Point its public hostname at `http://caddy:80`. Save its token: `pbpaste > ~/.lims-secrets/tunnel_token`.
-4. Export the folder in the shell you run Compose from: `export LIMS_SECRETS=~/.lims-secrets`.
+4. Export the folder in the shell you run Compose from: `export SECRETS_DIR=~/.lims-secrets`.
 
 ## Start, seed and stop
 
