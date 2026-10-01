@@ -19,7 +19,6 @@ import { stepRoutes } from './steps.ts';
 declare module 'fastify' {
   interface FastifyRequest {
     actor: ActorContext;
-    /** Who asked, once the session is known; null before sign-in, so the System Incident writer can read it on any route. */
     requester: ActorContext | null;
   }
 }

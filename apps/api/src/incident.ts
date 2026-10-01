@@ -3,7 +3,6 @@ import { routes, stepNames, stepRoute } from '@lims/domain';
 import type { FastifyRequest } from 'fastify';
 import type { Insertable, Kysely } from 'kysely';
 
-/** The service identity that opens System Incidents; the Release Log will declare it (#102). */
 const INCIDENT_SERVICE = { actor: 'svc:incident', role: 'system', reason: 'Open a System Incident' };
 
 const NAMED = new Map<string, string>([
@@ -43,7 +42,6 @@ export async function openSystemIncident(db: Kysely<DB>, req: FastifyRequest, er
   try {
     await audited(db, INCIDENT_SERVICE, (tx) => tx.insertInto('systemIncident').values(incident).execute());
   } catch (unwritten) {
-    // Not rethrown: the person still gets the reference, and the log line is the only witness until #90 writes it.
     req.log.error({ err: unwritten, unwrittenSystemIncident: incident }, 'unwritten System Incident');
   }
 }

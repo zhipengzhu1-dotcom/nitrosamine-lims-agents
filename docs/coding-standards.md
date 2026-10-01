@@ -39,7 +39,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 - Return a refusal from domain code as a value. Domain code never throws, so that the API and the web can both ask "may this person do this?" without a `try`.
 - Turn a refusal into an HTTP error only in the API, and only through `refuse`, so that every status code is chosen in one place.
-- Do not swallow an unexpected failure, because a hidden failure on a write path is a lost record. A `catch` adds context and rethrows with `cause`, or it does not exist.
+- Do not swallow an unexpected failure, because a hidden failure on a write path is a lost record. A `catch` adds context and rethrows with `cause`, or it does not exist. The one exception is the System Incident writer: when the database cannot write the incident, it logs the unwritten incident and lets the 500 carry its reference, because the log line is then the only witness ([#89](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/89)).
 - Write a refusal message as a sentence for the person at the bench, in glossary terms, because the web shows it as written.
 
 ## Values keep their digits and time comes from the database

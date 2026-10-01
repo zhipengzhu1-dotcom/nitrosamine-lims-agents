@@ -197,6 +197,12 @@ type Sheet = { action: RailAction; closing: boolean } | null;
 const EXIT_FALLBACK_MS = 400;
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+function unansweredText(e: unknown, signs: boolean): string {
+  const message = e instanceof Error ? e.message : String(e);
+  if (e instanceof Refused && e.kind === 'failure') return `Not finished: ${message}.`;
+  return `Refused: ${message}.${signs ? ' Nothing has been signed.' : ''}`;
+}
+
 function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -277,18 +283,9 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
       returnFocus.current = true;
       if (sheet) close(true);
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      const refused: Note = {
-        // A failure is not a refusal: the note claims nothing about what was saved, and the message names the reference.
-        text:
-          e instanceof Refused && e.kind === 'failure'
-            ? `Not finished: ${message}.`
-            : `Refused: ${message}.${a.signs ? ' Nothing has been signed.' : ''}`,
-        tone: 'bad',
-        n: ++count.current,
-      };
-      setNote(refused);
-      if (sheet) setRefusal(refused);
+      const unanswered: Note = { text: unansweredText(e, a.signs !== null), tone: 'bad', n: ++count.current };
+      setNote(unanswered);
+      if (sheet) setRefusal(unanswered);
     } finally {
       inFlight.current = false;
       setBusy(false);

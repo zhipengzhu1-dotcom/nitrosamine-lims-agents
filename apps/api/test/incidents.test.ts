@@ -36,7 +36,6 @@ async function assignedToLou(): Promise<string> {
   return testId;
 }
 
-/** Enters a Result the probe constraint refuses, so the database fails the signed step unexpectedly. */
 async function failEnterResult(client: Client, testId: string, base = api.base) {
   const res = await fetch(base + stepRoute('enterResult').url, {
     method: 'POST',

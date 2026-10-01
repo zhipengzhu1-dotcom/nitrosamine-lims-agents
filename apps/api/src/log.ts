@@ -22,7 +22,6 @@ const REDACTED = [
   '*.*.password',
 ];
 
-/** The log's view of an error: a Postgres error keeps its SQLSTATE and the names it carries, never its message, which can quote a record. */
 function errForLog(error: Error) {
   const fault = postgresFault(error);
   const type = error.constructor.name;

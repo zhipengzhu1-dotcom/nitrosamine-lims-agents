@@ -11,7 +11,6 @@ const psql = (statement: string) =>
   execFileSync('../../scripts/pg.sh', ['psql', '-d', database, '-qtAc', statement], { encoding: 'utf8' }).trim();
 
 test.beforeAll(() => {
-  // The four projects start at once, so a second add of the probe is ignored, not raced.
   psql(`do $$ begin
           alter table lims.sample add constraint e2e_failure_probe check (description not like '%${PROBE}%');
         exception when duplicate_object then null;

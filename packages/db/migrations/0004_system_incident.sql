@@ -3,8 +3,6 @@ set local role lims_owner;
 create type lims.incident_kind as enum ('UnexpectedFailure');
 create type lims.incident_state as enum ('Open');
 
--- Company-owned. The Lab is in session_lab_id, not lab_id, so lims.capture() writes it to the company chain.
--- It holds no error message: the class, SQLSTATE and constraint name say what failed without quoting a record.
 create table lims.system_incident (
   id              uuid                primary key default gen_random_uuid(),
   kind            lims.incident_kind  not null,
