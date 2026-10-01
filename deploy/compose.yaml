@@ -33,6 +33,15 @@ services:
     depends_on: { migrate: { condition: service_completed_successfully } }
     restart: unless-stopped
 
+  seed:
+    <<: *app
+    profiles: [seed]
+    environment: { LIMS_DB: lims, DB_ROLE: lims_app }
+    secrets: [lims_app]
+    command: ["node", "packages/db/src/seed.ts"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    restart: "no"
+
   caddy:
     build: { context: .., dockerfile: deploy/Dockerfile, target: web }
     image: lims-web:local
