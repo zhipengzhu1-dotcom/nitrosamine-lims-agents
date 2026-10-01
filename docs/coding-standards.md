@@ -2,7 +2,7 @@
 
 These rules bind all hand-written code in this repo: TypeScript, SQL migrations, Python, shell and tests. A rule is here only while no tool in `pnpm check` enforces it, and only if an engineer who follows the pstack skills would not already do it. Each rule gives its reason. Process lives in the Notes of the [map](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/1), and domain vocabulary lives in `CONTEXT.md`.
 
-The walking skeleton does not meet every rule yet. [Task: bring the walking skeleton into line with the coding standards](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/49) lists what remains.
+The walking skeleton does not meet every rule yet. [Task: bring the walking skeleton into line with the coding standards](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/49) lists what remains. [Task: bring the thin slice into line with the frontend design cycle](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/53) lists what remains of the UI rules.
 
 ## The gate decides what is green
 
@@ -86,6 +86,21 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 - Read server data through `useApi`. A component does not keep its own copy, so that a reload shows what the database holds.
 - Record a decision on the map before a pull request adds a state library, a CSS framework or a component library, because every screen then has to follow it.
 - Render a status only through `Status`, so that the word, glyph and colour order from [Prototype the UI direction](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/23) holds on every screen.
+
+## Motion follows the server, and every screen works on a phone
+
+These rules come from [Decide the frontend design cycle](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/52). A signed, verdict or status value is any Signature, verdict, Status or record state that the server decides.
+
+- Start motion on a signed, verdict or status value only after the server's answer, never on the press, so that the screen never shows a state the record is not in.
+- Show a new status word and glyph in full from the first frame. Motion is an accent on a confirmed state, such as a tint that fades. Never crossfade or morph one status into the next, because both would be on screen at once.
+- Animate a row in only if the server returned it, and play no part of the success motion on a refusal or a failure, so that motion never claims what the Audit Trail does not hold.
+- Keep a control inert from the first press until the server answers, and take no press on a surface that is closing, so that every commit happens once.
+- Follow the build rules of [Prototype the UI direction](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/23) where they and the `emil` skills disagree. Feeling faster is never a reason to show an unconfirmed record.
+- Animate status changes, row insertions, screen transitions, press feedback, and the enter and exit of occasional surfaces such as the signature sheet. Keep typed-entry grids, keyboard-initiated actions and bulk queue work instant, because an action repeated all day must not wait on an animation.
+- Honour `prefers-reduced-motion`: remove movement, keep at most a short opacity fade, and make status accents instant, so that a person who cannot tolerate motion can still use every screen.
+- Animate with CSS: transitions, `@starting-style` and the View Transitions API. Do not animate a property that triggers layout, such as `height`, `top` or `margin`, because it makes the page stutter under load. A JavaScript motion library needs a named component that CSS cannot serve, chosen through `emil:pick-ui-library` and justified in its pull request. The decision above already allows a headless primitives library for dialogs, popovers and tooltips.
+- Design sign-in, signing, the Customer portal, bench quick-entry of readings, and the inventory steps of receiving Packs, Placement, Pack status changes and the Verified signing for a phone. Design every other screen for tablet and desktop, and keep it readable and operable at phone width, because staff and Customers reach the LIMS from all three.
+- Make every control at least 44 × 44 CSS px and a rail commit button at least 56 px tall, for gloved hands. Set input text to at least 16 px, because an iPhone zooms the page when a smaller input takes focus.
 
 ## Python and shell follow the same gate
 
