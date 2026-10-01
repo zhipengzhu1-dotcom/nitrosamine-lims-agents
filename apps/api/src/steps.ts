@@ -19,20 +19,12 @@ import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
 import { reauthenticate } from './auth.ts';
 import { refuse } from './refuse.ts';
-import { type LabQueries, labScope } from './scope.ts';
+import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
 
 interface Effect<I> {
   signedRecord?: 'test_report';
   assignee?: (input: I) => PersonId;
-  write(q: LabQueries, ctx: ActorContext, testId: string, input: I): Promise<unknown>;
-}
-
-async function nextNumber(q: LabQueries, table: 'sample' | 'testReport', prefix: string): Promise<string> {
-  const { n } = await q
-    .from(table)
-    .select((eb) => eb.fn.countAll<string>().as('n'))
-    .executeTakeFirstOrThrow();
-  return `${prefix}${String(Number(n) + 1).padStart(5, '0')}`;
+  write(q: WriteQueries, ctx: ActorContext, testId: string, input: I): Promise<unknown>;
 }
 
 /** What each step writes besides moving the Test's state. */
@@ -42,14 +34,14 @@ const effects: { [K in StepName]: Effect<StepInput<K>> } = {
       const customerId = ctx.person.customerId ?? refuse('role', 'only a Customer User submits');
       const submission = await q.company
         .insertInto('submission')
-        .values({ customerId, submittedBy: ctx.person.id })
+        .values({ customerId, submittedBy: ctx.person.id, number: await q.takeNumber('Submission') })
         .returning('id')
         .executeTakeFirstOrThrow();
       const sample = await q
         .insert('sample', {
           submissionId: submission.id,
           description: input.description,
-          number: await nextNumber(q, 'sample', `${ctx.lab.code}-S`),
+          number: await q.takeNumber('Sample'),
         })
         .returning('id')
         .executeTakeFirstOrThrow();
@@ -87,8 +79,8 @@ const effects: { [K in StepName]: Effect<StepInput<K>> } = {
   review: { write: async () => {} },
   release: {
     signedRecord: 'test_report',
-    write: async (q, ctx, testId) =>
-      q.insert('testReport', { testId, number: await nextNumber(q, 'testReport', `${ctx.lab.code}-R`) }).execute(),
+    write: async (q, _ctx, testId) =>
+      q.insert('testReport', { testId, number: await q.takeNumber('TestReport') }).execute(),
   },
 };
 

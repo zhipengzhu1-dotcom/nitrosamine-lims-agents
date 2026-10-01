@@ -13,7 +13,7 @@ This directory is the maintained source for verifying what the LIMS does for the
 
 - Drive through a scenario that imports `scripts/drive.ts`. Use `scripts/chain.ts <State>` to make a Test in the state a recipe needs.
 - Find elements by ARIA role and accessible name. The handles are in the SKILL.md Drive section.
-- Address a Test by its Sample number link (`/^RD-S\d{5}$/`), never by its position in the worklist, because Tests from earlier drives stay in the instance.
+- Address a Test by its Sample number link (`/^RD-S-\d{4}-\d{6}$/`), never by its position in the worklist, because Tests from earlier drives stay in the instance.
 - Sign out between roles. Each role sees only the rail button for the step it may take.
 
 ## Proof and skip reporting

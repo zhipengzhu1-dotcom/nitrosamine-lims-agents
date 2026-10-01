@@ -23,7 +23,7 @@ try {
   await page.getByRole('button', { name: 'Submit' }).click();
   await v.railSays('now Requested');
   sample = v.sql('sample', 'select number from lims.sample order by number desc limit 1').split('\n')[1] ?? '';
-  if (!/^RD-S\d{5}$/.test(sample)) throw new Error(`the newest Sample number is ${JSON.stringify(sample)}`);
+  if (!/^RD-S-\d{4}-\d{6}$/.test(sample)) throw new Error(`the newest Sample number is ${JSON.stringify(sample)}`);
   v.note(`submitted ${sample}`);
   await v.shot('requested');
   await v.signOut();
@@ -79,8 +79,8 @@ try {
     await page.getByRole('button', { name: 'Release' }).click();
     await v.sign('Released');
     await v.railSays('now Reported');
-    await page.getByRole('link', { name: /^RD-R\d{5}$/ }).click();
-    await expect(page.getByRole('heading', { name: /Test Report RD-R\d{5}/ })).toBeVisible();
+    await page.getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ }).click();
+    await expect(page.getByRole('heading', { name: /Test Report RD-R-\d{4}-\d{6}/ })).toBeVisible();
     await v.shot('test-report');
     await v.signOut();
   }
