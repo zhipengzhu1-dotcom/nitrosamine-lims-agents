@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import pg from 'pg';
-import { databaseUrl, dbConfig } from '../src/db.ts';
+import { checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
 const { server } = dbConfig();
 
-const DATABASE = 'lims_refusals_test';
+const DATABASE = checkoutDatabase('lims_refusals_test');
 const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
 
 type Row = Record<string, unknown>;

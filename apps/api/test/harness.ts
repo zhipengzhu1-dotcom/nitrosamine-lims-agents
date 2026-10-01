@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after } from 'node:test';
-import { audited, createDb, type DB, databaseUrl, dbConfig, type Role } from '@lims/db';
+import { audited, checkoutDatabase, createDb, type DB, databaseUrl, dbConfig, type Role } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
 import { migrate } from '@lims/db/migrate';
 import { type SeededAccount, seed } from '@lims/db/seed';
@@ -68,8 +68,9 @@ async function listen(db: Kysely<DB>, { secureCookie = false } = {}) {
   };
 }
 
-/** A fresh migrated and seeded database behind a listening API that keeps its log lines, torn down after the file's tests. */
-export async function startApi(database: string) {
+/** A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API that keeps its log lines, torn down after the file's tests. */
+export async function startApi(name: string) {
+  const database = checkoutDatabase(name);
   const admin = createDb(databaseUrl(server, 'postgres'));
   await sql`drop database if exists ${sql.id(database)} with (force)`.execute(admin);
   await admin.destroy();

@@ -4,8 +4,7 @@ name: lims
 x-app: &app
   build: { context: .., dockerfile: deploy/Dockerfile, target: api }
   image: lims-api:local
-  # The secret named after the database user holds that user's password.
-  entrypoint: ["sh", "-c", 'export LIMS_PG="postgres://$$LIMS_PG_USER:$$(cat /run/secrets/$$LIMS_PG_USER)@db:5432"; exec "$$@"', "--"]
+  entrypoint: ["sh", "-c", 'export LIMS_PG="postgres://$$DB_ROLE:$$(cat /run/secrets/$$DB_ROLE)@db:5432"; exec "$$@"', "--"]
 
 services:
   db:
@@ -20,7 +19,7 @@ services:
 
   migrate:
     <<: *app
-    environment: { LIMS_DB: lims, LIMS_PG_USER: postgres }
+    environment: { LIMS_DB: lims, DB_ROLE: postgres }
     secrets: [postgres]
     command: ["node", "packages/db/src/migrate.ts"]
     depends_on: { db: { condition: service_healthy } }
@@ -28,11 +27,20 @@ services:
 
   api:
     <<: *app
-    environment: { LIMS_DB: lims, LIMS_PG_USER: lims_app, NODE_ENV: production, HOST: 0.0.0.0, PORT: "3000", LIMS_LOG: "1" }
+    environment: { LIMS_DB: lims, DB_ROLE: lims_app, NODE_ENV: production, HOST: 0.0.0.0, PORT: "3000", LIMS_LOG: "1" }
     secrets: [lims_app]
     command: ["node", "apps/api/src/main.ts"]
     depends_on: { migrate: { condition: service_completed_successfully } }
     restart: unless-stopped
+
+  seed:
+    <<: *app
+    profiles: [seed]
+    environment: { LIMS_DB: lims, DB_ROLE: lims_app }
+    secrets: [lims_app]
+    command: ["node", "packages/db/src/seed.ts"]
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    restart: "no"
 
   caddy:
     build: { context: .., dockerfile: deploy/Dockerfile, target: web }
@@ -49,9 +57,9 @@ services:
     restart: unless-stopped
 
 secrets:
-  postgres: { file: "${LIMS_SECRETS:?set LIMS_SECRETS to the owner-only secrets folder}/postgres" }
-  lims_app: { file: "${LIMS_SECRETS:?set LIMS_SECRETS to the owner-only secrets folder}/lims_app" }
-  tunnel_token: { file: "${LIMS_SECRETS:?set LIMS_SECRETS to the owner-only secrets folder}/tunnel_token" }
+  postgres: { file: "${SECRETS_DIR:?set SECRETS_DIR to the owner-only secrets folder}/postgres" }
+  lims_app: { file: "${SECRETS_DIR:?set SECRETS_DIR to the owner-only secrets folder}/lims_app" }
+  tunnel_token: { file: "${SECRETS_DIR:?set SECRETS_DIR to the owner-only secrets folder}/tunnel_token" }
 
 volumes:
   pgdata:

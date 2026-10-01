@@ -7,6 +7,8 @@ export interface ApiConfig {
   secureCookie: boolean;
 }
 
+const API_SETTINGS = ['LIMS_LOG'];
+
 function port(value: string | undefined): number {
   if (value === undefined) return 3000;
   const n = Number(value);
@@ -18,7 +20,7 @@ function port(value: string | undefined): number {
 /** Reads the API's environment once, at start: a missing or malformed value stops the process here. */
 export function apiConfig(): ApiConfig {
   const env = process.env;
-  const { server, database } = dbConfig();
+  const { server, database } = dbConfig(API_SETTINGS);
   return {
     databaseUrl: databaseUrl(server, database, 'lims_app'),
     listen: { port: port(env.PORT), host: env.HOST ?? '127.0.0.1' },

@@ -6,13 +6,13 @@ import { after, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { CamelCasePlugin } from 'kysely';
 import pg from 'pg';
-import { camelCaseOptions, databaseUrl, dbConfig } from '../src/db.ts';
+import { camelCaseOptions, checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
 const { server } = dbConfig();
 
-const DATABASE = 'lims_schema_test';
-const SCRATCH = 'lims_schema_scratch_test';
+const DATABASE = checkoutDatabase('lims_schema_test');
+const SCRATCH = checkoutDatabase('lims_schema_scratch_test');
 const packageDir = new URL('../', import.meta.url);
 
 async function freshlyMigrated(database: string, folder?: URL): Promise<void> {

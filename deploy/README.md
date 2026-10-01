@@ -1,10 +1,11 @@
 # Running the demo stack
 
-This is the owner's runbook for the thin slice on the MacBook, per [ADR 0002](../docs/adr/0002-react-spa-fastify-postgres-hosted-on-the-owners-mac-then-a-us-vps.md). Compose runs five services:
+This is the owner's runbook for the thin slice on the MacBook, per [ADR 0002](../docs/adr/0002-react-spa-fastify-postgres-hosted-on-the-owners-mac-then-a-us-vps.md). Compose runs five services, and a sixth on demand:
 
 - `db` is PostgreSQL 18. Its data lives in the named volume `lims_pgdata`.
 - `migrate` applies the migrations as the superuser, then exits.
 - `api` is the Fastify API, signed in to Postgres as `lims_app`. It serves only `/api`.
+- `seed` fills the empty database with the demo accounts. It runs only when you call it, as below.
 - `caddy` serves the built web app and proxies `/api` to the API.
 - `cloudflared` is the Cloudflare Tunnel, the only way in. No port is published on the Mac.
 
@@ -24,16 +25,16 @@ Every command below runs from the repo root.
 
    Use hex passwords. They go into a connection URL unescaped.
 3. In the Cloudflare dashboard, create a tunnel (Zero Trust, Networks, Tunnels). Point its public hostname at `http://caddy:80`. Save its token: `pbpaste > ~/.lims-secrets/tunnel_token`.
-4. Export the folder in the shell you run Compose from: `export LIMS_SECRETS=~/.lims-secrets`.
+4. Export the folder in the shell you run Compose from: `export SECRETS_DIR=~/.lims-secrets`.
 
 ## Start, seed and stop
 
 ```sh
 docker compose -f deploy/compose.yaml up -d --build
-docker compose -f deploy/compose.yaml run --rm api node packages/db/src/seed.ts
+docker compose -f deploy/compose.yaml run --rm seed
 ```
 
-The seed runs once, on the empty database. It prints the demo accounts and the one password they share, and it refuses a second run. To choose the password yourself, add `-e DEMO_PASSWORD=...` before `api`. Keep the printout. Nothing shows it again.
+The seed runs once, on the empty database. It prints the demo accounts and the one password they share, and it refuses a second run. To choose the password yourself, add `-e DEMO_PASSWORD=...` before `seed`. Keep the printout. Nothing shows it again.
 
 To check the stack, run `docker compose -f deploy/compose.yaml ps`. `migrate` should read `exited (0)` and the others `running`. Then sign in as QA through the tunnel's hostname, open a Test Report and press **Verify Audit Trail**.
 

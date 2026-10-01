@@ -25,8 +25,7 @@ case "${1:-}" in
   start)
     if [ -z "${LIMS_PG:-}" ] && ! "$PGBIN/pg_ctl" -D "$DATA" status >/dev/null 2>&1; then
       [ -d "$DATA" ] || "$PGBIN/initdb" -D "$DATA" -U postgres --auth=trust --encoding=UTF8 --locale=C >/dev/null
-      # The port comes from the checkout's path, so that two checkouts do not ask for the same one.
-      PORT=$((20000 + $(printf %s "$ROOT" | cksum | cut -d' ' -f1) % 12000))
+      PORT=$(node "$ROOT/packages/db/src/checkout.ts" port)
       "$PGBIN/pg_ctl" -D "$DATA" -l "$ROOT/.pg/server.log" -w \
         -o "-p $PORT -c listen_addresses=localhost -c timezone=UTC" start >/dev/null
     fi

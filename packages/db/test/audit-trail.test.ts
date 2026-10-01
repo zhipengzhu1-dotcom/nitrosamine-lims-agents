@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { after, before, it } from 'node:test';
 import { sql } from 'kysely';
 import pg from 'pg';
-import { audited, createDb, databaseUrl, dbConfig } from '../src/db.ts';
+import { audited, checkoutDatabase, createDb, databaseUrl, dbConfig } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
 const { server } = dbConfig();
 
-const DATABASE = 'lims_test';
+const DATABASE = checkoutDatabase('lims_test');
 
 const app = createDb(databaseUrl(server, DATABASE, 'lims_app'));
 const superuser = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });

@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Runs the slice locally: Postgres, migrations, a seed on an empty database, then the API and the web together.
-# LIMS_FRESH=1 drops the database first; the end-to-end test runs it that way on its own ports.
+# --scratch gives the database this checkout's suffix and drops it first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LIMS_DB=${LIMS_DB:-lims} PORT=${PORT:-3000}
 WEB_PORT=${WEB_PORT:-5173}
 
 scripts/pg.sh start >/dev/null
-if [ "${LIMS_FRESH:-}" = 1 ]; then PGOPTIONS=--client-min-messages=warning scripts/pg.sh psql -qc "drop database if exists \"$LIMS_DB\" with (force)"; fi
+if [ "${1:-}" = --scratch ]; then
+  LIMS_DB=$(node packages/db/src/checkout.ts database "$LIMS_DB")
+  PGOPTIONS=--client-min-messages=warning scripts/pg.sh psql -qc "drop database if exists \"$LIMS_DB\" with (force)"
+fi
 node packages/db/src/migrate.ts
 if [ "$(scripts/pg.sh psql -d "$LIMS_DB" -tAc 'select count(*) from lims.lab')" = 0 ]; then
   node packages/db/src/seed.ts
