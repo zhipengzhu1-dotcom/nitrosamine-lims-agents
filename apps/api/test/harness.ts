@@ -4,7 +4,16 @@ import { audited, checkoutDatabase, createDb, type DB, databaseUrl, dbConfig, ty
 import { hashPassword } from '@lims/db/credentials';
 import { migrate } from '@lims/db/migrate';
 import { type SeededAccount, seed } from '@lims/db/seed';
-import { pathOf, type Reply, type Route, type RouteInput, type RouteReply, readReply, routes } from '@lims/domain';
+import {
+  pathOf,
+  type RefusalKind,
+  type Reply,
+  type Route,
+  type RouteInput,
+  type RouteReply,
+  readReply,
+  routes,
+} from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import { buildApp } from '../src/app.ts';
 
@@ -26,13 +35,17 @@ export class Client {
     this.base = base;
   }
 
-  async call<R extends Route>(route: R, ...request: RouteInput<R>): Promise<Answer<R>> {
-    const [input] = request;
+  call<R extends Route>(route: R, ...request: RouteInput<R>): Promise<Answer<R>> {
+    return this.send(route, request[0]);
+  }
+
+  /** Sends any request, typed or not, and reads the answer through the route's contract, so a body outside it fails the test. */
+  async send<R extends Route>(route: R, request: unknown): Promise<Answer<R>> {
     const post = route.method === 'POST';
-    const res = await fetch(this.base + pathOf(route, input), {
+    const res = await fetch(this.base + pathOf(route, request), {
       method: route.method,
       headers: { cookie: this.cookie, ...(post ? { 'content-type': 'application/json' } : {}) },
-      ...(post ? { body: JSON.stringify(input ?? {}) } : {}),
+      ...(post ? { body: JSON.stringify(request ?? {}) } : {}),
     });
     for (const header of res.headers.getSetCookie()) {
       const session = /^lims_session=[^;]*/.exec(header);
@@ -46,13 +59,16 @@ export class Client {
 export function ok<R extends Route>(answer: Answer<R>): RouteReply<R> {
   return answer.kind === 'reply'
     ? answer.body
-    : assert.fail(`expected a reply, got ${answer.status}: ${answer.message}`);
+    : assert.fail(`expected a reply, got ${answer.status} ${answer.body.kind}: ${answer.body.message}`);
 }
 
-export function refusedWith<R extends Route>(answer: Answer<R>, status: number): string {
-  return answer.kind === 'refused' && answer.status === status
-    ? answer.message
-    : assert.fail(`expected a ${status} refusal, got ${answer.status}`);
+/** The message of a refusal of this kind, or a failed assertion naming what came instead. */
+export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKind): string {
+  return answer.kind === 'refused' && answer.body.kind === kind
+    ? answer.body.message
+    : assert.fail(
+        `expected a ${kind} refusal, got ${answer.status} ${answer.kind === 'refused' ? answer.body.kind : 'reply'}`,
+      );
 }
 
 async function listen(db: Kysely<DB>, { secureCookie = false } = {}) {

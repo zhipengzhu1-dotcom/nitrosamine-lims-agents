@@ -74,11 +74,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   const id = await submitTestTo('Assigned');
   assert.equal((await take(as.ana, 'enterResult', id, result, ana)).status, 200);
   assert.equal((await take(as.rui, 'review', id, {}, rui)).status, 200);
-  assert.equal(
-    (await as.cora.call(routes.report, { id })).status,
-    404,
-    'no Test Report for the Customer before release',
-  );
+  refusedWith(await as.cora.call(routes.report, { id }), 'notFound');
   assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
 
   const reported = await view(id, as.quinn);
@@ -174,15 +170,15 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
 
 it('a step by the wrong role is refused', async () => {
   const id = await submitTestTo('Requested');
-  assert.equal((await take(as.cora, 'receive', id)).status, 403);
-  assert.equal((await take(as.ana, 'receive', id)).status, 403);
+  assert.equal(refusedWith(await take(as.cora, 'receive', id), 'role'), 'receive is taken by the SampleCustodian role');
+  refusedWith(await take(as.ana, 'receive', id), 'role');
   assert.equal((await view(id)).test.state, 'Requested');
 });
 
 it('assigning an Analyst without a Training Record for the Method is refused', async () => {
   const id = await submitTestTo('Ready');
   const refused = await take(as.lena, 'assign', id, { assigneeId: theo.id });
-  assert.match(refusedWith(refused, 403), /Training Record/);
+  assert.match(refusedWith(refused, 'guard'), /Training Record/);
   const after = await view(id);
   assert.deepEqual([after.test.state, after.test.assignee], ['Ready', null]);
 });
@@ -193,34 +189,41 @@ it('the Analyst who signed Performed cannot review, and the Reviewer who reviewe
   assert.equal((await view(id, as.dana)).next, null, 'review is not offered to the Analyst who performed it');
   const anySignature = { password: 'unused' };
   const selfReview = await as.dana.call(stepRoute('review'), { testId: id, input: {}, signature: anySignature });
-  assert.equal(refusedWith(selfReview, 403), 'the Analyst who performed the Test cannot review it');
+  assert.equal(refusedWith(selfReview, 'guard'), 'the Analyst who performed the Test cannot review it');
 
   assert.equal((await take(as.rhea, 'review', id, {}, rhea)).status, 200);
   const selfRelease = await as.rhea.call(stepRoute('release'), { testId: id, input: {}, signature: anySignature });
-  assert.equal(selfRelease.status, 403);
+  refusedWith(selfRelease, 'guard');
   assert.equal((await view(id)).test.state, 'Reviewed');
 });
 
-it('a signing with a wrong password is refused and changes nothing', async () => {
+it('a signing with a wrong password is refused and changes nothing, and a signing on an ended session is refused by another kind', async () => {
   const id = await submitTestTo('Assigned', wes);
   const before = await view(id);
   const enter = (password: string) =>
     as.wes.call(stepRoute('enterResult'), { testId: id, input: result, signature: { password } });
 
-  assert.equal((await enter('not-the-password')).status, 401);
+  const wrong = await enter('not-the-password');
+  assert.equal(wrong.status, 401);
+  assert.equal(refusedWith(wrong, 'badCredentials'), 'the credentials are not valid');
   assert.deepEqual(
     await view(id),
     before,
     'a wrong password leaves the Test, Result, Signatures and Audit Trail as they were',
   );
   assert.equal((await enter(wes.password)).status, 200);
+
+  ok(await as.wes.call(routes.logout));
+  const ended = await enter(wes.password);
+  assert.equal(ended.status, 401);
+  assert.equal(refusedWith(ended, 'noSession'), 'sign in first');
 });
 
 it("a Customer User cannot read another Customer's Test", async () => {
   const id = await submitTestTo('Requested');
   assert.ok(ok(await as.cora.call(routes.tests)).some((t) => t.id === id));
-  assert.equal((await as.olga.call(routes.test, { id })).status, 404);
-  assert.equal((await as.olga.call(routes.report, { id })).status, 404);
+  refusedWith(await as.olga.call(routes.test, { id }), 'notFound');
+  refusedWith(await as.olga.call(routes.report, { id }), 'notFound');
   assert.ok(!ok(await as.olga.call(routes.tests)).some((t) => t.id === id));
 });
 
@@ -256,8 +259,8 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
       ).id;
     },
   );
-  assert.equal((await as.lena.call(routes.test, { id: otherTest })).status, 404);
-  assert.equal((await take(as.samir, 'receive', otherTest)).status, 404);
+  refusedWith(await as.lena.call(routes.test, { id: otherTest }), 'notFound');
+  refusedWith(await take(as.samir, 'receive', otherTest), 'notFound');
   assert.ok(!ok(await as.lena.call(routes.tests)).some((t) => t.id === otherTest));
 });
 
