@@ -52,7 +52,10 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   release: step('release', { testId, input: {}, signature }),
 };
 
-async function raw(path: string, init: RequestInit): Promise<{ status: number; body: unknown }> {
+async function raw(
+  path: string,
+  init: { method: 'GET' | 'POST'; headers?: Record<string, string>; body?: string },
+): Promise<{ status: number; body: unknown }> {
   const res = await fetch(api.base + path, { ...init, headers: { cookie: as.cora.cookie, ...init.headers } });
   return { status: res.status, body: await res.json() };
 }
