@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
-import { routes, stepRoute } from '@lims/domain';
+import { numberedKinds, routes, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
 import { type Client, ok, startApi } from './harness.ts';
 
@@ -137,4 +137,14 @@ it('a submit that rolls back after taking its numbers gives them to the next kep
   const next = await numbersOf(ok(await submit(as.cora)).testId);
   assert.equal(seqOf(next.submission), seqOf(kept.submission) + 1);
   assert.equal(seqOf(next.sample), seqOf(kept.sample) + 1);
+});
+
+it('the kinds the domain formats are the kinds the database counts', async () => {
+  const { rows } = await sql<{
+    kind: string;
+  }>`select unnest(enum_range(null::lims.numbered_kind))::text as kind`.execute(api.db);
+  assert.deepEqual(
+    rows.map((r) => r.kind),
+    [...numberedKinds],
+  );
 });

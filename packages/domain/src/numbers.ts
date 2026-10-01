@@ -1,5 +1,6 @@
-/** The kinds `lims.numbered_kind` counts. */
-export type NumberedKind = 'Submission' | 'Sample' | 'TestReport';
+/** The kinds `lims.numbered_kind` counts, in its order. */
+export const numberedKinds = ['Submission', 'Sample', 'TestReport'] as const;
+export type NumberedKind = (typeof numberedKinds)[number];
 
 /** A number as `lims.take_number` hands it out: the counter's value, and the Lab's code and local date (`YYYY-MM-DD`) at assignment. */
 export interface NumberTaken {

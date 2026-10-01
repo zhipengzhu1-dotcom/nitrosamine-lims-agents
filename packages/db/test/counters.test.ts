@@ -23,10 +23,14 @@ const id = {
 };
 let folder = '';
 
-async function inTransaction(statements: [string, unknown[]?][]): Promise<void> {
+async function begin(): Promise<void> {
   await client.query('begin');
   await client.query(`select set_config('lims.actor', 'svc:test', true), set_config('lims.role', 'system', true),
                              set_config('lims.reason', 'Write records made before counters', true)`);
+}
+
+async function inTransaction(statements: [string, unknown[]?][]): Promise<void> {
+  await begin();
   for (const [statement, values] of statements) await client.query(statement, values);
   await client.query('commit');
 }
@@ -93,7 +97,7 @@ it('Submissions made before counters are numbered in the order they were made, a
     { id: id.second, number: `SUB-${year}-000002` },
   ]);
 
-  await client.query('begin');
+  await begin();
   const next = await client.query<{ seq: number }>(`select seq from lims.take_number('Submission', $1)`, [id.lab]);
   await client.query('rollback');
   assert.deepEqual(next.rows, [{ seq: 3 }]);
@@ -131,7 +135,7 @@ it("a number takes its Lab's local date, so Labs 25 hours apart number into diff
   await inTransaction([
     [`insert into lims.lab (lab_id, code, name, time_zone) values ($1, 'PG', 'West Lab', 'Pacific/Pago_Pago')`, [west]],
   ]);
-  await client.query('begin');
+  await begin();
   await client.query('select lims.lock_chains($1, $2)', [east, west]);
   const { rows } = await client.query<{ east: string; west: string; eastNow: string; westNow: string }>(
     `select e.local_date as east, w.local_date as west,

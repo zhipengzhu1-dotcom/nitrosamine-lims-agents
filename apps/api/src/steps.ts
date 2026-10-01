@@ -19,12 +19,12 @@ import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
 import { reauthenticate } from './auth.ts';
 import { refuse } from './refuse.ts';
-import { type LabQueries, labScope } from './scope.ts';
+import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
 
 interface Effect<I> {
   signedRecord?: 'test_report';
   assignee?: (input: I) => PersonId;
-  write(q: LabQueries, ctx: ActorContext, testId: string, input: I): Promise<unknown>;
+  write(q: WriteQueries, ctx: ActorContext, testId: string, input: I): Promise<unknown>;
 }
 
 /** What each step writes besides moving the Test's state. */

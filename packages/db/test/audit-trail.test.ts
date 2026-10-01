@@ -203,7 +203,7 @@ it('a transaction that locks the company chain after a Lab chain is refused, so 
 
 it('two transactions that write the company chain and a Lab chain in opposite orders both complete', async () => {
   const waiting = async () => {
-    for (;;) {
+    for (let polls = 0; polls < 500; polls++) {
       const { rows } = await superuser.query<{ n: string }>(
         `select count(*) as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`,
       );
@@ -212,6 +212,7 @@ it('two transactions that write the company chain and a Lab chain in opposite or
         setTimeout(resolve, 10);
       });
     }
+    assert.fail('the second transaction never waited on a chain lock');
   };
   let companyFirstHolds: () => void = () => {};
   const companyLocked = new Promise<void>((resolve) => {
@@ -233,4 +234,64 @@ it('two transactions that write the company chain and a Lab chain in opposite or
   );
   await Promise.all([companyFirst, labFirst]);
   assert.equal((await transactionIds(['Company First Ltd', 'Lab First Ltd'])).length, 2);
+});
+
+it('a transaction ID left on the connection by an earlier transaction is never taken for a later one', async () => {
+  const forged = '11111111-1111-4111-8111-111111111111';
+  const ctx = { actor: 'svc:test', role: 'system', reason: 'Leave a transaction ID on the connection' };
+  await sql`select 1`.execute(app);
+  await audited(app, ctx, async (tx) => {
+    await sql`select set_config('lims.transaction', ${forged}, false)`.execute(tx);
+    await tx.insertInto('customer').values({ name: 'Left Behind One' }).execute();
+  });
+  await audited(app, ctx, (tx) => tx.insertInto('customer').values({ name: 'Left Behind Two' }).execute());
+  const ids = (await transactionIds(['Left Behind One', 'Left Behind Two'])).map((e) => e.transactionId);
+  assert.equal(ids.length, 2);
+  assert.ok(!ids.includes(forged), 'the value set on the connection is not an ID');
+  assert.notEqual(ids[0], ids[1], 'two transactions, two IDs');
+});
+
+it('a transaction that locks a Lab chain after a Lab with a higher ID is refused', async () => {
+  const ctx = { actor: 'svc:test', role: 'system', reason: 'Add two more Labs' };
+  const labs = [];
+  for (const code of ['TA', 'TB'])
+    labs.push(
+      (
+        await audited(app, ctx, (tx) =>
+          tx
+            .insertInto('lab')
+            .values({ code, name: `Lab ${code}`, timeZone: 'UTC' })
+            .returning('labId')
+            .executeTakeFirstOrThrow(),
+        )
+      ).labId,
+    );
+  const [low, high] = labs.sort();
+  assert.ok(low && high);
+  await assert.rejects(
+    audited(app, { ...ctx, reason: 'Rename two Labs, the higher ID first' }, async (tx) => {
+      await tx.updateTable('lab').set({ name: 'Higher first' }).where('labId', '=', high).execute();
+      await tx.updateTable('lab').set({ name: 'Lower second' }).where('labId', '=', low).execute();
+    }),
+    refusedWith('LA004'),
+  );
+  await audited(app, { ...ctx, reason: 'Rename two Labs, declared first' }, async (tx) => {
+    await sql`select lims.lock_chains(${high}, ${low})`.execute(tx);
+    await tx.updateTable('lab').set({ name: 'Higher first' }).where('labId', '=', high).execute();
+    await tx.updateTable('lab').set({ name: 'Lower second' }).where('labId', '=', low).execute();
+  });
+});
+
+it('a chain or a Lab that does not exist is refused, and a number is taken only inside an audited write', async () => {
+  const ctx = { actor: 'svc:test', role: 'system', reason: 'Probe what does not exist' };
+  const nowhere = '22222222-2222-4222-8222-222222222222';
+  await assert.rejects(
+    audited(app, ctx, (tx) => sql`select lims.lock_chains(${nowhere})`.execute(tx)),
+    refusedWith('LA005'),
+  );
+  await assert.rejects(
+    audited(app, ctx, (tx) => sql`select * from lims.take_number('Sample', ${nowhere})`.execute(tx)),
+    refusedWith('LA005'),
+  );
+  await assert.rejects(sql`select * from lims.take_number('Sample', ${labId})`.execute(app), refusedWith('LA001'));
 });

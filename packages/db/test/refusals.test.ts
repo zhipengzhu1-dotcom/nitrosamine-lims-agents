@@ -45,8 +45,8 @@ const fixture: [string, Row][] = [
   ],
   ['lims.lab', { lab_id: id.lab, code: 'RF', name: 'Refusal Lab', time_zone: 'America/New_York' }],
   ['lims.lab', { lab_id: id.otherLab, code: 'OT', name: 'Other Lab', time_zone: 'Asia/Tokyo' }],
-  ['lims.counter', { lab_id: null, kind: 'Submission', last: 1 }],
-  ['lims.counter', { lab_id: id.lab, kind: 'Sample', last: 1 }],
+  ['lims.counter', { lab_id: null, kind: 'Submission' }],
+  ['lims.counter', { lab_id: id.lab, kind: 'Sample' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.person, role: 'Analyst' }],
   ['lims.training_record', { lab_id: id.lab, person_id: id.person, method_id: id.method }],
   [
@@ -183,7 +183,7 @@ const tables = {
   'lims.counter': {
     noun: 'counter',
     row: { lab_id: id.lab, kind: 'TestReport' },
-    notNull: ['kind', 'last'],
+    notNull: ['kind'],
   },
   'lims.audit_chain': {
     noun: 'Audit Trail chain head',
@@ -205,19 +205,7 @@ const tables = {
       hash: zeros,
       transaction_id: id.transaction,
     },
-    notNull: [
-      'chain',
-      'seq',
-      'at',
-      'actor',
-      'role',
-      'reason',
-      'table_name',
-      'op',
-      'prev_hash',
-      'hash',
-      'transaction_id',
-    ],
+    notNull: ['chain', 'seq', 'at', 'actor', 'role', 'reason', 'table_name', 'op', 'prev_hash', 'hash'],
   },
   'public.schema_migration': {
     noun: 'recorded migration',
@@ -254,7 +242,7 @@ function insert(table: string, row: Row): [string, unknown[]] {
 
 const AUDIT_CONTEXT = `select set_config('lims.actor', 'svc:test', true), set_config('lims.role', 'system', true),
                               set_config('lims.reason', 'Probe a refusal', true),
-                              set_config('lims.numbering', 'on', true)`;
+                              lims.set_this_transaction('lims.numbering', 'on')`;
 
 async function refusalOf(statement: string, values: unknown[] = [], context = true): Promise<pg.DatabaseError> {
   await client.query('begin');
@@ -605,6 +593,19 @@ describe('the database refuses a value outside its allowed set', () => {
       'audit_entry_op_check',
     ),
     {
+      name: 'an Audit Trail entry without a transaction ID is refused',
+      table: 'lims.audit_entry',
+      change: { transaction_id: null },
+      constraint: 'audit_entry_transaction_id_check',
+    },
+    ...each(
+      'a Lab in a time zone that is not a named zone of the time zone database is refused',
+      'lims.lab',
+      'time_zone',
+      ['Mars/Olympus_Mons', 'UTC+5', ''],
+      'lab_time_zone_check',
+    ),
+    {
       name: 'a Submission counter that belongs to a Lab is refused',
       table: 'lims.counter',
       change: { kind: 'Submission' },
@@ -619,14 +620,38 @@ describe('the database refuses a value outside its allowed set', () => {
   ]);
 });
 
-it('a Lab in a time zone the database does not know is refused', async () => {
-  covered.add('lims.lab.lab_time_zone_check');
-  const error = await refusalOfRow('lims.lab', { time_zone: 'Mars/Olympus_Mons' });
-  assert.deepEqual([error.code, error.message], ['22023', 'time zone "Mars/Olympus_Mons" not recognized']);
+describe('a counter holds at most six digits and is never empty', () => {
+  // The counter trigger lets a counter start only at zero, so these rows reach the constraints with triggers off.
+  async function refusalOfCounter(last: number | null): Promise<pg.DatabaseError> {
+    await client.query('begin');
+    try {
+      await client.query('set local session_replication_role = replica');
+      await client.query(`insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', $2)`, [
+        id.otherLab,
+        last,
+      ]);
+    } catch (error) {
+      if (error instanceof pg.DatabaseError) return error;
+      throw error;
+    } finally {
+      await client.query('rollback');
+    }
+    return assert.fail(`the database accepted a counter at ${last}`);
+  }
+  covered.add('lims.counter.counter_last_check');
+  covered.add('lims.counter.counter_last_not_null');
+  it('a counter past 999999 or below zero is refused', async () => {
+    for (const last of [1_000_000, -1])
+      assertConstraint(await refusalOfCounter(last), '23514', 'lims.counter', 'counter_last_check');
+  });
+  it('a counter with no value is refused', async () => {
+    const error = await refusalOfCounter(null);
+    assert.deepEqual([error.code, error.table, error.column], ['23502', 'counter', 'last']);
+  });
 });
 
 describe('a counter changes only when lims.take_number takes a number, even for the superuser', () => {
-  const cases: { name: string; trigger: string; statement: string; values?: unknown[] }[] = [
+  const cases: { name: string; trigger: string; statement: string; values?: unknown[]; numbering?: boolean }[] = [
     {
       name: 'adding a counter outside the numbering function is refused',
       trigger: 'refuse_change',
@@ -648,16 +673,29 @@ describe('a counter changes only when lims.take_number takes a number, even for 
       trigger: 'refuse_truncate',
       statement: 'truncate lims.counter',
     },
+    {
+      name: 'a counter that starts above zero is refused, even inside the numbering function',
+      trigger: 'refuse_change',
+      statement: `insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', 5)`,
+      values: [id.otherLab],
+      numbering: true,
+    },
+    {
+      name: 'a counter moved back or by more than one is refused, even inside the numbering function',
+      trigger: 'refuse_change',
+      statement: 'update lims.counter set last = last + 2',
+      numbering: true,
+    },
   ];
   for (const c of cases) {
     covered.add(`lims.counter.${c.trigger}`);
     it(c.name, async () => {
-      const error = await refusalOf(c.statement, c.values, false);
+      const error = await refusalOf(c.statement, c.values, c.numbering ?? false);
       assert.deepEqual(
         [error.code, error.message],
         ['LA003', 'a counter changes only when lims.take_number takes a number'],
       );
-      assert.match(error.where ?? '', /function lims\.refuse_counter_change\(\)/);
+      assert.match(error.where ?? '', /function refuse_counter_change\(\)/);
     });
   }
 });

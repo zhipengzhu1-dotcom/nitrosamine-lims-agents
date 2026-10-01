@@ -44,7 +44,7 @@ export interface AuditEntry {
   role: string;
   seq: Int8;
   tableName: string;
-  transactionId: string;
+  transactionId: string | null;
 }
 
 export interface Customer {
