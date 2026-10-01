@@ -6,7 +6,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 ## The gate decides what is green
 
-- Run `pnpm check` before you push. It runs the Biome format check, oxlint, the typecheck, ruff, shellcheck, and the TypeScript and Python tests. The tests need the checkout's own Postgres (`scripts/pg.sh start`), and ruff and shellcheck need `uvx`. The schema drift check joins the gate with item 6 of the task above.
+- Run `pnpm check` before you push. It runs the Biome format check, oxlint, the typecheck, ruff, shellcheck, and the TypeScript and Python tests. The tests need the checkout's own Postgres (`scripts/pg.sh start`), and ruff and shellcheck need `uvx`. The tests include the schema drift check, which fails when `packages/db/src/schema.ts` differs from what the `types` script generates from the migrations, or when a `lims` table or column name does not survive CamelCasePlugin's round trip.
 - GitHub Actions runs `pnpm check` on every pull request and on `main`, with the Playwright walk (`pnpm e2e`) as a second job. The repo's plan has no branch protection, so the person who merges checks that both jobs passed.
 - Biome formats at 120 columns (`pnpm format`). oxlint with tsgolint lints, and its type-aware rules use a TypeScript 7 checker. It also enforces the import direction between packages. `tsconfig.base.json` sets the compiler's strictness. This document does not repeat what those tools check. Read `.oxlintrc.json`, `biome.json` and `ruff.toml`.
 - Keep `main` green. Do not skip or weaken a check to pass the gate. Fix the code, or change the rule as the last section describes.
@@ -52,7 +52,6 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 ## The database refuses bad data
 
 - Write migrations forward-only. Fix a mistake with a new migration, never by editing one that is on `main`, because a database that already applied the old file would then differ from the repo.
-- Regenerate `packages/db/src/schema.ts` in the commit that adds the migration, and never edit it by hand, so that the types always describe the schema that the migrations build.
 - Make every rule that the database can enforce a constraint or a trigger, so that the database refuses bad data even when the API is wrong.
 - Write SQL with lowercase keywords, singular snake_case table names and schema-qualified names, so that each migration reads like the ones before it.
 - Send SQL from TypeScript only through Kysely or its `sql` tag with parameters, never through string concatenation, because concatenated SQL is how injection happens.
