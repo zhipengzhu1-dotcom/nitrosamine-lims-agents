@@ -211,6 +211,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
       await effect.write(q, actor, testId, body.input);
       if (step.signs) await sign(q, actor, step.signs, effect.signedRecord ?? 'test', testId);
     });
+    req.log.info({ step: name, testId }, 'step taken');
     return { testId, state: step.to };
   });
 }

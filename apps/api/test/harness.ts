@@ -55,7 +55,7 @@ export function refusedWith<R extends Route>(answer: Answer<R>, status: number):
     : assert.fail(`expected a ${status} refusal, got ${answer.status}`);
 }
 
-/** A fresh migrated and seeded database behind a listening API, torn down after the file's tests. */
+/** A fresh migrated and seeded database behind a listening API that keeps its log lines, torn down after the file's tests. */
 export async function startApi(database: string) {
   const admin = createDb(databaseUrl(server, 'postgres'));
   await sql`drop database if exists ${sql.id(database)} with (force)`.execute(admin);
@@ -64,7 +64,8 @@ export async function startApi(database: string) {
   const db = createDb(databaseUrl(server, database, 'lims_app'));
   const superuser = createDb(databaseUrl(server, database)).withSchema('lims');
   const seeded = await seed(db);
-  const app = buildApp(db, { log: null, secureCookie: false });
+  const lines: string[] = [];
+  const app = buildApp(db, { log: { write: (line) => lines.push(line) }, secureCookie: false });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(async () => {
     await app.close();
@@ -78,6 +79,9 @@ export async function startApi(database: string) {
     db,
     superuser,
     base,
+    app,
+    log: () => lines.join(''),
+    logLines: () => lines.map((line): Record<string, unknown> => JSON.parse(line)),
     labId,
     methodId,
     person(name: SeededName): Account {

@@ -72,3 +72,59 @@ it('a refusal and a request that fails validation answer with their own status a
     text: `{"statusCode":400,"error":"Bad Request","message":"body must have required property 'signature'"}`,
   });
 });
+
+const lou = await api.addPerson('lou.analyst', ['Analyst'], { trained: true });
+const asLou = await api.login(lou);
+
+async function assignedToLou(): Promise<string> {
+  const { testId } = ok(
+    await as.cora.call(stepRoute('submit'), {
+      input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
+    }),
+  );
+  ok(await as.samir.call(stepRoute('receive'), { testId, input: {} }));
+  ok(await as.lena.call(stepRoute('assign'), { testId, input: { assigneeId: lou.id } }));
+  return testId;
+}
+
+it("a signed step logs its step name and the Test's id, and never the signer's password", async () => {
+  const testId = await assignedToLou();
+  ok(
+    await asLou.call(stepRoute('enterResult'), {
+      testId,
+      input: result('RD-NB-0007-012'),
+      signature: { password: lou.password },
+    }),
+  );
+  assert.ok(
+    api.logLines().some((line) => line.step === 'enterResult' && line.testId === testId),
+    "a log line names the step and the Test's id",
+  );
+  assert.ok(!api.log().includes(lou.password), "the signer's password is not in the log");
+});
+
+it("a failed signed step logs the failure without the password or the Result's content", async () => {
+  const testId = await assignedToLou();
+  const failed = await post(asLou, stepRoute('enterResult').url, {
+    testId,
+    input: result(PROBE),
+    signature: { password: lou.password },
+  });
+  const reference = /reference (req-\w+)/.exec(failed.text)?.[1] ?? assert.fail(`no reference in ${failed.text}`);
+  const logged = api.logLines().find((line) => line.level === 50 && line.reqId === reference);
+  assert.match(JSON.stringify(logged?.err), /log_probe/, 'the log names the failure under the reference');
+  assert.ok(!api.log().includes(lou.password), "the signer's password is not in the log");
+  assert.ok(!api.log().includes(PROBE), "the Result's content is not in the log");
+});
+
+it("the API's logger writes a password, a session cookie and a request body redacted", () => {
+  const [password, token] = ['logged-password-for-tests', 'logged-session-token-for-tests'];
+  api.app.log.info({
+    req: { headers: { cookie: `lims_session=${token}` }, body: { signature: { password } } },
+    signature: { password },
+  });
+  const log = api.log();
+  assert.ok(!log.includes(password), 'the password is redacted');
+  assert.ok(!log.includes(token), 'the session cookie is redacted');
+  assert.match(log, /\[redacted\]/);
+});

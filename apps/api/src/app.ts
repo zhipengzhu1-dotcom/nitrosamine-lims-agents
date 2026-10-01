@@ -50,9 +50,26 @@ export interface AppOptions {
   secureCookie: boolean;
 }
 
+const REDACTED = [
+  'req.body',
+  'req.headers.cookie',
+  'req.headers.authorization',
+  'res.headers["set-cookie"]',
+  'password',
+  '*.password',
+  '*.*.password',
+  // The err serializer copies pg's own fields onto the line, and detail quotes the failing row.
+  'err.detail',
+  'err.hint',
+  'err.where',
+  'err.internalQuery',
+];
+
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   const app = Fastify({
-    logger: options.log ? { level: 'info', stream: options.log } : false,
+    logger: options.log
+      ? { level: 'info', stream: options.log, redact: { paths: REDACTED, censor: '[redacted]' } }
+      : false,
     ajv: { customOptions: { coerceTypes: false } },
   }).withTypeProvider<WireTypes>();
   app.setErrorHandler(answerThrown);
