@@ -1,15 +1,24 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { api, type Me, onSignedOut } from './api.ts';
+import { Placeholder } from './placeholder.tsx';
+import { ReportPage } from './report.tsx';
 import { SignIn } from './signin.tsx';
 import { TestPage, Worklist } from './tests.tsx';
+import { type ModuleKey, modules } from './rail.tsx';
 import './app.css';
 
-type Route = { page: 'tests' } | { page: 'test'; id: string };
+type Route =
+  | { page: 'tests' }
+  | { page: 'test'; id: string }
+  | { page: 'report'; id: string }
+  | { page: 'module'; key: Exclude<ModuleKey, 'tests'> };
 
 function parse(hash: string): Route {
-  const [, a, id] = hash.split('/');
-  return a === 'tests' && id ? { page: 'test', id } : { page: 'tests' };
+  const [, a, id, b] = hash.split('/');
+  if (a === 'tests' && id) return b === 'report' ? { page: 'report', id } : { page: 'test', id };
+  const module = modules.find((m) => m.key === a && m.key !== 'tests');
+  return module ? { page: 'module', key: module.key as Exclude<ModuleKey, 'tests'> } : { page: 'tests' };
 }
 
 function useRoute(): Route {
@@ -36,6 +45,8 @@ function App() {
   switch (route.page) {
     case 'tests': return <Worklist me={me} />;
     case 'test': return <TestPage key={route.id} me={me} id={route.id} />;
+    case 'report': return <ReportPage key={route.id} me={me} id={route.id} />;
+    case 'module': return <Placeholder key={route.key} me={me} module={route.key} />;
   }
 }
 
