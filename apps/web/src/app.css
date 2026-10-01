@@ -135,6 +135,8 @@ p {
 .top nav a {
   display: flex;
   align-items: center;
+  justify-content: center;
+  min-width: 44px;
   color: var(--ink-2);
   font-weight: 600;
   text-decoration: none;
@@ -205,6 +207,13 @@ th {
 .value {
   font-size: 20px;
   font-weight: 700;
+}
+td a,
+.facts a {
+  display: inline-block;
+  min-width: 44px;
+  padding: 13px 0;
+  margin: -13px 0;
 }
 .hash {
   word-break: break-all;
@@ -371,11 +380,11 @@ label {
 }
 input,
 select {
-  height: 40px;
+  height: 44px;
   padding: 0 10px;
   border: 1px solid var(--edge);
   border-radius: 8px;
-  font: 400 15px var(--font);
+  font: 400 16px var(--font);
 }
 .who__name {
   font-size: 24px;
@@ -415,6 +424,17 @@ select {
 }
 .print-hide {
   float: right;
+}
+.btn {
+  min-width: 44px;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: 600 15px var(--font);
+  cursor: pointer;
 }
 
 @media (prefers-reduced-motion: reduce) {
