@@ -47,6 +47,7 @@ export type GateReason =
     }
   | { readonly code: 'variability-not-computed'; readonly analyte: string; readonly because: 'one-preparation' | 'zero-mean' }
   | { readonly code: 'equipment-not-in-use'; readonly equipment: string; readonly status: FitnessStatus }
+  | { readonly code: 'equipment-wrong-kind'; readonly equipment: string; readonly kind: string; readonly needs: string }
   | { readonly code: 'open-hold'; readonly hold: string }
   | { readonly code: 'checklist-incomplete'; readonly items: NonEmpty<string> }
   | { readonly code: 'verdict-not-confirmed'; readonly test: string; readonly jurisdiction: Jurisdiction }
@@ -189,6 +190,7 @@ export function describeReason(r: GateReason): string {
         ? `The variability between Preparations can't be computed for ${r.analyte}: it needs at least two Preparations.`
         : `The variability between Preparations can't be computed for ${r.analyte}: the Preparations' mean is zero.`;
     case 'equipment-not-in-use': return `${r.equipment} is ${r.status}, not In use.`;
+    case 'equipment-wrong-kind': return `${r.equipment} is registered as ${r.kind}, not ${r.needs}.`;
     case 'open-hold': return `Hold ${r.hold} is open.`;
     case 'checklist-incomplete': return `The Review Checklist is not complete: ${andList(r.items.map((i) => `"${i}"`))} not ticked.`;
     case 'verdict-not-confirmed': return `Confirm or disagree with the ${r.jurisdiction} verdict on ${r.test}.`;

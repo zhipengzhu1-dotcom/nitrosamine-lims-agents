@@ -6,7 +6,7 @@
 import { versionStands, type DB, type ReadDb } from '@lims/db';
 import { calculatePreparation, type PreparationResults } from '@lims/domain/calculation';
 import { written, type Written } from '@lims/domain/decimal';
-import type { AdoptionStatusFacts, PerformerFacts, ReleaserFacts, ReviewerFacts, FitnessStatus } from '@lims/domain/gates';
+import type { AdoptionStatusFacts, EquipmentFitness, PerformerFacts, ReleaserFacts, ReviewerFacts, FitnessStatus } from '@lims/domain/gates';
 import type { AnalyteKey, LabId, PersonId, PreparationId, RecordId, Sha256Hex, ValueRecordId, VersionId, VersionRef } from '@lims/domain/ids';
 import { runState, type RunState, type TestState } from '@lims/domain/machines';
 import { nonEmpty } from '@lims/domain/nonempty';
@@ -147,7 +147,11 @@ export async function currentMethodVersion(q: Q, methodId: string): Promise<Meth
   return null;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A ref value's text that is not a uuid names nothing, rather than failing the query. */
 export async function equipmentById(q: Q, id: string): Promise<EquipmentFacts | null> {
+  if (!UUID.test(id)) return null;
   const e = await q.selectFrom('equipment').select(['id', 'code', 'kind', 'fitness_status']).where('id', '=', id).executeTakeFirst();
   return e ? { id: e.id, code: e.code, kind: e.kind, fitness: e.fitness_status as FitnessStatus } : null;
 }
@@ -213,7 +217,7 @@ export async function openHolds(q: Q, testId: string): Promise<readonly string[]
 // The Test
 // ---------------------------------------------------------------------------------------------
 
-export type EquipmentFacts = { readonly id: string; readonly code: string; readonly kind: string; readonly fitness: FitnessStatus };
+export type EquipmentFacts = EquipmentFitness & { readonly id: string };
 
 export type PreparationFacts = {
   readonly id: PreparationId;

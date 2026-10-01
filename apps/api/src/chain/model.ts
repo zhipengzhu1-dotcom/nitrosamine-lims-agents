@@ -4,7 +4,8 @@
 // again when read back, and the domain types are built from the parsed value.
 
 import { z } from 'zod';
-import { BALANCE_KIND, uuid } from '@lims/contract';
+import { uuid } from '@lims/contract';
+import { BALANCE_KIND } from '@lims/domain/gates';
 import type { Canon } from '@lims/domain/canonical';
 import { written } from '@lims/domain/decimal';
 import type { AnalyteKey } from '@lims/domain/ids';

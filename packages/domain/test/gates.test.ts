@@ -219,7 +219,7 @@ describe('runPerformedGate', () => {
     signer: performer(ana),
     isAcquirer: true,
     missingValues: [], unverifiedValues: [], pendingChanges: [],
-    equipment: { code: 'LCMS-02', fitness: 'In use' },
+    equipment: { code: 'LCMS-02', kind: 'LC-MS/MS', fitness: 'In use' },
     runChecks: [{ check: 'S/N at the LOQ standard', outcome: passing }, { check: 'CCV recovery', outcome: passing }],
   };
 
@@ -229,7 +229,8 @@ describe('runPerformedGate', () => {
     ['a value missing, one unverified, one change pending', {
       ...base, missingValues: ['Run sequence'], unverifiedValues: ['Injection 3 time'], pendingChanges: ['CCV recovery'],
     }, ['value-missing', 'not-verified', 'change-pending']],
-    ['the instrument not In use', { ...base, equipment: { code: 'LCMS-02', fitness: 'Suspended' } }, ['equipment-not-in-use']],
+    ['the instrument not In use', { ...base, equipment: { code: 'LCMS-02', kind: 'LC-MS/MS', fitness: 'Suspended' } }, ['equipment-not-in-use']],
+    ['a balance cited as the instrument', { ...base, equipment: { code: 'BAL-01', kind: 'Balance', fitness: 'In use' } }, ['equipment-wrong-kind']],
     ['a Run Check not recorded', { ...base, runChecks: [{ check: 'CCV recovery', outcome: { kind: 'not-recorded' } }] }, ['run-check-missing']],
     ['a Run Check the LIMS must compute: not built', { ...base, runChecks: [{ check: 'Replicate-injection RSD', outcome: computed }] }, ['not-built']],
     ['a Run Check written coarser than its export', { ...base, runChecks: [{ check: 'S/N at the LOQ standard', outcome: misconfigured }] }, ['criterion-misconfigured']],
@@ -272,7 +273,7 @@ describe('testPerformedGate', () => {
     isAssignee: true,
     valuesByOthers: [], missingValues: [], unverifiedValues: [], pendingChanges: [],
     runs: [{ run: 'RUN-2026-0042', performedStands: true }],
-    balances: [{ preparation: 'P1', equipment: { code: 'BAL-01', fitness: 'In use' } }],
+    balances: [{ preparation: 'P1', equipment: { code: 'BAL-01', kind: 'Balance', fitness: 'In use' } }],
     judgement: judge('0.012', '0.014'),
     blockingHolds: [],
   };
@@ -282,7 +283,9 @@ describe('testPerformedGate', () => {
     ['not the assigned Analyst', { ...base, isAssignee: false }, ['not-assignee']],
     ['a feeding Run not Performed', { ...base, runs: [{ run: 'RUN-2026-0042', performedStands: false }] }, ['unsigned-dependency']],
     ['no Run linked at all (usp 2, iso 1)', { ...base, runs: [] }, ['no-run-linked']],
-    ['a Preparation weighed on a balance not In use (usp 7, iso 5)', { ...base, balances: [{ preparation: 'P2', equipment: { code: 'BAL-01', fitness: 'Suspended' } }] }, ['equipment-not-in-use']],
+    ['a Preparation weighed on a balance not In use (usp 7, iso 5)', { ...base, balances: [{ preparation: 'P2', equipment: { code: 'BAL-01', kind: 'Balance', fitness: 'Suspended' } }] }, ['equipment-not-in-use']],
+    ['a Preparation whose balance was changed to an instrument of another kind', { ...base, balances: [{ preparation: 'P1', equipment: { code: 'LCMS-01', kind: 'LC-MS/MS', fitness: 'In use' } }] }, ['equipment-wrong-kind']],
+    ['a Preparation whose balance names no Equipment', { ...base, balances: [{ preparation: 'P1', equipment: null }] }, ['equipment-not-in-use']],
     ['a Hold blocks Performed', { ...base, blockingHolds: ['HOLD-7'] }, ['open-hold']],
     ['a value another Analyst typed (split signing is not built)', { ...base, valuesByOthers: ['Preparation 1 weight'] }, ['not-built']],
     ['a Preparation fails although the mean passes (OOS)', { ...base, judgement: judge('0.030', '0.036') }, ['not-built']],

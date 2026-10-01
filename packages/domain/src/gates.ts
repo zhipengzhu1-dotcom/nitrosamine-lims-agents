@@ -53,6 +53,11 @@ export type SigningEnablement =
 
 export type FitnessStatus = 'Quarantined' | 'In use' | 'Suspended' | 'Expired' | 'Retired';
 
+/** The Equipment kind a Preparation is weighed on; a Run's instrument is never one (usp <41>, review fix 12). */
+export const BALANCE_KIND = 'Balance';
+
+export type EquipmentFitness = { readonly code: string; readonly kind: string; readonly fitness: FitnessStatus };
+
 export type AdoptionStatus =
   | 'in-development' | 'validated-here' | 'transferred-in' | 'verified' | 'verified-basic-compendial' | 'retired'
   | 'none'; // no Adoption of this Method version in this Lab
@@ -122,7 +127,7 @@ export type RunPerformedFacts = {
   readonly missingValues: readonly string[];
   readonly unverifiedValues: readonly string[];
   readonly pendingChanges: readonly string[];
-  readonly equipment: { readonly code: string; readonly fitness: FitnessStatus };
+  readonly equipment: EquipmentFitness;
   readonly runChecks: readonly { readonly check: string; readonly outcome: RunCheckOutcome }[]; // from judgeRunCheck
 };
 
@@ -136,7 +141,7 @@ export type TestPerformedFacts = {
   readonly pendingChanges: readonly string[];
   readonly runs: readonly { readonly run: string; readonly performedStands: boolean }[];
   /** The balance each Preparation was weighed on (usp 7, iso 5), checked In use like the Run's instrument. */
-  readonly balances: readonly { readonly preparation: string; readonly equipment: { readonly code: string; readonly fitness: FitnessStatus } }[];
+  readonly balances: readonly { readonly preparation: string; readonly equipment: EquipmentFitness | null }[];
   readonly judgement: TestJudgement;
   readonly blockingHolds: readonly string[];
 };
@@ -292,7 +297,8 @@ export function runPerformedGate(f: RunPerformedFacts): GateResult {
     ...each(f.missingValues, (field) => ({ code: 'value-missing', field })),
     ...each(f.unverifiedValues, (value) => ({ code: 'not-verified', value })),
     ...each(f.pendingChanges, (value) => ({ code: 'change-pending', value })),
-    ...(f.equipment.fitness === 'In use' ? [] : [{ code: 'equipment-not-in-use' as const, equipment: f.equipment.code, status: f.equipment.fitness }]),
+    ...fit(f.equipment, `instrument ${f.equipment.code}`),
+    ...(f.equipment.kind === BALANCE_KIND ? [{ code: 'equipment-wrong-kind' as const, equipment: f.equipment.code, kind: f.equipment.kind, needs: 'an instrument' }] : []),
     ...f.runChecks.flatMap(({ check, outcome }): Reasons => {
       switch (outcome.kind) {
         case 'not-recorded': return [{ code: 'run-check-missing', check }];
@@ -311,6 +317,7 @@ export function runPerformedGate(f: RunPerformedFacts): GateResult {
 }
 
 const noRun = (test: string): GateReason => ({ code: 'no-run-linked', test });
+const fit = (e: EquipmentFitness, label: string): Reasons => (e.fitness === 'In use' ? [] : [{ code: 'equipment-not-in-use', equipment: label, status: e.fitness }]);
 
 /** Decisions 12, 19, 20 and 29: the assignee signs after every feeding Run (usp 2: at least one), and no Preparation or Reportable Result fails. */
 export function testPerformedGate(f: TestPerformedFacts): GateResult {
@@ -323,7 +330,11 @@ export function testPerformedGate(f: TestPerformedFacts): GateResult {
     ...each(f.pendingChanges, (value) => ({ code: 'change-pending', value })),
     ...(f.runs.length === 0 ? [noRun(f.test)] : []),
     ...f.runs.flatMap((r): Reasons => (r.performedStands ? [] : [{ code: 'unsigned-dependency', record: r.run, needs: 'Performed' }])),
-    ...f.balances.flatMap((b): Reasons => (b.equipment.fitness === 'In use' ? [] : [{ code: 'equipment-not-in-use', equipment: `${b.preparation} balance ${b.equipment.code}`, status: b.equipment.fitness }])),
+    ...f.balances.flatMap((b): Reasons => {
+      if (!b.equipment) return [{ code: 'equipment-not-in-use', equipment: `${b.preparation} balance (none)`, status: 'Quarantined' }];
+      const label = `${b.preparation} balance ${b.equipment.code}`;
+      return [...fit(b.equipment, label), ...(b.equipment.kind === BALANCE_KIND ? [] : [{ code: 'equipment-wrong-kind' as const, equipment: label, kind: b.equipment.kind, needs: `a ${BALANCE_KIND}` }])];
+    }),
     ...each(f.blockingHolds, (hold) => ({ code: 'open-hold', hold })),
     ...verdictReasons(f.judgement),
   ]);

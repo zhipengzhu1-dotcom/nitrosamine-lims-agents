@@ -236,8 +236,9 @@ export const createRun = defineCommand({
   ledgers: () => [],
   run: async (tx, input) => {
     const lab = await labOf(tx.db, staffLab(tx));
-    const equipment = await tx.db.selectFrom('equipment').select('id').where('id', '=', input.equipmentId).executeTakeFirst();
+    const equipment = await equipmentById(tx.db, input.equipmentId);
     if (!equipment) return { kind: 'not-permitted', message: 'No such Equipment in this Lab.' };
+    if (equipment.kind === BALANCE_KIND) return { kind: 'not-permitted', message: `${equipment.code} is a ${BALANCE_KIND}, so it cannot be the Run's instrument.` };
     const year = yearIn(lab.zone, tx.dbNow);
     const number = labNumber(lab.code, 'R', year, await nextNumber(tx, lab.id, 'run', year));
     const id = randomUUID() as RecordId;
@@ -292,7 +293,8 @@ export const createPreparation = defineCommand({
     if (t.preparations.length >= Number(count)) return { kind: 'transition', message: `${t.method.number} v${t.method.version} asks for exactly ${count} Preparations, and ${t.label} has them.` };
     const balance = await equipmentById(tx.db, balanceId);
     if (!balance) return { kind: 'not-permitted', message: 'No such Equipment in this Lab.' };
-    if (balance.kind !== BALANCE_KIND) return { kind: 'not-permitted', message: `${balance.code} is an ${balance.kind}, not a ${BALANCE_KIND}.` };
+    if (balance.kind !== BALANCE_KIND) return { kind: 'not-permitted', message: `${balance.code} is registered as ${balance.kind}, not a ${BALANCE_KIND}.` };
+    if (balance.fitness !== 'In use') return { kind: 'not-permitted', message: `${balance.code} is ${balance.fitness}, not In use.` };
     const prepNo = t.preparations.length + 1;
     const id = randomUUID();
     await tx.db.insertInto('preparation').values({ lab_id: t.labId, id, test_id: testId, prep_no: prepNo }).execute();

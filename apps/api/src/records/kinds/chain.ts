@@ -75,7 +75,7 @@ async function testPerformedCheck(ctx: RuleContext, signer: Signer, t: TestFacts
     unverifiedValues: unverified(TEST_FIELD_SPECS, t.values),
     pendingChanges: pendingOf(TEST_FIELD_SPECS, t.values),
     runs: t.runs.map((r) => ({ run: r.number, performedStands: signedAndStanding(r.standing, 'Performed') })),
-    balances: t.preparations.flatMap((p) => (p.balance ? [{ preparation: preparationSubject(p.prepNo), equipment: { code: p.balance.equipment?.code ?? '(none)', fitness: p.balance.equipment?.fitness ?? 'Quarantined' } }] : [])),
+    balances: t.preparations.flatMap((p) => (p.balance ? [{ preparation: preparationSubject(p.prepNo), equipment: p.balance.equipment }] : [])),
     judgement,
     blockingHolds: t.holds,
   });
@@ -165,7 +165,7 @@ async function runPerformedCheck(ctx: RuleContext, signer: Signer, r: RunFacts):
     missingValues: [...r.missingValues, ...r.runChecks.filter((c) => !c.value).map((c) => `Run Check ${c.check.name}`)],
     unverifiedValues: unverified(RUN_FIELD_SPECS, r.values),
     pendingChanges: pendingOf(RUN_FIELD_SPECS, r.values),
-    equipment: r.instrument?.equipment ? { code: r.instrument.equipment.code, fitness: r.instrument.equipment.fitness } : { code: '(none)', fitness: 'Quarantined' },
+    equipment: r.instrument?.equipment ?? { code: '(none)', kind: '(none)', fitness: 'Quarantined' },
     runChecks: r.runChecks.map((c) => ({ check: c.check.name, outcome: c.outcome })),
   });
 }
