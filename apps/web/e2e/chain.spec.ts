@@ -27,8 +27,8 @@ const sign = async (page: Page, meaning: string, password = DEMO_PASSWORD) => {
 
 async function box(target: Locator) {
   const b = await target.boundingBox();
-  expect(b, 'the element is on screen').not.toBeNull();
-  return b ?? { x: 0, y: 0, width: 0, height: 0 };
+  if (!b) throw new Error('the element is not on screen');
+  return b;
 }
 async function atLeast(target: Locator, width: number, height: number) {
   await target.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
