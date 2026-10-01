@@ -2,6 +2,8 @@
 // and the signature rows on the versions it cites. Limits and results print as the stored strings.
 // Nothing here computes a verdict: it prints what the Test version's judgement recorded.
 
+import { readFileSync } from 'node:fs';
+import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { Canon } from '@lims/domain/canonical';
 import type { LabId, RecordId } from '@lims/domain/ids';
@@ -15,6 +17,11 @@ export type RenderInput = {
   /** The Released version's body as sealed, for what the report says about itself. */
   readonly body: Canon;
 };
+
+// Names arrive in any script; the standard fonts encode only WinAnsi. See assets/fonts/SOURCE.md.
+const fontBytes = (file: string): Uint8Array => readFileSync(new URL(`../../assets/fonts/${file}`, import.meta.url));
+const UNICODE_REGULAR = fontBytes('NotoSansSC-Regular.ttf');
+const UNICODE_BOLD = fontBytes('NotoSansSC-Bold.ttf');
 
 const utc = (d: Date): string => d.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
 /** "2026-07-14 09:09:10 EDT": the abbreviation comes from en-US, which names US zones by letters (rule 9). */
@@ -81,8 +88,9 @@ export async function renderReportPdf(q: Q, input: RenderInput): Promise<Uint8Ar
   doc.setTitle(`Test Report ${report.number}`);
   doc.setCreationDate(input.releasedSignature.signedAt);
   doc.setModificationDate(input.releasedSignature.signedAt);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont(UNICODE_REGULAR, { subset: true });
+  const bold = await doc.embedFont(UNICODE_BOLD, { subset: true });
   const mono = await doc.embedFont(StandardFonts.Courier);
   const w = new Writer(doc, font, bold, mono);
 
