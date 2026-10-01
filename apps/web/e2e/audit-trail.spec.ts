@@ -28,7 +28,7 @@ async function submittedTest(page: Page, description: string): Promise<string> {
     expect(res.ok(), `sign in as ${username}`).toBe(true);
   };
   const step = async (name: string, body: object) => {
-    const res = await page.request.post(`/api/steps/${name}`, { data: body });
+    const res = await page.request.post(`/api/steps/${name}`, { data: { commitKey: randomUUID(), ...body } });
     expect(res.ok(), `${name}: ${await res.text()}`).toBe(true);
     return res.json();
   };
