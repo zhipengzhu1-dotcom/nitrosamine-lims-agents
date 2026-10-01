@@ -295,3 +295,15 @@ it('a chain or a Lab that does not exist is refused, and a number is taken only 
   );
   await assert.rejects(sql`select * from lims.take_number('Sample', ${labId})`.execute(app), refusedWith('LA001'));
 });
+
+it("one transaction keeps one ID when it changes the session's time zone and date style between writes", async () => {
+  await audited(app, { actor: 'svc:test', role: 'system', reason: 'Change display settings mid-write' }, async (tx) => {
+    await tx.insertInto('customer').values({ name: 'Before The Zone Change' }).execute();
+    await sql`set local timezone = 'Asia/Tokyo'`.execute(tx);
+    await sql`set local datestyle = 'SQL, DMY'`.execute(tx);
+    await tx.insertInto('customer').values({ name: 'After The Zone Change' }).execute();
+  });
+  const ids = (await transactionIds(['Before The Zone Change', 'After The Zone Change'])).map((e) => e.transactionId);
+  assert.equal(ids.length, 2);
+  assert.equal(ids[0], ids[1]);
+});

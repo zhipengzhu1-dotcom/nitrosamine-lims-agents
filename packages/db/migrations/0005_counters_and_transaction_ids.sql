@@ -82,7 +82,7 @@ begin
   -- A UUID no caller can choose, hashed from the cluster, the server's start and the transaction. A restore, logical or
   -- physical, starts a new server, so a transaction number replayed after it never yields an ID seen before.
   e.transaction_id := md5((select system_identifier from pg_control_system())::text || ':'
-                          || pg_postmaster_start_time()::text || ':' || pg_current_xact_id()::text)::uuid;
+                          || extract(epoch from pg_postmaster_start_time())::text || ':' || pg_current_xact_id()::text)::uuid;
 
   perform lock_chain(e.chain);
   select seq + 1, head into e.seq, e.prev_hash from audit_chain where chain = e.chain for update;
@@ -215,7 +215,7 @@ declare
   t text;
 begin
   foreach t in array array['submission', 'sample', 'test_report'] loop
-    execute format('create trigger refuse_renumber before update of number on lims.%I
+    execute format('create trigger refuse_renumber before update on lims.%I
                     for each row when (old.number is distinct from new.number)
                     execute function lims.refuse_renumber()', t);
   end loop;

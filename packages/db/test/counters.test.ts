@@ -11,7 +11,7 @@ import { migrate } from '../src/migrate.ts';
 
 const { server } = dbConfig();
 const DATABASE = checkoutDatabase('lims_counters_test');
-const BEFORE_COUNTERS = '0004_counters_and_transaction_ids.sql';
+const BEFORE_COUNTERS = '0005_counters_and_transaction_ids.sql';
 
 const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
 const id = {
