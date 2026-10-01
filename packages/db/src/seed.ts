@@ -71,7 +71,9 @@ if (import.meta.main) {
   try {
     const accounts = await seed(db);
     console.table(accounts.map((a) => ({ username: a.username, role: a.role })));
-    console.log(`Every account signs in with the password: ${accounts[0]!.password}`);
+    const [first] = accounts;
+    if (!first) throw new Error('the seed made no accounts');
+    console.log(`Every account signs in with the password: ${first.password}`);
   } finally {
     await db.destroy();
   }

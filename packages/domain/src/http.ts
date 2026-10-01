@@ -112,7 +112,6 @@ const testView = Type.Object({
   auditTrail: Type.Array(auditEntry),
   next: nullable(Type.Enum(stepNames)),
 });
-export type TestView = Static<typeof testView>;
 const testReport = Type.Object({
   report: reportRef,
   test: testRow,
@@ -128,7 +127,6 @@ const chainCheck = Type.Object({ at: instant, lab: nullable(Type.String()), comp
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** The body Fastify writes for every refusal `refuse()` throws and every request that fails validation. */
 const refusalBody = Type.Object({ statusCode: Type.Integer(), error: Type.String(), message: Type.String() });
-export type RefusalBody = Static<typeof refusalBody>;
 
 const credentials = Type.Object({ username: text, password: text }, closed);
 const byId = Type.Object({ id: uuid });

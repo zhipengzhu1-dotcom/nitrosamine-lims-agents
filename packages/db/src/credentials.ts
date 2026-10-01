@@ -1,7 +1,9 @@
 import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
-import { promisify } from 'node:util';
 
-const derive = promisify(scrypt) as (password: string, salt: Buffer, length: number) => Promise<Buffer>;
+const derive = (password: string, salt: Buffer, length: number) =>
+  new Promise<Buffer>((resolve, reject) => {
+    scrypt(password, salt, length, (error, key) => (error ? reject(error) : resolve(key)));
+  });
 
 export const MIN_PASSWORD_LENGTH = 4;
 
