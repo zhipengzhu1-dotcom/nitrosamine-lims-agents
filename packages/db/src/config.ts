@@ -44,8 +44,8 @@ function closest(name: string, known: readonly string[]): string {
   );
 }
 
-function refuseStrays(known: readonly string[]): void {
-  const strays = Object.keys(process.env)
+function refuseStrays(env: NodeJS.ProcessEnv, known: readonly string[]): void {
+  const strays = Object.keys(env)
     .filter((name) => name.startsWith('LIMS_') && !known.includes(name))
     .sort();
   if (strays.length > 0)
@@ -56,7 +56,7 @@ function refuseStrays(known: readonly string[]): void {
 
 /** Reads the environment once, at a process's start: a LIMS_ variable that neither this nor `alsoReads` names, or a checkout with no PostgreSQL to reach, stops the process here. */
 export function dbConfig(alsoReads: readonly string[] = []): DbConfig {
-  refuseStrays([...DB_SETTINGS, ...alsoReads]);
   const env = process.env;
+  refuseStrays(env, [...DB_SETTINGS, ...alsoReads]);
   return { server: env.LIMS_PG || checkoutServer(), database: env.LIMS_DB ?? 'lims', demoPassword: env.DEMO_PASSWORD };
 }
