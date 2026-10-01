@@ -700,6 +700,21 @@ describe('a counter changes only when lims.take_number takes a number, even for 
   }
 });
 
+describe('a numbered record keeps its number, even for the superuser', () => {
+  const cases: { noun: string; table: Table; id: string }[] = [
+    { noun: 'Submission', table: 'lims.submission', id: id.submission },
+    { noun: 'Sample', table: 'lims.sample', id: id.sample },
+    { noun: 'Test Report', table: 'lims.test_report', id: id.testReport },
+  ];
+  for (const c of cases) {
+    covered.add(`${c.table}.refuse_renumber`);
+    it(`changing the number of a ${c.noun} is refused`, async () => {
+      const error = await refusalOf(`update ${c.table} set number = number || '-X' where id = $1`, [c.id]);
+      assert.deepEqual([error.code, error.message], ['LA006', `a ${bare(c.table)} keeps the number it was given`]);
+    });
+  }
+});
+
 describe('an audited write without an actor, a role and a reason is refused', () => {
   for (const table of auditedTables) {
     covered.add(`${table}.capture`);
