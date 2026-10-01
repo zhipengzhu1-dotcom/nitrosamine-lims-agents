@@ -26,6 +26,7 @@ const id = {
   testReport: randomUUID(),
   signature: randomUUID(),
   session: randomUUID(),
+  transaction: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -38,14 +39,19 @@ const fixture: [string, Row][] = [
     { id: id.person, username: 'refusal.person', display_name: 'Refusal Person', password_hash: 'not-a-real-hash' },
   ],
   ['lims.method', { id: id.method, code: 'RF-MTH-0001', version: '1', title: 'NDMA by LC-MS/MS (fictional)' }],
-  ['lims.submission', { id: id.submission, customer_id: id.customer, submitted_by: id.person }],
-  ['lims.lab', { lab_id: id.lab, code: 'RF', name: 'Refusal Lab' }],
-  ['lims.lab', { lab_id: id.otherLab, code: 'OT', name: 'Other Lab' }],
+  [
+    'lims.submission',
+    { id: id.submission, customer_id: id.customer, submitted_by: id.person, number: 'SUB-2026-000001' },
+  ],
+  ['lims.lab', { lab_id: id.lab, code: 'RF', name: 'Refusal Lab', time_zone: 'America/New_York' }],
+  ['lims.lab', { lab_id: id.otherLab, code: 'OT', name: 'Other Lab', time_zone: 'Asia/Tokyo' }],
+  ['lims.counter', { lab_id: null, kind: 'Submission', last: 1 }],
+  ['lims.counter', { lab_id: id.lab, kind: 'Sample', last: 1 }],
   ['lims.membership', { lab_id: id.lab, person_id: id.person, role: 'Analyst' }],
   ['lims.training_record', { lab_id: id.lab, person_id: id.person, method_id: id.method }],
   [
     'lims.sample',
-    { lab_id: id.lab, id: id.sample, submission_id: id.submission, number: 'RF-S00001', description: 'Tablets' },
+    { lab_id: id.lab, id: id.sample, submission_id: id.submission, number: 'RF-S-2026-000001', description: 'Tablets' },
   ],
   ['lims.test', { lab_id: id.lab, id: id.test, sample_id: id.sample, method_id: id.method }],
   ['lims.test', { lab_id: id.lab, id: id.untested, sample_id: id.sample, method_id: id.method }],
@@ -64,7 +70,7 @@ const fixture: [string, Row][] = [
       entered_by: id.person,
     },
   ],
-  ['lims.test_report', { lab_id: id.lab, id: id.testReport, test_id: id.test, number: 'RF-R00001' }],
+  ['lims.test_report', { lab_id: id.lab, id: id.testReport, test_id: id.test, number: 'RF-R-2026-000001' }],
   [
     'lims.signature',
     {
@@ -98,10 +104,14 @@ const tables = {
   },
   'lims.submission': {
     noun: 'Submission',
-    row: { customer_id: id.customer, submitted_by: id.person },
-    notNull: ['id', 'customer_id', 'submitted_by'],
+    row: { customer_id: id.customer, submitted_by: id.person, number: 'SUB-2026-000002' },
+    notNull: ['id', 'customer_id', 'submitted_by', 'number'],
   },
-  'lims.lab': { noun: 'Lab', row: { code: 'RFB', name: 'Second Refusal Lab' }, notNull: ['lab_id', 'code', 'name'] },
+  'lims.lab': {
+    noun: 'Lab',
+    row: { code: 'RFB', name: 'Second Refusal Lab', time_zone: 'UTC' },
+    notNull: ['lab_id', 'code', 'name', 'time_zone'],
+  },
   'lims.membership': {
     noun: 'Lab membership',
     row: { lab_id: id.lab, person_id: id.person, role: 'QA' },
@@ -114,7 +124,7 @@ const tables = {
   },
   'lims.sample': {
     noun: 'Sample',
-    row: { lab_id: id.lab, submission_id: id.submission, number: 'RF-S00002', description: 'Capsules' },
+    row: { lab_id: id.lab, submission_id: id.submission, number: 'RF-S-2026-000002', description: 'Capsules' },
     notNull: ['lab_id', 'id', 'submission_id', 'number', 'description'],
   },
   'lims.test': {
@@ -150,7 +160,7 @@ const tables = {
   },
   'lims.test_report': {
     noun: 'Test Report',
-    row: { lab_id: id.lab, test_id: id.untested, number: 'RF-R00002' },
+    row: { lab_id: id.lab, test_id: id.untested, number: 'RF-R-2026-000002' },
     notNull: ['lab_id', 'id', 'test_id', 'number'],
   },
   'lims.signature': {
@@ -170,6 +180,11 @@ const tables = {
     row: { lab_id: id.lab, person_id: id.person, token_hash: Buffer.alloc(32, 2) },
     notNull: ['lab_id', 'id', 'person_id', 'token_hash', 'created_at', 'last_seen_at'],
   },
+  'lims.counter': {
+    noun: 'counter',
+    row: { lab_id: id.lab, kind: 'TestReport' },
+    notNull: ['kind', 'last'],
+  },
   'lims.audit_chain': {
     noun: 'Audit Trail chain head',
     row: { chain: 'refusal-probe' },
@@ -188,8 +203,21 @@ const tables = {
       op: 'INSERT',
       prev_hash: zeros,
       hash: zeros,
+      transaction_id: id.transaction,
     },
-    notNull: ['chain', 'seq', 'at', 'actor', 'role', 'reason', 'table_name', 'op', 'prev_hash', 'hash'],
+    notNull: [
+      'chain',
+      'seq',
+      'at',
+      'actor',
+      'role',
+      'reason',
+      'table_name',
+      'op',
+      'prev_hash',
+      'hash',
+      'transaction_id',
+    ],
   },
   'public.schema_migration': {
     noun: 'recorded migration',
@@ -225,7 +253,8 @@ function insert(table: string, row: Row): [string, unknown[]] {
 }
 
 const AUDIT_CONTEXT = `select set_config('lims.actor', 'svc:test', true), set_config('lims.role', 'system', true),
-                              set_config('lims.reason', 'Probe a refusal', true)`;
+                              set_config('lims.reason', 'Probe a refusal', true),
+                              set_config('lims.numbering', 'on', true)`;
 
 async function refusalOf(statement: string, values: unknown[] = [], context = true): Promise<pg.DatabaseError> {
   await client.query('begin');
@@ -260,10 +289,12 @@ before(async () => {
   }
   await migrate(server, DATABASE);
   await client.connect();
-  await client.query('begin');
-  await client.query(AUDIT_CONTEXT);
-  for (const [table, row] of fixture) await client.query(...insert(table, row));
-  await client.query('commit');
+  for (const [table, row] of fixture) {
+    await client.query('begin');
+    await client.query(AUDIT_CONTEXT);
+    await client.query(...insert(table, row));
+    await client.query('commit');
+  }
 });
 
 after(() => client.end());
@@ -294,7 +325,7 @@ describe('the database refuses an empty required field', () => {
 });
 
 describe('the database refuses a second row with the key of an existing one', () => {
-  const keys: Record<Table, Row> = {
+  const keys: Record<Exclude<Table, 'lims.counter'>, Row> = {
     'lims.customer': { id: id.customer },
     'lims.person': { id: id.person },
     'lims.method': { id: id.method },
@@ -313,6 +344,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'public.schema_migration': { name: '0001_roles.sql' },
   };
   for (const table of tableNames) {
+    if (table === 'lims.counter') continue;
     const constraint = `${bare(table)}_pkey`;
     covered.add(`${table}.${constraint}`);
     it(`a second ${tables[table].noun} with the key of an existing one is refused`, async () => {
@@ -362,9 +394,15 @@ describe('the database refuses a duplicate of a unique value', () => {
       constraint: 'lab_code_key',
     },
     {
+      name: 'a second Submission with the same number is refused',
+      table: 'lims.submission',
+      change: { number: 'SUB-2026-000001' },
+      constraint: 'submission_number_key',
+    },
+    {
       name: 'a second Sample with the same number in one Lab is refused',
       table: 'lims.sample',
-      change: { number: 'RF-S00001' },
+      change: { number: 'RF-S-2026-000001' },
       constraint: 'sample_lab_id_number_key',
     },
     {
@@ -376,7 +414,7 @@ describe('the database refuses a duplicate of a unique value', () => {
     {
       name: 'a second Test Report with the same number in one Lab is refused',
       table: 'lims.test_report',
-      change: { number: 'RF-R00001' },
+      change: { number: 'RF-R-2026-000001' },
       constraint: 'test_report_lab_id_number_key',
     },
     {
@@ -384,6 +422,18 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.test_report',
       change: { test_id: id.test },
       constraint: 'test_report_lab_id_test_id_key',
+    },
+    {
+      name: 'a second counter for one kind in one Lab is refused',
+      table: 'lims.counter',
+      change: { kind: 'Sample' },
+      constraint: 'counter_lab_id_kind_key',
+    },
+    {
+      name: 'a second company-wide Submission counter is refused',
+      table: 'lims.counter',
+      change: { lab_id: null, kind: 'Submission' },
+      constraint: 'counter_lab_id_kind_key',
     },
     {
       name: 'a second session with the same token is refused',
@@ -500,6 +550,7 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'signature_person_id_fkey',
     },
     noLab('lims.session', 'session'),
+    noLab('lims.counter', 'counter'),
     {
       name: 'a session of a person who does not exist is refused',
       table: 'lims.session',
@@ -553,7 +604,61 @@ describe('the database refuses a value outside its allowed set', () => {
       ['TRUNCATE', 'insert'],
       'audit_entry_op_check',
     ),
+    {
+      name: 'a Submission counter that belongs to a Lab is refused',
+      table: 'lims.counter',
+      change: { kind: 'Submission' },
+      constraint: 'counter_check',
+    },
+    {
+      name: 'a Sample counter that belongs to no Lab is refused',
+      table: 'lims.counter',
+      change: { lab_id: null },
+      constraint: 'counter_check',
+    },
   ]);
+});
+
+it('a Lab in a time zone the database does not know is refused', async () => {
+  covered.add('lims.lab.lab_time_zone_check');
+  const error = await refusalOfRow('lims.lab', { time_zone: 'Mars/Olympus_Mons' });
+  assert.deepEqual([error.code, error.message], ['22023', 'time zone "Mars/Olympus_Mons" not recognized']);
+});
+
+describe('a counter changes only when lims.take_number takes a number, even for the superuser', () => {
+  const cases: { name: string; trigger: string; statement: string }[] = [
+    {
+      name: 'adding a counter outside the numbering function is refused',
+      trigger: 'refuse_change',
+      statement: `insert into lims.counter (lab_id, kind) values ('${id.otherLab}', 'Sample')`,
+    },
+    {
+      name: 'moving a counter outside the numbering function is refused',
+      trigger: 'refuse_change',
+      statement: 'update lims.counter set last = last + 1',
+    },
+    {
+      name: 'removing a counter is refused',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.counter',
+    },
+    {
+      name: 'truncating the counters is refused',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.counter',
+    },
+  ];
+  for (const c of cases) {
+    covered.add(`lims.counter.${c.trigger}`);
+    it(c.name, async () => {
+      const error = await refusalOf(c.statement, [], false);
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA003', 'a counter changes only when lims.take_number takes a number'],
+      );
+      assert.match(error.where ?? '', /function lims\.refuse_counter_change\(\)/);
+    });
+  }
 });
 
 describe('an audited write without an actor, a role and a reason is refused', () => {

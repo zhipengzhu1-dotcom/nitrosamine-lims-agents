@@ -28,11 +28,6 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
   if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
   return audited(db, { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' }, async (tx) => {
-    const { labId } = await tx
-      .insertInto('lab')
-      .values({ code: 'RD', name: 'R&D Laboratory (fictional)' })
-      .returning('labId')
-      .executeTakeFirstOrThrow();
     const customer = await tx
       .insertInto('customer')
       .values({ name: 'Northwind Generics (fictional)' })
@@ -42,6 +37,11 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
       .insertInto('method')
       .values({ code: 'RD-MTH-0001', version: '1', title: 'NDMA in metformin hydrochloride by LC-MS/MS' })
       .returning('id')
+      .executeTakeFirstOrThrow();
+    const { labId } = await tx
+      .insertInto('lab')
+      .values({ code: 'RD', name: 'R&D Laboratory (fictional)', timeZone: 'America/New_York' })
+      .returning('labId')
       .executeTakeFirstOrThrow();
     const out: SeededAccount[] = [];
     for (const p of people) {

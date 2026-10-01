@@ -121,7 +121,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   }
 
   const report = ok(await as.cora.call(routes.report, { id }));
-  assert.match(report.report.number, /^RD-R\d{5}$/);
+  assert.match(report.report.number, /^RD-R-\d{4}-\d{6}$/);
   const printed = report.test;
   const signed = await api.db
     .selectFrom('signature')
@@ -235,19 +235,19 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
     api.db,
     { actor: 'svc:test', role: 'system', reason: 'Add a second Lab' },
     async (tx) => {
-      const { labId } = await tx
-        .insertInto('lab')
-        .values({ code: 'OT', name: 'Other Lab' })
-        .returning('labId')
-        .executeTakeFirstOrThrow();
       const submission = await tx
         .insertInto('submission')
-        .values({ customerId, submittedBy: cora.id })
+        .values({ customerId, submittedBy: cora.id, number: 'SUB-2026-900001' })
         .returning('id')
+        .executeTakeFirstOrThrow();
+      const { labId } = await tx
+        .insertInto('lab')
+        .values({ code: 'OT', name: 'Other Lab', timeZone: 'UTC' })
+        .returning('labId')
         .executeTakeFirstOrThrow();
       const sample = await tx
         .insertInto('sample')
-        .values({ labId, submissionId: submission.id, number: 'OT-S00001', description: 'x' })
+        .values({ labId, submissionId: submission.id, number: 'OT-S-2026-000001', description: 'x' })
         .returning('id')
         .executeTakeFirstOrThrow();
       return (

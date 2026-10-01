@@ -21,7 +21,11 @@ before(async () => {
   await migrate(server, DATABASE);
   await superuser.connect();
   ({ labId } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Set up the test Lab' }, (tx) =>
-    tx.insertInto('lab').values({ code: 'TL', name: 'Test Lab' }).returning('labId').executeTakeFirstOrThrow(),
+    tx
+      .insertInto('lab')
+      .values({ code: 'TL', name: 'Test Lab', timeZone: 'UTC' })
+      .returning('labId')
+      .executeTakeFirstOrThrow(),
   ));
 });
 
@@ -126,4 +130,107 @@ it("the Lab's chain verifies, and an entry tampered with as superuser is found a
   await superuser.query(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 2`, [labId]);
   await superuser.query('commit');
   assert.equal(await verify(), '2');
+});
+
+const transactionIds = (customers: string[]) =>
+  app
+    .selectFrom('auditEntry')
+    .select(['transactionId', sql<string>`new_row->>'name'`.as('name')])
+    .where('tableName', '=', 'customer')
+    .where(sql<string>`new_row->>'name'`, 'in', customers)
+    .execute();
+
+it('every entry of one audited write carries one transaction ID, and the next audited write draws another', async () => {
+  const ctx = { actor: 'svc:test', role: 'system', reason: 'Add Customers together' };
+  await audited(app, ctx, async (tx) => {
+    await tx.insertInto('customer').values({ name: 'Together One' }).execute();
+    await tx.updateTable('lab').set({ name: 'Test Lab, renamed together' }).where('labId', '=', labId).execute();
+    await tx.insertInto('customer').values({ name: 'Together Two' }).execute();
+  });
+  await audited(app, ctx, (tx) => tx.insertInto('customer').values({ name: 'Apart' }).execute());
+
+  const ids = new Map(
+    (await transactionIds(['Together One', 'Together Two', 'Apart'])).map((e) => [e.name, e.transactionId]),
+  );
+  const { transactionId: labEntry } = await app
+    .selectFrom('auditEntry')
+    .select('transactionId')
+    .where('chain', '=', labId)
+    .where(sql<string>`new_row->>'name'`, '=', 'Test Lab, renamed together')
+    .executeTakeFirstOrThrow();
+  assert.match(ids.get('Together One') ?? '', /^[0-9a-f-]{36}$/);
+  assert.equal(ids.get('Together Two'), ids.get('Together One'), 'one audited write, one ID');
+  assert.equal(labEntry, ids.get('Together One'), 'the same ID on the Lab chain and the company chain');
+  assert.notEqual(ids.get('Apart'), ids.get('Together One'), 'another audited write, another ID');
+});
+
+it('changing the transaction ID stored on an entry breaks its chain at that entry', async () => {
+  await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a Customer to regroup' }, (tx) =>
+    tx.insertInto('customer').values({ name: 'Regrouped Ltd' }).execute(),
+  );
+  const verify = async () =>
+    (await sql<{ broken: string | null }>`select lims.verify_chain('company') as broken`.execute(app)).rows[0]?.broken;
+  assert.equal(await verify(), null);
+  const { seq } = await app
+    .selectFrom('auditEntry')
+    .select('seq')
+    .where('chain', '=', 'company')
+    .where(sql<string>`new_row->>'name'`, '=', 'Regrouped Ltd')
+    .executeTakeFirstOrThrow();
+
+  await superuser.query('begin');
+  await superuser.query('set local session_replication_role = replica');
+  await superuser.query(
+    `update lims.audit_entry set transaction_id = gen_random_uuid() where chain = 'company' and seq = $1`,
+    [seq],
+  );
+  await superuser.query('commit');
+  assert.equal(await verify(), seq);
+});
+
+it('a transaction that locks the company chain after a Lab chain is refused, so it cannot deadlock', async () => {
+  await assert.rejects(
+    audited(app, { actor: 'svc:test', role: 'system', reason: 'Write a Lab, then the company' }, async (tx) => {
+      await tx.updateTable('lab').set({ name: 'Test Lab, out of order' }).where('labId', '=', labId).execute();
+      await tx.insertInto('customer').values({ name: 'Out Of Order Ltd' }).execute();
+    }),
+    (error: unknown) =>
+      refusedWith('LA004')(error) &&
+      error instanceof Error &&
+      error.message === `chain company is locked after chain ${labId}; declare both chains when the transaction starts`,
+  );
+});
+
+it('two transactions that write the company chain and a Lab chain in opposite orders both complete', async () => {
+  const waiting = async () => {
+    for (;;) {
+      const { rows } = await superuser.query<{ n: string }>(
+        `select count(*) as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`,
+      );
+      if (rows[0]?.n !== '0') return;
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+    }
+  };
+  let companyFirstHolds: () => void = () => {};
+  const companyLocked = new Promise<void>((resolve) => {
+    companyFirstHolds = resolve;
+  });
+  const ctx = { actor: 'svc:test', role: 'system', reason: 'Write two chains at once' };
+  const companyFirst = audited(app, ctx, async (tx) => {
+    await tx.insertInto('customer').values({ name: 'Company First Ltd' }).execute();
+    companyFirstHolds();
+    await waiting();
+    await tx.updateTable('lab').set({ name: 'Test Lab, company first' }).where('labId', '=', labId).execute();
+  });
+  const labFirst = companyLocked.then(() =>
+    audited(app, ctx, async (tx) => {
+      await sql`select lims.lock_chains('company', ${labId})`.execute(tx);
+      await tx.updateTable('lab').set({ name: 'Test Lab, Lab first' }).where('labId', '=', labId).execute();
+      await tx.insertInto('customer').values({ name: 'Lab First Ltd' }).execute();
+    }),
+  );
+  await Promise.all([companyFirst, labFirst]);
+  assert.equal((await transactionIds(['Company First Ltd', 'Lab First Ltd'])).length, 2);
 });

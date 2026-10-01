@@ -1,5 +1,5 @@
 import { audited, type DB } from '@lims/db';
-import type { ActorContext, Role } from '@lims/domain';
+import { type ActorContext, type NumberedKind, type NumberTaken, type Role, recordNumber } from '@lims/domain';
 import {
   type Insertable,
   type Kysely,
@@ -27,6 +27,15 @@ function inLab(q: Kysely<DB>, labId: string) {
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot type an update of a generic Lab table; ofLab filters it
       (q.updateTable(table) as unknown as UpdateQueryBuilder<DB, T, T, UpdateResult>).where(ofLab(table)),
     company,
+    /** Takes the next number of the kind from its counter inside this transaction, so a rollback gives it back. */
+    takeNumber: async (kind: NumberedKind) => {
+      const { rows } = await sql<Omit<NumberTaken, 'kind'>>`select * from lims.take_number(${kind}, ${labId})`.execute(
+        q,
+      );
+      const [taken] = rows;
+      if (!taken) throw new Error(`lims.take_number returned no ${kind} number`);
+      return recordNumber({ kind, ...taken });
+    },
   };
 }
 
