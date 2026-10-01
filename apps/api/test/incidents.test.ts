@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,11 +29,12 @@ after(() => rmSync(volume, { recursive: true, force: true }));
 async function assignedToLou(): Promise<string> {
   const { testId } = ok(
     await as.cora.call(stepRoute('submit'), {
+      commitKey: randomUUID(),
       input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
     }),
   );
-  ok(await as.samir.call(stepRoute('receive'), { testId, input: {} }));
-  ok(await as.lena.call(stepRoute('assign'), { testId, input: { assigneeId: lou.id } }));
+  ok(await as.samir.call(stepRoute('receive'), { commitKey: randomUUID(), testId, input: {} }));
+  ok(await as.lena.call(stepRoute('assign'), { commitKey: randomUUID(), testId, input: { assigneeId: lou.id } }));
   return testId;
 }
 
@@ -41,6 +43,7 @@ async function failEnterResult(client: Client, testId: string, base = api.base) 
     method: 'POST',
     headers: { cookie: client.cookie, 'content-type': 'application/json' },
     body: JSON.stringify({
+      commitKey: randomUUID(),
       testId,
       input: {
         analyte: 'NDMA',

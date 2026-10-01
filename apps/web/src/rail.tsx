@@ -96,11 +96,20 @@ export function stepAction(
     fields: ui.fields,
     signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
     async run(input, password) {
+      // Kept until the server answers, even across a reload, so pressing again after no answer resends this press.
+      const press = `commitKey:${name}:${testId ?? 'new'}`;
+      const commitKey = sessionStorage.getItem(press) ?? crypto.randomUUID();
+      sessionStorage.setItem(press, commitKey);
       await api(stepRoute(name), {
+        commitKey,
         ...(testId && { testId }),
         input,
         ...(password !== null && { signature: { password } }),
+      }).catch((e: unknown) => {
+        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(press);
+        throw e;
       });
+      sessionStorage.removeItem(press);
       await onDone();
       return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
@@ -198,10 +207,10 @@ const EXIT_FALLBACK_MS = 400;
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function unansweredText(e: unknown, signs: boolean): string {
-  const message = e instanceof Error ? e.message : String(e);
-  if (e instanceof Refused && e.kind !== 'failure')
-    return `Refused: ${message}.${signs ? ' Nothing has been signed.' : ''}`;
-  return `Not finished: ${message}.`;
+  if (!(e instanceof Refused))
+    return `The LIMS did not answer. ${signs ? 'Type your password again and sign' : 'Press again'} with the same entries; they will not be saved twice.`;
+  if (e.kind === 'failure') return `Not finished: ${e.message}.`;
+  return `Refused: ${e.message}.${signs ? ' Nothing has been signed.' : ''}`;
 }
 
 function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
