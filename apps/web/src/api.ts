@@ -1,5 +1,5 @@
 import type { Meaning, Role, StepName, TestState } from '@lims/domain';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface Me {
   person: { id: string; username: string; displayName: string; customerId: string | null };
@@ -85,13 +85,24 @@ export async function signOut(): Promise<void> {
   signedOut('');
 }
 
-export function useApi<T>(path: string): { data?: T; error?: string; reload: () => void } {
+/** `reload` resolves once the reloaded data is in state, so a caller can show an outcome together with the record it changed. */
+export function useApi<T>(path: string): { data?: T; error?: string; reload: () => Promise<void> } {
   const [state, setState] = useState<{ data?: T; error?: string }>({});
   const [version, setVersion] = useState(0);
+  const waiting = useRef<(() => void)[]>([]);
   useEffect(() => {
     let live = true;
-    api<T>(path).then((data) => live && setState({ data }), (e: Error) => live && setState({ error: e.message }));
+    const settle = (next: { data?: T; error?: string }) => {
+      if (!live) return;
+      setState(next);
+      for (const resolve of waiting.current.splice(0)) resolve();
+    };
+    api<T>(path).then((data) => settle({ data }), (e: Error) => settle({ error: e.message }));
     return () => { live = false; };
   }, [path, version]);
-  return { ...state, reload: () => setVersion((v) => v + 1) };
+  const reload = () => new Promise<void>((resolve) => {
+    waiting.current.push(resolve);
+    setVersion((v) => v + 1);
+  });
+  return { ...state, reload };
 }

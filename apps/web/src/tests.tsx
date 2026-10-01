@@ -1,6 +1,7 @@
 import { steps } from '@lims/domain';
+import { useEffect, useRef } from 'react';
 import { type AuditEntry, type Me, type Row, type Signature, type TestRow, type TestView, useApi } from './api.ts';
-import { Shell, Status, stepAction } from './rail.tsx';
+import { Shell, Status, stepAction, useArrivals } from './rail.tsx';
 
 export const time = (iso: string | null) => (iso ? `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')} UTC` : '');
 const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on Sample ${t.sampleNumber}`;
@@ -64,18 +65,26 @@ export function TestPage({ me, id }: { me: Me; id: string }) {
 
 const resultLine = (r: NonNullable<TestView['result']>) => `Result: ${r.analyte} ${r.value} ${r.unit}, performed on ${r.performedOn}`;
 
+const signatureKey = (s: Signature) => s.meaning + s.signedAt;
+
 export function Signatures({ rows }: { rows: Signature[] }) {
+  const fresh = useArrivals(rows.map((s) => signatureKey(s)));
+  const arrived = useRef<HTMLTableRowElement>(null);
+  useEffect(() => { arrived.current?.scrollIntoView({ block: 'nearest' }); }, [fresh]);
   if (!rows.length) return <p className="muted">No Signatures yet.</p>;
   return (
-    <table>
+    <table className="sigs">
       <thead><tr><th>Meaning</th><th>Signed by</th><th>Time</th><th>Record</th><th>SHA-256 of the signed Record Version</th></tr></thead>
       <tbody>
-        {rows.map((s) => (
-          <tr key={s.meaning + s.signedAt}>
-            <td className="sig">{s.meaning}</td><td>{s.signer}</td><td>{time(s.signedAt)}</td><td>{s.record}</td>
-            <td><code className="hash">{s.contentHash}</code></td>
-          </tr>
-        ))}
+        {rows.map((s) => {
+          const isNew = fresh.has(signatureKey(s));
+          return (
+            <tr key={signatureKey(s)} ref={isNew ? arrived : undefined} className={isNew ? 'row--new' : undefined}>
+              <td className="sig">{s.meaning}</td><td>{s.signer}</td><td data-label="Time">{time(s.signedAt)}</td>
+              <td data-label="Record">{s.record}</td><td data-label="SHA-256"><code className="hash">{s.contentHash}</code></td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -99,17 +108,19 @@ function AuditTrail({ entries }: { entries: AuditEntry[] }) {
   return (
     <>
       <h2>Audit Trail</h2>
-      <table className="audit">
-        <thead><tr><th>#</th><th>Time</th><th>Who</th><th>Role</th><th>Reason</th><th>Record</th><th>Change</th></tr></thead>
-        <tbody>
-          {entries.map((e) => (
-            <tr key={e.seq}>
-              <td>{e.seq}</td><td>{time(e.at)}</td><td><code>{e.actor}</code></td><td>{e.role}</td><td>{e.reason}</td>
-              <td>{e.op} {e.table}</td><td>{changes(e)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="wide">
+        <table className="audit">
+          <thead><tr><th>#</th><th>Time</th><th>Who</th><th>Role</th><th>Reason</th><th>Record</th><th>Change</th></tr></thead>
+          <tbody>
+            {entries.map((e) => (
+              <tr key={e.seq}>
+                <td>{e.seq}</td><td>{time(e.at)}</td><td><code>{e.actor}</code></td><td>{e.role}</td><td>{e.reason}</td>
+                <td>{e.op} {e.table}</td><td>{changes(e)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
