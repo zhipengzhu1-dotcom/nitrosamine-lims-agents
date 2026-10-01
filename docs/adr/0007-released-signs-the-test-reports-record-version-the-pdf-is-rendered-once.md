@@ -8,7 +8,7 @@ We chose this for three reasons (§11.50(b), §11.70; ISO/IEC 17025 7.8.1):
 - The person who authorises the report must see the document before releasing it, not only the rows behind it.
 - The file's hash must live in the audited chain, not beside the file.
 
-What the report prints and how it is laid out is not decided here; that is [Specify the Test Report format](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/47). Source: [Decide the spec gaps the walking skeleton found](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/45), gap 30, reviewed by the Part 11, ISO/IEC 17025 and USP expert agents.
+What the report prints and how it is laid out is not decided here; the map's Test Report format item holds what it must carry. Source: [Decide the spec gaps the walking skeleton found](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/45), gap 30, reviewed by the Part 11, ISO/IEC 17025 and USP expert agents.
 
 ## Considered options
 
