@@ -87,6 +87,8 @@ it("a signed step logs its step name and the Test's id, and never the signer's p
     "a log line names the step and the Test's id",
   );
   assert.ok(!api.log().includes(lou.password), "the signer's password is not in the log");
+  const token = as.lou.cookie.replace('lims_session=', '');
+  assert.ok(token && !api.log().includes(token), "the signer's session token is not in the log");
 });
 
 it("a failed signed step logs the failure without the password or the Result's content", async () => {
@@ -103,14 +105,10 @@ it("a failed signed step logs the failure without the password or the Result's c
   assert.ok(!api.log().includes(PROBE), "the Result's content is not in the log");
 });
 
-it("the API's logger writes a password, a session cookie and a request body redacted", () => {
-  const [password, token] = ['logged-password-for-tests', 'logged-session-token-for-tests'];
-  api.app.log.info({
-    req: { headers: { cookie: `lims_session=${token}` }, body: { signature: { password } } },
-    signature: { password },
-  });
+it("the API's logger writes a password redacted wherever it sits in a logged object", () => {
+  const password = 'logged-password-for-tests';
+  api.app.log.info({ password, signature: { password }, body: { signature: { password } } });
   const log = api.log();
   assert.ok(!log.includes(password), 'the password is redacted');
-  assert.ok(!log.includes(token), 'the session cookie is redacted');
   assert.match(log, /\[redacted\]/);
 });
