@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import type { Kysely } from 'kysely';
 import { hashPassword, newTotpSecret, otpauthUri } from './credentials.ts';
-import { audited, createDb } from './db.ts';
+import { audited, createDb, type DB } from './db.ts';
 
 // All fictional. Two Analysts so the assignment gate has someone to refuse.
 const people = [
@@ -14,10 +15,18 @@ const people = [
   { role: 'Admin', username: 'ada.admin', name: 'Ada Novak' },
 ] as const;
 
-const db = createDb();
-try {
+export interface SeededAccount {
+  id: string;
+  username: (typeof people)[number]['username'];
+  role: (typeof people)[number]['role'];
+  password: string;
+  totpSecret: string;
+}
+
+/** Seeds one Lab, one Customer, one Method and the demo people into an empty database. */
+export async function seed(db: Kysely<DB>): Promise<SeededAccount[]> {
   if (await db.selectFrom('lab').select('lab_id').executeTakeFirst()) throw new Error('already seeded; seed a fresh database');
-  const accounts = await audited(db, { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' }, async (tx) => {
+  return audited(db, { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' }, async (tx) => {
     const { lab_id } = await tx.insertInto('lab').values({ code: 'RD', name: 'R&D Laboratory (fictional)' })
       .returning('lab_id').executeTakeFirstOrThrow();
     const customer = await tx.insertInto('customer').values({ name: 'Northwind Generics (fictional)' })
@@ -25,21 +34,28 @@ try {
     const method = await tx.insertInto('method')
       .values({ code: 'RD-MTH-0001', version: '1', title: 'NDMA in metformin hydrochloride by LC-MS/MS' })
       .returning('id').executeTakeFirstOrThrow();
-    const out = [];
+    const out: SeededAccount[] = [];
     for (const p of people) {
       const password = randomBytes(18).toString('base64url');
-      const totp = newTotpSecret();
+      const totpSecret = newTotpSecret();
       const { id } = await tx.insertInto('person').values({
-        username: p.username, display_name: p.name, password_hash: await hashPassword(password), totp_secret: totp,
+        username: p.username, display_name: p.name, password_hash: await hashPassword(password), totp_secret: totpSecret,
         customer_id: p.role === 'Customer' ? customer.id : null,
       }).returning('id').executeTakeFirstOrThrow();
       await tx.insertInto('membership').values({ lab_id, person_id: id, role: p.role }).execute();
       if ('trained' in p) await tx.insertInto('training_record').values({ lab_id, person_id: id, method_id: method.id }).execute();
-      out.push({ username: p.username, role: p.role, password, totp: otpauthUri(p.username, totp) });
+      out.push({ id, username: p.username, role: p.role, password, totpSecret });
     }
     return out;
   });
-  console.table(accounts);
-} finally {
-  await db.destroy();
+}
+
+if (import.meta.main) {
+  const db = createDb();
+  try {
+    const accounts = await seed(db);
+    console.table(accounts.map((a) => ({ username: a.username, role: a.role, password: a.password, totp: otpauthUri(a.username, a.totpSecret) })));
+  } finally {
+    await db.destroy();
+  }
 }

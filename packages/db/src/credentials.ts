@@ -1,4 +1,4 @@
-import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 
 const derive = promisify(scrypt) as (password: string, salt: Buffer, length: number) => Promise<Buffer>;
@@ -22,6 +22,21 @@ export function newTotpSecret(): string {
   let bits = '';
   for (const byte of randomBytes(20)) bits += byte.toString(2).padStart(8, '0');
   return bits.match(/.{5}/g)!.map((chunk) => BASE32[parseInt(chunk, 2)]).join('');
+}
+
+export function totpStep(at = Date.now()): number {
+  return Math.floor(at / 30_000);
+}
+
+/** The RFC 6238 six-digit code for one 30-second time step, with HMAC-SHA1 as authenticator apps use. */
+export function totpCode(secret: string, step: number): string {
+  let bits = '';
+  for (const char of secret) bits += BASE32.indexOf(char).toString(2).padStart(5, '0');
+  const key = Buffer.from(bits.match(/.{8}/g)!.map((byte) => parseInt(byte, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(step));
+  const mac = createHmac('sha1', key).update(counter).digest();
+  return String((mac.readUInt32BE(mac[mac.length - 1]! & 0xf) & 0x7fffffff) % 1_000_000).padStart(6, '0');
 }
 
 export function otpauthUri(username: string, secret: string): string {

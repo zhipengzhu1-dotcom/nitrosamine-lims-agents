@@ -4,7 +4,9 @@
   "type": "module",
   "exports": {
     ".": "./src/db.ts",
-    "./credentials": "./src/credentials.ts"
+    "./credentials": "./src/credentials.ts",
+    "./seed": "./src/seed.ts",
+    "./migrate": "./src/migrate.ts"
   },
   "scripts": {
     "migrate": "node src/migrate.ts",
