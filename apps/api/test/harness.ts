@@ -7,7 +7,11 @@ import { seed } from '@lims/db/seed';
 import { sql } from 'kysely';
 import { buildApp } from '../src/app.ts';
 
-export interface Account { id: string; username: string; password: string }
+export interface Account {
+  id: string;
+  username: string;
+  password: string;
+}
 
 export class Client {
   cookie = '';
@@ -52,21 +56,42 @@ export async function startApi(database: string) {
   const people = Object.fromEntries(seeded.map((a): [string, Account] => [a.username.split('.')[0]!, a]));
 
   return {
-    db, superuser, base, labId, methodId, people,
+    db,
+    superuser,
+    base,
+    labId,
+    methodId,
+    people,
     async login(account: Account): Promise<Client> {
       const client = new Client(base);
       const res = await client.post('/api/login', { username: account.username, password: account.password });
       if (res.status !== 200) throw new Error(`login of ${account.username} failed: ${JSON.stringify(res.body)}`);
       return client;
     },
-    async addPerson(username: string, roles: Role[], opts: { trained?: boolean; customerId?: string } = {}): Promise<Account> {
+    async addPerson(
+      username: string,
+      roles: Role[],
+      opts: { trained?: boolean; customerId?: string } = {},
+    ): Promise<Account> {
       const account = { username, password: `${username}-password-for-tests`, id: '' };
       await audited(db, { actor: 'svc:test', role: 'system', reason: 'Add a test person' }, async (tx) => {
-        ({ id: account.id } = await tx.insertInto('person').values({
-          username, display_name: username, password_hash: await hashPassword(account.password), customer_id: opts.customerId ?? null,
-        }).returning('id').executeTakeFirstOrThrow());
-        for (const role of roles) await tx.insertInto('membership').values({ lab_id: labId, person_id: account.id, role }).execute();
-        if (opts.trained) await tx.insertInto('training_record').values({ lab_id: labId, person_id: account.id, method_id: methodId }).execute();
+        ({ id: account.id } = await tx
+          .insertInto('person')
+          .values({
+            username,
+            display_name: username,
+            password_hash: await hashPassword(account.password),
+            customer_id: opts.customerId ?? null,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow());
+        for (const role of roles)
+          await tx.insertInto('membership').values({ lab_id: labId, person_id: account.id, role }).execute();
+        if (opts.trained)
+          await tx
+            .insertInto('training_record')
+            .values({ lab_id: labId, person_id: account.id, method_id: methodId })
+            .execute();
       });
       return account;
     },

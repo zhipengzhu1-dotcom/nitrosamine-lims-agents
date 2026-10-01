@@ -2,7 +2,13 @@
   "name": "@lims/domain",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/steps.ts" },
-  "scripts": { "typecheck": "tsc -p ." },
-  "dependencies": { "@lims/db": "workspace:*" }
+  "exports": {
+    ".": "./src/steps.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@lims/db": "workspace:*"
+  }
 }

@@ -18,8 +18,12 @@ export async function migrate(database: string): Promise<string[]> {
   const client = new pg.Client({ connectionString: databaseUrl(database) });
   await client.connect();
   try {
-    await client.query('create table if not exists public.schema_migration (name text primary key, applied_at timestamptz not null default now())');
-    const done = new Set((await client.query<{ name: string }>('select name from public.schema_migration')).rows.map((r) => r.name));
+    await client.query(
+      'create table if not exists public.schema_migration (name text primary key, applied_at timestamptz not null default now())',
+    );
+    const done = new Set(
+      (await client.query<{ name: string }>('select name from public.schema_migration')).rows.map((r) => r.name),
+    );
     const pending = (await readdir(migrations)).filter((f) => f.endsWith('.sql') && !done.has(f)).sort();
     for (const name of pending) {
       await client.query('begin');

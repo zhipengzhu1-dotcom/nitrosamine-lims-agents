@@ -6,7 +6,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 ## The gate decides what is green
 
-- Run `pnpm check` before you push. It runs oxlint, the typecheck, ruff, shellcheck, and the TypeScript and Python tests. The tests need the local Postgres (`scripts/pg.sh start`), and ruff and shellcheck need `uvx`. The Biome format check and the schema drift check join the gate with items 2 and 6 of the task above.
+- Run `pnpm check` before you push. It runs the Biome format check, oxlint, the typecheck, ruff, shellcheck, and the TypeScript and Python tests. The tests need the local Postgres (`scripts/pg.sh start`), and ruff and shellcheck need `uvx`. The schema drift check joins the gate with item 6 of the task above.
 - GitHub Actions runs `pnpm check` on every pull request and on `main`, with the Playwright walk (`pnpm e2e`) as a second job. The repo's plan has no branch protection, so the person who merges checks that both jobs passed.
 - Biome formats at 120 columns (`pnpm format`). oxlint with tsgolint lints, and its type-aware rules use a TypeScript 7 checker. It also enforces the import direction between packages. `tsconfig.base.json` sets the compiler's strictness. This document does not repeat what those tools check. Read `.oxlintrc.json`, `biome.json` and `ruff.toml`.
 - Keep `main` green. Do not skip or weaken a check to pass the gate. Fix the code, or change the rule as the last section describes.

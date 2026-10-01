@@ -25,6 +25,7 @@ for dir in apps/*/test packages/*/test; do
   fi
 done
 
+pnpm exec biome format .
 pnpm lint
 pnpm typecheck
 git ls-files -co --exclude-standard -z '*.py' | xargs -0 uvx "$RUFF" check

@@ -36,18 +36,29 @@ function App() {
   const [notice, setNotice] = useState('');
   const route = useRoute();
   useEffect(() => {
-    onSignedOut((message) => { setMe(null); setNotice(message); });
+    onSignedOut((message) => {
+      setMe(null);
+      setNotice(message);
+    });
     api<Me>('/api/me').then(setMe, () => setNotice(''));
   }, []);
 
   if (me === undefined) return null;
   if (me === null) return <SignIn notice={notice} onIn={setMe} />;
   switch (route.page) {
-    case 'tests': return <Worklist me={me} />;
-    case 'test': return <TestPage key={route.id} me={me} id={route.id} />;
-    case 'report': return <ReportPage key={route.id} me={me} id={route.id} />;
-    case 'module': return <Placeholder key={route.key} me={me} module={route.key} />;
+    case 'tests':
+      return <Worklist me={me} />;
+    case 'test':
+      return <TestPage key={route.id} me={me} id={route.id} />;
+    case 'report':
+      return <ReportPage key={route.id} me={me} id={route.id} />;
+    case 'module':
+      return <Placeholder key={route.key} me={me} module={route.key} />;
   }
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
