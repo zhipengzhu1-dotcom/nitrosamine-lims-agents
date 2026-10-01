@@ -47,12 +47,13 @@ Lab-owned, `lab_id NOT NULL` and first in every primary key, children referencin
 |---|---|---|
 | `packages/db` | migrations, migrate, Kysely + `audited()` write path, credentials, seed | 550 |
 | `packages/domain` + `apps/api` | step registry and guards; Fastify, sessions, `ActorContext`, step endpoint, signing, views | 1,200 |
-| `apps/web` | login, worklist, Test page with Bench Rail and Audit Trail panel, placeholder modules | 1,400 |
+| `apps/web` | login, worklist, Test page with Bench Rail and Audit Trail panel, Test Report, placeholder modules | 1,400 |
 | tests (any `test/` folder) | real Postgres and real HTTP, no mocks | 700 |
+| `apps/web/e2e` | one Playwright walk of the whole chain through the real UI, API and Postgres | 200 |
 | `deploy/` | Compose, Caddy, Cloudflare Tunnel, runbook script | 200 |
 | config and `scripts/` | workspace, tsconfig, `loc.sh`, `pg.sh` | 150 |
 
-Planned 4,200. Stop and raise at 4,500. Generated `packages/db/src/schema.ts`, the lockfile and docs are not counted.
+Planned 4,400. Stop and raise at 4,500. Generated `packages/db/src/schema.ts`, the lockfile and docs are not counted.
 
 ## Left out on purpose
 

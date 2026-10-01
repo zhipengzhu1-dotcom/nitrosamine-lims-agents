@@ -1,3 +1,5 @@
 node_modules/
 .pg/
 dist/
+test-results/
+playwright-report/

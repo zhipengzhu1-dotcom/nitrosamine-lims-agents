@@ -10,6 +10,7 @@ git ls-files -co --exclude-standard | while IFS= read -r f; do
   esac
   [ -f "$f" ] && grep -Iq . "$f" || continue
   case "$f" in
+    */e2e/*) area=e2e ;;
     */test/* | *.test.ts | *.test.tsx) area=tests ;;
     apps/* | packages/*) area=$(echo "$f" | cut -d/ -f2) ;;
     deploy/*) area=deploy ;;

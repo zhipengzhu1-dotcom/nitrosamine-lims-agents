@@ -7,7 +7,8 @@
   "scripts": {
     "loc": "scripts/loc.sh",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "e2e": "pnpm --filter @lims/web e2e"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
