@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, test } from 'node:test';
+import { after, before, it } from 'node:test';
 import { sql } from 'kysely';
 import pg from 'pg';
 import { audited, createDb, databaseUrl } from '../src/db.ts';
@@ -33,7 +33,7 @@ function refusedWith(code: string) {
   return (error: unknown) => (error as { code?: string }).code === code;
 }
 
-test('an audited write records who made it, in which role, why, and the old and new row', async () => {
+it('an audited write records who made it, in which role, why, and the old and new row', async () => {
   const ctx = { actor: 'person:lena', role: 'LabManager', reason: 'Correct the Customer name' };
   const customer = await audited(app, ctx, async (tx) => {
     const { id } = await tx
@@ -60,7 +60,7 @@ test('an audited write records who made it, in which role, why, and the old and 
   assert.equal((entry.new_row as { name: string }).name, 'Acme Labs');
 });
 
-test('a write without a reason is refused and leaves nothing behind', async () => {
+it('a write without a reason is refused and leaves nothing behind', async () => {
   await assert.rejects(
     audited(app, { actor: 'person:lena', role: 'LabManager', reason: '' }, (tx) =>
       tx.insertInto('customer').values({ name: 'No Reason Ltd' }).execute(),
@@ -76,7 +76,7 @@ test('a write without a reason is refused and leaves nothing behind', async () =
   assert.deepEqual(left, []);
 });
 
-test('audit entries cannot be updated or deleted, by the app or by the superuser', async () => {
+it('audit entries cannot be updated or deleted, by the app or by the superuser', async () => {
   for (const statement of [
     'update lims.audit_entry set reason = $1',
     'delete from lims.audit_entry where reason <> $1',
@@ -87,7 +87,7 @@ test('audit entries cannot be updated or deleted, by the app or by the superuser
   await assert.rejects(app.deleteFrom('audit_entry').execute(), refusedWith('42501'));
 });
 
-test("the Lab's chain verifies, and an entry tampered with as superuser is found at its seq", async () => {
+it("the Lab's chain verifies, and an entry tampered with as superuser is found at its seq", async () => {
   await audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
     tx.updateTable('lab').set({ name: 'Test Laboratory' }).where('lab_id', '=', labId).execute(),
   );
@@ -102,7 +102,7 @@ test("the Lab's chain verifies, and an entry tampered with as superuser is found
   assert.equal(await verify(), '2');
 });
 
-test('a lab-owned row without a lab_id is refused', async () => {
+it('a lab-owned row without a lab_id is refused', async () => {
   for (const table of LAB_TABLES) {
     await assert.rejects(
       superuser.query(`insert into lims.${table} default values`),

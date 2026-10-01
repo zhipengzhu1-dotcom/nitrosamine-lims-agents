@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { it } from 'node:test';
 import { sql } from 'kysely';
 import { ABSOLUTE_LIMIT_MS, IDLE_LIMIT_MS, LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
 import { Client, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_auth_test');
 
-test('a wrong password or an unknown username gives no session, and the right password does', async () => {
+it('a wrong password or an unknown username gives no session, and the right password does', async () => {
   const rui = api.people.rui!;
   const client = new Client(api.base);
   assert.equal((await client.post('/api/login', { username: rui.username, password: 'not-the-password' })).status, 401);
@@ -18,7 +18,7 @@ test('a wrong password or an unknown username gives no session, and the right pa
   assert.equal((await signedIn.get('/api/me')).body.person.username, rui.username);
 });
 
-test(`the ${LOCKOUT_AFTER_FAILURES}th failed login locks the account and ends its sessions`, async () => {
+it(`the ${LOCKOUT_AFTER_FAILURES}th failed login locks the account and ends its sessions`, async () => {
   const ada = api.people.ada!;
   const fail = () => new Client(api.base).post('/api/login', { username: ada.username, password: 'not-the-password' });
   for (let i = 1; i < LOCKOUT_AFTER_FAILURES; i++) assert.equal((await fail()).status, 401);
@@ -30,7 +30,7 @@ test(`the ${LOCKOUT_AFTER_FAILURES}th failed login locks the account and ends it
   assert.equal((await session.get('/api/me')).status, 401);
 });
 
-test('a session ends when idle too long, when too old, and on logout', async () => {
+it('a session ends when idle too long, when too old, and on logout', async () => {
   const sessions = {
     idle: await api.login(api.people.samir!),
     old: await api.login(api.people.lena!),
