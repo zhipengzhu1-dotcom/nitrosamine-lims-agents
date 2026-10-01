@@ -63,7 +63,7 @@ _Avoid_: Admin, host, IT
 ### Sample chain
 
 **Submission**:
-One request from a Customer to the company, listing the Samples sent and the Tests wanted on each.
+One request from a Customer to the company, listing the Samples sent and the Tests wanted on each. It is numbered company-wide when submitted, such as `SUB-2026-000045`.
 _Avoid_: Order, request, job
 
 **Acceptance**:
@@ -127,11 +127,11 @@ One manufactured quantity of a Product, identified by the manufacturer's lot num
 _Avoid_: Batch
 
 **Sample**:
-The smallest identified portion of material that gets its own results. Material with a different storage history is a different Sample, so one Lot pulled at a stability time point in two pack sizes is two Samples.
+The smallest identified portion of material that gets its own results. Material with a different storage history is a different Sample, so one Lot pulled at a stability time point in two pack sizes is two Samples. Its number carries the Lab's code and the Lab's local year, such as `RD-S-2026-000123`; numbers in a Lab never repeat and never skip.
 _Avoid_: Specimen, item
 
 **Container**:
-A physical bottle, vial or bag received for a Sample; used for custody and storage, never for results. Stability units are Containers: placed into a Study Condition, then moved into a Pull's Sample.
+A physical bottle, vial or bag received for a Sample; used for custody and storage, never for results. Stability units are Containers: placed into a Study Condition, then moved into a Pull's Sample. Its number is its Sample's number with a suffix, such as `RD-S-2026-000123-C02`.
 _Avoid_: Vial (for received material), unit
 
 **Substance**:
@@ -239,7 +239,7 @@ Moving a Sample, equipment or stock from one Lab to another, recorded as a dispa
 _Avoid_: Move, relocation
 
 **Test Report**:
-The signed document a Lab issues to a Customer with Reportable Results. Its printed title is always "Test Report", never "Certificate of Analysis". The Released signature is given on the Record Version holding the content the report prints, and the issued document is made from it once, at release, with that signature printed on it; every later copy is that same document. Once released it changes only through a Deviation: superseded by an Amended Report, or Withdrawn, by a Withdrawal notice, when its results cannot be corrected. Each of those takes its own number and cites the original's.
+The signed document a Lab issues to a Customer with Reportable Results. Its printed title is always "Test Report", never "Certificate of Analysis". The Released signature is given on the Record Version holding the content the report prints, and the issued document is made from it once, at release, with that signature printed on it; every later copy is that same document. Once released it changes only through a Deviation: superseded by an Amended Report, or Withdrawn, by a Withdrawal notice, when its results cannot be corrected. Each of those takes its own number and cites the original's. A Test Report is numbered when its Draft is created, such as `RD-R-2026-000045`, and a Draft that never issues keeps its number on record.
 _Avoid_: CoA, certificate, report
 
 ### Stability
@@ -493,7 +493,7 @@ One saved state of a record that can be signed: the record's canonical content, 
 _Avoid_: Revision, edit
 
 **Audit Trail**:
-The permanent, system-generated history of every change to records, accounts and configuration, and of every Access Event: who (with role and Lab), what (old and new value), when, and why. A normal forward step in a workflow, such as Receive, Performed or Released, records its action name as the reason; a step off that path, such as a Return, rejection, Hold, reassignment, cancellation, Reprocessing or account unlock, and any change to a saved value or setting, takes a reason picked from a list. Nobody can edit or switch it off.
+The permanent, system-generated history of every change to records, accounts and configuration, and of every Access Event: who (with role and Lab), what (old and new value), when, and why. A normal forward step in a workflow, such as Receive, Performed or Released, records its action name as the reason; a step off that path, such as a Return, rejection, Hold, reassignment, cancellation, Reprocessing or account unlock, and any change to a saved value or setting, takes a reason picked from a list. Every entry carries the transaction ID of the change that wrote it, so entries written together read as one change. Nobody can edit or switch it off.
 _Avoid_: Log, history, change log
 
 **Access Event**:

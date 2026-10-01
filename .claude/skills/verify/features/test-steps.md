@@ -15,7 +15,7 @@ Each role takes one step from the rail on the Test page: Receive, then Assign, E
 
 ## How to get to it (user POV)
 
-- Open a Test from the worklist by its Sample number link (`/^RD-S\d{5}$/`), as the role that takes the next step, and press the one step button in the rail.
+- Open a Test from the worklist by its Sample number link (`/^RD-S-\d{4}-\d{6}$/`), as the role that takes the next step, and press the one step button in the rail.
 
 ## Driving it with drive.ts
 

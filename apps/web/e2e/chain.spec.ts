@@ -197,10 +197,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await page.getByRole('button', { name: 'Release' }).click();
   await sign(page, 'Released');
   await railSays(page, 'now Reported');
-  const reportLink = page.getByRole('link', { name: /^RD-R\d{5}$/ });
+  const reportLink = page.getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ });
   await atLeast(reportLink, 44, 44);
   await reportLink.click();
-  await expect(page.getByRole('heading', { name: /Test Report RD-R\d{5}/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Test Report RD-R-\d{4}-\d{6}/ })).toBeVisible();
   await expect(page.getByRole('cell', { name: '0.0300', exact: true })).toBeVisible();
   for (const [meaning, signer] of [
     ['Performed', 'Ana Ferreira'],

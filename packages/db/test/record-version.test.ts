@@ -45,11 +45,6 @@ before(async () => {
   await dropDatabase(DATABASE);
   await migrate(server, DATABASE);
   await audited(app, { ...svc, reason: 'Set up the Lab' }, async (tx) => {
-    ({ labId: fixture.labId } = await tx
-      .insertInto('lab')
-      .values({ code: 'RV', name: 'Versions Lab' })
-      .returning('labId')
-      .executeTakeFirstOrThrow());
     ({ id: fixture.customerId } = await tx
       .insertInto('customer')
       .values({ name: 'Versions Customer (fictional)' })
@@ -67,8 +62,13 @@ before(async () => {
       .executeTakeFirstOrThrow());
     ({ id: fixture.submissionId } = await tx
       .insertInto('submission')
-      .values({ customerId: fixture.customerId, submittedBy: fixture.personId })
+      .values({ customerId: fixture.customerId, submittedBy: fixture.personId, number: 'SUB-2026-000001' })
       .returning('id')
+      .executeTakeFirstOrThrow());
+    ({ labId: fixture.labId } = await tx
+      .insertInto('lab')
+      .values({ code: 'RV', name: 'Versions Lab', timeZone: 'UTC' })
+      .returning('labId')
       .executeTakeFirstOrThrow());
   });
 });
@@ -344,9 +344,6 @@ async function sliceChain(client: pg.Client) {
   await client.query(AUDIT_CONTEXT);
   const one = async <R extends pg.QueryResultRow>(statement: string, values: unknown[] = []) =>
     (await client.query<R>(statement, values)).rows[0] ?? assert.fail(statement);
-  const { lab_id: lab } = await one<{ lab_id: string }>(
-    `insert into lims.lab (code, name) values ('SL', 'Slice Lab') returning lab_id`,
-  );
   const { id: customer } = await one<{ id: string }>(
     `insert into lims.customer (name) values ('Slice Customer (fictional)') returning id`,
   );
@@ -357,8 +354,11 @@ async function sliceChain(client: pg.Client) {
     `insert into lims.method (code, version, title) values ('SL-MTH-0001', '1', 'Slice Method') returning id`,
   );
   const { id: submission } = await one<{ id: string }>(
-    `insert into lims.submission (customer_id, submitted_by) values ($1, $2) returning id`,
+    `insert into lims.submission (customer_id, submitted_by, number) values ($1, $2, 'SUB-2026-000001') returning id`,
     [customer, person],
+  );
+  const { lab_id: lab } = await one<{ lab_id: string }>(
+    `insert into lims.lab (code, name, time_zone) values ('SL', 'Slice Lab', 'UTC') returning lab_id`,
   );
   const signedContent = (testId: string, sample: string, value: string, report: string | null) =>
     JSON.stringify({
@@ -439,7 +439,7 @@ describe('the migration moves the thin slice’s signed content onto Record Vers
     const dir = await mkdtemp(join(tmpdir(), 'lims-slice-migrations-'));
     copies.push(dir);
     await cp(migrations, dir, { recursive: true });
-    for (const name of await readdir(dir)) if (name >= '0005') await rm(join(dir, name));
+    for (const name of await readdir(dir)) if (name >= '0006') await rm(join(dir, name));
     await dropDatabase(SLICE);
     await migrate(server, SLICE, pathToFileURL(`${dir}/`));
     client = new pg.Client({ connectionString: databaseUrl(server, SLICE) });

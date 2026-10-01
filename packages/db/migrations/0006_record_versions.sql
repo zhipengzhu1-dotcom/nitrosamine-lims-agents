@@ -143,6 +143,12 @@ alter table lims.signature add column record_version_id uuid;
 -- the one time Signature rows are updated; the Audit Trail records it under svc:migrate.
 select set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 'system', true),
        set_config('lims.reason', 'Move the thin slice''s signed content onto Record Versions', true);
+-- The backfill writes to every Lab's chain in one statement, so it declares them all before the first write.
+do $$ begin
+  if exists (select from lims.lab) then
+    perform lims.lock_chains(variadic (select array_agg(lab_id::text) from lims.lab));
+  end if;
+end $$;
 insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
 select lab_id, record_table, record_id,
        dense_rank() over (partition by lab_id, record_table, record_id order by min(signed_at)), 0, content
