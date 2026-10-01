@@ -16,6 +16,7 @@ import {
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import { buildApp } from '../src/app.ts';
+import { STATUS } from '../src/scope.ts';
 
 const { server } = dbConfig();
 
@@ -52,7 +53,10 @@ export class Client {
       if (session) this.cookie = session[0];
     }
     const answer = readReply(route, res.status, await res.json());
-    return answer.kind === 'breach' ? assert.fail(answer.problem) : answer;
+    if (answer.kind === 'breach') assert.fail(answer.problem);
+    if (answer.kind === 'refused')
+      assert.equal(answer.status, STATUS[answer.body.kind], `the status of a ${answer.body.kind} refusal`);
+    return answer;
   }
 }
 

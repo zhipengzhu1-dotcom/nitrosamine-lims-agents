@@ -129,21 +129,25 @@ const auditTrailVerification = Type.Object({
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /**
  * Why the LIMS did not do what was asked, as one closed list the API, the web and the tests share, so that the web
- * branches on the kind and never on the sentence. The API chooses each kind's status. `failure` is not a refusal but
- * an unexpected failure; it is listed so that every non-2xx body has the one shape below.
+ * branches on the kind and never on the sentence. The API chooses each kind's status. `malformed` covers every way
+ * a request fails its schema except a field the closed schema does not name (`unknownField`), and unparseable JSON
+ * and a wrong media type. `badCredentials` is the one answer to every sign-in failure; `accountLocked` comes only
+ * after the right password. `noSession` covers no session presented and a session that has ended. `stale` asks the
+ * person to reload; `state` says the step does not apply. `notFound` also covers an unknown route. `failure` is not
+ * a refusal but an unexpected failure, listed so that every non-2xx body has the one shape below.
  */
 export const refusalKinds = [
-  'unknownField', // the body names a field the route's closed schema does not
-  'malformed', // any other way a request fails its schema, unparseable JSON, or a wrong media type
-  'badCredentials', // the username and password together do not prove the person, at sign-in or at signing
-  'noSession', // none was presented, or the one presented has ended
-  'accountLocked', // the password was right and the account is locked
-  'role', // the person lacks the role or the Membership the action needs
-  'guard', // a step registry guard refused
-  'state', // the step does not start from the Test's state
-  'stale', // what the caller saw has moved on; reload before acting
-  'notFound', // no such record in this Lab, or no such route
-  'failure', // the LIMS could not finish; the message carries the Admin reference
+  'unknownField',
+  'malformed',
+  'badCredentials',
+  'noSession',
+  'accountLocked',
+  'role',
+  'guard',
+  'state',
+  'stale',
+  'notFound',
+  'failure',
 ] as const;
 export type RefusalKind = (typeof refusalKinds)[number];
 export const isRefusalKind = (value: unknown): value is RefusalKind => refusalKinds.some((k) => k === value);

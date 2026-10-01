@@ -19,11 +19,11 @@ const authAudit = (person: Person, reason: string) => ({
   role: 'authentication',
   reason,
 });
-const notValid = () => refuse(401, 'the credentials are not valid');
+const notValid = () => refuse('badCredentials', 'the credentials are not valid');
 
 /** Checks the password. A failure counts toward lockout and a success clears the count. */
 async function prove(db: Kysely<DB>, person: Person, password: string, reason: string): Promise<void> {
-  if (person.lockedAt) refuse(423, 'this account is locked');
+  if (person.lockedAt) refuse('accountLocked', 'this account is locked');
   if (await verifyPassword(password, person.passwordHash)) {
     if (person.failedLogins > 0) {
       await audited(db, authAudit(person, reason), (tx) =>
@@ -45,7 +45,7 @@ async function prove(db: Kysely<DB>, person: Person, password: string, reason: s
   notValid();
 }
 
-/** Proves the signer before a Signature is written: a wrong password refuses with 401 and counts toward lockout. */
+/** Proves the signer before a Signature is written: a wrong password refuses as badCredentials and counts toward lockout. */
 export async function reauthenticate(db: Kysely<DB>, ctx: ActorContext, password: string, step: string): Promise<void> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', ctx.person.id).executeTakeFirstOrThrow();
   await prove(db, person, password, `Re-authenticate to sign ${step}`);
@@ -75,10 +75,10 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
       .where('tokenHash', '=', hashToken(token))
       .where('endedAt', 'is', null)
       .executeTakeFirst());
-  if (!session) return refuse(401, 'sign in first');
+  if (!session) return refuse('noSession', 'sign in first');
   if (session.expired) {
     await db.updateTable('session').set({ endedAt: sql`now()` }).where('id', '=', session.id).execute();
-    refuse(401, 'the session has ended; sign in again');
+    refuse('noSession', 'the session has ended; sign in again');
   }
   await db.updateTable('session').set({ lastSeenAt: sql`now()` }).where('id', '=', session.id).execute();
   const roles = await db
@@ -116,7 +116,7 @@ export function loginRoutes(app: App, db: Kysely<DB>): void {
           .select('labId')
           .where('personId', '=', person.id)
           .orderBy('labId')
-          .executeTakeFirst()) ?? refuse(403, 'this account belongs to no Lab');
+          .executeTakeFirst()) ?? refuse('role', 'this account belongs to no Lab');
       const token = randomBytes(32).toString('base64url');
       await db
         .insertInto('session')

@@ -40,7 +40,8 @@ function snapshot(row: Json | null): RowSnapshot | null {
 }
 
 async function testView(scope: Scope, id: string) {
-  const test = (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ?? refuse(404, 'no such Test');
+  const test =
+    (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ?? refuse('notFound', 'no such Test');
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
@@ -126,14 +127,16 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
     ...routes.report,
     handler: async (req) => {
       const { report, test, result, signatures } = await testView(labScope(db, req.actor), req.params.id);
-      return report ? { report, test, result, signatures } : refuse(404, 'this Test has no released Test Report');
+      return report
+        ? { report, test, result, signatures }
+        : refuse('notFound', 'this Test has no released Test Report');
     },
   });
 
   app.route({
     ...routes.verifyAuditTrail,
     handler: async (req) => {
-      if (!req.actor.roles.includes('QA')) refuse(403, 'verifying the Audit Trail is a QA action');
+      if (!req.actor.roles.includes('QA')) refuse('role', 'verifying the Audit Trail is a QA action');
       return labScope(db, req.actor).verifyAuditTrail();
     },
   });

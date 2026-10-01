@@ -1,12 +1,29 @@
-import { pathOf, type Route, type RouteInput, type RouteReply, routes } from '@lims/domain';
+import {
+  isRefusalKind,
+  pathOf,
+  type RefusalKind,
+  type Route,
+  type RouteInput,
+  type RouteReply,
+  routes,
+} from '@lims/domain';
 import { useEffect, useRef, useState } from 'react';
 
 export class Refused extends Error {
-  status: number;
-  constructor(status: number, message: string) {
+  kind: RefusalKind;
+  constructor(kind: RefusalKind, message: string) {
     super(message);
-    this.status = status;
+    this.kind = kind;
   }
+}
+
+/** The Refused a non-2xx answer carries. A body outside the shape (a proxy's page, an empty body) is a `failure` with the status text. */
+function refusedBy(json: unknown, fallback: string): Refused {
+  const body: object = typeof json === 'object' && json !== null ? json : {};
+  return new Refused(
+    'kind' in body && isRefusalKind(body.kind) ? body.kind : 'failure',
+    'message' in body && typeof body.message === 'string' ? body.message : fallback,
+  );
 }
 
 let signedOut = (_message: string) => {};
@@ -14,10 +31,7 @@ export const onSignedOut = (fn: (message: string) => void) => {
   signedOut = fn;
 };
 
-/**
- * Calls a route and gives its reply. A 401 returns to sign-in once `/api/me` confirms the session is gone,
- * because a wrong password on a signature is also a 401 and leaves the session open.
- */
+/** Calls a route and gives its reply. A `noSession` refusal returns to sign-in before it is thrown; no second request decides it. */
 export function api<R extends Route>(route: R, ...request: RouteInput<R>): Promise<RouteReply<R>> {
   const [input] = request;
   return call(route, pathOf(route, input), input);
@@ -33,17 +47,9 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
   const json: unknown = await res.json().catch(() => ({}));
   // oxlint-disable-next-line typescript/consistent-type-assertions -- a wire body has no static type; the API serializes every 2xx through this route's reply schema, and the web does not repeat the check
   if (res.ok) return json as RouteReply<R>;
-  const message =
-    typeof json === 'object' && json !== null && 'message' in json && typeof json.message === 'string'
-      ? json.message
-      : res.statusText;
-  if (
-    res.status === 401 &&
-    route.url !== routes.login.url &&
-    (route.url === routes.me.url || !(await fetch(routes.me.url)).ok)
-  )
-    signedOut(message);
-  throw new Refused(res.status, message);
+  const refused = refusedBy(json, res.statusText);
+  if (refused.kind === 'noSession') signedOut(refused.message);
+  throw refused;
 }
 
 export async function signOut(): Promise<void> {
