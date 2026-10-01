@@ -202,7 +202,7 @@ test('the whole sample chain through the real UI, with a refusal on screen and a
   const bob = await atPc(browser, 'bob', 'Review desk RD-120');
   await bob.goto(testUrl);
   await bob.getByRole('link', { name: `Review Run ${runNumber}` }).click();
-  await reviewAndSign(bob, 'bob', `Run ${runNumber}`, 4);
+  await reviewAndSign(bob, 'bob', `Run ${runNumber}`, 2);
 
   // 7b. Ann signs the Test Performed; its verdicts stop being Provisional.
   await ann.goto(testUrl);
@@ -214,8 +214,8 @@ test('the whole sample chain through the real UI, with a refusal on screen and a
   // 8. Ann, who also holds Reviewer, may not review the Test she performed: the prompt says why.
   await ann.goto(testUrl);
   await ann.getByRole('link', { name: `Review ${t1}` }).click();
-  await press(ann, `Open a Review of ${t1}`, 'Opened your Review on checklist CL-TEST@1.');
-  await tickAll(ann, 4);
+  await press(ann, `Open a Review of ${t1}`, 'Opened your Review on checklist CL-TEST@2.');
+  await tickAll(ann, 2);
   await rail(ann).getByRole('button', { name: `Sign ${t1} as Reviewed` }).click();
   const refusedSheet = ann.getByRole('dialog');
   await expect(refusedSheet.getByRole('alert')).toContainText(/cannot sign this as Reviewed/);
@@ -230,7 +230,7 @@ test('the whole sample chain through the real UI, with a refusal on screen and a
   await bob.getByRole('link', { name: `Review ${t1}` }).click();
   const trail = bob.getByRole('region', { name: `Audit Trail of ${t1}` });
   await expect(trail.getByText('P1 weight', { exact: true }).first()).toBeVisible();
-  await reviewAndSign(bob, 'bob', t1, 4);
+  await reviewAndSign(bob, 'bob', t1, 2);
   await shoot(bob, 'review-reviewer');
 
   // 10. Bob drafts the report and sends it to QA.
@@ -275,10 +275,11 @@ test('the whole sample chain through the real UI, with a refusal on screen and a
 });
 
 async function tickAll(page: Page, n: number) {
+  const ticks = page.getByRole('button', { name: /^Tick: / });
+  await expect(ticks).toHaveCount(n);
   for (let i = 0; i < n; i++) {
-    const tick = page.getByRole('button', { name: /^Tick: / }).first();
-    await tick.click();
-    await expect(page.getByRole('button', { name: /^Tick: / })).toHaveCount(n - i - 1);
+    await ticks.first().click();
+    await expect(ticks).toHaveCount(n - i - 1);
   }
 }
 
