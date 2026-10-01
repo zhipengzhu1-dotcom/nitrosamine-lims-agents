@@ -39,13 +39,13 @@ const text = Type.String({ minLength: 1, maxLength: 200 });
 export const decimalPattern = '-?[0-9]+(\\.[0-9]+)?';
 const decimal = Type.String({ pattern: `^${decimalPattern}$` });
 const calendarDate = Type.String({ format: 'date' });
+declare const instantBrand: unique symbol;
 /**
- * A point in time. On the wire, and so in the web and the tests, it is an ISO 8601 UTC string. An API handler gives a
- * Date, which Fastify's serializer writes with toISOString; the codec's functions never run on a reply.
+ * A point in time: on the wire, and so in the web and the tests, the ISO 8601 UTC string the database clock produced.
+ * The API hands Fastify the Date that Kysely returns, and Fastify writes it with toISOString.
  */
-const instant = Type.Codec(Type.String({ format: 'date-time' }))
-  .Decode((iso) => new Date(iso))
-  .Encode((at: Date) => at.toISOString());
+export type Instant = string & { readonly [instantBrand]: true };
+const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' }));
 const nullable = <S extends TSchema>(schema: S) => Type.Union([schema, Type.Null()]);
 const closed = { additionalProperties: false } as const;
 

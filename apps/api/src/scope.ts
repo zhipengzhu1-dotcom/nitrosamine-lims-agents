@@ -1,5 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import { audited, type DB } from '@lims/db';
 import type { ActorContext, Role } from '@lims/domain';
+import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import {
   type Insertable,
   type Kysely,
@@ -15,6 +17,24 @@ type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session'>;
 /** The one place a refusal becomes an HTTP status: Fastify writes the thrown error as the route's 4xx body. */
 export function refuse(statusCode: number, message: string): never {
   throw Object.assign(new Error(message), { statusCode });
+}
+
+const READ_ALOUD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/** Eight Crockford base32 characters from 40 random bits, so a reference is unlikely to repeat, even across restarts of the API. */
+export function requestReference(): string {
+  return Array.from(randomBytes(8), (byte) => READ_ALOUD.charAt(byte % 32)).join('');
+}
+
+/** A refusal keeps its own status and message; any other failure is logged with its cause and answered with a reference only. */
+export function answerThrown(error: FastifyError, req: FastifyRequest, reply: FastifyReply) {
+  if (typeof error.statusCode === 'number' && error.statusCode < 500) throw error;
+  req.log.error({ err: error }, 'unexpected failure');
+  return reply.code(500).send({
+    statusCode: 500,
+    error: 'Internal Server Error',
+    message: `the LIMS could not finish this request; reload to see what was saved, and give the Admin reference ${req.id}`,
+  });
 }
 
 function inLab(q: Kysely<DB>, labId: string) {
@@ -45,12 +65,14 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     ctx,
     ...inLab(db, labId),
     auditTrail: () => db.selectFrom('auditEntry').where('chain', '=', labId),
-    verifyChain: async (chain: 'lab' | 'company') =>
-      (
-        await db
-          .selectNoFrom(sql<string | null>`lims.verify_chain(${chain === 'lab' ? labId : 'company'})`.as('broken'))
-          .executeTakeFirstOrThrow()
-      ).broken,
+    verifyAuditTrail: () =>
+      db
+        .selectNoFrom([
+          sql<Date>`now()`.as('at'),
+          sql<string | null>`lims.verify_chain(${labId})`.as('lab'),
+          sql<string | null>`lims.verify_chain('company')`.as('company'),
+        ])
+        .executeTakeFirstOrThrow(),
     write: <R>(reason: string, role: Role, fn: (q: LabQueries) => Promise<R>) =>
       audited(db, { actor: `person:${ctx.person.username}`, role, reason }, (tx) => fn(inLab(tx, labId))),
   };

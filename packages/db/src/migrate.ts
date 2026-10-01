@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import pg from 'pg';
+import { dbConfig } from './config.ts';
 import { databaseUrl } from './db.ts';
 
 const migrations = new URL('../migrations/', import.meta.url);
@@ -41,8 +42,8 @@ const REFUSAL = [
  * Creates the database if it is missing, refuses before applying anything when an applied migration's file changed or
  * is gone, then applies each pending file as the superuser and records the SHA-256 of its bytes.
  */
-export async function migrate(database: string, folder: URL = migrations): Promise<string[]> {
-  const admin = new pg.Client({ connectionString: databaseUrl('postgres') });
+export async function migrate(server: string, database: string, folder: URL = migrations): Promise<string[]> {
+  const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   try {
     // Runners on one cluster take turns, because the migrations create cluster-wide roles. An advisory lock belongs
@@ -51,7 +52,7 @@ export async function migrate(database: string, folder: URL = migrations): Promi
     const files = await readMigrations(folder);
     const { rowCount } = await admin.query('select from pg_database where datname = $1', [database]);
     if (!rowCount) await admin.query(`create database ${pg.escapeIdentifier(database)}`);
-    return await applyPending(database, files);
+    return await applyPending(databaseUrl(server, database), database, files);
   } finally {
     await admin.end();
   }
@@ -79,8 +80,8 @@ function diverged(applied: Applied[], files: Map<string, Migration>): string[] {
   });
 }
 
-async function applyPending(database: string, files: Migration[]): Promise<string[]> {
-  const client = new pg.Client({ connectionString: databaseUrl(database) });
+async function applyPending(url: string, database: string, files: Migration[]): Promise<string[]> {
+  const client = new pg.Client({ connectionString: url });
   await client.connect();
   try {
     const byName = new Map(files.map((file) => [file.name, file]));
@@ -125,7 +126,7 @@ async function applyPending(database: string, files: Migration[]): Promise<strin
 }
 
 if (import.meta.main) {
-  const database = process.env.LIMS_DB ?? 'lims';
-  if (process.argv.includes('--print-url')) console.log(databaseUrl(database));
-  else console.log(`applied to ${database}:`, (await migrate(database)).join(', ') || 'nothing pending');
+  const { server, database } = dbConfig();
+  if (process.argv.includes('--print-url')) console.log(databaseUrl(server, database));
+  else console.log(`applied to ${database}:`, (await migrate(server, database)).join(', ') || 'nothing pending');
 }

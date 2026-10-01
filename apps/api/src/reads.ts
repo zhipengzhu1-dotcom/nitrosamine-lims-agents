@@ -134,8 +134,7 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
     ...routes.verifyAuditTrail,
     handler: async (req) => {
       if (!req.actor.roles.includes('QA')) refuse(403, 'verifying the Audit Trail is a QA action');
-      const scope = labScope(db, req.actor);
-      return { at: new Date(), lab: await scope.verifyChain('lab'), company: await scope.verifyChain('company') };
+      return labScope(db, req.actor).verifyAuditTrail();
     },
   });
 }

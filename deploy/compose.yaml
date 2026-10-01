@@ -28,9 +28,9 @@ services:
 
   api:
     <<: *app
-    environment: { LIMS_DB: lims, LIMS_PG_USER: lims_app, NODE_ENV: production, HOST: 0.0.0.0, PORT: "3000" }
+    environment: { LIMS_DB: lims, LIMS_PG_USER: lims_app, NODE_ENV: production, HOST: 0.0.0.0, PORT: "3000", LIMS_LOG: "1" }
     secrets: [lims_app]
-    command: ["node", "apps/api/src/app.ts"]
+    command: ["node", "apps/api/src/main.ts"]
     depends_on: { migrate: { condition: service_completed_successfully } }
     restart: unless-stopped
 

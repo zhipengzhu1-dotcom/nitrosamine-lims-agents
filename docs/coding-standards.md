@@ -46,7 +46,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 - Never hold a measured value or a limit in a JavaScript `number`. Use a decimal string in TypeScript and `text` or `numeric` in Postgres, because a float loses the digits as typed.
 - Do arithmetic on values in one domain module, so that rounding ([ADR 0006](adr/0006-acceptance-criteria-round-the-value-once-to-the-limits-written-decimals.md)) has one implementation. Choose the decimal library when the first calculation is built.
-- Take every timestamp that is stored on a row from the database clock, never from `new Date()` or `Date.now()`, because the API host's clock is not the record's clock.
+- Take every timestamp that is stored on a row from the database clock, because the API host's clock is not the record's clock.
 - Send a time over HTTP as an ISO 8601 UTC string, and format it for display in one web function, so that every screen shows time the same way.
 
 ## The database refuses bad data
@@ -67,7 +67,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 ## Packages stay apart
 
-- Keep `@lims/domain` free of I/O: no `process.env`, no `fetch`, nothing that reaches outside the process, because the browser runs it too.
+- Keep `@lims/domain` free of I/O: no `fetch`, nothing that reaches outside the process, because the browser runs it too.
 - Keep business rules out of the web, because a rule in the web is a rule that the API does not check. What a person may do comes from the step registry or from the API.
 - Reach another package only by its name, never by a relative path, because the lint rule sees only paths that spell `packages/` or `apps/`.
 - Bump dependency versions in the monthly patch round that ADR 0002 sets for image digests, so that upgrades arrive together and get one test pass.
@@ -75,7 +75,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 ## Configuration is read once, and logs carry no record content
 
-- Read the environment once, at process start, in one config module for each process, so that a missing value stops the process at start and not at the first request that needs it. No other file touches `process.env`.
+- Read the environment once, at process start, in one config module for each process, so that a missing value stops the process at start and not at the first request that needs it.
 - Give a secret no default in code, and never commit one, because a default secret ends up in a real deployment. A secret arrives through a file or a variable that the deploy config names, as `deploy/README.md` describes.
 - Log record IDs and step names. Never log a request body, a password, a token or record content, because signing requests carry passwords.
 - The seed script prints the demo password. ADR 0002 documents this as a demo exception.

@@ -6,8 +6,10 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
-import { databaseUrl } from '../src/db.ts';
+import { databaseUrl, dbConfig } from '../src/db.ts';
 import { migrate, runnerLock } from '../src/migrate.ts';
+
+const { server } = dbConfig();
 
 const repoMigrations = new URL('../migrations/', import.meta.url);
 const migrations = await sqlFiles(repoMigrations);
@@ -21,7 +23,7 @@ async function asSuperuser<R extends pg.QueryResultRow>(
   statement: string,
   values: unknown[] = [],
 ): Promise<R[]> {
-  const superuser = new pg.Client({ connectionString: databaseUrl(database) });
+  const superuser = new pg.Client({ connectionString: databaseUrl(server, database) });
   await superuser.connect();
   try {
     return (await superuser.query<R>(statement, values)).rows;
@@ -42,7 +44,7 @@ async function dropDatabase(database: string): Promise<void> {
 /** Starts one runner for each entry at the same moment, on databases that do not exist yet, and waits for them all. */
 async function migrateAtOnce(databases: string[]): Promise<string[][]> {
   for (const database of new Set(databases)) await dropDatabase(database);
-  const runners = databases.map((database) => migrate(database));
+  const runners = databases.map((database) => migrate(server, database));
   await Promise.allSettled(runners);
   return Promise.all(runners);
 }
@@ -78,7 +80,7 @@ async function copyOfMigrations(): Promise<URL> {
 
 async function fresh(database: string, folder: URL): Promise<string[]> {
   await dropDatabase(database);
-  return migrate(database, folder);
+  return migrate(server, database, folder);
 }
 
 interface Hash {
@@ -114,13 +116,13 @@ async function whenHashed(database: string): Promise<string[]> {
 }
 
 async function migrateWithoutHashes(database: string, folder: URL): Promise<void> {
-  const admin = new pg.Client({ connectionString: databaseUrl('postgres') });
+  const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   try {
     await admin.query('select pg_advisory_lock($1)', [runnerLock]);
     await admin.query(`drop database if exists ${pg.escapeIdentifier(database)} with (force)`);
     await admin.query(`create database ${pg.escapeIdentifier(database)}`);
-    const client = new pg.Client({ connectionString: databaseUrl(database) });
+    const client = new pg.Client({ connectionString: databaseUrl(server, database) });
     await client.connect();
     try {
       await client.query(
@@ -172,7 +174,7 @@ describe('the SHA-256 of each applied migration', () => {
     assert.match(currentHash, /^[0-9a-f]{64}$/);
     assert.notEqual(recordedHash, currentHash);
 
-    await assert.rejects(migrate(database, folder), (error) => {
+    await assert.rejects(migrate(server, database, folder), (error) => {
       assert.ok(error instanceof Error);
       assert.match(error.message, /0002_audit_trail\.sql/);
       assert.ok(error.message.includes(recordedHash), 'the refusal shows the recorded SHA-256');
@@ -191,9 +193,9 @@ describe('the SHA-256 of each applied migration', () => {
     const folder = await copyOfMigrations();
     const database = 'lims_migrate_rerun';
     await fresh(database, folder);
-    assert.deepEqual(await migrate(database, folder), []);
+    assert.deepEqual(await migrate(server, database, folder), []);
     await writeFile(new URL('9999_probe.sql', folder), probe);
-    assert.deepEqual(await migrate(database, folder), ['9999_probe.sql']);
+    assert.deepEqual(await migrate(server, database, folder), ['9999_probe.sql']);
     assert.deepEqual(await recorded(database), [...migrations, '9999_probe.sql']);
   });
 
@@ -202,14 +204,14 @@ describe('the SHA-256 of each applied migration', () => {
     const database = 'lims_migrate_missing';
     await fresh(database, folder);
     await rm(new URL('0003_sample_chain.sql', folder));
-    await assert.rejects(migrate(database, folder), /0003_sample_chain\.sql/);
+    await assert.rejects(migrate(server, database, folder), /0003_sample_chain\.sql/);
   });
 
   it('migrate records the hash of the file on disk for a migration applied before hashes were kept', async () => {
     const folder = await copyOfMigrations();
     const database = 'lims_migrate_legacy';
     await migrateWithoutHashes(database, folder);
-    assert.deepEqual(await migrate(database, folder), []);
+    assert.deepEqual(await migrate(server, database, folder), []);
     assert.deepEqual(await hashesRecorded(database), await hashesOnDisk(folder));
     assert.deepEqual(
       await whenHashed(database),
@@ -217,7 +219,7 @@ describe('the SHA-256 of each applied migration', () => {
     );
 
     await appendFile(new URL('0001_roles.sql', folder), ' ');
-    await assert.rejects(migrate(database, folder), /0001_roles\.sql/);
+    await assert.rejects(migrate(server, database, folder), /0001_roles\.sql/);
   });
 
   it('migrate refuses a migration applied before hashes were kept whose file is missing, and adopts no hash', async () => {
@@ -227,14 +229,14 @@ describe('the SHA-256 of each applied migration', () => {
     const wholeRows = 'select to_jsonb(m) as row from public.schema_migration m order by name';
     const before = await asSuperuser(database, wholeRows);
     await rm(new URL('0002_audit_trail.sql', folder));
-    await assert.rejects(migrate(database, folder), /0002_audit_trail\.sql.*applied before hashes were kept/);
+    await assert.rejects(migrate(server, database, folder), /0002_audit_trail\.sql.*applied before hashes were kept/);
     assert.deepEqual(await asSuperuser(database, wholeRows), before);
   });
 
   it('the database refuses to update, delete or truncate a recorded migration', async () => {
     const database = 'lims_migrate_refusal';
     await fresh(database, await copyOfMigrations());
-    const superuser = new pg.Client({ connectionString: databaseUrl(database) });
+    const superuser = new pg.Client({ connectionString: databaseUrl(server, database) });
     await superuser.connect();
     try {
       await assert.rejects(

@@ -61,13 +61,13 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
       .innerJoin('lab', 'lab.labId', 'session.labId')
       .select([
         'session.id',
-        'session.createdAt',
-        'session.lastSeenAt',
+        sql<boolean>`person.locked_at is not null
+          or session.last_seen_at < now() - ${IDLE_LIMIT_MS} * interval '1 millisecond'
+          or session.created_at < now() - ${ABSOLUTE_LIMIT_MS} * interval '1 millisecond'`.as('expired'),
         'person.id as personId',
         'person.username',
         'person.displayName',
         'person.customerId',
-        'person.lockedAt',
         'lab.labId',
         'lab.code',
         'lab.name',
@@ -76,16 +76,11 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
       .where('endedAt', 'is', null)
       .executeTakeFirst());
   if (!session) return refuse(401, 'sign in first');
-  const now = Date.now();
-  if (
-    session.lockedAt ||
-    now - session.lastSeenAt.getTime() > IDLE_LIMIT_MS ||
-    now - session.createdAt.getTime() > ABSOLUTE_LIMIT_MS
-  ) {
-    await db.updateTable('session').set({ endedAt: new Date() }).where('id', '=', session.id).execute();
+  if (session.expired) {
+    await db.updateTable('session').set({ endedAt: sql`now()` }).where('id', '=', session.id).execute();
     refuse(401, 'the session has ended; sign in again');
   }
-  await db.updateTable('session').set({ lastSeenAt: new Date() }).where('id', '=', session.id).execute();
+  await db.updateTable('session').set({ lastSeenAt: sql`now()` }).where('id', '=', session.id).execute();
   const roles = await db
     .selectFrom('membership')
     .select('role')
@@ -127,12 +122,7 @@ export function loginRoutes(app: App, db: Kysely<DB>): void {
         .insertInto('session')
         .values({ labId: membership.labId, personId: person.id, tokenHash: hashToken(token) })
         .execute();
-      reply.setCookie(SESSION_COOKIE, token, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === 'production',
-      });
+      reply.setCookie(SESSION_COOKIE, token);
       return actorFor(db, token);
     },
   });
@@ -146,10 +136,10 @@ export function logoutRoute(app: App, db: Kysely<DB>): void {
       if (token !== undefined)
         await db
           .updateTable('session')
-          .set({ endedAt: new Date() })
+          .set({ endedAt: sql`now()` })
           .where('tokenHash', '=', hashToken(token))
           .execute();
-      reply.clearCookie(SESSION_COOKIE, { path: '/' });
+      reply.clearCookie(SESSION_COOKIE);
       return { ended: true } as const;
     },
   });

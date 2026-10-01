@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
 export const DEMO_PASSWORD = 'e2e-demo-password';
+export const SHOTS = Boolean(process.env.SHOTS);
 
 export default defineConfig({
   testDir: 'e2e',

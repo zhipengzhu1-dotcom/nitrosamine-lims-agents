@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A PostgreSQL 18 cluster for development and tests, one for each checkout, trusting localhost only.
-# The Node code finds the running cluster as this script does, in its postmaster.pid (packages/db/src/db.ts).
+# The Node code finds the running cluster as this script does, in its postmaster.pid (packages/db/src/config.ts).
 # With LIMS_PG set, both use that server instead and start leaves the cluster alone (CI's service container).
 set -euo pipefail
 PGBIN=${PGBIN:-/opt/homebrew/opt/postgresql@18/bin}

@@ -2,22 +2,24 @@ import assert from 'node:assert/strict';
 import { after, before, it } from 'node:test';
 import { sql } from 'kysely';
 import pg from 'pg';
-import { audited, createDb, databaseUrl } from '../src/db.ts';
+import { audited, createDb, databaseUrl, dbConfig } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
+
+const { server } = dbConfig();
 
 const DATABASE = 'lims_test';
 const LAB_TABLES = ['membership', 'training_record', 'sample', 'test', 'result', 'test_report', 'signature', 'session'];
 
-const app = createDb(databaseUrl(DATABASE, 'lims_app'));
-const superuser = new pg.Client({ connectionString: databaseUrl(DATABASE) });
+const app = createDb(databaseUrl(server, DATABASE, 'lims_app'));
+const superuser = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
 let labId: string;
 
 before(async () => {
-  const admin = new pg.Client({ connectionString: databaseUrl('postgres') });
+  const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   await admin.query(`drop database if exists ${DATABASE} with (force)`);
   await admin.end();
-  await migrate(DATABASE);
+  await migrate(server, DATABASE);
   await superuser.connect();
   ({ labId } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Set up the test Lab' }, (tx) =>
     tx.insertInto('lab').values({ code: 'TL', name: 'Test Lab' }).returning('labId').executeTakeFirstOrThrow(),

@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import type { Kysely } from 'kysely';
+import { dbConfig } from './config.ts';
 import { hashPassword } from './credentials.ts';
-import { audited, createDb, type DB } from './db.ts';
+import { audited, createDb, type DB, databaseUrl } from './db.ts';
 
 // All fictional. Two Analysts so the assignment gate has someone to refuse.
 const people = [
@@ -23,10 +24,7 @@ export interface SeededAccount {
 }
 
 /** Seeds one Lab, one Customer, one Method and the demo people, who all share one password, into an empty database. */
-export async function seed(
-  db: Kysely<DB>,
-  password = process.env.DEMO_PASSWORD ?? randomBytes(6).toString('base64url'),
-): Promise<SeededAccount[]> {
+export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('base64url')): Promise<SeededAccount[]> {
   if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
   return audited(db, { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' }, async (tx) => {
@@ -67,9 +65,10 @@ export async function seed(
 }
 
 if (import.meta.main) {
-  const db = createDb();
+  const { server, database, demoPassword } = dbConfig();
+  const db = createDb(databaseUrl(server, database, 'lims_app'));
   try {
-    const accounts = await seed(db);
+    const accounts = await seed(db, demoPassword);
     console.table(accounts.map((a) => ({ username: a.username, role: a.role })));
     const [first] = accounts;
     if (!first) throw new Error('the seed made no accounts');
