@@ -21,10 +21,13 @@ const authAudit = (person: Person, reason: string) => ({
 });
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
 
-/** Checks the password. A failure counts toward lockout and a success clears the count. */
+/**
+ * Checks the password before the lock, so that a wrong password answers the same whether or not the account is locked
+ * and only the right password learns of the lock. A failure counts toward lockout and a success clears the count.
+ */
 async function prove(db: Kysely<DB>, person: Person, password: string, reason: string): Promise<void> {
-  if (person.lockedAt) refuse('accountLocked', 'this account is locked');
   if (await verifyPassword(password, person.passwordHash)) {
+    if (person.lockedAt) refuse('accountLocked', 'this account is locked');
     if (person.failedLogins > 0) {
       await audited(db, authAudit(person, reason), (tx) =>
         tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', person.id).execute(),
@@ -37,7 +40,7 @@ async function prove(db: Kysely<DB>, person: Person, password: string, reason: s
       .updateTable('person')
       .set({
         failedLogins: sql`failed_logins + 1`,
-        lockedAt: sql`case when failed_logins + 1 >= ${LOCKOUT_AFTER_FAILURES} then clock_timestamp() end`,
+        lockedAt: sql`coalesce(locked_at, case when failed_logins + 1 >= ${LOCKOUT_AFTER_FAILURES} then clock_timestamp() end)`,
       })
       .where('id', '=', person.id)
       .execute(),
