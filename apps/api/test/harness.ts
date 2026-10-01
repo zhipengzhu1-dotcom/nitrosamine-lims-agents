@@ -16,9 +16,23 @@ import {
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import { buildApp } from '../src/app.ts';
-import { STATUS } from '../src/scope.ts';
 
 const { server } = dbConfig();
+
+/** The status each kind answers with, as the tests expect it; every refused answer is checked against this table. */
+const STATUS_OF: { readonly [K in RefusalKind]: number } = {
+  unknownField: 400,
+  malformed: 400,
+  badCredentials: 401,
+  noSession: 401,
+  role: 403,
+  guard: 403,
+  notFound: 404,
+  state: 409,
+  stale: 409,
+  accountLocked: 423,
+  failure: 500,
+};
 
 export interface Account {
   id: string;
@@ -40,7 +54,6 @@ export class Client {
     return this.send(route, request[0]);
   }
 
-  /** Sends any request, typed or not, and reads the answer through the route's contract, so a body outside it fails the test. */
   async send<R extends Route>(route: R, request: unknown): Promise<Answer<R>> {
     const post = route.method === 'POST';
     const res = await fetch(this.base + pathOf(route, request), {
@@ -55,7 +68,7 @@ export class Client {
     const answer = readReply(route, res.status, await res.json());
     if (answer.kind === 'breach') assert.fail(answer.problem);
     if (answer.kind === 'refused')
-      assert.equal(answer.status, STATUS[answer.body.kind], `the status of a ${answer.body.kind} refusal`);
+      assert.equal(answer.status, STATUS_OF[answer.body.kind], `the status of a ${answer.body.kind} refusal`);
     return answer;
   }
 }
@@ -66,7 +79,6 @@ export function ok<R extends Route>(answer: Answer<R>): RouteReply<R> {
     : assert.fail(`expected a reply, got ${answer.status} ${answer.body.kind}: ${answer.body.message}`);
 }
 
-/** The message of a refusal of this kind, or a failed assertion naming what came instead. */
 export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKind): string {
   return answer.kind === 'refused' && answer.body.kind === kind
     ? answer.body.message

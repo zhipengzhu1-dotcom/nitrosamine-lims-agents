@@ -207,9 +207,7 @@ it('a signing with a wrong password is refused and changes nothing, and a signin
   const enter = (password: string) =>
     as.wes.call(stepRoute('enterResult'), { testId: id, input: result, signature: { password } });
 
-  const wrong = await enter('not-the-password');
-  assert.equal(wrong.status, 401);
-  assert.equal(refusedWith(wrong, 'badCredentials'), 'the credentials are not valid');
+  assert.equal(refusedWith(await enter('not-the-password'), 'badCredentials'), 'the credentials are not valid');
   assert.deepEqual(
     await view(id),
     before,
@@ -218,9 +216,7 @@ it('a signing with a wrong password is refused and changes nothing, and a signin
   assert.equal((await enter(wes.password)).status, 200);
 
   ok(await as.wes.call(routes.logout));
-  const ended = await enter(wes.password);
-  assert.equal(ended.status, 401);
-  assert.equal(refusedWith(ended, 'noSession'), 'sign in first');
+  assert.equal(refusedWith(await enter(wes.password), 'noSession'), 'sign in first');
 });
 
 it("a Customer User cannot read another Customer's Test", async () => {
