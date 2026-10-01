@@ -1,5 +1,7 @@
 // A Customer or signer whose name is not Latin-1 must still get an issued PDF that prints the name,
 // and the bytes must stay a pure function of the input, since their SHA-256 is recorded at release.
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { LabId, RecordId } from '@lims/domain/ids';
@@ -49,5 +51,22 @@ describe('the issued PDF prints names in any script', () => {
   it('renders the same input to the same bytes', async () => {
     const [a, b] = await Promise.all([renderReportPdf(q, input('Đặng Pharma', '王芳')), renderReportPdf(q, input('Đặng Pharma', '王芳'))]);
     expect(Buffer.from(a).equals(Buffer.from(b))).toBe(true);
+  });
+
+  it('refuses to issue a name the fonts cannot draw rather than printing empty boxes', async () => {
+    await expect(renderReportPdf(q, input('Acme Pharma', '김민준'))).rejects.toThrow('The report fonts cannot print U+AE40, U+BBFC, U+C900');
+  });
+
+  it('refuses a hanzi outside GB 2312, which the subset fonts leave out', async () => {
+    await expect(renderReportPdf(q, input('Acme Pharma', '王喆'))).rejects.toThrow('The report fonts cannot print U+5586');
+  });
+});
+
+describe('the report fonts are the files SOURCE.md names', () => {
+  it('each font file hashes to the SHA-256 recorded beside it', () => {
+    const dir = new URL('../assets/fonts/', import.meta.url);
+    const rows = [...readFileSync(new URL('SOURCE.md', dir), 'utf8').matchAll(/^\| `([^`]+\.ttf)` \|.*\| `([0-9a-f]{64})` \|$/gm)];
+    expect(rows.map(([, file]) => file).sort()).toEqual(['NotoSansSC-Bold.ttf', 'NotoSansSC-Regular.ttf']);
+    for (const [, file, sha] of rows) expect(createHash('sha256').update(readFileSync(new URL(file!, dir))).digest('hex'), file).toBe(sha);
   });
 });

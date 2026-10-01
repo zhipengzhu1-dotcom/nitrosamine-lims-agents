@@ -47,6 +47,7 @@ class Writer {
   readonly #font: PDFFont;
   readonly #bold: PDFFont;
   readonly #mono: PDFFont;
+  readonly #printable = new Map<PDFFont, Set<number>>();
 
   constructor(doc: PDFDocument, font: PDFFont, bold: PDFFont, mono: PDFFont) {
     this.#doc = doc; this.#font = font; this.#bold = bold; this.#mono = mono;
@@ -63,9 +64,19 @@ class Writer {
 
   line(text: string, opts: { size?: number; bold?: boolean; mono?: boolean; indent?: number } = {}): void {
     const size = opts.size ?? 10;
+    const font = opts.mono ? this.#mono : opts.bold ? this.#bold : this.#font;
+    this.#refuseUnprintable(text, font);
     this.#ensure(size + 4);
-    this.#page.drawText(text, { x: 50 + (opts.indent ?? 0), y: this.#y, size, font: opts.mono ? this.#mono : opts.bold ? this.#bold : this.#font, color: rgb(0.1, 0.1, 0.1) });
+    this.#page.drawText(text, { x: 50 + (opts.indent ?? 0), y: this.#y, size, font, color: rgb(0.1, 0.1, 0.1) });
     this.#y -= size + 4;
+  }
+
+  // An embedded font draws a character it lacks as an empty box; on a signed report that misstates a name.
+  #refuseUnprintable(text: string, font: PDFFont): void {
+    let printable = this.#printable.get(font);
+    if (!printable) this.#printable.set(font, (printable = new Set(font.getCharacterSet())));
+    const missing = [...new Set(text)].filter((c) => !printable.has(c.codePointAt(0)!));
+    if (missing.length > 0) throw new Error(`The report fonts cannot print ${missing.map((c) => `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`).join(', ')}`);
   }
 
   gap(h = 8): void { this.#y -= h; }
