@@ -189,6 +189,12 @@ importers:
         specifier: ^0.20.0
         version: 0.20.0(kysely@0.29.6)(pg@8.23.0)(typescript@7.0.2)
 
+  packages/domain:
+    dependencies:
+      '@lims/db':
+        specifier: workspace:*
+        version: link:../db
+
 packages:
 
   '@babel/code-frame@7.29.7':
