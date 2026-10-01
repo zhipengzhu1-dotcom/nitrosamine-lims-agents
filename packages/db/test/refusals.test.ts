@@ -27,6 +27,7 @@ const id = {
   signature: randomUUID(),
   session: randomUUID(),
   accessEvent: randomUUID(),
+  otherPerson: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -37,6 +38,10 @@ const fixture: [string, Row][] = [
   [
     'lims.person',
     { id: id.person, username: 'refusal.person', display_name: 'Refusal Person', password_hash: 'not-a-real-hash' },
+  ],
+  [
+    'lims.person',
+    { id: id.otherPerson, username: 'refusal.other', display_name: 'Other Person', password_hash: 'not-a-real-hash' },
   ],
   ['lims.method', { id: id.method, code: 'RF-MTH-0001', version: '1', title: 'NDMA by LC-MS/MS (fictional)' }],
   ['lims.submission', { id: id.submission, customer_id: id.customer, submitted_by: id.person }],
@@ -549,8 +554,20 @@ describe('the database refuses a reference to a row that does not exist', () => 
     {
       name: 'an Access Event of a session that does not exist is refused',
       table: 'lims.access_event',
-      change: { session_lab_id: id.lab, session_id: missing },
-      constraint: 'access_event_session_lab_id_session_id_fkey',
+      change: { kind: 'SignOut', failure_reason: null, session_lab_id: id.lab, session_id: missing },
+      constraint: 'access_event_session_lab_id_session_id_subject_id_fkey',
+    },
+    {
+      name: "an Access Event about one person in another person's session is refused",
+      table: 'lims.access_event',
+      change: {
+        kind: 'SignOut',
+        failure_reason: null,
+        subject_id: id.otherPerson,
+        session_lab_id: id.lab,
+        session_id: id.session,
+      },
+      constraint: 'access_event_session_lab_id_session_id_subject_id_fkey',
     },
   ]);
 });
@@ -599,6 +616,12 @@ describe('the database refuses a value outside its allowed set', () => {
       ['TRUNCATE', 'insert'],
       'audit_entry_op_check',
     ),
+    {
+      name: 'a failed sign-in Access Event that names a session is refused',
+      table: 'lims.access_event',
+      change: { session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_session_kind_check',
+    },
     {
       name: 'an Access Event with a session ID but no session Lab is refused',
       table: 'lims.access_event',
@@ -736,6 +759,7 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
     ['public.schema_migration.schema_migration_sha256_not_null', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_check', 'migrate.test.ts'],
     ['lims.signature.signature_content_hash_not_null', 'unreachable: generated from content, which is not null'],
+    ['lims.session.session_lab_id_id_person_id_key', 'unreachable: (lab_id, id) is already the key'],
   ]);
   const { rows } = await client.query<{ rule: string }>(
     `select n.nspname || '.' || c.relname || '.' || k.conname as rule

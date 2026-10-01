@@ -19,7 +19,7 @@ import { stepRoutes } from './steps.ts';
 declare module 'fastify' {
   interface FastifyRequest {
     actor: ActorContext;
-    session: SessionKey;
+    sessionKey: SessionKey;
   }
 }
 
@@ -82,9 +82,9 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   loginRoutes(app, db, options.accessEventKey);
   app.register(async (signedIn) => {
     signedIn.decorateRequest('actor');
-    signedIn.decorateRequest('session');
+    signedIn.decorateRequest('sessionKey');
     signedIn.addHook('onRequest', async (req) => {
-      ({ actor: req.actor, session: req.session } = await actorFor(db, req.cookies[SESSION_COOKIE]));
+      ({ actor: req.actor, session: req.sessionKey } = await actorFor(db, req.cookies[SESSION_COOKIE]));
     });
     logoutRoute(signedIn, db);
     readRoutes(signedIn, db);

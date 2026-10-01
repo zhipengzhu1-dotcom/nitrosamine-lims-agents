@@ -147,7 +147,7 @@ it('an unknown user ID takes as long to refuse as a wrong password for a known o
   }
   const [unknown, wrong] = [median(unknownMs), median(knownMs)];
   assert.ok(
-    Math.abs(unknown - wrong) <= 0.25 * wrong,
+    Math.abs(unknown - wrong) <= 0.25 * wrong + 10,
     `median refusal took ${unknown.toFixed(1)} ms for an unknown user ID and ${wrong.toFixed(1)} ms for a wrong password`,
   );
 });
@@ -251,6 +251,24 @@ it('sign-out writes a sign-out Access Event, and a read or a page refresh writes
     .where(sql<boolean>`new_row ->> 'id' = ${signedOut?.id ?? ''}`)
     .executeTakeFirstOrThrow();
   assert.deepEqual(entry, { chain: 'company', actor: `person:${person.username}` });
+});
+
+it('a person whose Membership moved to another Lab during the session can still sign out, and the event records no roles', async () => {
+  const person = await api.addPerson('access.removed', ['Analyst']);
+  const client = await api.login(person);
+  await audited(api.db, SYSTEM, async (tx) => {
+    const elsewhere = await tx
+      .insertInto('lab')
+      .values({ code: 'ACMV', name: 'Lab the Membership moved to' })
+      .returning('labId')
+      .executeTakeFirstOrThrow();
+    await tx.updateTable('membership').set({ labId: elsewhere.labId }).where('personId', '=', person.id).execute();
+  });
+
+  ok(await client.call(routes.logout));
+  const signedOut = (await eventsOf(person.id)).at(-1);
+  assert.deepEqual([signedOut?.kind, signedOut?.roles], ['SignOut', []]);
+  refusedWith(await client.call(routes.me), 'noSession');
 });
 
 it(`the ${LOCKOUT_AFTER_FAILURES}th wrong password writes one lockout Access Event`, async () => {

@@ -25,6 +25,8 @@ const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', re
 
 const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
 
+const SIGN_OUT_NEEDS_NO_ROLE = 'none';
+
 const hashToken = (token: string) => createHash('sha256').update(token).digest();
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
 
@@ -200,21 +202,28 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): v
       }
 
       const token = randomBytes(32).toString('base64url');
-      await audited(db, SIGN_IN_SERVICE, async (tx) => {
+      const lockedMeanwhile = await audited(db, SIGN_IN_SERVICE, async (tx) => {
+        const { lockedAt } = await tx
+          .selectFrom('person')
+          .select('lockedAt')
+          .where('id', '=', person.id)
+          .forUpdate()
+          .executeTakeFirstOrThrow();
+        if (lockedAt) {
+          await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...subject });
+          return true;
+        }
         if (person.failedLogins > 0)
-          await tx
-            .updateTable('person')
-            .set({ failedLogins: 0 })
-            .where('id', '=', person.id)
-            .where('lockedAt', 'is', null)
-            .execute();
+          await tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', person.id).execute();
         const session = await tx
           .insertInto('session')
           .values({ labId, personId: person.id, tokenHash: hashToken(token) })
           .returning('id')
           .executeTakeFirstOrThrow();
         await record(tx, { kind: 'SignInSucceeded', ...subject, sessionLabId: labId, sessionId: session.id });
+        return false;
       });
+      if (lockedMeanwhile) return REFUSAL.AccountLocked();
       reply.setCookie(SESSION_COOKIE, token);
       return (await actorFor(db, token)).actor;
     },
@@ -226,15 +235,17 @@ export function logoutRoute(app: App, db: Kysely<DB>): void {
   app.route({
     ...routes.logout,
     handler: async (req, reply) => {
-      const { actor, session } = req;
-      const as = { actor: `person:${actor.person.username}`, role: actor.roles.join(', '), reason: 'Sign out' };
+      const { actor, sessionKey: session } = req;
+      const as = { actor: `person:${actor.person.username}`, role: SIGN_OUT_NEEDS_NO_ROLE, reason: 'Sign out' };
       await audited(db, as, async (tx) => {
-        await tx
+        const ended = await tx
           .updateTable('session')
           .set({ endedAt: sql`now()` })
           .where('labId', '=', session.labId)
           .where('id', '=', session.id)
-          .execute();
+          .where('endedAt', 'is', null)
+          .executeTakeFirst();
+        if (!ended.numUpdatedRows) return;
         await record(tx, {
           kind: 'SignOut',
           subjectId: actor.person.id,

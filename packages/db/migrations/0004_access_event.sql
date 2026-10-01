@@ -4,6 +4,9 @@ create type lims.access_event_kind as enum ('SignInSucceeded', 'SignInFailed', '
 create type lims.sign_in_failure as enum ('UnknownUserId', 'WrongPassword', 'WrongPasswordOnLockedAccount',
                                           'AccountLocked', 'NoLab');
 
+alter table lims.session add unique (lab_id, id, person_id);
+
+-- The session's Lab is session_lab_id, not lab_id, because lims.capture() routes a row with lab_id to that Lab's chain.
 create table lims.access_event (
   id                   uuid                   primary key default gen_random_uuid(),
   kind                 lims.access_event_kind not null,
@@ -17,9 +20,11 @@ create table lims.access_event (
   roles                lims.role[]            not null,
   failure_reason       lims.sign_in_failure,
   at                   timestamptz            not null default clock_timestamp(),
-  foreign key (session_lab_id, session_id) references lims.session (lab_id, id),
+  foreign key (session_lab_id, session_id, subject_id) references lims.session (lab_id, id, person_id),
   constraint access_event_session_check check ((session_lab_id is null) = (session_id is null)),
-  constraint access_event_session_kind_check check (session_id is not null or kind not in ('SignInSucceeded', 'SignOut')),
+  constraint access_event_session_kind_check check (
+    (session_id is not null or kind not in ('SignInSucceeded', 'SignOut')) and (session_id is null or kind <> 'SignInFailed')
+  ),
   constraint access_event_failure_check check ((kind = 'SignInFailed') = (failure_reason is not null)),
   constraint access_event_unknown_user_id_check check (
     (failure_reason is not distinct from 'UnknownUserId') = (typed_user_id_hmac is not null)
