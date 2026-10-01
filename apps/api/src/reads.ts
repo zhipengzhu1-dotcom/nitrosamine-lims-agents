@@ -4,7 +4,7 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { factsFor } from './steps.ts';
+import { factsFor, latestVersion } from './steps.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -47,8 +47,10 @@ async function testView(scope: Scope, id: string) {
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
   const visibleToActor = !isCustomer || test.state === 'Reported';
+  const { version, contentHash } = await latestVersion(scope, 'test', id);
   return {
     test,
+    recordVersion: { version, contentHash },
     report: report ? { number: report.number } : null,
     result: visibleToActor
       ? ((await scope
@@ -68,14 +70,25 @@ async function testView(scope: Scope, id: string) {
       ? await scope
           .from('signature')
           .innerJoin('person', 'person.id', 'signature.personId')
+          .innerJoin('recordVersion', (j) =>
+            j
+              .onRef('recordVersion.labId', '=', 'signature.labId')
+              .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
+          )
           .select([
             'signature.meaning',
             'person.displayName as signer',
             'signature.signedAt',
-            'signature.recordTable as record',
-            sql<string>`encode(signature.content_hash, 'hex')`.as('contentHash'),
+            'recordVersion.recordTable as record',
+            'recordVersion.version as recordVersion',
+            sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
+            sql<boolean>`exists (select from lims.record_version later
+              where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
+                and later.record_id = record_version.record_id and later.version > record_version.version)`.as(
+              'unsigned',
+            ),
           ])
-          .where('signature.recordId', 'in', ids)
+          .where('recordVersion.recordId', 'in', ids)
           .orderBy('signature.signedAt')
           .execute()
       : [],
@@ -85,7 +98,9 @@ async function testView(scope: Scope, id: string) {
           .auditTrail()
           .select(['seq', 'at', 'actor', 'role', 'reason', 'tableName as table', 'op', 'oldRow', 'newRow'])
           .where(sql<boolean>`coalesce(new_row, old_row)->>'id' = any(${ids}) or coalesce(new_row, old_row)->>'test_id' = ${id}
-        or coalesce(new_row, old_row)->>'record_id' = any(${ids})`)
+        or coalesce(new_row, old_row)->>'record_id' = any(${ids})
+        or coalesce(new_row, old_row)->>'record_version_id' in
+           (select id::text from lims.record_version where lab_id = ${scope.ctx.lab.id} and record_id = any(${ids}))`)
           .orderBy('seq')
           .execute()
           .then((entries) => entries.map((e) => ({ ...e, oldRow: snapshot(e.oldRow), newRow: snapshot(e.newRow) }))),

@@ -78,12 +78,17 @@ const result = Type.Object({
   performedOn: calendarDate,
 });
 export type Result = Static<typeof result>;
+/** The latest Record Version of a record: its number and the hex SHA-256 of its canonical content. */
+const recordVersionRef = Type.Object({ version: Type.Integer({ minimum: 1 }), contentHash: Type.String() });
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
   signedAt: instant,
   record: Type.String(),
+  recordVersion: Type.Integer({ minimum: 1 }),
   contentHash: Type.String(),
+  /** True once the record has a Record Version later than the one this Signature was given on. */
+  unsigned: Type.Boolean(),
 });
 export type Signature = Static<typeof signature>;
 /** An Audit Trail row snapshot, keyed by its stored column names. */
@@ -104,6 +109,7 @@ export type AuditEntry = Static<typeof auditEntry>;
 const reportRef = Type.Object({ number: Type.String() });
 const testView = Type.Object({
   test: testRow,
+  recordVersion: recordVersionRef,
   report: nullable(reportRef),
   result: nullable(result),
   signatures: Type.Array(signature),

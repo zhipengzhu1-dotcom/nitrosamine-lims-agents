@@ -24,6 +24,7 @@ const id = {
   untested: randomUUID(),
   result: randomUUID(),
   testReport: randomUUID(),
+  laterRecordVersion: randomUUID(),
   signature: randomUUID(),
   session: randomUUID(),
 };
@@ -66,15 +67,25 @@ const fixture: [string, Row][] = [
   ],
   ['lims.test_report', { lab_id: id.lab, id: id.testReport, test_id: id.test, number: 'RF-R00001' }],
   [
+    'lims.record_version',
+    {
+      lab_id: id.lab,
+      id: id.laterRecordVersion,
+      record_table: 'test',
+      record_id: id.untested,
+      version: 2,
+      canonical_form: 0,
+      content: Buffer.from('{"id":"fixture"}'),
+    },
+  ],
+  [
     'lims.signature',
     {
       lab_id: id.lab,
       id: id.signature,
       person_id: id.person,
       meaning: 'Performed',
-      record_table: 'test',
-      record_id: id.test,
-      content: Buffer.from('{"id":"fixture"}'),
+      record_version_id: id.laterRecordVersion,
     },
   ],
   ['lims.session', { lab_id: id.lab, id: id.session, person_id: id.person, token_hash: token }],
@@ -153,17 +164,22 @@ const tables = {
     row: { lab_id: id.lab, test_id: id.untested, number: 'RF-R00002' },
     notNull: ['lab_id', 'id', 'test_id', 'number'],
   },
-  'lims.signature': {
-    noun: 'Signature',
+  'lims.record_version': {
+    noun: 'Record Version',
     row: {
       lab_id: id.lab,
-      person_id: id.person,
-      meaning: 'Reviewed',
       record_table: 'test',
-      record_id: id.test,
-      content: Buffer.from('{"id":"second"}'),
+      record_id: id.untested,
+      version: 3,
+      canonical_form: 1,
+      content: Buffer.from('{"id":"third"}'),
     },
-    notNull: ['lab_id', 'id', 'person_id', 'meaning', 'record_table', 'record_id', 'content', 'signed_at'],
+    notNull: ['lab_id', 'id', 'record_table', 'record_id', 'version', 'canonical_form', 'content', 'saved_at'],
+  },
+  'lims.signature': {
+    noun: 'Signature',
+    row: { lab_id: id.lab, person_id: id.person, meaning: 'Reviewed', record_version_id: id.laterRecordVersion },
+    notNull: ['lab_id', 'id', 'person_id', 'meaning', 'record_version_id', 'signed_at'],
   },
   'lims.session': {
     noun: 'session',
@@ -212,6 +228,7 @@ const auditedTables: Table[] = [
   'lims.test',
   'lims.result',
   'lims.test_report',
+  'lims.record_version',
   'lims.signature',
 ];
 
@@ -306,6 +323,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.test': { id: id.test },
     'lims.result': { id: id.result },
     'lims.test_report': { id: id.testReport },
+    'lims.record_version': { id: id.laterRecordVersion },
     'lims.signature': { id: id.signature },
     'lims.session': { id: id.session },
     'lims.audit_chain': { chain: 'company' },
@@ -384,6 +402,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.test_report',
       change: { test_id: id.test },
       constraint: 'test_report_lab_id_test_id_key',
+    },
+    {
+      name: 'a second Record Version with the number of an existing one is refused',
+      table: 'lims.record_version',
+      change: { version: 2 },
+      constraint: 'record_version_lab_id_record_table_record_id_version_key',
     },
     {
       name: 'a second session with the same token is refused',
@@ -492,12 +516,25 @@ describe('the database refuses a reference to a row that does not exist', () => 
       change: { lab_id: id.otherLab },
       constraint: 'test_report_lab_id_test_id_fkey',
     },
+    noLab('lims.record_version', 'Record Version'),
     noLab('lims.signature', 'Signature'),
     {
       name: 'a Signature by a person who does not exist is refused',
       table: 'lims.signature',
       change: { person_id: missing },
       constraint: 'signature_person_id_fkey',
+    },
+    {
+      name: 'a Signature on a Record Version that does not exist is refused',
+      table: 'lims.signature',
+      change: { record_version_id: missing },
+      constraint: 'signature_lab_id_record_version_id_fkey',
+    },
+    {
+      name: 'a Signature on a Record Version in another Lab is refused',
+      table: 'lims.signature',
+      change: { lab_id: id.otherLab },
+      constraint: 'signature_lab_id_record_version_id_fkey',
     },
     noLab('lims.session', 'session'),
     {
@@ -510,7 +547,7 @@ describe('the database refuses a reference to a row that does not exist', () => 
 });
 
 describe('the database refuses a value outside its allowed set', () => {
-  const each = (name: string, table: Table, column: string, values: string[], constraint: string): Case[] =>
+  const each = (name: string, table: Table, column: string, values: unknown[], constraint: string): Case[] =>
     values.map((value) => ({
       name: `${name}: ${JSON.stringify(value)}`,
       table,
@@ -540,11 +577,25 @@ describe('the database refuses a value outside its allowed set', () => {
       'test_gxp_class_check',
     ),
     ...each(
-      'a Signature on a record other than a Test or a Test Report is refused',
-      'lims.signature',
+      'a Record Version of a record other than a Test or a Test Report is refused',
+      'lims.record_version',
       'record_table',
       ['result', 'sample'],
-      'signature_record_table_check',
+      'record_version_record_table_check',
+    ),
+    ...each(
+      'a Record Version numbered below 1 is refused',
+      'lims.record_version',
+      'version',
+      [0, -1],
+      'record_version_version_check',
+    ),
+    ...each(
+      'a Record Version in a canonical form the LIMS has never written is refused',
+      'lims.record_version',
+      'canonical_form',
+      [2, -1],
+      'record_version_canonical_form_check',
     ),
     ...each(
       'an Audit Trail entry for an operation other than insert, update or delete is refused',
@@ -567,8 +618,27 @@ describe('an audited write without an actor, a role and a reason is refused', ()
   }
 });
 
-describe('a Signature or an Audit Trail entry is never changed or removed, even by the superuser', () => {
+describe('a Signature, a Record Version or an Audit Trail entry is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
+    {
+      name: 'updating a Record Version is refused',
+      table: 'lims.record_version',
+      trigger: 'refuse_change',
+      statement: `update lims.record_version set version = version + 10`,
+    },
+    {
+      name: 'deleting a Record Version is refused',
+      table: 'lims.record_version',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.record_version',
+    },
+    {
+      // Postgres refuses to truncate a foreign-key target on its own, so the Signatures are named with it.
+      name: 'truncating the Record Versions is refused',
+      table: 'lims.record_version',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.record_version, lims.signature',
+    },
     {
       name: 'updating a Signature is refused',
       table: 'lims.signature',
@@ -611,7 +681,16 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
     ['public.schema_migration.refuse_truncate', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_not_null', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_check', 'migrate.test.ts'],
-    ['lims.signature.signature_content_hash_not_null', 'unreachable: generated from content, which is not null'],
+    [
+      'lims.record_version.record_version_content_hash_not_null',
+      'unreachable: generated from content, which is not null',
+    ],
+    ['lims.test.version_record', 'record-version.test.ts'],
+    ['lims.result.version_record', 'record-version.test.ts'],
+    ['lims.test_report.version_record', 'record-version.test.ts'],
+    ['lims.sample.version_record', 'record-version.test.ts'],
+    ['lims.method.version_record', 'record-version.test.ts'],
+    ['lims.customer.version_record', 'record-version.test.ts'],
   ]);
   const { rows } = await client.query<{ rule: string }>(
     `select n.nspname || '.' || c.relname || '.' || k.conname as rule
