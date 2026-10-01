@@ -6,6 +6,7 @@ import {
   type RouteInput,
   type RouteReply,
   routes,
+  SESSION_ENDED,
   type SignedInView,
 } from '@lims/domain';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -31,15 +32,28 @@ export const onSignedOut = (fn: (message: string) => void) => {
   signedOut = fn;
 };
 
+// oxlint-disable-next-line no-restricted-globals, no-restricted-properties -- elapsed time on this page only; no instant is shown or sent
+const wallOffset = Date.now() - performance.now();
+let pageLatest = 0;
 /**
- * The session's end by this page's monotonic clock. Each answer restarts the idle count from when its request left,
- * which is no later than the server restarts its own, so the page never shows a session the server has ended.
+ * The page's clock for the countdown. It never runs backwards, and it counts time the device slept, which
+ * performance.now() skips on some platforms, so a page woken after its session ended does not show it as live.
+ */
+function pageNow(): number {
+  // oxlint-disable-next-line no-restricted-globals, no-restricted-properties -- elapsed time on this page only; no instant is shown or sent
+  pageLatest = Math.max(pageLatest, performance.now(), Date.now() - wallOffset);
+  return pageLatest;
+}
+
+/**
+ * The session's end by the page's clock. Each reply restarts the idle count from when its request left, which is no
+ * later than the server restarts its own, so the page never shows a session the server has ended. Only a reply
+ * restarts it: a refusal or a failure may not have reached the session.
  */
 let session: { idleLimitMs: number; absoluteEndsAt: number; lastSentAt: number } | null = null;
 let secondsLeft: number | null = null;
 let ticker = 0;
 const watchers = new Set<() => void>();
-const SESSION_ENDED = 'the session has ended; sign in again';
 
 function setSecondsLeft(left: number | null) {
   if (left === secondsLeft) return;
@@ -50,7 +64,7 @@ function setSecondsLeft(left: number | null) {
 function tick() {
   if (!session) return;
   const endsAt = Math.min(session.lastSentAt + session.idleLimitMs, session.absoluteEndsAt);
-  const left = Math.max(0, Math.ceil((endsAt - performance.now()) / 1000));
+  const left = Math.max(0, Math.ceil((endsAt - pageNow()) / 1000));
   if (left === 0) return endSession(SESSION_ENDED);
   setSecondsLeft(left);
 }
@@ -63,7 +77,7 @@ function endSession(message: string) {
 }
 
 async function startSession(request: () => Promise<SignedInView>): Promise<SignedInView> {
-  const sentAt = performance.now();
+  const sentAt = pageNow();
   const view = await request();
   const { idleLimitMs, absoluteLeftMs } = view.session;
   session = { idleLimitMs, absoluteEndsAt: sentAt + absoluteLeftMs, lastSentAt: sentAt };
@@ -72,6 +86,8 @@ async function startSession(request: () => Promise<SignedInView>): Promise<Signe
   tick();
   return view;
 }
+
+addEventListener('visibilitychange', tick);
 
 /** Signs in and starts the session's countdown. */
 export const signIn = (username: string, password: string) =>
@@ -97,7 +113,7 @@ export function api<R extends Route>(route: R, ...request: RouteInput<R>): Promi
 }
 
 async function call<R extends Route>(route: R, path: string, body?: unknown): Promise<RouteReply<R>> {
-  const sentAt = performance.now();
+  const sentAt = pageNow();
   const res = await fetch(
     path,
     route.method === 'GET'
@@ -110,8 +126,8 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
     endSession(refused.message);
     throw refused;
   }
-  if (session) session.lastSentAt = Math.max(session.lastSentAt, sentAt);
   if (refused) throw refused;
+  if (session) session.lastSentAt = Math.max(session.lastSentAt, sentAt);
   // oxlint-disable-next-line typescript/consistent-type-assertions -- a wire body has no static type; the API serializes every 2xx through this route's reply schema, and the web does not repeat the check
   return json as RouteReply<R>;
 }
@@ -119,7 +135,7 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
 export async function signOut(): Promise<void> {
   await api(routes.logout).catch(() => {});
   location.hash = '';
-  endSession('');
+  if (session) endSession('');
 }
 
 /** Reads a route for a component. `reload` settles once the page holds the server's new answer, so a commit can wait until what it changed is on screen. */

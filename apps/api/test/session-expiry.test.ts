@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { routes } from '@lims/domain';
+import { routes, SESSION_ENDED } from '@lims/domain';
+import { audited } from '@lims/db';
 import { sql } from 'kysely';
 import { endExpiredSessions, SESSION_LIMITS } from '../src/auth.ts';
 import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
@@ -9,7 +10,7 @@ import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
 const api = await startApi('lims_api_session_expiry_test');
 const { idleMs, absoluteMs } = SESSION_LIMITS.decided;
 const MINUTE_MS = 60_000;
-const ENDED = 'the session has ended; sign in again';
+
 const sweep = () => endExpiredSessions(api.db, SESSION_LIMITS.decided);
 
 const sessionOf = (account: Account) =>
@@ -69,7 +70,7 @@ it('the sweep ends a session idle past its limit, with an idle-expiry Access Eve
     .where(sql<boolean>`new_row ->> 'id' = ${id}`)
     .executeTakeFirstOrThrow();
   assert.deepEqual(entry, { chain: 'company', actor: 'svc:session-sweep', role: 'system' });
-  assert.equal(refusedWith(await client.call(routes.me), 'noSession'), ENDED);
+  assert.equal(refusedWith(await client.call(routes.me), 'noSession'), SESSION_ENDED);
 });
 
 it('a session kept active is ended at 12 hours, with an absolute-expiry Access Event at session start plus 12 hours', async () => {
@@ -112,7 +113,7 @@ it('a request on a session past its limit, before the sweep reaches it, is refus
   await api.advanceClock(person, idleMs + MINUTE_MS);
   const { lastSeenAt } = await sessionOf(person);
 
-  assert.equal(refusedWith(await client.call(routes.me), 'noSession'), ENDED);
+  assert.equal(refusedWith(await client.call(routes.me), 'noSession'), SESSION_ENDED);
   const refused = await sessionOf(person);
   assert.deepEqual(
     [refused.lastSeenAt, refused.endedAt],
@@ -126,6 +127,24 @@ it('a request on a session past its limit, before the sweep reaches it, is refus
     (await expiriesOf(person)).map((e) => e.at.getTime()),
     [lastSeenAt.getTime() + idleMs],
     'the sweep still stamps the computed instant',
+  );
+});
+
+it("a locked person's session past its limit is left to the sweep, which records its expiry", async () => {
+  const person = await api.addPerson('expiry.locked', ['Analyst']);
+  const client = await api.login(person);
+  await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Lock a test person' }, (tx) =>
+    tx.updateTable('person').set({ lockedAt: sql`now()` }).where('id', '=', person.id).execute(),
+  );
+  await api.advanceClock(person, idleMs + MINUTE_MS);
+  const { lastSeenAt } = await sessionOf(person);
+
+  assert.equal(refusedWith(await client.call(routes.me), 'noSession'), SESSION_ENDED);
+  assert.equal((await sessionOf(person)).endedAt, null);
+  await sweep();
+  assert.deepEqual(
+    (await expiriesOf(person)).map((e) => [e.kind, e.at.getTime()]),
+    [['IdleExpiry', lastSeenAt.getTime() + idleMs]],
   );
 });
 
@@ -151,7 +170,7 @@ it('with the decided login the idle limit is 15 minutes, with the demo login 8 h
     const again = new Client(base);
     ok(await again.call(routes.login, { username: person.username, password: person.password }));
     await api.advanceClock(person, idle + MINUTE_MS);
-    assert.equal(refusedWith(await again.call(routes.me), 'noSession'), ENDED, `${login}: idle past its limit`);
+    assert.equal(refusedWith(await again.call(routes.me), 'noSession'), SESSION_ENDED, `${login}: idle past its limit`);
   }
 });
 
@@ -164,6 +183,23 @@ it('the sweep refuses limits other than the decided or demo ones, so no caller e
   );
   assert.deepEqual(await expiriesOf(person), []);
   ok(await client.call(routes.me));
+});
+
+it('the sweep takes every login configuration the API offers', async () => {
+  for (const limits of Object.values(SESSION_LIMITS)) await endExpiredSessions(api.db, limits);
+});
+
+it("the API's database role cannot move a session's times, so it cannot choose when an expiry is stamped", async () => {
+  const person = await api.addPerson('expiry.backdate', ['Analyst']);
+  await api.login(person);
+  for (const set of [
+    { lastSeenAt: sql<Date>`now() - interval '1 day'` },
+    { createdAt: sql<Date>`now() - interval '1 day'` },
+  ])
+    await assert.rejects(
+      api.db.updateTable('session').set(set).where('personId', '=', person.id).execute(),
+      (err: { code?: string }) => err.code === '42501',
+    );
 });
 
 it('the API runs the sweep by itself on its schedule', async () => {

@@ -111,12 +111,19 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   });
   if (options.sweepEveryMs !== null) {
     // A failed sweep is logged and the next one retries: each expiry is recorded at its computed end, so a late sweep
-    // writes the same record.
-    const sweep = setInterval(
-      () => void endExpiredSessions(db, limits).catch((err: unknown) => app.log.error({ err }, 'expiry sweep failed')),
-      options.sweepEveryMs,
-    );
-    app.addHook('onClose', async () => clearInterval(sweep));
+    // writes the same record. A tick skips while a sweep is still running, and close waits for it.
+    let running: Promise<void> | null = null;
+    const sweep = setInterval(() => {
+      running ??= endExpiredSessions(db, limits)
+        .catch((err: unknown) => app.log.error({ err }, 'expiry sweep failed'))
+        .finally(() => {
+          running = null;
+        });
+    }, options.sweepEveryMs);
+    app.addHook('onClose', async () => {
+      clearInterval(sweep);
+      await running;
+    });
   }
   return app;
 }

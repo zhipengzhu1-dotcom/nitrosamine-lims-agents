@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, verifyPassword } from '@lims/db/credentials';
-import { type ActorContext, routes, type SessionClock } from '@lims/domain';
+import { type ActorContext, routes, SESSION_ENDED, type SessionClock } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
@@ -43,7 +43,6 @@ const SWEEP_SERVICE: AuditContext = {
   role: 'system',
   reason: 'End sessions past their limit',
 };
-const SESSION_ENDED = 'the session has ended; sign in again';
 
 const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
 
@@ -68,6 +67,7 @@ async function rolesIn(db: Kysely<DB>, personId: string, labId: string): Promise
     .select('role')
     .where('labId', '=', labId)
     .where('personId', '=', personId)
+    .orderBy('role')
     .execute();
   return rows.map((r) => r.role);
 }
@@ -162,31 +162,25 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined, limits
   if (!session) return refuse('noSession', 'sign in first');
   if (session.endedAt) return refuse('noSession', SESSION_ENDED);
   const key = { labId: session.labId, id: session.id };
+  const idle = interval(limits.idleMs);
+  const absolute = interval(limits.absoluteMs);
   if (session.lockedAt) {
+    // An expired session is left to the sweep, which records its expiry; a live one ends with the lock.
     await db
       .updateTable('session')
       .set({ endedAt: sql`now()` })
       .where('labId', '=', key.labId)
       .where('id', '=', key.id)
+      .where('endedAt', 'is', null)
+      .where(sql<boolean>`lims.session_end(last_seen_at, created_at, ${idle}, ${absolute}) > now()`)
       .execute();
     return refuse('noSession', SESSION_ENDED);
   }
-  const touched = await db
-    .updateTable('session')
-    .set({ lastSeenAt: sql`now()` })
-    .where('labId', '=', key.labId)
-    .where('id', '=', key.id)
-    .where('endedAt', 'is', null)
-    .where(
-      sql<boolean>`lims.session_end(last_seen_at, created_at, ${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}) > now()`,
-    )
-    .returning(
-      sql<number>`(extract(epoch from created_at + ${interval(limits.absoluteMs)} - now()) * 1000)::integer`.as(
-        'absoluteLeftMs',
-      ),
-    )
-    .executeTakeFirst();
-  if (!touched) return refuse('noSession', SESSION_ENDED);
+  const { rows } = await sql<{
+    absoluteLeftMs: number | null;
+  }>`select lims.touch_session(${key.labId}, ${key.id}, ${idle}, ${absolute}) as "absoluteLeftMs"`.execute(db);
+  const absoluteLeftMs = rows[0]?.absoluteLeftMs ?? null;
+  if (absoluteLeftMs === null) return refuse('noSession', SESSION_ENDED);
   return {
     actor: {
       person: {
@@ -199,7 +193,7 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined, limits
       roles: await rolesIn(db, session.personId, session.labId),
     },
     session: key,
-    clock: { idleLimitMs: limits.idleMs, absoluteLeftMs: touched.absoluteLeftMs },
+    clock: { idleLimitMs: limits.idleMs, absoluteLeftMs },
   };
 }
 
