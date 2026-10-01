@@ -20,6 +20,7 @@ function checkoutServer(): string {
 }
 
 /** Reads the environment once, at a process's start: a checkout with no PostgreSQL server to reach stops here. */
-export function dbConfig(env: Readonly<Record<string, string | undefined>> = process.env): DbConfig {
+export function dbConfig(): DbConfig {
+  const env = process.env;
   return { server: env.LIMS_PG || checkoutServer(), database: env.LIMS_DB ?? 'lims', demoPassword: env.DEMO_PASSWORD };
 }

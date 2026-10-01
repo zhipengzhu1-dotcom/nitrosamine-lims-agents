@@ -16,8 +16,9 @@ function port(value: string | undefined): number {
 }
 
 /** Reads the API's environment once, at start: a missing or malformed value stops the process here. */
-export function apiConfig(env: Readonly<Record<string, string | undefined>> = process.env): ApiConfig {
-  const { server, database } = dbConfig(env);
+export function apiConfig(): ApiConfig {
+  const env = process.env;
+  const { server, database } = dbConfig();
   return {
     databaseUrl: databaseUrl(server, database, 'lims_app'),
     listen: { port: port(env.PORT), host: env.HOST ?? '127.0.0.1' },

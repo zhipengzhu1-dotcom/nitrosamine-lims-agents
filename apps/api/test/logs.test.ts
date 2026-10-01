@@ -38,14 +38,21 @@ async function assignedToLou(): Promise<string> {
   return testId;
 }
 
-async function post(client: Client, url: string, body: unknown): Promise<{ status: number; text: string }> {
-  const res = await fetch(api.base + url, {
+async function post(
+  client: Client,
+  url: string,
+  body: unknown,
+  base = api.base,
+): Promise<{ status: number; text: string }> {
+  const res = await fetch(base + url, {
     method: 'POST',
     headers: { cookie: client.cookie, 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
   return { status: res.status, text: await res.text() };
 }
+
+const referenceIn = (text: string) => /reference (\w+)"/.exec(text)?.[1] ?? assert.fail(`no reference in ${text}`);
 
 it('an unexpected failure answers a generic 500 that names a reference, not the database error', async () => {
   const testId = await assignedToLou();
@@ -56,7 +63,7 @@ it('an unexpected failure answers a generic 500 that names a reference, not the 
   });
   assert.equal(failed.status, 500);
   assert.doesNotMatch(failed.text, /log_probe|violates/, 'the database error stays out of the answer');
-  assert.match(failed.text, /reference req-\w+/, 'the answer names a reference the Admin can find in the log');
+  assert.match(referenceIn(failed.text), /^[0-9A-HJKMNP-TV-Z]{8}$/, 'eight characters an Admin can read aloud');
 });
 
 it('a refusal and a request that fails validation answer with their own status and message', async () => {
@@ -98,17 +105,40 @@ it("a failed signed step logs the failure without the password or the Result's c
     input: result(PROBE),
     signature: { password: lou.password },
   });
-  const reference = /reference (req-\w+)/.exec(failed.text)?.[1] ?? assert.fail(`no reference in ${failed.text}`);
+  const reference = referenceIn(failed.text);
   const logged = api.logLines().find((line) => line.level === 50 && line.reqId === reference);
   assert.match(JSON.stringify(logged?.err), /log_probe/, 'the log names the failure under the reference');
   assert.ok(!api.log().includes(lou.password), "the signer's password is not in the log");
   assert.ok(!api.log().includes(PROBE), "the Result's content is not in the log");
 });
 
-it("the API's logger writes a password redacted wherever it sits in a logged object", () => {
+it("the logger's configuration redacts a password at each depth its redact paths name", () => {
   const password = 'logged-password-for-tests';
   api.app.log.info({ password, signature: { password }, body: { signature: { password } } });
   const log = api.log();
   assert.ok(!log.includes(password), 'the password is redacted');
   assert.match(log, /\[redacted\]/);
+});
+
+it('each unexpected failure gets a reference no restart of the API reuses, and the log files the failure under it', async () => {
+  const testId = await assignedToLou();
+  const references: string[] = [];
+  for (const another of [await api.startAnotherApi(), await api.startAnotherApi()]) {
+    const failed = await post(
+      as.lou,
+      stepRoute('enterResult').url,
+      { testId, input: result(PROBE), signature: { password: lou.password } },
+      another.base,
+    );
+    assert.equal(failed.status, 500);
+    const reference = referenceIn(failed.text);
+    assert.ok(
+      another
+        .logLines()
+        .some((line) => line.level === 50 && line.reqId === reference && line.msg === 'unexpected failure'),
+      'the logged error line carries the reference the answer gave',
+    );
+    references.push(reference);
+  }
+  assert.notEqual(references[0], references[1], 'two API processes give different references');
 });
