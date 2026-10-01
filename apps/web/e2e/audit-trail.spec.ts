@@ -25,7 +25,7 @@ async function submittedTest(page: Page, description: string): Promise<string> {
   const as = async (username: string) => {
     await page.request.post('/api/logout', { data: {} });
     const res = await page.request.post('/api/login', { data: { username, password: DEMO_PASSWORD } });
-    expect(res.ok(), `sign in as ${username}`).toBe(true);
+    expect(res.ok(), `sign in as ${username}: ${res.status()} ${await res.text()}`).toBe(true);
   };
   const step = async (name: string, body: object) => {
     const res = await page.request.post(`/api/steps/${name}`, { data: { commitKey: randomUUID(), ...body } });
