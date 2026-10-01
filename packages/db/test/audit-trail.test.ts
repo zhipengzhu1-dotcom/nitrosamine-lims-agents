@@ -8,7 +8,6 @@ import { migrate } from '../src/migrate.ts';
 const { server } = dbConfig();
 
 const DATABASE = 'lims_test';
-const LAB_TABLES = ['membership', 'training_record', 'sample', 'test', 'result', 'test_report', 'signature', 'session'];
 
 const app = createDb(databaseUrl(server, DATABASE, 'lims_app'));
 const superuser = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
@@ -127,14 +126,4 @@ it("the Lab's chain verifies, and an entry tampered with as superuser is found a
   await superuser.query(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 2`, [labId]);
   await superuser.query('commit');
   assert.equal(await verify(), '2');
-});
-
-it('a lab-owned row without a lab_id is refused', async () => {
-  for (const table of LAB_TABLES) {
-    await assert.rejects(
-      superuser.query(`insert into lims.${table} default values`),
-      (error: { code?: string; column?: string }) => error.code === '23502' && error.column === 'lab_id',
-      table,
-    );
-  }
 });

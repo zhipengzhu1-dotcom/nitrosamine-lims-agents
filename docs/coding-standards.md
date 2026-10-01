@@ -6,7 +6,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 ## The gate decides what is green
 
-- Run `pnpm check` before you push. It runs the Biome format check, oxlint, the typecheck, ruff, shellcheck, and the TypeScript and Python tests. The tests need the checkout's own Postgres (`scripts/pg.sh start`), and ruff and shellcheck need `uvx`. The tests include the schema drift check, which fails when `packages/db/src/schema.ts` differs from what the `types` script generates from the migrations, or when a `lims` table or column name does not survive CamelCasePlugin's round trip.
+- Run `pnpm check` before you push. It runs the Biome format check, oxlint, the typecheck, ruff, shellcheck, and the TypeScript and Python tests. The tests need the checkout's own Postgres (`scripts/pg.sh start`), and ruff and shellcheck need `uvx`. The tests include the schema drift check, which fails when `packages/db/src/schema.ts` differs from what the `types` script generates from the migrations, or when a `lims` table or column name does not survive CamelCasePlugin's round trip. They also include the refusal completeness check in `packages/db/test/refusals.test.ts`, which fails when a database constraint or trigger has no test that shows it refusing. A rule shown refusing in another test file goes in that check's `elsewhere` map, with the file named.
 - GitHub Actions runs `pnpm check` on every pull request and on `main`, with the Playwright walk (`pnpm e2e`) as a second job. The repo's plan has no branch protection, so the person who merges checks that both jobs passed.
 - Biome formats at 120 columns (`pnpm format`). oxlint with tsgolint lints, and its type-aware rules use a TypeScript 7 checker. It also enforces the import direction between packages. `tsconfig.base.json` sets the compiler's strictness. This document does not repeat what those tools check. Read `.oxlintrc.json`, `biome.json` and `ruff.toml`.
 - Keep `main` green. Do not skip or weaken a check to pass the gate. Fix the code, or change the rule as the last section describes.
@@ -62,7 +62,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 - Give each test file its own database, and make each test create its own records, so that any test passes alone and in any order.
 - Test through the public interface: HTTP for the API, exported functions for the domain, SQL for database invariants. A test that reaches inside breaks on every refactor. Give a pure rule with many cases a table-driven test in `packages/domain`.
 - Name a test with a sentence that states the behaviour in glossary terms, because the name is what a failing run shows.
-- Do not chase a coverage percentage, because a percentage rewards lines, not refusals. Show every step-registry refusal and every database constraint or trigger refusing in a test, and land every bug fix with a test that failed first.
+- Do not chase a coverage percentage, because a percentage rewards lines, not refusals. Show every step-registry refusal in a test, and land every bug fix with a test that failed first.
 - Test the web with Playwright walks only, one for each user-visible flow. Move logic that needs a unit test to `@lims/domain`, so that the web stays free of rules.
 
 ## Packages stay apart
