@@ -73,6 +73,7 @@ The Audit Trail showing a Test's descendants and a value's own text (part11 G5),
 | The Lab Manager also holds QA so a second QA can approve the first QA's Authorisations | iso 6, part11 point 5 | a second QA person joins and re-signs |
 | Seed signatures were made by the seed script for fictional people, and one person holds all demo accounts after handover | part11 point 6 | before any real data |
 | Balance printouts are not attached; the weight is Verified against the Run's True Copy only | usp 7 | the balance import or printout capture is built |
+| A net weight is not checked against its balance's smallest net weight, because the Equipment stub holds none (USP `<41>`, found by the USP review of C1) | usp | the equipment module records a smallest net weight per balance |
 
 ## Map (questions for the owner, recorded when #24 closes)
 

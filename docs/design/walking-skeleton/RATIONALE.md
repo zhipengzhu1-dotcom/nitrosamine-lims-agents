@@ -572,6 +572,8 @@ The shared contract holds for every item below. Fixes 11, 25, 30, 31, 32 and 33 
 - Whether a Run's instrument may be a balance. The workbench no longer offers one; the server does not refuse it, since no decision names which Equipment kinds a Run may cite.
 - Nothing can take a balance out of use, so the In-use check on `prep.balance` at Test Performed is proved by the pure gate test only; the wiring mirrors the Run's instrument and is not pinned by an API test.
 - Whether a Method may ask for more Preparations than the count when a Preparation is lost or repeated (decision 29 names Retests, which are not built). Exact means exact: a spoiled Preparation has no path in the skeleton.
+- What follows a negative typed concentration (ISO/IEC 17025 7.10.1, raised by the review of C1). It is listed as a missing value, so the only way on is a Critical Data Change to the real reading; whether that is an entry error or nonconforming work needing a Hold (fix 5, unit C2) is for the map.
+- A weight typed while its balance is out of use (decision 15, judged per step; `CONTEXT.md` Refused Entry). `preparation.create` refuses a balance that is not In use and Test Performed re-checks it, but `value.record` of `prep.weight` does not look at the balance: that check belongs with the writer rules on Recorded Values (unit C2, `apps/api/src/commands/values.ts`), and nothing in the skeleton can yet take a balance out of use.
 
 ## Open questions and risks
 
