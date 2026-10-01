@@ -3,7 +3,9 @@ import { createDb, type DB } from '@lims/db';
 import Fastify from 'fastify';
 import type { Kysely } from 'kysely';
 import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE } from './auth.ts';
+import { readRoutes } from './reads.ts';
 import type { ActorContext } from './scope.ts';
+import { stepRoutes } from './steps.ts';
 
 declare module 'fastify' {
   interface FastifyRequest { actor: ActorContext }
@@ -19,7 +21,8 @@ export function buildApp(db: Kysely<DB>) {
       req.actor = await actorFor(db, req.cookies[SESSION_COOKIE]);
     });
     logoutRoute(signedIn, db);
-    signedIn.get('/api/me', async (req) => req.actor);
+    readRoutes(signedIn, db);
+    stepRoutes(signedIn, db);
   });
   return app;
 }

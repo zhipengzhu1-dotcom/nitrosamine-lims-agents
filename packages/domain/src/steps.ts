@@ -58,7 +58,6 @@ export function refusal(name: StepName, state: TestState | null, roles: readonly
   return failed ? { kind: 'guard', message: failed } : null;
 }
 
-/** The step the actor may take next on a Test in `state`, if any. */
 export function nextStep(state: TestState, roles: readonly Role[], facts: StepFacts): StepName | null {
   return stepNames.find((name) => steps[name].from === state && !refusal(name, state, roles, facts)) ?? null;
 }

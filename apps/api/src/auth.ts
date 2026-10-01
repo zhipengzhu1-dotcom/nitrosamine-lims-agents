@@ -45,7 +45,6 @@ async function prove(db: Kysely<DB>, person: Person, proof: Proof, reason: strin
   notValid();
 }
 
-/** Full re-authentication for an Electronic Signature: password and a fresh TOTP code. */
 export async function reauthenticate(db: Kysely<DB>, ctx: ActorContext, proof: Required<Proof>, step: string): Promise<void> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', ctx.person.id).executeTakeFirstOrThrow();
   await prove(db, person, proof, `Re-authenticate to sign ${step}`);

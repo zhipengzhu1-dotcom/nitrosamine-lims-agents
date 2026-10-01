@@ -1,5 +1,5 @@
 import { audited, type DB, type Role } from '@lims/db';
-import { type Insertable, type Kysely, type SelectQueryBuilder, sql, type UpdateQueryBuilder } from 'kysely';
+import { type Insertable, type Kysely, type SelectQueryBuilder, sql, type UpdateQueryBuilder, type UpdateResult } from 'kysely';
 
 export interface ActorContext {
   person: { id: string; username: string; displayName: string; customerId: string | null };
@@ -21,7 +21,7 @@ function inLab(q: Kysely<DB>, labId: string) {
     insert: <T extends LabTable>(table: T, values: Omit<Insertable<DB[T]>, 'lab_id'>) =>
       q.insertInto(table).values({ ...values, lab_id: labId } as unknown as Insertable<DB[T]>),
     update: <T extends LabTable>(table: T) =>
-      (q.updateTable(table) as unknown as UpdateQueryBuilder<DB, T, T, never>).where(ofLab(table)),
+      (q.updateTable(table) as unknown as UpdateQueryBuilder<DB, T, T, UpdateResult>).where(ofLab(table)),
     // Typed without the Lab tables, so a Lab row can only be reached through the filtered builders above.
     company: q as unknown as Kysely<Pick<DB, CompanyTable>>,
   };
@@ -34,6 +34,7 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
   const labId = ctx.lab.id;
   if (!labId) throw new Error('a lab-scoped query needs the Lab of the ActorContext');
   return {
+    ctx,
     ...inLab(db, labId),
     auditTrail: () => db.selectFrom('audit_entry').where('chain', '=', labId),
     verifyChain: async (chain: 'lab' | 'company') =>

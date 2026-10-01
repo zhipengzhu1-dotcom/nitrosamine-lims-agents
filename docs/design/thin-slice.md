@@ -4,7 +4,7 @@ Answers [#24](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/24) a
 
 ## The chain-step table
 
-One registry in `packages/domain` drives the API's single step endpoint (`POST /api/steps/:step`) and the web's Bench Rail action. No per-step endpoints or screens.
+One registry in `packages/domain` drives the API's single step endpoint (`POST /api/steps/:step`) and the web's Bench Rail action. No per-step endpoints or screens. The API registers that endpoint once per registry entry, all through one handler, so each step's body is validated against its own schema.
 
 ```ts
 type Role = 'Customer' | 'SampleCustodian' | 'Analyst' | 'Reviewer' | 'QA' | 'LabManager' | 'Admin';
@@ -28,7 +28,7 @@ The reason recorded with each step's writes is the step name.
 
 ## Tables (schema `lims`)
 
-Company-owned: `person` (id, username, display_name, customer_id for Customer Users, password_hash, totp_secret, failed_logins, locked_at), `customer` (id, name), `method` (id, code, title, version), `submission` (id, customer_id, submitted_by).
+Company-owned: `person` (id, username, display_name, customer_id for Customer Users, password_hash, totp_secret, totp_last_step so a code is accepted once, failed_logins, locked_at), `customer` (id, name), `method` (id, code, title, version), `submission` (id, customer_id, submitted_by).
 
 Roles, Test states and Signature Meanings are Postgres enums, so the generated Kysely types carry them as unions.
 
