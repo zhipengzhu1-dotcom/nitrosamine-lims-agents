@@ -40,13 +40,13 @@ it('a session ends when idle too long, when too old, and on logout', async () =>
   const ago = (ms: number) => sql<Date>`now() - ${`${ms + 60_000} milliseconds`}::interval`;
   await api.superuser
     .updateTable('session')
-    .set({ last_seen_at: ago(IDLE_LIMIT_MS) })
-    .where('person_id', '=', api.person('samir').id)
+    .set({ lastSeenAt: ago(IDLE_LIMIT_MS) })
+    .where('personId', '=', api.person('samir').id)
     .execute();
   await api.superuser
     .updateTable('session')
-    .set({ created_at: ago(ABSOLUTE_LIMIT_MS) })
-    .where('person_id', '=', api.person('lena').id)
+    .set({ createdAt: ago(ABSOLUTE_LIMIT_MS) })
+    .where('personId', '=', api.person('lena').id)
     .execute();
   assert.equal((await sessions.out.call(routes.logout)).status, 200);
 

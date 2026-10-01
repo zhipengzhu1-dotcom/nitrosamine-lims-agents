@@ -27,13 +27,13 @@ export async function seed(
   db: Kysely<DB>,
   password = process.env.DEMO_PASSWORD ?? randomBytes(6).toString('base64url'),
 ): Promise<SeededAccount[]> {
-  if (await db.selectFrom('lab').select('lab_id').executeTakeFirst())
+  if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
   return audited(db, { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' }, async (tx) => {
-    const { lab_id } = await tx
+    const { labId } = await tx
       .insertInto('lab')
       .values({ code: 'RD', name: 'R&D Laboratory (fictional)' })
-      .returning('lab_id')
+      .returning('labId')
       .executeTakeFirstOrThrow();
     const customer = await tx
       .insertInto('customer')
@@ -51,15 +51,15 @@ export async function seed(
         .insertInto('person')
         .values({
           username: p.username,
-          display_name: p.name,
-          password_hash: await hashPassword(password),
-          customer_id: p.role === 'Customer' ? customer.id : null,
+          displayName: p.name,
+          passwordHash: await hashPassword(password),
+          customerId: p.role === 'Customer' ? customer.id : null,
         })
         .returning('id')
         .executeTakeFirstOrThrow();
-      await tx.insertInto('membership').values({ lab_id, person_id: id, role: p.role }).execute();
+      await tx.insertInto('membership').values({ labId, personId: id, role: p.role }).execute();
       if ('trained' in p)
-        await tx.insertInto('training_record').values({ lab_id, person_id: id, method_id: method.id }).execute();
+        await tx.insertInto('trainingRecord').values({ labId, personId: id, methodId: method.id }).execute();
       out.push({ id, username: p.username, role: p.role, password });
     }
     return out;

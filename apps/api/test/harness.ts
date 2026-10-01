@@ -69,7 +69,7 @@ export async function startApi(database: string) {
     await db.destroy();
     await superuser.destroy();
   });
-  const { lab_id: labId } = await db.selectFrom('lab').select('lab_id').executeTakeFirstOrThrow();
+  const { labId } = await db.selectFrom('lab').select('labId').executeTakeFirstOrThrow();
   const { id: methodId } = await db.selectFrom('method').select('id').executeTakeFirstOrThrow();
 
   return {
@@ -97,19 +97,16 @@ export async function startApi(database: string) {
           .insertInto('person')
           .values({
             username,
-            display_name: username,
-            password_hash: await hashPassword(account.password),
-            customer_id: opts.customerId ?? null,
+            displayName: username,
+            passwordHash: await hashPassword(account.password),
+            customerId: opts.customerId ?? null,
           })
           .returning('id')
           .executeTakeFirstOrThrow());
         for (const role of roles)
-          await tx.insertInto('membership').values({ lab_id: labId, person_id: account.id, role }).execute();
+          await tx.insertInto('membership').values({ labId, personId: account.id, role }).execute();
         if (opts.trained)
-          await tx
-            .insertInto('training_record')
-            .values({ lab_id: labId, person_id: account.id, method_id: methodId })
-            .execute();
+          await tx.insertInto('trainingRecord').values({ labId, personId: account.id, methodId }).execute();
       });
       return account;
     },

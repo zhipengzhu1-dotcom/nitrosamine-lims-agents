@@ -16,8 +16,8 @@ const [cora, samir, lena, ana, theo, rui, quinn] = [
   api.person('quinn'),
 ];
 const customerId =
-  (await api.db.selectFrom('person').select('customer_id').where('id', '=', cora.id).executeTakeFirstOrThrow())
-    .customer_id ?? assert.fail('Cora is a Customer User');
+  (await api.db.selectFrom('person').select('customerId').where('id', '=', cora.id).executeTakeFirstOrThrow())
+    .customerId ?? assert.fail('Cora is a Customer User');
 const otherCustomer = await audited(
   api.db,
   { actor: 'svc:test', role: 'system', reason: 'Add a second Customer' },
@@ -88,12 +88,18 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     '0.0300',
     'the Audit Trail keeps the Result as typed',
   );
+  const testInsert = reported.auditTrail.find((e) => e.table === 'test' && e.op === 'INSERT')?.newRow;
   assert.deepEqual(
-    reported.signatures.map((s) => [s.meaning, s.signer]),
+    Object.keys(testInsert ?? {}).sort(),
+    ['assignee_id', 'gxp_class', 'id', 'lab_id', 'method_id', 'sample_id', 'state'],
+    'the Audit Trail shows each row snapshot under its stored column names',
+  );
+  assert.deepEqual(
+    reported.signatures.map((s) => [s.meaning, s.signer, s.record]),
     [
-      ['Performed', 'Ana Ferreira'],
-      ['Reviewed', 'Rui Tanaka'],
-      ['Released', 'Quinn Adeyemi'],
+      ['Performed', 'Ana Ferreira', 'test'],
+      ['Reviewed', 'Rui Tanaka', 'test'],
+      ['Released', 'Quinn Adeyemi', 'test_report'],
     ],
   );
   const actors = {
@@ -121,14 +127,36 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     .select('content')
     .where((eb) =>
       eb.or([
-        eb('record_id', '=', id),
-        eb('record_id', 'in', eb.selectFrom('test_report').select('id').where('test_id', '=', id)),
+        eb('recordId', '=', id),
+        eb('recordId', 'in', eb.selectFrom('testReport').select('id').where('testId', '=', id)),
       ]),
     )
     .execute();
   assert.equal(signed.length, 3);
   for (const { content } of signed) {
     const version = JSON.parse(content.toString());
+    assert.deepEqual(
+      Object.keys(version),
+      [
+        'id',
+        'customer',
+        'sample',
+        'description',
+        'receivedAt',
+        'method',
+        'methodVersion',
+        'methodTitle',
+        'gxpClass',
+        'analyte',
+        'value',
+        'unit',
+        'injectionSequenceRef',
+        'notebookRef',
+        'performedOn',
+        'report',
+      ],
+      'each signed Record Version names its fields in one fixed order',
+    );
     assert.deepEqual(
       [version.customer, version.description, version.receivedAt, version.methodTitle],
       [printed.customer, printed.description, printed.receivedAt, printed.methodTitle],
@@ -200,25 +228,25 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
     api.db,
     { actor: 'svc:test', role: 'system', reason: 'Add a second Lab' },
     async (tx) => {
-      const { lab_id } = await tx
+      const { labId } = await tx
         .insertInto('lab')
         .values({ code: 'OT', name: 'Other Lab' })
-        .returning('lab_id')
+        .returning('labId')
         .executeTakeFirstOrThrow();
       const submission = await tx
         .insertInto('submission')
-        .values({ customer_id: customerId, submitted_by: cora.id })
+        .values({ customerId, submittedBy: cora.id })
         .returning('id')
         .executeTakeFirstOrThrow();
       const sample = await tx
         .insertInto('sample')
-        .values({ lab_id, submission_id: submission.id, number: 'OT-S00001', description: 'x' })
+        .values({ labId, submissionId: submission.id, number: 'OT-S00001', description: 'x' })
         .returning('id')
         .executeTakeFirstOrThrow();
       return (
         await tx
           .insertInto('test')
-          .values({ lab_id, sample_id: sample.id, method_id: api.methodId })
+          .values({ labId, sampleId: sample.id, methodId: api.methodId })
           .returning('id')
           .executeTakeFirstOrThrow()
       ).id;
