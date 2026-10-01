@@ -59,8 +59,14 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await signIn(page, 'ana.analyst');
   await openTheTest(page);
   await page.getByRole('button', { name: 'Enter Result' }).click();
-  const result = { Analyte: 'NDMA', 'Result as written': '0.0300', Unit: 'ppm', 'Injection sequence': 'SEQ-2026-0042',
-    'Notebook reference': 'RD-NB-0007-012', 'Performed on': new Date().toISOString().slice(0, 10) };
+  const result = {
+    Analyte: 'NDMA',
+    'Result as written': '0.0300',
+    Unit: 'ppm',
+    'Injection sequence': 'SEQ-2026-0042',
+    'Notebook reference': 'RD-NB-0007-012',
+    'Performed on': new Date().toISOString().slice(0, 10),
+  };
   for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
   await shot(page, 'test-signature-sheet');
@@ -88,11 +94,18 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await page.getByRole('link', { name: /^RD-R\d{5}$/ }).click();
   await expect(page.getByRole('heading', { name: /Test Report RD-R\d{5}/ })).toBeVisible();
   await expect(page.getByRole('cell', { name: '0.0300', exact: true })).toBeVisible();
-  for (const [meaning, signer] of [['Performed', 'Ana Ferreira'], ['Reviewed', 'Rui Tanaka'], ['Released', 'Quinn Adeyemi']]) {
+  for (const [meaning, signer] of [
+    ['Performed', 'Ana Ferreira'],
+    ['Reviewed', 'Rui Tanaka'],
+    ['Released', 'Quinn Adeyemi'],
+  ]) {
     await expect(page.getByRole('row', { name: new RegExp(`^${meaning} ${signer}`) })).toBeVisible();
   }
   await page.getByRole('button', { name: 'Verify Audit Trail' }).click();
-  await railSays(page, 'Lab chain internally consistent, company chain internally consistent. Not anchored off-server (demo).');
+  await railSays(
+    page,
+    'Lab chain internally consistent, company chain internally consistent. Not anchored off-server (demo).',
+  );
   await railSays(page, /Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC:/);
   await shot(page, 'test-report');
 });

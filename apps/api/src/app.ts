@@ -8,7 +8,9 @@ import type { ActorContext } from './scope.ts';
 import { stepRoutes } from './steps.ts';
 
 declare module 'fastify' {
-  interface FastifyRequest { actor: ActorContext }
+  interface FastifyRequest {
+    actor: ActorContext;
+  }
 }
 
 export function buildApp(db: Kysely<DB>) {

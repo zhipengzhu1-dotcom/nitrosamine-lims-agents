@@ -1,5 +1,12 @@
 import { audited, type DB, type Role } from '@lims/db';
-import { type Insertable, type Kysely, type SelectQueryBuilder, sql, type UpdateQueryBuilder, type UpdateResult } from 'kysely';
+import {
+  type Insertable,
+  type Kysely,
+  type SelectQueryBuilder,
+  sql,
+  type UpdateQueryBuilder,
+  type UpdateResult,
+} from 'kysely';
 
 export interface ActorContext {
   person: { id: string; username: string; displayName: string; customerId: string | null };
@@ -17,7 +24,8 @@ export function refuse(statusCode: number, message: string): never {
 function inLab(q: Kysely<DB>, labId: string) {
   const ofLab = (table: LabTable) => sql<boolean>`${sql.ref(`${table}.lab_id`)} = ${labId}`;
   return {
-    from: <T extends LabTable>(table: T) => (q.selectFrom(table) as unknown as SelectQueryBuilder<DB, T, {}>).where(ofLab(table)),
+    from: <T extends LabTable>(table: T) =>
+      (q.selectFrom(table) as unknown as SelectQueryBuilder<DB, T, {}>).where(ofLab(table)),
     insert: <T extends LabTable>(table: T, values: Omit<Insertable<DB[T]>, 'lab_id'>) =>
       q.insertInto(table).values({ ...values, lab_id: labId } as unknown as Insertable<DB[T]>),
     update: <T extends LabTable>(table: T) =>
@@ -38,8 +46,11 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     ...inLab(db, labId),
     auditTrail: () => db.selectFrom('audit_entry').where('chain', '=', labId),
     verifyChain: async (chain: 'lab' | 'company') =>
-      (await sql<{ broken: string | null }>`select lims.verify_chain(${chain === 'lab' ? labId : 'company'}) as broken`
-        .execute(db)).rows[0]!.broken,
+      (
+        await sql<{
+          broken: string | null;
+        }>`select lims.verify_chain(${chain === 'lab' ? labId : 'company'}) as broken`.execute(db)
+      ).rows[0]!.broken,
     write: <R>(reason: string, role: Role, fn: (q: LabQueries) => Promise<R>) =>
       audited(db, { actor: `person:${ctx.person.username}`, role, reason }, (tx) => fn(inLab(tx, labId))),
   };

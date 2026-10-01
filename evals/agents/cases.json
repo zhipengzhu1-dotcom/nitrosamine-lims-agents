@@ -6,13 +6,7 @@
     "source": "research/part11 A5, D6: audit trail keeps old and new value; changes never obscure earlier data",
     "artifact": "Analysts correct a typed nitrosamine result by overwriting the value in the results table. An audit row stores the new value, the user ID and the server timestamp.",
     "expect": {
-      "gap": [
-        [
-          "11.10(e)",
-          "DI Q12",
-          "A11d §12.2"
-        ]
-      ]
+      "gap": [["11.10(e)", "DI Q12", "A11d §12.2"]]
     }
   },
   {
@@ -22,11 +16,7 @@
     "source": "research/iso17025 7.10: impact on earlier results, customer notification and recall, authorised resumption",
     "artifact": "An out-of-tolerance balance verification opens a Deviation with a description and an owner. The balance is blocked until any Analyst closes the Deviation with a closing comment.",
     "expect": {
-      "gap": [
-        [
-          "7.10"
-        ]
-      ]
+      "gap": [["7.10"]]
     }
   },
   {
@@ -36,13 +26,7 @@
     "source": "research/part11 B1-B3, C4-C5: signature shows name, time, meaning; bound to record; re-authenticates",
     "artifact": "Reviewer approval of a result is a checkbox on the review screen. Ticking it stores the reviewer's user ID and the time.",
     "expect": {
-      "gap": [
-        [
-          "11.50",
-          "11.70",
-          "11.200"
-        ]
-      ]
+      "gap": [["11.50", "11.70", "11.200"]]
     }
   },
   {
@@ -52,12 +36,7 @@
     "source": "research/iso17025 7.7.3: failed batch QC must prevent incorrect results being reported",
     "artifact": "When a batch's spiked recovery or blank fails its acceptance criteria, the review screen shows a yellow warning banner. The Reviewer can still approve the batch and QA can release its reports.",
     "expect": {
-      "gap": [
-        [
-          "7.7.3",
-          "7.7"
-        ]
-      ]
+      "gap": [["7.7.3", "7.7"]]
     }
   },
   {
@@ -67,12 +46,7 @@
     "source": "research/iso17025 6.2.6: people are authorised, not just trained, to review and release",
     "artifact": "Review sign-off checks only that the Reviewer holds a current Training Record for the method. QA release checks only that the user has the QA role.",
     "expect": {
-      "gap": [
-        [
-          "6.2.6",
-          "6.2"
-        ]
-      ]
+      "gap": [["6.2.6", "6.2"]]
     }
   },
   {
@@ -82,14 +56,8 @@
     "source": "research/part11 B1-B3, C4-C5 all satisfied",
     "artifact": "Scope: the signing act and the signature record only. Release locking and report amendment are unchanged from decision #13. QA release is an e-signature. The signing dialog always asks for the typed user ID, the password and a fresh second factor: a TOTP code (accepted once) or a passkey assertion with user verification, even inside a session; the login session never counts toward the signature. The server stores an append-only signature row, linked into the Lab's audit chain, with signer, printed name, username, role, Lab, meaning 'Released', server UTC time taken from the database clock in the same transaction as the audit entry, the Lab's zone for display, record ID, record version, a SHA-256 hash of that version's canonical content, the version of the canonical form that produced the hash, the app release ID, the versioned signature statement shown to the signer with that statement's hash, the Review Checklist version the signer confirmed, the authenticator type and the session. The canonical content pins each child row's version ID and content hash and each attachment's SHA-256, and any change to a child row writes a new Record Version of every parent that includes it. Every canonical-form version stays in the code for the whole retention period and is never changed in place; the nightly chain verify recomputes every stored signature hash with the version it names. Every screen and export of the record renders the signature block after recomputing the SHA-256 of the signed version's canonical content with the canonical-form version stored on the signature; each signature is judged against the version it names. The issued Test Report PDF is the one exception, per ADR 0007: it is rendered once in the releasing transaction with the Released signature printed (name, username, role, meaning, time with zone, Record Version and hash), stored with its SHA-256 in an audited issue entry on the Lab chain, never re-rendered, and served only after its hash matches that entry; a mismatch raises a System Incident instead of re-rendering. Status changes after release appear on the screen, the download page and the export, never inside the issued file. A later, unsigned version of the record shows 'UNSIGNED — changed after signature'; an earlier signed version keeps its signature block and is marked Superseded only once a later version carries a valid signature with the meaning that put it in force (Released for a Test Report); until then it stays in force with the note 'Draft vN+1 in progress (unsigned)'; a hash mismatch on the signed version itself shows 'SIGNATURE INVALID' and raises a System Incident that opens a Deviation.",
     "expect": {
-      "met": [
-        "11.50"
-      ],
-      "not_gap": [
-        "11.50",
-        "11.70",
-        "11.200"
-      ]
+      "met": ["11.50"],
+      "not_gap": ["11.50", "11.70", "11.200"]
     }
   },
   {
@@ -99,12 +67,7 @@
     "source": "research/auth E-signature re-authentication, decision #13: every signing re-authenticates in full (typed user ID + password + fresh second factor); the series-of-signings allowance is not adopted",
     "artifact": "Scope: the re-authentication step of the signing dialog only. The signature record, its binding to the Record Version and its display are unchanged from decision #13. The first signing in a login session asks for the typed user ID, the password and a fresh TOTP code. While that session stays unbroken, each later signing asks only for the password.",
     "expect": {
-      "gap": [
-        [
-          "11.200",
-          "A11d §13.3"
-        ]
-      ]
+      "gap": [["11.200", "A11d §13.3"]]
     }
   },
   {
@@ -114,12 +77,8 @@
     "source": "research/iso17025 6.4.13 a-h all recorded",
     "artifact": "Each equipment record holds: identity with software and firmware version; manufacturer, type and serial number; verification evidence; current location; calibration dates, results, adjustments, acceptance criteria and due date; reference-material documentation, results, acceptance criteria, dates and period of validity; maintenance plan and maintenance done; and any damage, malfunction, modification or repair.",
     "expect": {
-      "met": [
-        "6.4.13"
-      ],
-      "not_gap": [
-        "6.4.13"
-      ]
+      "met": ["6.4.13"],
+      "not_gap": ["6.4.13"]
     }
   },
   {
@@ -149,11 +108,7 @@
     "source": "research/cn: every change to entered critical data must be approved (CS Art. 16)",
     "artifact": "For specifications under China jurisdiction, an Analyst corrects a typed result by creating a new result version with a mandatory reason. The audit trail keeps the old and new values, the user, the role and the UTC time. Nobody approves the correction.",
     "expect": {
-      "gap": [
-        [
-          "CS Art. 16"
-        ]
-      ]
+      "gap": [["CS Art. 16"]]
     }
   },
   {
@@ -163,11 +118,7 @@
     "source": "research/jp: automatic pass/fail is advisory; QA records its own judgment (JIREI GMP20-11)",
     "artifact": "For Japanese customers, the LIMS computes pass or fail against the specification and that computed result is final. QA release signs the report without recording a judgment of its own.",
     "expect": {
-      "gap": [
-        [
-          "GMP20-11"
-        ]
-      ]
+      "gap": [["GMP20-11"]]
     }
   },
   {
@@ -177,11 +128,7 @@
     "source": "research/eu: data and audit trail read-only after release (A11d §17.1)",
     "artifact": "For EU customers, after QA release a Lab Manager can still correct a typo in a released result by entering a reason. The audit trail records the change.",
     "expect": {
-      "gap": [
-        [
-          "A11d §17.1"
-        ]
-      ]
+      "gap": [["A11d §17.1"]]
     }
   },
   {
@@ -191,13 +138,7 @@
     "source": "research/usp <41>, GN 8.20: repeatability judged against the smallest net weight; a net weight below it is not 'accurately weighed'",
     "artifact": "Each morning the Analyst weighs one 200 g check weight on each analytical balance; the check passes if the reading is within 0.10% of the weight's value. Once a balance has passed that day, every weighing on it is accepted for 'accurately weighed' steps, whatever the net weight. Balance records hold capacity, readability, the check weight's ID and the calibration due date; there is no minimum-weight or smallest-net-weight field.",
     "expect": {
-      "gap": [
-        [
-          "<41>",
-          "<1251>",
-          "GN 8.20"
-        ]
-      ]
+      "gap": [["<41>", "<1251>", "GN 8.20"]]
     }
   },
   {
@@ -207,11 +148,7 @@
     "source": "research/usp GN 7.20: round only the final reportable value, to the limit's decimal places, round-half-up; intermediates stay unrounded",
     "artifact": "When an Analyst enters a Preparation result for NDMA, the server rounds it to the Specification limit's decimal places using the database's default round-half-even. The Reportable Result is the mean of the rounded Preparation results, and that mean is compared with the limit.",
     "expect": {
-      "gap": [
-        [
-          "GN 7.20"
-        ]
-      ]
+      "gap": [["GN 7.20"]]
     }
   },
   {
@@ -221,11 +158,7 @@
     "source": "research/usp <621>: 'No sample analysis is acceptable unless the suitability of the system has been demonstrated'",
     "artifact": "The TargetLynx import records each Run's system suitability values (S/N of the LOQ standard, %RSD of replicate standard injections). If a criterion fails, the Run is shown with an amber 'SST failed' badge, and the Reviewer can still approve its Reportable Results with a comment.",
     "expect": {
-      "gap": [
-        [
-          "<621>"
-        ]
-      ]
+      "gap": [["<621>"]]
     }
   },
   {
@@ -235,12 +168,8 @@
     "source": "research/usp <11>: current lots have no valid-use date; a lot that becomes previous gets one and cannot be used after it; the user checks lot status against the catalogue, which USP updates daily",
     "artifact": "Scope: USP Reference Standard lot status and use dates only (the current-lot rule). Pretreatment, assigned values and compendial substitution are specified in a separate design. Each USP RS Material Lot records catalogue number, lot, status (Current, Previous or Withdrawn), valid-use date, and the date and user of the last check against the USP catalogue. The valid-use date is its own field, never an expiry or retest date. It stays empty while the lot is Current unless the USP catalogue lists one for that Current lot. A lot changes to Previous only at a catalogue check, and that change requires the valid-use date shown in the catalogue at that check, entered by the same user. The Fitness Status blocks GMP use of any lot past a recorded valid-use date whatever its status, of any Withdrawn lot, and of any lot whose last catalogue check is older than a QA-set interval (default 30 days, changed only under change control). A lot never checked against the catalogue is unfit. Solutions made from a lot inherit its block through their lineage. A catalogue check that records a valid-use date earlier than the check date lists, in a Deviation for impact assessment, every Solution and Run that used the lot after that date. Each check records its outcome, and a lot the catalogue no longer lists is blocked until QA resolves it. Marking a lot Withdrawn records USP's notice date and lists the Results that cited the lot for impact assessment in a Deviation.",
     "expect": {
-      "met": [
-        "<11>"
-      ],
-      "not_gap": [
-        "<11>"
-      ]
+      "met": ["<11>"],
+      "not_gap": ["<11>"]
     }
   },
   {
@@ -250,14 +179,8 @@
     "source": "research/usp <621>: SST failure blocks the Run's results (met here); an adjustment must stay within the listed ranges and no second adjustment is allowed without revalidation (broken here)",
     "artifact": "For a compendial USP procedure run on LC-MS/MS: each Run stores every system suitability criterion with its source and value, and any failed or missing criterion blocks all Reportable Results from that Run until it is invalidated through a Deviation. Analysts may change the column temperature, flow rate and mobile-phase pH of the compendial procedure to any value they choose, recorded as free text on the Run, and may adjust a procedure that has already been adjusted.",
     "expect": {
-      "gap": [
-        [
-          "<621>"
-        ]
-      ],
-      "met": [
-        "<621>"
-      ]
+      "gap": [["<621>"]],
+      "met": ["<621>"]
     }
   },
   {
@@ -267,12 +190,8 @@
     "source": "research/usp <11>: suitability of a previously opened USP RS 'is the responsibility of the user' (USP RS FAQ)",
     "artifact": "Scope: the use-after-opening period of USP Reference Standard Packs only. Lot status, valid-use dates and label storage are specified in a separate design. USP publishes no use-after-opening period, so each USP RS Material carries an in-use period after opening that QA sets in the Material record, under change control, from the lab's SOP. A Pack records its opened date, and opened date plus that period is the Pack's in-use expiry; a Solution made from the Pack expires no later than it. The shared fit-for-use check refuses the expired Pack at every step that records use, including making a Solution, judged on the date of use. GMP has no override; the non-GMP override follows the inventory decision (Expired only, with a signed reason, flagged on every descendant). Where a lot's label restricts reuse (for example a single-use ampoule), the Pack is unfit once opened. This design does not choose the period; the SOP does.",
     "expect": {
-      "procedural": [
-        "<11>"
-      ],
-      "not_gap": [
-        "<11>"
-      ]
+      "procedural": ["<11>"],
+      "not_gap": ["<11>"]
     }
   },
   {

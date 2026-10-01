@@ -6,7 +6,8 @@ const derive = promisify(scrypt) as (password: string, salt: Buffer, length: num
 export const MIN_PASSWORD_LENGTH = 4;
 
 export async function hashPassword(password: string): Promise<string> {
-  if (password.length < MIN_PASSWORD_LENGTH) throw new Error(`a password needs at least ${MIN_PASSWORD_LENGTH} characters`);
+  if (password.length < MIN_PASSWORD_LENGTH)
+    throw new Error(`a password needs at least ${MIN_PASSWORD_LENGTH} characters`);
   const salt = randomBytes(16);
   return `scrypt$${salt.toString('base64')}$${(await derive(password, salt, 64)).toString('base64')}`;
 }

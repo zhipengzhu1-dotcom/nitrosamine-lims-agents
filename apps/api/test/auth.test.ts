@@ -31,12 +31,22 @@ test(`the ${LOCKOUT_AFTER_FAILURES}th failed login locks the account and ends it
 });
 
 test('a session ends when idle too long, when too old, and on logout', async () => {
-  const sessions = { idle: await api.login(api.people.samir!), old: await api.login(api.people.lena!), out: await api.login(api.people.theo!) };
+  const sessions = {
+    idle: await api.login(api.people.samir!),
+    old: await api.login(api.people.lena!),
+    out: await api.login(api.people.theo!),
+  };
   const ago = (ms: number) => sql<Date>`now() - ${`${ms + 60_000} milliseconds`}::interval`;
-  await api.superuser.updateTable('session').set({ last_seen_at: ago(IDLE_LIMIT_MS) })
-    .where('person_id', '=', api.people.samir!.id).execute();
-  await api.superuser.updateTable('session').set({ created_at: ago(ABSOLUTE_LIMIT_MS) })
-    .where('person_id', '=', api.people.lena!.id).execute();
+  await api.superuser
+    .updateTable('session')
+    .set({ last_seen_at: ago(IDLE_LIMIT_MS) })
+    .where('person_id', '=', api.people.samir!.id)
+    .execute();
+  await api.superuser
+    .updateTable('session')
+    .set({ created_at: ago(ABSOLUTE_LIMIT_MS) })
+    .where('person_id', '=', api.people.lena!.id)
+    .execute();
   assert.equal((await sessions.out.post('/api/logout')).status, 200);
 
   for (const [name, client] of Object.entries(sessions)) assert.equal((await client.get('/api/me')).status, 401, name);

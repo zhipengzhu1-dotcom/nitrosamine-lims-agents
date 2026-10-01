@@ -22,23 +22,39 @@ export const steps = {
   submit: { from: null, to: 'Requested', role: 'Customer', signs: null },
   receive: { from: 'Requested', to: 'Ready', role: 'SampleCustodian', signs: null },
   assign: {
-    from: 'Ready', to: 'Assigned', role: 'LabManager', signs: null,
+    from: 'Ready',
+    to: 'Assigned',
+    role: 'LabManager',
+    signs: null,
     // With no assignee named yet the Lab Manager is still choosing; the API requires one on the step itself.
-    guard: (f) => f.assignee === null || f.assigneeTrained
-      ? null : 'the assignee must be an Analyst in this Lab with a Training Record for the Method',
+    guard: (f) =>
+      f.assignee === null || f.assigneeTrained
+        ? null
+        : 'the assignee must be an Analyst in this Lab with a Training Record for the Method',
   },
   enterResult: {
-    from: 'Assigned', to: 'SubmittedForReview', role: 'Analyst', signs: 'Performed',
-    guard: (f) => f.actor === f.assignee ? null : 'only the assigned Analyst can enter the Result',
+    from: 'Assigned',
+    to: 'SubmittedForReview',
+    role: 'Analyst',
+    signs: 'Performed',
+    guard: (f) => (f.actor === f.assignee ? null : 'only the assigned Analyst can enter the Result'),
   },
   review: {
-    from: 'SubmittedForReview', to: 'Reviewed', role: 'Reviewer', signs: 'Reviewed',
-    guard: (f) => f.signers.Performed === f.actor ? 'the Analyst who performed the Test cannot review it' : null,
+    from: 'SubmittedForReview',
+    to: 'Reviewed',
+    role: 'Reviewer',
+    signs: 'Reviewed',
+    guard: (f) => (f.signers.Performed === f.actor ? 'the Analyst who performed the Test cannot review it' : null),
   },
   release: {
-    from: 'Reviewed', to: 'Reported', role: 'QA', signs: 'Released',
-    guard: (f) => f.signers.Performed === f.actor || f.signers.Reviewed === f.actor
-      ? 'QA cannot release a Test they performed or reviewed' : null,
+    from: 'Reviewed',
+    to: 'Reported',
+    role: 'QA',
+    signs: 'Released',
+    guard: (f) =>
+      f.signers.Performed === f.actor || f.signers.Reviewed === f.actor
+        ? 'QA cannot release a Test they performed or reviewed'
+        : null,
   },
 } satisfies Record<string, Step>;
 
@@ -50,9 +66,15 @@ export interface Refusal {
   message: string;
 }
 
-export function refusal(name: StepName, state: TestState | null, roles: readonly Role[], facts: StepFacts): Refusal | null {
+export function refusal(
+  name: StepName,
+  state: TestState | null,
+  roles: readonly Role[],
+  facts: StepFacts,
+): Refusal | null {
   const step: Step = steps[name];
-  if (step.from !== state) return { kind: 'state', message: `${name} needs a Test in ${step.from ?? 'no'} state, not ${state}` };
+  if (step.from !== state)
+    return { kind: 'state', message: `${name} needs a Test in ${step.from ?? 'no'} state, not ${state}` };
   if (!roles.includes(step.role)) return { kind: 'role', message: `${name} is taken by the ${step.role} role` };
   const failed = step.guard?.(facts);
   return failed ? { kind: 'guard', message: failed } : null;
