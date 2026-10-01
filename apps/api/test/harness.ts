@@ -55,9 +55,9 @@ export function refusedWith<R extends Route>(answer: Answer<R>, status: number):
     : assert.fail(`expected a ${status} refusal, got ${answer.status}`);
 }
 
-async function listen(db: Kysely<DB>) {
+async function listen(db: Kysely<DB>, { secureCookie = false } = {}) {
   const lines: string[] = [];
-  const app = buildApp(db, { log: { write: (line) => lines.push(line) }, secureCookie: false });
+  const app = buildApp(db, { log: { write: (line) => lines.push(line) }, secureCookie });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(() => app.close());
   return {
@@ -92,7 +92,7 @@ export async function startApi(database: string) {
     app,
     log,
     logLines,
-    startAnotherApi: () => listen(db),
+    startAnotherApi: (options: { secureCookie?: boolean } = {}) => listen(db, options),
     labId,
     methodId,
     person(name: SeededName): Account {
