@@ -101,7 +101,11 @@ const tables = {
     row: { customer_id: id.customer, submitted_by: id.person },
     notNull: ['id', 'customer_id', 'submitted_by'],
   },
-  'lims.lab': { noun: 'Lab', row: { code: 'RFB', name: 'Second Refusal Lab' }, notNull: ['lab_id', 'code', 'name'] },
+  'lims.lab': {
+    noun: 'Lab',
+    row: { code: 'RFB', name: 'Second Refusal Lab' },
+    notNull: ['lab_id', 'code', 'name', 'time_zone'],
+  },
   'lims.membership': {
     noun: 'Lab membership',
     row: { lab_id: id.lab, person_id: id.person, role: 'QA' },
@@ -524,6 +528,13 @@ describe('the database refuses a value outside its allowed set', () => {
       'code',
       ['rf', 'R', 'RFLAB', 'R1'],
       'lab_code_check',
+    ),
+    ...each(
+      'a Lab time zone that the database does not know is refused',
+      'lims.lab',
+      'time_zone',
+      ['', 'Mars/Olympus', 'EST5EDT; drop table lims.lab'],
+      'lab_time_zone_check',
     ),
     ...each(
       'a Result value that is not a plain decimal as typed is refused',

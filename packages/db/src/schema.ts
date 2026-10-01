@@ -55,6 +55,7 @@ export interface Lab {
   code: string;
   labId: Generated<string>;
   name: string;
+  timeZone: Generated<string>;
 }
 
 export interface Membership {

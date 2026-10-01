@@ -30,7 +30,7 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
   return audited(db, { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' }, async (tx) => {
     const { labId } = await tx
       .insertInto('lab')
-      .values({ code: 'RD', name: 'R&D Laboratory (fictional)' })
+      .values({ code: 'RD', name: 'R&D Laboratory (fictional)', timeZone: 'America/New_York' })
       .returning('labId')
       .executeTakeFirstOrThrow();
     const customer = await tx
