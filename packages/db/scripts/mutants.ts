@@ -280,10 +280,10 @@ const MUTANTS: Mutant[] = [
     test: 'test/service-scope.test.ts',
   },
   {
-    name: 'LA011 a service reopens what it ended',
+    name: 'LA011 a service changes a row that has ended',
     file: 'migrations/0065_service_scope.sql',
-    find: "where c in ('ended_at', 'used_at', 'revoked_at') and to_jsonb(old)->>c is not null) then",
-    replace: 'where false) then',
+    find: "                                    where to_jsonb(old)->>c is not null) then",
+    replace: '                                    where false) then',
     test: 'test/service-scope.test.ts',
   },
   {

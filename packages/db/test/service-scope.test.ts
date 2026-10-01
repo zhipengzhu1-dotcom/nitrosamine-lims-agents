@@ -82,7 +82,7 @@ describe('svc:auth writes only sessions, the access log, TOTP steps, alerts, spe
     await expectSqlState(as(SERVICE.auth, (tx) => tx.db.updateTable('account').set({ disabled_at: sql`clock_timestamp()` }).where('person_id', '=', fx.ann.id).execute()), 'LA011');
   });
 
-  it('never clears a stamp it may set: an ended session stays ended and a spent link stays spent', async () => {
+  it('never changes a row it ended: an ended session stays as it ended and a spent link stays spent', async () => {
     const link = await newLink(fx.cid);
     let session: SessionId | null = null;
     await as(SERVICE.auth, async (tx) => {
@@ -92,6 +92,8 @@ describe('svc:auth writes only sessions, the access log, TOTP steps, alerts, spe
     });
     await expectSqlState(as(SERVICE.auth, (tx) => tx.db.updateTable('session').set({ ended_at: null, end_reason: null }).where('id', '=', session!).execute()), 'LA011');
     await expectSqlState(as(SERVICE.auth, (tx) => tx.db.updateTable('enrolment_link').set({ used_at: null }).where('id', '=', link).execute()), 'LA011');
+    await expectSqlState(as(SERVICE.auth, (tx) => tx.db.updateTable('session').set({ end_reason: 'logout' }).where('id', '=', session!).execute()), 'LA011');
+    await expectSqlState(as(SERVICE.auth, (tx) => tx.db.updateTable('enrolment_link').set({ totp_secret_enc: Buffer.from('again') }).where('id', '=', link).execute()), 'LA011');
   });
 });
 
