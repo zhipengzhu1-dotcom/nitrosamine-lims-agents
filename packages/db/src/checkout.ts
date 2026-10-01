@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export interface Checkout {
+interface Checkout {
   port: number;
   suffix: string;
 }
@@ -10,8 +10,7 @@ export interface Checkout {
 const ROOT = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 const MAX_IDENTIFIER_BYTES = 63;
 
-/** One root path gives one port and one suffix, both from one SHA-256 of the path, and different roots give different suffixes. */
-export function checkoutOf(root: string): Checkout {
+function checkoutOf(root: string): Checkout {
   const digest = createHash('sha256').update(root).digest();
   return { port: 20_000 + (digest.readUInt32BE(0) % 12_000), suffix: digest.toString('hex').slice(0, 8) };
 }

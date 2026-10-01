@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the slice locally: Postgres, migrations, a seed on an empty database, then the API and the web together.
-# --scratch gives the database this checkout's suffix and drops it first; the end-to-end test runs it that way on its own ports.
+# --scratch gives the database this checkout's suffix and drops it first.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LIMS_DB=${LIMS_DB:-lims} PORT=${PORT:-3000}

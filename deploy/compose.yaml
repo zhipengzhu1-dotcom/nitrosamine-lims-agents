@@ -4,7 +4,6 @@ name: lims
 x-app: &app
   build: { context: .., dockerfile: deploy/Dockerfile, target: api }
   image: lims-api:local
-  # The secret named after the database role holds that role's password. DB_ROLE has no LIMS_ prefix because the config refuses a LIMS_ variable it does not read.
   entrypoint: ["sh", "-c", 'export LIMS_PG="postgres://$$DB_ROLE:$$(cat /run/secrets/$$DB_ROLE)@db:5432"; exec "$$@"', "--"]
 
 services:
