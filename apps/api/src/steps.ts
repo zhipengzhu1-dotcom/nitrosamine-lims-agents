@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { DB } from '@lims/db';
+import { isDeepStrictEqual } from 'node:util';
+import type { DB, Json } from '@lims/db';
 import {
   type ActorContext,
   type Meaning,
@@ -11,6 +12,7 @@ import {
   type StepFacts,
   type StepInput,
   type StepName,
+  type StepTaken,
   stepNames,
   stepRoute,
   steps,
@@ -176,13 +178,36 @@ async function sign(q: LabQueries, ctx: ActorContext, meaning: Meaning, table: '
     .execute();
 }
 
+type KeptCommit = Pick<Selectable<DB['commitKey']>, 'sessionId' | 'request' | 'testId' | 'state'>;
+
+const asJson = (value: object) => sql<Json>`cast(${JSON.stringify(value)} as jsonb)`;
+
+const keptCommit = (q: LabQueries, key: string) =>
+  q.from('commitKey').select(['sessionId', 'request', 'testId', 'state']).where('key', '=', key);
+
+/** The receipt a Commit Key was first answered with. A key answers only the session and request that first used it. */
+function receiptOf(kept: KeptCommit, sessionId: string, request: object): StepTaken {
+  if (kept.sessionId !== sessionId || !isDeepStrictEqual(kept.request, request))
+    refuse('keyReused', 'this press was already sent with other entries; reload to see what was saved');
+  return { testId: kept.testId, state: kept.state };
+}
+
 function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): void {
   const step: Step = steps[name];
   const effect: Effect<StepInput<K>> = effects[name];
   const route = stepRoute(name);
   app.post<{ Body: StepBody<K>; Reply: RouteReply<typeof route> }>(route.url, { schema: route.schema }, async (req) => {
-    const { actor, body } = req;
+    const { actor, body, sessionId } = req;
     const scope = labScope(db, actor);
+    const request = { step: name, testId: body.testId ?? null, input: body.input };
+    const replay = (kept: KeptCommit) => {
+      const receipt = receiptOf(kept, sessionId, request);
+      req.log.info({ step: name, testId: receipt.testId }, 'step replayed');
+      return receipt;
+    };
+    const kept = await keptCommit(scope, body.commitKey).executeTakeFirst();
+    if (kept) return replay(kept);
+
     const test =
       body.testId === undefined
         ? null
@@ -196,8 +221,16 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
       await reauthenticate(db, actor, password, name);
     }
 
-    const testId = test?.id ?? randomUUID();
-    await scope.write(name, step.role, async (q) => {
+    const receipt = { testId: test?.id ?? randomUUID(), state: step.to };
+    const { testId } = receipt;
+    // A concurrent press with the same key waits on the claim for the first to commit, then replays its receipt.
+    const replayed = await scope.write(name, step.role, async (q) => {
+      const claimed = await q
+        .insert('commitKey', { key: body.commitKey, sessionId, request: asJson(request), ...receipt })
+        .onConflict((oc) => oc.doNothing())
+        .returning('key')
+        .executeTakeFirst();
+      if (!claimed) return replay(await keptCommit(q, body.commitKey).executeTakeFirstOrThrow());
       if (test) {
         const moved = await q
           .update('test')
@@ -209,9 +242,11 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
       }
       await effect.write(q, actor, testId, body.input);
       if (step.signs) await sign(q, actor, step.signs, effect.signedRecord ?? 'test', testId);
+      return null;
     });
+    if (replayed) return replayed;
     req.log.info({ step: name, testId }, 'step taken');
-    return { testId, state: step.to };
+    return receipt;
   });
 }
 

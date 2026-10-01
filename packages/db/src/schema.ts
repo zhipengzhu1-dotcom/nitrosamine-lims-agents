@@ -46,6 +46,16 @@ export interface AuditEntry {
   tableName: string;
 }
 
+export interface CommitKey {
+  committedAt: Generated<Timestamp>;
+  key: string;
+  labId: string;
+  request: Json;
+  sessionId: string;
+  state: TestState;
+  testId: string;
+}
+
 export interface Customer {
   id: Generated<string>;
   name: string;
@@ -155,6 +165,7 @@ export interface TrainingRecord {
 
 export interface DB {
   auditEntry: AuditEntry;
+  commitKey: CommitKey;
   customer: Customer;
   lab: Lab;
   membership: Membership;

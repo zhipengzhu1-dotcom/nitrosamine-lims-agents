@@ -127,13 +127,16 @@ const auditTrailVerification = Type.Object({
   company: nullable(Type.String()),
 });
 const stepTaken = Type.Object({ testId: uuid, state: testState });
+/** What a committed step answers, and what a retry of the same press answers again. */
+export type StepTaken = Static<typeof stepTaken>;
 /**
  * Why the LIMS did not do what was asked, as one closed list the API, the web and the tests share. `unknownField` is
  * a body with a field its closed schema does not name, whatever else is wrong with it; `malformed` is any other
  * request Fastify refuses before the handler runs (a schema fault, unparseable JSON, a wrong media type, too large).
  * `badCredentials` is the one answer to every sign-in failure;
  * `accountLocked`, and `role` for an account with no Lab, come only after the right password. `noSession` covers no session presented and a session that
- * has ended. `stale` asks the person to reload; `state` says the step does not apply. `notFound` also covers an
+ * has ended. `stale` asks the person to reload; `state` says the step does not apply. `keyReused` is a Commit Key sent again
+ * with a different step or input, or from another session. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
  */
@@ -147,6 +150,7 @@ export const refusalKinds = [
   'guard',
   'state',
   'stale',
+  'keyReused',
   'notFound',
   'failure',
 ] as const;
@@ -162,7 +166,13 @@ const credentials = Type.Object({ username: text, password: text }, closed);
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
 const reauthentication = Type.Object({ password: text }, closed);
-const stepEnvelope = Type.Object({ testId: Type.Optional(uuid), signature: Type.Optional(reauthentication) });
+/** The Commit Key the client chose for one press, resent unchanged when it retries that press. */
+const commitKey = uuid;
+const stepEnvelope = Type.Object({
+  commitKey,
+  testId: Type.Optional(uuid),
+  signature: Type.Optional(reauthentication),
+});
 const stepInputs = {
   submit: Type.Object({ methodId: uuid, description: text }, closed),
   receive: Type.Object({}, closed),
@@ -217,10 +227,15 @@ export const routes = {
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
 } satisfies Record<string, Route>;
 
-/** The route of one step. Its body requires testId when the step starts from a state, and signature when it signs. */
+/** The route of one step. Its body requires a commitKey, testId when the step starts from a state, and signature when it signs. */
 export function stepRoute<K extends StepName>(name: K) {
   const step: Step = steps[name];
-  const required = [...(step.from === null ? [] : ['testId']), 'input', ...(step.signs === null ? [] : ['signature'])];
+  const required = [
+    'commitKey',
+    ...(step.from === null ? [] : ['testId']),
+    'input',
+    ...(step.signs === null ? [] : ['signature']),
+  ];
   const body = Type.Object({ ...stepEnvelope.properties, input: stepInputs[name] }, { ...closed, required });
   return route('POST', `/api/steps/${name}`, { body }, stepTaken);
 }

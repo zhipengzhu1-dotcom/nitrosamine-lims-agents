@@ -30,6 +30,7 @@ const STATUS_OF: { readonly [K in RefusalKind]: number } = {
   notFound: 404,
   state: 409,
   stale: 409,
+  keyReused: 422,
   accountLocked: 423,
   failure: 500,
 };

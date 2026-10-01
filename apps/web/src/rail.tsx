@@ -10,7 +10,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, signOut, useApi } from './api.ts';
+import { api, Refused, signOut, useApi } from './api.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst';
 export interface Field<N extends string = string> {
@@ -79,7 +79,7 @@ export interface RailAction {
   context: string;
   fields: readonly Field[];
   signs: { meaning: SignedMeaning; what: string[] } | null;
-  run: (input: Record<string, string>, password: string | null) => Promise<string>;
+  run: (input: Record<string, string>, password: string | null, commitKey: string) => Promise<string>;
 }
 
 export function stepAction(
@@ -95,8 +95,9 @@ export function stepAction(
     context: what[0] ?? '',
     fields: ui.fields,
     signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
-    async run(input, password) {
+    async run(input, password, commitKey) {
       await api(stepRoute(name), {
+        commitKey,
         ...(testId && { testId }),
         input,
         ...(password !== null && { signature: { password } }),
@@ -206,6 +207,8 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
   const [refusal, setRefusal] = useState<Note | null>(null);
   const [instant, setInstant] = useState(false);
   const inFlight = useRef(false);
+  // A press the server never answered keeps its Commit Key, so pressing again retries it instead of committing twice.
+  const unanswered = useRef<{ action: string; commitKey: string } | null>(null);
   const count = useRef(0);
   const returnFocus = useRef(false);
   const clearOnClose = useRef(false);
@@ -271,14 +274,23 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
+    const action = `${a.label}\n${a.context}`;
+    const press =
+      unanswered.current?.action === action ? unanswered.current : { action, commitKey: crypto.randomUUID() };
+    unanswered.current = press;
     try {
-      const text = await a.run(values, a.signs ? password : null);
+      const text = await a.run(values, a.signs ? password : null, press.commitKey);
+      unanswered.current = null;
       setNote({ text, tone: 'ok', n: ++count.current });
       returnFocus.current = true;
       if (sheet) close(true);
     } catch (e) {
+      if (e instanceof Refused && e.kind !== 'failure') unanswered.current = null;
       const refused: Note = {
-        text: `Refused: ${e instanceof Error ? e.message : String(e)}.${a.signs ? ' Nothing has been signed.' : ''}`,
+        text:
+          e instanceof Refused
+            ? `Refused: ${e.message}.${a.signs ? ' Nothing has been signed.' : ''}`
+            : 'The LIMS did not answer. Press again with the same entries; they will not be saved twice.',
         tone: 'bad',
         n: ++count.current,
       };

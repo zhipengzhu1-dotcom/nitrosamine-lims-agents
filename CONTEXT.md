@@ -504,6 +504,10 @@ _Avoid_: Login log, session log, access log
 A bench PC the Admin has registered with its name, Lab and Room, which every session and Access Event from it carries. A device that is not registered shows as an unregistered device; the portal and desk PCs may be used that way.
 _Avoid_: Terminal, client, kiosk
 
+**Commit Key**:
+The one-time key a screen chooses for one press of a step and sends again when it retries that press, so the step happens once however often the press reaches the LIMS. A retry from the same session with the same entries gets the first answer back; the key used with other entries or from another session is refused.
+_Avoid_: Idempotency key, request ID, nonce
+
 **Reason for Change**:
 The cause recorded with every change made after a record is first saved.
 _Avoid_: Comment, justification

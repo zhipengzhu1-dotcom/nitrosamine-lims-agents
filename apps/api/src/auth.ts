@@ -51,8 +51,14 @@ export async function reauthenticate(db: Kysely<DB>, ctx: ActorContext, password
   await prove(db, person, password, `Re-authenticate to sign ${step}`);
 }
 
+/** A live session and the ActorContext it acts as. The session stays on the server: no reply carries its ID. */
+export interface SignedIn {
+  actor: ActorContext;
+  sessionId: string;
+}
+
 /** Builds the ActorContext from the session cookie. Reads the session tables directly: no context exists yet to scope by. */
-export async function actorFor(db: Kysely<DB>, token: string | undefined): Promise<ActorContext> {
+export async function actorFor(db: Kysely<DB>, token: string | undefined): Promise<SignedIn> {
   const session =
     token &&
     (await db
@@ -88,14 +94,17 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
     .where('personId', '=', session.personId)
     .execute();
   return {
-    person: {
-      id: session.personId,
-      username: session.username,
-      displayName: session.displayName,
-      customerId: session.customerId,
+    actor: {
+      person: {
+        id: session.personId,
+        username: session.username,
+        displayName: session.displayName,
+        customerId: session.customerId,
+      },
+      lab: { id: session.labId, code: session.code, name: session.name },
+      roles: roles.map((r) => r.role),
     },
-    lab: { id: session.labId, code: session.code, name: session.name },
-    roles: roles.map((r) => r.role),
+    sessionId: session.id,
   };
 }
 
@@ -123,7 +132,7 @@ export function loginRoutes(app: App, db: Kysely<DB>): void {
         .values({ labId: membership.labId, personId: person.id, tokenHash: hashToken(token) })
         .execute();
       reply.setCookie(SESSION_COOKIE, token);
-      return actorFor(db, token);
+      return (await actorFor(db, token)).actor;
     },
   });
 }

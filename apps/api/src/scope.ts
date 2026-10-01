@@ -1,7 +1,7 @@
 import { audited, type DB } from '@lims/db';
 import type { ActorContext, Role } from '@lims/domain';
 import {
-  type Insertable,
+  type InsertObject,
   type Kysely,
   type SelectQueryBuilder,
   sql,
@@ -20,9 +20,9 @@ function inLab(q: Kysely<DB>, labId: string) {
     from: <T extends LabTable>(table: T) =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot type a select from a generic Lab table; ofLab filters it
       (q.selectFrom(table) as unknown as SelectQueryBuilder<DB, T, {}>).where(ofLab(table)),
-    insert: <T extends LabTable>(table: T, values: Omit<Insertable<DB[T]>, 'labId'>) =>
+    insert: <T extends LabTable>(table: T, values: Omit<InsertObject<DB, T>, 'labId'>) =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot see that values plus labId make a row of a generic Lab table
-      q.insertInto(table).values({ ...values, labId } as unknown as Insertable<DB[T]>),
+      q.insertInto(table).values({ ...values, labId } as unknown as InsertObject<DB, T>),
     update: <T extends LabTable>(table: T) =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot type an update of a generic Lab table; ofLab filters it
       (q.updateTable(table) as unknown as UpdateQueryBuilder<DB, T, T, UpdateResult>).where(ofLab(table)),
