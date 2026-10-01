@@ -229,6 +229,9 @@ td a,
 }
 
 .status {
+  --accent: var(--act);
+  position: relative;
+  isolation: isolate;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -244,13 +247,52 @@ td a,
   height: 8px;
   border: 1px solid var(--edge);
 }
-.track i.on {
-  background: var(--act);
-  border-color: var(--act);
+.status--done {
+  --accent: var(--ink);
 }
-.status--done .track i.on {
-  background: var(--ink);
-  border-color: var(--ink);
+.track i.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.status--fresh::before {
+  content: "";
+  position: absolute;
+  inset: -4px -8px;
+  z-index: -1;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  animation: tint-out var(--dur-accent) var(--ease-out) both;
+}
+.status--fresh .now {
+  animation: ring var(--dur-accent) var(--ease-out) both;
+}
+.row--fresh td {
+  animation:
+    rise var(--dur-enter) var(--ease-out) both,
+    row-tint var(--dur-accent) var(--ease-out) both;
+}
+@keyframes tint-out {
+  0%,
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes ring {
+  from {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+@keyframes row-tint {
+  0%,
+  40% {
+    background-color: var(--sig-tint);
+  }
 }
 
 .rail {
@@ -555,6 +597,15 @@ select {
   .note--bad,
   .refusal {
     animation: none;
+  }
+  .status--fresh::before,
+  .status--fresh .now {
+    animation-timing-function: var(--ease-step);
+  }
+  .row--fresh td {
+    animation:
+      fade var(--dur-fade) var(--ease-out) both,
+      row-tint var(--dur-accent) var(--ease-step) both;
   }
 }
 

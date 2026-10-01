@@ -59,14 +59,15 @@ export const demoSigning = 'Demo: accounts share one password, and a signing re-
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-export function Status({ state }: { state: TestState }) {
+/** `fresh` marks a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them. */
+export function Status({ state, fresh = false }: { state: TestState; fresh?: boolean }) {
   const at = stateOrder.indexOf(state);
   return (
-    <span className={`status ${state === 'Reported' ? 'status--done' : ''}`}>
+    <span className={`status ${state === 'Reported' ? 'status--done' : ''} ${fresh ? 'status--fresh' : ''}`}>
       {words(state)}
       <span className="track" aria-hidden>
         {stateOrder.map((s, i) => (
-          <i key={s} className={i <= at ? 'on' : ''} />
+          <i key={s} className={i < at ? 'on' : i === at ? 'on now' : ''} />
         ))}
       </span>
     </span>
