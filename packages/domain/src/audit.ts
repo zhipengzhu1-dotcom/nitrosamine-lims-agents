@@ -58,7 +58,8 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
   submission: {
     kind: 'Submission',
     chain: 'company',
-    label: (row, labelOf) => `Submission from ${labelOf('customer', row.customer_id)}`,
+    // Read after its kind: "the Submission from Northwind Generics".
+    label: (row, labelOf) => `from ${labelOf('customer', row.customer_id)}`,
     fields: {
       customer_id: { label: 'Customer', ref: 'customer' },
       submitted_by: { label: 'Submitted by', ref: 'person' },

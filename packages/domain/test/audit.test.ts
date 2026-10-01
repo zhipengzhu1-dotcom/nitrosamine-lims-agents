@@ -164,7 +164,7 @@ describe('an entry reads in glossary words with labels as they stood at its time
           { table: 'test', id: 't1', kind: 'Test', label: 'RD-S00001' },
         ],
         [{ label: 'Ana Ferreira-Souza', role: 'Analyst' }, 'NDMA 0.0300 ppm', 'Ana Ferreira-Souza'],
-        ['svc:seed', 'Submission from c1', 2],
+        ['svc:seed', 'from c1', 2],
       ],
     ));
 
