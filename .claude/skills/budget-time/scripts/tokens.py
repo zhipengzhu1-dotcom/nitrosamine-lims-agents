@@ -30,7 +30,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 REPO = Path(__file__).resolve().parents[4]
 EVIDENCE = REPO / "evals" / "agents" / "out" / "budget-time"
@@ -39,7 +39,7 @@ EVAL_TOOLS = "Read Grep Glob Bash(git show:*) Bash(git diff:*) Bash(git log:*) B
 EVAL_PROMPT = "Review this proposed design for the LIMS. It is given inline; there is no diff.\n\n{artifact}"
 FETCH_TOOLS = {"WebFetch", "WebSearch"}
 
-Row = dict[str, Any]
+JsonObject = dict[str, Any]
 
 
 class Actor(TypedDict):
@@ -68,6 +68,7 @@ class Report(TypedDict):
     models: dict[str, ModelTotals]
     subagents: int
     actors: dict[str, Actor]
+    failures: NotRequired[list[str]]
 
 
 class SessionUsage(TypedDict):
@@ -77,7 +78,7 @@ class SessionUsage(TypedDict):
     output_tokens: int
 
 
-def context_size(usage: Row) -> int:
+def context_size(usage: JsonObject) -> int:
     return (
         usage.get("input_tokens", 0)
         + usage.get("cache_creation_input_tokens", 0)
@@ -89,7 +90,7 @@ def num(value: int | None) -> str:
     return "-" if value is None else f"{value:,}"
 
 
-def read_jsonl(path: Path) -> list[Row]:
+def read_jsonl(path: Path) -> list[JsonObject]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
@@ -106,18 +107,16 @@ def analyse(stream: Path) -> Report:
         if r.get("type") != "assistant":
             continue
         msg = r["message"]
-        parent = r.get("parent_tool_use_id") or "lead"
-        actor = actors.setdefault(
-            parent,
-            {
-                "label": "lead" if parent == "lead" else labels.get(parent, parent),
-                "turns": 0,
-                "first_context": None,
-                "peak_context": 0,
-                "total_tokens": None,
-                "tool_calls": {},
-            },
-        )
+        parent: str = r.get("parent_tool_use_id") or "lead"
+        fresh: Actor = {
+            "label": "lead" if parent == "lead" else labels.get(parent, parent),
+            "turns": 0,
+            "first_context": None,
+            "peak_context": 0,
+            "total_tokens": None,
+            "tool_calls": {},
+        }
+        actor = actors.setdefault(parent, fresh)
         for block in msg.get("content", []):
             if block.get("type") == "tool_use":
                 actor["tool_calls"][block["name"]] = actor["tool_calls"].get(block["name"], 0) + 1
@@ -134,19 +133,23 @@ def analyse(stream: Path) -> Report:
             actors[r["tool_use_id"]]["total_tokens"] = r.get("usage", {}).get("total_tokens")
     results = [r for r in rows if r.get("type") == "result"]
     final = results[-1] if results else {}
+    models: dict[str, ModelTotals] = {
+        m: {
+            "inputTokens": u.get("inputTokens"),
+            "outputTokens": u.get("outputTokens"),
+            "cacheReadInputTokens": u.get("cacheReadInputTokens"),
+            "cacheCreationInputTokens": u.get("cacheCreationInputTokens"),
+            "costUSD": u.get("costUSD"),
+        }
+        for m, u in final.get("modelUsage", {}).items()
+    }
     return {
         "stream": str(stream),
         "finished": bool(final) and not final.get("is_error", True),
         "terminal_reason": final.get("terminal_reason"),
         "total_cost_usd": final.get("total_cost_usd"),
         "duration_ms": final.get("duration_ms"),
-        "models": {
-            m: {
-                k: u.get(k)
-                for k in ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "costUSD")
-            }
-            for m, u in final.get("modelUsage", {}).items()
-        },
+        "models": models,
         "subagents": final.get("subagent_stats", {}).get("spawned", 0),
         "actors": actors,
     }

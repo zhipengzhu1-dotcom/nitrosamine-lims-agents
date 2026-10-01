@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import re
@@ -5,19 +6,19 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Sequence
 from pathlib import Path
-from types import SimpleNamespace
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "tokens.py"
 sys.path.insert(0, str(SCRIPT.parent))
 import tokens
 
-Row = tokens.Row
+JsonObject = tokens.JsonObject
 
 SUB = "toolu_sub"
 
 
-def usage(context: int, output: int = 1) -> Row:
+def usage(context: int, output: int = 1) -> JsonObject:
     return {
         "input_tokens": 10,
         "cache_creation_input_tokens": context - 110,
@@ -26,7 +27,7 @@ def usage(context: int, output: int = 1) -> Row:
     }
 
 
-def assistant(msg_id: str, context: int, blocks: tuple[Row, ...] | list[Row] = (), parent: str | None = None) -> Row:
+def assistant(msg_id: str, context: int, blocks: Sequence[JsonObject] = (), parent: str | None = None) -> JsonObject:
     return {
         "type": "assistant",
         "parent_tool_use_id": parent,
@@ -34,11 +35,11 @@ def assistant(msg_id: str, context: int, blocks: tuple[Row, ...] | list[Row] = (
     }
 
 
-def tool(name: str) -> Row:
+def tool(name: str) -> JsonObject:
     return {"type": "tool_use", "name": name}
 
 
-def result(cost: float = 0.5, models: dict[str, Row] | None = None, is_error: bool = False) -> Row:
+def result(cost: float = 0.5, models: dict[str, JsonObject] | None = None, is_error: bool = False) -> JsonObject:
     return {
         "type": "result",
         "is_error": is_error,
@@ -59,7 +60,7 @@ TASK_STARTED = {
 TASK_DONE = {"type": "system", "subtype": "task_notification", "tool_use_id": SUB, "usage": {"total_tokens": 19288}}
 
 
-def delegating_run() -> list[Row]:
+def delegating_run() -> list[JsonObject]:
     return [
         assistant("m1", 1000, [{"type": "thinking"}]),
         assistant("m1", 1000, [tool("Agent")]),
@@ -79,12 +80,12 @@ class Case(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
 
-    def stream(self, rows: list[Row]) -> Path:
+    def stream(self, rows: list[JsonObject]) -> Path:
         path = self.tmp / "stream.jsonl"
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
         return path
 
-    def analyse(self, rows: list[Row]) -> tokens.Report:
+    def analyse(self, rows: list[JsonObject]) -> tokens.Report:
         return tokens.analyse(self.stream(rows))
 
 
@@ -123,8 +124,10 @@ class AnalyseTest(Case):
         self.assertIn("| claude-x | - | 7 | - | - | - |", tokens.markdown(rep))
 
 
-def checks(**overrides: bool | int | None) -> SimpleNamespace:
-    return SimpleNamespace(**{"no_lead_fetch": False, "max_lead_context": None, "max_lead_growth": None, **overrides})
+def checks(**overrides: bool | int | None) -> argparse.Namespace:
+    return argparse.Namespace(
+        **{"no_lead_fetch": False, "max_lead_context": None, "max_lead_growth": None, **overrides}
+    )
 
 
 class CheckTest(Case):
@@ -152,7 +155,7 @@ class CheckTest(Case):
         )
 
 
-def turn(msg_id: str, context: int, output: int, model: str = "claude-opus-5-5", sidechain: bool = False) -> Row:
+def turn(msg_id: str, context: int, output: int, model: str = "claude-opus-5-5", sidechain: bool = False) -> JsonObject:
     return {
         "type": "assistant",
         "isSidechain": sidechain,
@@ -177,7 +180,7 @@ SYNTHETIC = {
 }
 
 
-def transcript() -> list[Row]:
+def transcript() -> list[JsonObject]:
     return [
         {"type": "user", "message": {"role": "user", "content": "go"}},
         turn("a1", 30000, 200),

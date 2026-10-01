@@ -26,6 +26,8 @@ VERDICT_LINE = re.compile(r"^\s*[-*]?\s*(met|gap|procedural|unclear|n/a)\s*:\s*(
 PART11_CITATION = re.compile(r"^(§?11\.\d|a11|di|ci|sa|pics|cs|rd|gmp|jirei|ch4|esl|62fr)")
 ISO_CITATION = re.compile(r"^\d\.\d")
 USP_CITATION = re.compile(r"^(<\d{1,4}(\.\d+)?>|gn\d)")
+LANES = {"part11": PART11_CITATION, "iso17025": ISO_CITATION, "usp": USP_CITATION}
+
 Verdicts = list[tuple[str, str]]
 
 
@@ -44,9 +46,6 @@ class Case(TypedDict):
     source: str
     artifact: str
     expect: Expect
-
-
-LANES = {"part11": PART11_CITATION, "iso17025": ISO_CITATION, "usp": USP_CITATION}
 
 
 def normalize(citation: str) -> str:
