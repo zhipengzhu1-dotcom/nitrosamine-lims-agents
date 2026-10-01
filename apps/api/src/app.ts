@@ -10,7 +10,7 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE } from './auth.ts';
+import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE, type SessionKey } from './auth.ts';
 import { apiLogger, type LogSink } from './log.ts';
 import { readRoutes } from './reads.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
@@ -20,6 +20,7 @@ declare module 'fastify' {
   interface FastifyRequest {
     actor: ActorContext;
     requester: ActorContext | null;
+    sessionKey: SessionKey;
   }
 }
 
@@ -45,6 +46,7 @@ export type App = FastifyInstance<
 export interface AppOptions {
   log: LogSink | null;
   secureCookie: boolean;
+  accessEventKey: Buffer;
 }
 
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
@@ -56,11 +58,12 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   app.setErrorHandler(answerThrown(db));
   app.decorateRequest('requester', null);
   app.setNotFoundHandler(() => refuse('notFound', 'no such route'));
-  loginRoutes(app, db, options.secureCookie);
+  loginRoutes(app, db, options.accessEventKey, options.secureCookie);
   app.register(async (signedIn) => {
     signedIn.decorateRequest('actor');
+    signedIn.decorateRequest('sessionKey');
     signedIn.addHook('onRequest', async (req) => {
-      req.actor = await actorFor(db, req.cookies[SESSION_COOKIE]);
+      ({ actor: req.actor, session: req.sessionKey } = await actorFor(db, req.cookies[SESSION_COOKIE]));
       req.requester = req.actor;
     });
     logoutRoute(signedIn, db);

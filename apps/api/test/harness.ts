@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { after } from 'node:test';
 import { audited, checkoutDatabase, createDb, type DB, databaseUrl, dbConfig, type Role } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
@@ -15,8 +16,9 @@ import {
   routes,
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
-import { buildApp } from '../src/app.ts';
-import type { LogSink } from '../src/log.ts';
+import { type AppOptions, buildApp } from '../src/app.ts';
+
+type LogSink = NonNullable<AppOptions['log']>;
 
 const { server } = dbConfig();
 
@@ -88,9 +90,11 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
       );
 }
 
+const accessEventKey = randomBytes(32);
+
 async function listen(db: Kysely<DB>, { secureCookie = false, log }: { secureCookie?: boolean; log?: LogSink } = {}) {
   const lines: string[] = [];
-  const app = buildApp(db, { log: log ?? { write: (line) => lines.push(line) }, secureCookie });
+  const app = buildApp(db, { log: log ?? { write: (line) => lines.push(line) }, secureCookie, accessEventKey });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(() => app.close());
   return {
@@ -124,6 +128,7 @@ export async function startApi(name: string) {
     superuser,
     base,
     app,
+    accessEventKey,
     log,
     logLines,
     startAnotherApi: (options: { secureCookie?: boolean; log?: LogSink } = {}) => listen(db, options),

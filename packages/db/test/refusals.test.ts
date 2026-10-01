@@ -27,6 +27,8 @@ const id = {
   signature: randomUUID(),
   session: randomUUID(),
   systemIncident: randomUUID(),
+  accessEvent: randomUUID(),
+  otherPerson: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -37,6 +39,10 @@ const fixture: [string, Row][] = [
   [
     'lims.person',
     { id: id.person, username: 'refusal.person', display_name: 'Refusal Person', password_hash: 'not-a-real-hash' },
+  ],
+  [
+    'lims.person',
+    { id: id.otherPerson, username: 'refusal.other', display_name: 'Other Person', password_hash: 'not-a-real-hash' },
   ],
   ['lims.method', { id: id.method, code: 'RF-MTH-0001', version: '1', title: 'NDMA by LC-MS/MS (fictional)' }],
   ['lims.submission', { id: id.submission, customer_id: id.customer, submitted_by: id.person }],
@@ -94,7 +100,27 @@ const fixture: [string, Row][] = [
       constraint_name: 'result_value_check',
     },
   ],
+  [
+    'lims.access_event',
+    {
+      id: id.accessEvent,
+      kind: 'SignInSucceeded',
+      subject_id: id.person,
+      source_address: '192.0.2.1',
+      session_lab_id: id.lab,
+      session_id: id.session,
+      roles: '{Analyst}',
+    },
+  ],
 ];
+const unknownUserIdAttempt: Row = {
+  kind: 'SignInFailed',
+  failure_reason: 'UnknownUserId',
+  subject_id: null,
+  typed_user_id_hmac: Buffer.alloc(32, 3),
+  typed_user_id_length: 12,
+  roles: '{}',
+};
 
 const tables = {
   'lims.customer': {
@@ -201,6 +227,17 @@ const tables = {
     },
     notNull: ['id', 'kind', 'reference', 'opened_at', 'step', 'error_class', 'state'],
   },
+  'lims.access_event': {
+    noun: 'Access Event',
+    row: {
+      kind: 'SignInFailed',
+      failure_reason: 'WrongPassword',
+      subject_id: id.person,
+      source_address: '192.0.2.1',
+      roles: '{Analyst}',
+    },
+    notNull: ['id', 'kind', 'source_address', 'roles', 'at'],
+  },
   'lims.audit_chain': {
     noun: 'Audit Trail chain head',
     row: { chain: 'refusal-probe' },
@@ -245,6 +282,7 @@ const auditedTables: Table[] = [
   'lims.test_report',
   'lims.signature',
   'lims.system_incident',
+  'lims.access_event',
 ];
 
 const bare = (table: string) => table.slice(table.indexOf('.') + 1);
@@ -341,6 +379,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.signature': { id: id.signature },
     'lims.session': { id: id.session },
     'lims.system_incident': { id: id.systemIncident },
+    'lims.access_event': { id: id.accessEvent },
     'lims.audit_chain': { chain: 'company' },
     'lims.audit_entry': { seq: 1 },
     'public.schema_migration': { name: '0001_roles.sql' },
@@ -557,6 +596,30 @@ describe('the database refuses a reference to a row that does not exist', () => 
       change: { session_lab_id: missing },
       constraint: 'system_incident_session_lab_id_fkey',
     },
+    {
+      name: 'an Access Event about a person who does not exist is refused',
+      table: 'lims.access_event',
+      change: { subject_id: missing },
+      constraint: 'access_event_subject_id_fkey',
+    },
+    {
+      name: 'an Access Event of a session that does not exist is refused',
+      table: 'lims.access_event',
+      change: { kind: 'SignOut', failure_reason: null, session_lab_id: id.lab, session_id: missing },
+      constraint: 'access_event_session_lab_id_session_id_subject_id_fkey',
+    },
+    {
+      name: "an Access Event about one person in another person's session is refused",
+      table: 'lims.access_event',
+      change: {
+        kind: 'SignOut',
+        failure_reason: null,
+        subject_id: id.otherPerson,
+        session_lab_id: id.lab,
+        session_id: id.session,
+      },
+      constraint: 'access_event_session_lab_id_session_id_subject_id_fkey',
+    },
   ]);
 });
 
@@ -618,6 +681,72 @@ describe('the database refuses a value outside its allowed set', () => {
       ['2351', '235140', '2351a'],
       'system_incident_sqlstate_check',
     ),
+    {
+      name: 'a failed sign-in Access Event that names a session is refused',
+      table: 'lims.access_event',
+      change: { session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_session_kind_check',
+    },
+    {
+      name: 'an Access Event with a session ID but no session Lab is refused',
+      table: 'lims.access_event',
+      change: { session_id: id.session },
+      constraint: 'access_event_session_check',
+    },
+    ...(['SignInSucceeded', 'SignOut'] as const).map((kind) => ({
+      name: `an Access Event of kind ${kind} without a session is refused`,
+      table: 'lims.access_event' as const,
+      change: { kind, failure_reason: null },
+      constraint: 'access_event_session_kind_check',
+    })),
+    {
+      name: 'a failed sign-in Access Event without a failure reason is refused',
+      table: 'lims.access_event',
+      change: { failure_reason: null },
+      constraint: 'access_event_failure_check',
+    },
+    {
+      name: 'a lockout Access Event with a failure reason is refused',
+      table: 'lims.access_event',
+      change: { kind: 'Lockout' },
+      constraint: 'access_event_failure_check',
+    },
+    {
+      name: 'an Access Event about a known person that also holds a typed user ID is refused',
+      table: 'lims.access_event',
+      change: { typed_user_id_hmac: Buffer.alloc(32, 3), typed_user_id_length: 12 },
+      constraint: 'access_event_unknown_user_id_check',
+    },
+    {
+      name: 'an unknown user ID attempt without the HMAC of what was typed is refused',
+      table: 'lims.access_event',
+      change: { ...unknownUserIdAttempt, typed_user_id_hmac: null },
+      constraint: 'access_event_unknown_user_id_check',
+    },
+    {
+      name: 'an unknown user ID attempt without the length of what was typed is refused',
+      table: 'lims.access_event',
+      change: { ...unknownUserIdAttempt, typed_user_id_length: null },
+      constraint: 'access_event_unknown_user_id_check',
+    },
+    {
+      name: 'an unknown user ID HMAC that is not 32 bytes is refused',
+      table: 'lims.access_event',
+      change: { ...unknownUserIdAttempt, typed_user_id_hmac: Buffer.alloc(16, 3) },
+      constraint: 'access_event_typed_user_id_hmac_check',
+    },
+    {
+      name: 'an unknown user ID of negative length is refused',
+      table: 'lims.access_event',
+      change: { ...unknownUserIdAttempt, typed_user_id_length: -1 },
+      constraint: 'access_event_typed_user_id_length_check',
+    },
+    {
+      name: 'an Access Event about an unknown user ID that records roles is refused',
+      table: 'lims.access_event',
+      change: { ...unknownUserIdAttempt, roles: '{Analyst}' },
+      constraint: 'access_event_roles_check',
+    },
   ]);
 });
 
@@ -632,7 +761,7 @@ describe('an audited write without an actor, a role and a reason is refused', ()
   }
 });
 
-describe('a Signature, an Audit Trail entry or a System Incident is never changed or removed, even by the superuser', () => {
+describe('a Signature, an Access Event, an Audit Trail entry or a System Incident is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
     {
       name: 'updating a Signature is refused',
@@ -651,6 +780,24 @@ describe('a Signature, an Audit Trail entry or a System Incident is never change
       table: 'lims.signature',
       trigger: 'refuse_truncate',
       statement: 'truncate lims.signature',
+    },
+    {
+      name: 'updating an Access Event is refused',
+      table: 'lims.access_event',
+      trigger: 'refuse_change',
+      statement: `update lims.access_event set failure_reason = null, kind = 'SignOut'`,
+    },
+    {
+      name: 'deleting an Access Event is refused',
+      table: 'lims.access_event',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.access_event',
+    },
+    {
+      name: 'truncating the Access Events is refused',
+      table: 'lims.access_event',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.access_event',
     },
     {
       name: 'truncating the Audit Trail is refused',
@@ -715,6 +862,7 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
     ['public.schema_migration.schema_migration_sha256_not_null', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_check', 'migrate.test.ts'],
     ['lims.signature.signature_content_hash_not_null', 'unreachable: generated from content, which is not null'],
+    ['lims.session.session_lab_id_id_person_id_key', 'unreachable: (lab_id, id) is already the key'],
   ]);
   const { rows } = await client.query<{ rule: string }>(
     `select n.nspname || '.' || c.relname || '.' || k.conname as rule

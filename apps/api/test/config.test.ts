@@ -44,6 +44,18 @@ it('LIMS_LOG_FILE is a setting the API reads', () => {
   assert.match(started.stderr, /PORT/);
   assert.doesNotMatch(started.stderr, /not a LIMS setting/);
 });
+for (const [name, key] of [
+  ['without an', undefined],
+  ['with a short', 'ab'.repeat(31)],
+  ['with a non-hex', 'zz'.repeat(32)],
+] as const) {
+  it(`the API ${name} Access Event HMAC key stops at start and names LIMS_ACCESS_EVENT_KEY`, () => {
+    const started = start({ PORT: '3000', ...(key === undefined ? {} : { LIMS_ACCESS_EVENT_KEY: key }) });
+    assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+    assert.notEqual(started.status, 0);
+    assert.match(started.stderr, /LIMS_ACCESS_EVENT_KEY must hold the Access Event HMAC key/);
+  });
+}
 
 it('LIMS_LOG is a setting the API reads', () => {
   const started = start({ LIMS_LOG: '1', PORT: '' });
