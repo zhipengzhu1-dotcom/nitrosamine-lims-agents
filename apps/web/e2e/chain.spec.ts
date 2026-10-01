@@ -60,7 +60,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await openTheTest(page);
   await page.getByRole('button', { name: 'Enter Result' }).click();
   const result = { Analyte: 'NDMA', 'Result as written': '0.0300', Unit: 'ppm', 'Injection sequence': 'SEQ-2026-0042',
-    'Notebook reference': 'RD-NB-0007-012', 'Performed on': '2026-09-30' };
+    'Notebook reference': 'RD-NB-0007-012', 'Performed on': new Date().toISOString().slice(0, 10) };
   for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
   await shot(page, 'test-signature-sheet');
@@ -92,6 +92,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     await expect(page.getByRole('row', { name: new RegExp(`^${meaning} ${signer}`) })).toBeVisible();
   }
   await page.getByRole('button', { name: 'Verify Audit Trail' }).click();
-  await railSays(page, 'Lab chain intact, company chain intact');
+  await railSays(page, 'Lab chain internally consistent, company chain internally consistent. Not anchored off-server (demo).');
+  await railSays(page, /Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC:/);
   await shot(page, 'test-report');
 });

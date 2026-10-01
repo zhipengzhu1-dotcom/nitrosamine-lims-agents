@@ -36,6 +36,7 @@ export const meaningStatement: Record<SignedMeaning, string> = {
   Released: 'I release this Test Report to the Customer.',
 };
 
+export const demoSigning = 'Demo: accounts share one password, and a signing re-enters the password only.';
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
@@ -164,6 +165,7 @@ function Rail({ me, action }: { me: Me; action: RailAction | null }) {
                   <label>Password (type it again to sign)
                     <input type="password" required autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} />
                   </label>
+                  <p className="fict">{demoSigning}</p>
                 </section>
               </>
             )}

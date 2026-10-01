@@ -2,10 +2,7 @@ import { steps } from '@lims/domain';
 import { type AuditEntry, type Me, type Row, type Signature, type TestRow, type TestView, useApi } from './api.ts';
 import { Shell, Status, stepAction } from './rail.tsx';
 
-const clock: Intl.DateTimeFormatOptions = {
-  year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
-};
-export const time = (iso: string | null) => (iso ? new Date(iso).toLocaleString(undefined, clock) : '');
+export const time = (iso: string | null) => (iso ? `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')} UTC` : '');
 const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on Sample ${t.sampleNumber}`;
 
 export function Worklist({ me }: { me: Me }) {

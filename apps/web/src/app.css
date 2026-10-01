@@ -32,6 +32,7 @@ p { margin: 0 0 6px; }
 .top nav a { display: flex; align-items: center; color: var(--ink-2); font-weight: 600; text-decoration: none; border-bottom: 3px solid transparent; }
 .top nav a.active { color: var(--ink); border-bottom-color: var(--act); }
 .fict { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--ink-2); background: var(--sheet-2); border: 1px solid var(--line-2); border-radius: 4px; padding: 4px 8px; white-space: nowrap; }
+p.fict { display: inline-block; margin-left: 0; white-space: normal; }
 .plane { overflow: auto; padding: 16px 24px; }
 
 table { border-collapse: collapse; width: 100%; background: var(--sheet); border: 1px solid var(--line); }
