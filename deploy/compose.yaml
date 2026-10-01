@@ -4,8 +4,8 @@ name: lims
 x-app: &app
   build: { context: .., dockerfile: deploy/Dockerfile, target: api }
   image: lims-api:local
-  # The secret named after the database user holds that user's password.
-  entrypoint: ["sh", "-c", 'export LIMS_PG="postgres://$$LIMS_PG_USER:$$(cat /run/secrets/$$LIMS_PG_USER)@db:5432"; exec "$$@"', "--"]
+  # The secret named after the database role holds that role's password. DB_ROLE has no LIMS_ prefix because the config refuses a LIMS_ variable it does not read.
+  entrypoint: ["sh", "-c", 'export LIMS_PG="postgres://$$DB_ROLE:$$(cat /run/secrets/$$DB_ROLE)@db:5432"; exec "$$@"', "--"]
 
 services:
   db:
@@ -20,7 +20,7 @@ services:
 
   migrate:
     <<: *app
-    environment: { LIMS_DB: lims, LIMS_PG_USER: postgres }
+    environment: { LIMS_DB: lims, DB_ROLE: postgres }
     secrets: [postgres]
     command: ["node", "packages/db/src/migrate.ts"]
     depends_on: { db: { condition: service_healthy } }
@@ -28,7 +28,7 @@ services:
 
   api:
     <<: *app
-    environment: { LIMS_DB: lims, LIMS_PG_USER: lims_app, NODE_ENV: production, HOST: 0.0.0.0, PORT: "3000", LIMS_LOG: "1" }
+    environment: { LIMS_DB: lims, DB_ROLE: lims_app, NODE_ENV: production, HOST: 0.0.0.0, PORT: "3000", LIMS_LOG: "1" }
     secrets: [lims_app]
     command: ["node", "apps/api/src/main.ts"]
     depends_on: { migrate: { condition: service_completed_successfully } }
