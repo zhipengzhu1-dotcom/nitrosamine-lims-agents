@@ -1,15 +1,23 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
-import { type StepName, stepNames, steps } from '@lims/domain';
+import { routes, type StepInput, type StepName, stepNames, stepRoute, steps } from '@lims/domain';
 import { labScope } from '../src/scope.ts';
-import { type Account, type Client, startApi } from './harness.ts';
+import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_steps_test');
-const { cora, samir, lena, ana, theo, rui, quinn } = api.people as Record<string, Account>;
-const customerId = (
-  await api.db.selectFrom('person').select('customer_id').where('id', '=', cora!.id).executeTakeFirstOrThrow()
-).customer_id!;
+const [cora, samir, lena, ana, theo, rui, quinn] = [
+  api.person('cora'),
+  api.person('samir'),
+  api.person('lena'),
+  api.person('ana'),
+  api.person('theo'),
+  api.person('rui'),
+  api.person('quinn'),
+];
+const customerId =
+  (await api.db.selectFrom('person').select('customer_id').where('id', '=', cora.id).executeTakeFirstOrThrow())
+    .customer_id ?? assert.fail('Cora is a Customer User');
 const otherCustomer = await audited(
   api.db,
   { actor: 'svc:test', role: 'system', reason: 'Add a second Customer' },
@@ -21,9 +29,18 @@ const rhea = await api.addPerson('rhea.reviewer-qa', ['Reviewer', 'QA']);
 const wes = await api.addPerson('wes.analyst', ['Analyst'], { trained: true });
 const olga = await api.addPerson('olga.other-customer', ['Customer'], { customerId: otherCustomer.id });
 
-const as: Record<string, Client> = {};
-for (const [name, account] of Object.entries({ cora, samir, lena, ana, rui, quinn, dana, rhea, wes, olga }))
-  as[name] = await api.login(account!);
+const as = {
+  cora: await api.login(cora),
+  samir: await api.login(samir),
+  lena: await api.login(lena),
+  ana: await api.login(ana),
+  rui: await api.login(rui),
+  quinn: await api.login(quinn),
+  dana: await api.login(dana),
+  rhea: await api.login(rhea),
+  wes: await api.login(wes),
+  olga: await api.login(olga),
+};
 
 const result = {
   analyte: 'NDMA',
@@ -34,63 +51,71 @@ const result = {
   performedOn: '2026-09-30',
 };
 
-async function take(client: Client, name: StepName, testId: string, input: object = {}, signer?: Account) {
+async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
   const signature = signer && { password: signer.password };
-  return client.post(`/api/steps/${name}`, { testId, input, ...(signature && { signature }) });
+  return client.call(stepRoute(name), { testId, input, ...(signature && { signature }) });
 }
 
-async function submitTestTo(state: 'Requested' | 'Ready' | 'Assigned', analyst: Account = ana!): Promise<string> {
-  const submitted = await as.cora!.post('/api/steps/submit', {
-    input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
-  });
-  assert.equal(submitted.status, 200, JSON.stringify(submitted.body));
-  const id: string = submitted.body.testId;
-  if (state !== 'Requested') assert.equal((await take(as.samir!, 'receive', id)).status, 200);
-  if (state === 'Assigned') assert.equal((await take(as.lena!, 'assign', id, { assigneeId: analyst.id })).status, 200);
+async function submitTestTo(state: 'Requested' | 'Ready' | 'Assigned', analyst: Account = ana): Promise<string> {
+  const { testId: id } = ok(
+    await as.cora.call(stepRoute('submit'), {
+      input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
+    }),
+  );
+  if (state !== 'Requested') assert.equal((await take(as.samir, 'receive', id)).status, 200);
+  if (state === 'Assigned') assert.equal((await take(as.lena, 'assign', id, { assigneeId: analyst.id })).status, 200);
   return id;
 }
 
-const view = async (id: string, client = as.lena!) => (await client.get(`/api/tests/${id}`)).body;
+const view = async (id: string, client = as.lena) => ok(await client.call(routes.test, { id }));
 
 it('the chain walks a submitted Test to Reported with three Signatures and an audit entry for every step', async () => {
   const id = await submitTestTo('Assigned');
-  assert.equal((await take(as.ana!, 'enterResult', id, result, ana)).status, 200);
-  assert.equal((await take(as.rui!, 'review', id, {}, rui)).status, 200);
+  assert.equal((await take(as.ana, 'enterResult', id, result, ana)).status, 200);
+  assert.equal((await take(as.rui, 'review', id, {}, rui)).status, 200);
   assert.equal(
-    (await as.cora!.get(`/api/tests/${id}/report`)).status,
+    (await as.cora.call(routes.report, { id })).status,
     404,
     'no Test Report for the Customer before release',
   );
-  assert.equal((await take(as.quinn!, 'release', id, {}, quinn)).status, 200);
+  assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
 
   const reported = await view(id, as.quinn);
   assert.equal(reported.test.state, 'Reported');
-  assert.equal(reported.result.value, '0.0300', 'the Result as typed');
+  assert.equal(reported.result?.value, '0.0300', 'the Result as typed');
   assert.equal(
-    reported.auditTrail.find((e: any) => e.table === 'result').newRow.value,
+    reported.auditTrail.find((e) => e.table === 'result')?.newRow?.value,
     '0.0300',
     'the Audit Trail keeps the Result as typed',
   );
   assert.deepEqual(
-    reported.signatures.map((s: any) => [s.meaning, s.signer]),
+    reported.signatures.map((s) => [s.meaning, s.signer]),
     [
       ['Performed', 'Ana Ferreira'],
       ['Reviewed', 'Rui Tanaka'],
       ['Released', 'Quinn Adeyemi'],
     ],
   );
-  const actors = { submit: cora, receive: samir, assign: lena, enterResult: ana, review: rui, release: quinn };
+  const actors = {
+    submit: cora,
+    receive: samir,
+    assign: lena,
+    enterResult: ana,
+    review: rui,
+    release: quinn,
+  } satisfies {
+    [K in StepName]: Account;
+  };
   for (const name of stepNames) {
-    const entries = reported.auditTrail.filter((e: any) => e.reason === name);
+    const entries = reported.auditTrail.filter((e) => e.reason === name);
     assert.ok(entries.length > 0, `an audit entry for ${name}`);
     for (const e of entries)
-      assert.deepEqual([e.actor, e.role], [`person:${actors[name]!.username}`, steps[name].role], name);
+      assert.deepEqual([e.actor, e.role], [`person:${actors[name].username}`, steps[name].role], name);
   }
 
-  const report = await as.cora!.get(`/api/tests/${id}/report`);
-  assert.equal(report.status, 200);
-  assert.match(report.body.report.number, /^RD-R\d{5}$/);
-  const printed = report.body.test;
+  const report = ok(await as.cora.call(routes.report, { id }));
+  assert.match(report.report.number, /^RD-R\d{5}$/);
+  const printed = report.test;
   const signed = await api.db
     .selectFrom('signature')
     .select('content')
@@ -110,40 +135,36 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
       'each Signature covers what the Test Report prints',
     );
   }
-  const verified = (await as.quinn!.post('/api/audit/verify')).body;
+  const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   assert.deepEqual([verified.lab, verified.company], [null, null]);
   assert.ok(Math.abs(Date.parse(verified.at) - Date.now()) < 60_000, 'the server states when it checked');
 });
 
 it('a step by the wrong role is refused', async () => {
   const id = await submitTestTo('Requested');
-  assert.equal((await take(as.cora!, 'receive', id)).status, 403);
-  assert.equal((await take(as.ana!, 'receive', id)).status, 403);
+  assert.equal((await take(as.cora, 'receive', id)).status, 403);
+  assert.equal((await take(as.ana, 'receive', id)).status, 403);
   assert.equal((await view(id)).test.state, 'Requested');
 });
 
 it('assigning an Analyst without a Training Record for the Method is refused', async () => {
   const id = await submitTestTo('Ready');
-  const refused = await take(as.lena!, 'assign', id, { assigneeId: theo!.id });
-  assert.equal(refused.status, 403);
-  assert.match(refused.body.message, /Training Record/);
+  const refused = await take(as.lena, 'assign', id, { assigneeId: theo.id });
+  assert.match(refusedWith(refused, 403), /Training Record/);
   const after = await view(id);
-  assert.deepEqual([after.test.state, after.test.assignee_id], ['Ready', null]);
+  assert.deepEqual([after.test.state, after.test.assignee], ['Ready', null]);
 });
 
 it('the Analyst who signed Performed cannot review, and the Reviewer who reviewed cannot release', async () => {
   const id = await submitTestTo('Assigned', dana);
-  assert.equal((await take(as.dana!, 'enterResult', id, result, dana)).status, 200);
+  assert.equal((await take(as.dana, 'enterResult', id, result, dana)).status, 200);
   assert.equal((await view(id, as.dana)).next, null, 'review is not offered to the Analyst who performed it');
   const anySignature = { password: 'unused' };
-  const selfReview = await as.dana!.post('/api/steps/review', { testId: id, input: {}, signature: anySignature });
-  assert.deepEqual(
-    [selfReview.status, selfReview.body.message],
-    [403, 'the Analyst who performed the Test cannot review it'],
-  );
+  const selfReview = await as.dana.call(stepRoute('review'), { testId: id, input: {}, signature: anySignature });
+  assert.equal(refusedWith(selfReview, 403), 'the Analyst who performed the Test cannot review it');
 
-  assert.equal((await take(as.rhea!, 'review', id, {}, rhea)).status, 200);
-  const selfRelease = await as.rhea!.post('/api/steps/release', { testId: id, input: {}, signature: anySignature });
+  assert.equal((await take(as.rhea, 'review', id, {}, rhea)).status, 200);
+  const selfRelease = await as.rhea.call(stepRoute('release'), { testId: id, input: {}, signature: anySignature });
   assert.equal(selfRelease.status, 403);
   assert.equal((await view(id)).test.state, 'Reviewed');
 });
@@ -152,7 +173,7 @@ it('a signing with a wrong password is refused and changes nothing', async () =>
   const id = await submitTestTo('Assigned', wes);
   const before = await view(id);
   const enter = (password: string) =>
-    as.wes!.post('/api/steps/enterResult', { testId: id, input: result, signature: { password } });
+    as.wes.call(stepRoute('enterResult'), { testId: id, input: result, signature: { password } });
 
   assert.equal((await enter('not-the-password')).status, 401);
   assert.deepEqual(
@@ -165,14 +186,14 @@ it('a signing with a wrong password is refused and changes nothing', async () =>
 
 it("a Customer User cannot read another Customer's Test", async () => {
   const id = await submitTestTo('Requested');
-  assert.ok((await as.cora!.get('/api/tests')).body.some((t: any) => t.id === id));
-  assert.equal((await as.olga!.get(`/api/tests/${id}`)).status, 404);
-  assert.equal((await as.olga!.get(`/api/tests/${id}/report`)).status, 404);
-  assert.ok(!(await as.olga!.get('/api/tests')).body.some((t: any) => t.id === id));
+  assert.ok(ok(await as.cora.call(routes.tests)).some((t) => t.id === id));
+  assert.equal((await as.olga.call(routes.test, { id })).status, 404);
+  assert.equal((await as.olga.call(routes.report, { id })).status, 404);
+  assert.ok(!ok(await as.olga.call(routes.tests)).some((t) => t.id === id));
 });
 
 it("a query without the context's Lab fails, and another Lab's Test is out of reach", async () => {
-  const ctx = (await as.lena!.get('/api/me')).body;
+  const ctx = ok(await as.lena.call(routes.me));
   assert.throws(() => labScope(api.db, { ...ctx, lab: { id: '', code: '', name: '' } }), /needs the Lab/);
 
   const otherTest = await audited(
@@ -186,7 +207,7 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
         .executeTakeFirstOrThrow();
       const submission = await tx
         .insertInto('submission')
-        .values({ customer_id: customerId, submitted_by: cora!.id })
+        .values({ customer_id: customerId, submitted_by: cora.id })
         .returning('id')
         .executeTakeFirstOrThrow();
       const sample = await tx
@@ -203,7 +224,15 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
       ).id;
     },
   );
-  assert.equal((await as.lena!.get(`/api/tests/${otherTest}`)).status, 404);
-  assert.equal((await take(as.samir!, 'receive', otherTest)).status, 404);
-  assert.ok(!(await as.lena!.get('/api/tests')).body.some((t: any) => t.id === otherTest));
+  assert.equal((await as.lena.call(routes.test, { id: otherTest })).status, 404);
+  assert.equal((await take(as.samir, 'receive', otherTest)).status, 404);
+  assert.ok(!ok(await as.lena.call(routes.tests)).some((t) => t.id === otherTest));
+});
+
+it('a Test leaves the API with only the fields a Test row declares', async () => {
+  const id = await submitTestTo('Assigned');
+  const declared = Object.keys(routes.tests.schema.response[200].items.properties).sort();
+  const listed = ok(await as.lena.call(routes.tests)).find((t) => t.id === id) ?? assert.fail('the Test is listed');
+  assert.deepEqual(Object.keys(listed).sort(), declared, 'GET /api/tests');
+  assert.deepEqual(Object.keys((await view(id)).test).sort(), declared, 'GET /api/tests/:id');
 });

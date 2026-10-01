@@ -1,13 +1,18 @@
 import { type FormEvent, useState } from 'react';
-import { api, type Me } from './api.ts';
+import { type ActorContext, routes } from '@lims/domain';
+import { api } from './api.ts';
 import { TopBar } from './rail.tsx';
 
-export function SignIn({ notice, onIn }: { notice: string; onIn: (me: Me) => void }) {
+export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorContext) => void }) {
   const [error, setError] = useState(notice);
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    api<Me>('/api/login', { username: form.get('username'), password: form.get('password') }).then(onIn, (err: Error) =>
+    const field = (name: string) => {
+      const value = form.get(name);
+      return typeof value === 'string' ? value : '';
+    };
+    api(routes.login, { username: field('username'), password: field('password') }).then(onIn, (err: Error) =>
       setError(err.message),
     );
   }

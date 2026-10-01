@@ -4,7 +4,7 @@ import pg from 'pg';
 import type { DB } from './schema.ts';
 
 export type { DB };
-export type { Meaning, Role, TestState } from './schema.ts';
+export type { Json, Meaning, Role, TestState } from './schema.ts';
 
 const PID_FILE = new URL('../../../.pg/data/postmaster.pid', import.meta.url);
 

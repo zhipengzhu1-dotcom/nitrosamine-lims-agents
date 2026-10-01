@@ -1,9 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { audited, type DB } from '@lims/db';
 import { verifyPassword } from '@lims/db/credentials';
-import type { FastifyInstance } from 'fastify';
+import { type ActorContext, routes } from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
-import { type ActorContext, refuse } from './scope.ts';
+import type { App } from './app.ts';
+import { refuse } from './scope.ts';
 
 export const LOCKOUT_AFTER_FAILURES = 20;
 export const IDLE_LIMIT_MS = 8 * 60 * 60_000;
@@ -44,6 +45,7 @@ async function prove(db: Kysely<DB>, person: Person, password: string, reason: s
   notValid();
 }
 
+/** Proves the signer before a Signature is written: a wrong password refuses with 401 and counts toward lockout. */
 export async function reauthenticate(db: Kysely<DB>, ctx: ActorContext, password: string, step: string): Promise<void> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', ctx.person.id).executeTakeFirstOrThrow();
   await prove(db, person, password, `Re-authenticate to sign ${step}`);
@@ -102,22 +104,10 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
   };
 }
 
-const credential = { type: 'string', minLength: 1, maxLength: 200 } as const;
-
-export function loginRoutes(app: FastifyInstance, db: Kysely<DB>): void {
-  app.post<{ Body: { username: string; password: string } }>(
-    '/api/login',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          required: ['username', 'password'],
-          additionalProperties: false,
-          properties: { username: credential, password: credential },
-        },
-      },
-    },
-    async (req, reply) => {
+export function loginRoutes(app: App, db: Kysely<DB>): void {
+  app.route({
+    ...routes.login,
+    handler: async (req, reply) => {
       const person = await db
         .selectFrom('person')
         .selectAll()
@@ -145,14 +135,22 @@ export function loginRoutes(app: FastifyInstance, db: Kysely<DB>): void {
       });
       return actorFor(db, token);
     },
-  );
+  });
 }
 
-export function logoutRoute(app: FastifyInstance, db: Kysely<DB>): void {
-  app.post('/api/logout', async (req, reply) => {
-    const token = req.cookies[SESSION_COOKIE]!;
-    await db.updateTable('session').set({ ended_at: new Date() }).where('token_hash', '=', hashToken(token)).execute();
-    reply.clearCookie(SESSION_COOKIE, { path: '/' });
-    return { ended: true };
+export function logoutRoute(app: App, db: Kysely<DB>): void {
+  app.route({
+    ...routes.logout,
+    handler: async (req, reply) => {
+      const token = req.cookies[SESSION_COOKIE];
+      if (token !== undefined)
+        await db
+          .updateTable('session')
+          .set({ ended_at: new Date() })
+          .where('token_hash', '=', hashToken(token))
+          .execute();
+      reply.clearCookie(SESSION_COOKIE, { path: '/' });
+      return { ended: true } as const;
+    },
   });
 }

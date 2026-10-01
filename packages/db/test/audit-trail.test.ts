@@ -30,7 +30,7 @@ after(async () => {
 });
 
 function refusedWith(code: string) {
-  return (error: unknown) => (error as { code?: string }).code === code;
+  return (error: unknown) => error instanceof Error && 'code' in error && error.code === code;
 }
 
 it('an audited write records who made it, in which role, why, and the old and new row', async () => {
@@ -48,6 +48,7 @@ it('an audited write records who made it, in which role, why, and the old and ne
   const entry = await app
     .selectFrom('audit_entry')
     .selectAll()
+    .select([sql<string>`old_row->>'name'`.as('oldName'), sql<string>`new_row->>'name'`.as('newName')])
     .where('table_name', '=', 'customer')
     .where('op', '=', 'UPDATE')
     .where(sql`new_row->>'id'`, '=', customer)
@@ -56,8 +57,7 @@ it('an audited write records who made it, in which role, why, and the old and ne
     { actor: entry.actor, role: entry.role, reason: entry.reason, chain: entry.chain },
     { ...ctx, chain: 'company' },
   );
-  assert.equal((entry.old_row as { name: string }).name, 'Acme Labz');
-  assert.equal((entry.new_row as { name: string }).name, 'Acme Labs');
+  assert.deepEqual([entry.oldName, entry.newName], ['Acme Labz', 'Acme Labs']);
 });
 
 it('a write without a reason is refused and leaves nothing behind', async () => {

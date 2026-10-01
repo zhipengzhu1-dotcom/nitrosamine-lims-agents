@@ -1,13 +1,13 @@
-import type { DB } from '@lims/db';
-import { nextStep } from '@lims/domain';
-import type { FastifyInstance } from 'fastify';
+import type { DB, Json } from '@lims/db';
+import { nextStep, type RowSnapshot, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
+import type { App } from './app.ts';
 import { labScope, refuse, type Scope } from './scope.ts';
-import { factsFor, uuid } from './steps.ts';
+import { factsFor } from './steps.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
-  return scope
+  const tests = scope
     .from('test')
     .innerJoin('sample', 'sample.id', 'test.sample_id')
     .innerJoin('submission', 'submission.id', 'sample.submission_id')
@@ -29,8 +29,14 @@ function visibleTests(scope: Scope) {
       'test.sample_id',
       'test.method_id',
       'test.assignee_id',
-    ])
-    .$if(customerId !== null, (qb) => qb.where('submission.customer_id', '=', customerId!));
+    ]);
+  return customerId === null ? tests : tests.where('submission.customer_id', '=', customerId);
+}
+
+function snapshot(row: Json | null): RowSnapshot | null {
+  if (row === null) return null;
+  if (typeof row !== 'object' || Array.isArray(row)) throw new Error('an Audit Trail row snapshot is not an object');
+  return row;
 }
 
 async function testView(scope: Scope, id: string) {
@@ -89,54 +95,57 @@ async function testView(scope: Scope, id: string) {
           .where(sql<boolean>`coalesce(new_row, old_row)->>'id' = any(${ids}) or coalesce(new_row, old_row)->>'test_id' = ${id}
         or coalesce(new_row, old_row)->>'record_id' = any(${ids})`)
           .orderBy('seq')
-          .execute(),
+          .execute()
+          .then((entries) => entries.map((e) => ({ ...e, oldRow: snapshot(e.oldRow), newRow: snapshot(e.newRow) }))),
     next: nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test)),
   };
 }
 
-const byId = { params: { type: 'object', required: ['id'], properties: { id: uuid } } };
+export function readRoutes(app: App, db: Kysely<DB>): void {
+  app.route({ ...routes.me, handler: async (req) => req.actor });
 
-export function readRoutes(app: FastifyInstance, db: Kysely<DB>): void {
-  app.get('/api/me', async (req) => req.actor);
-
-  app.get('/api/lookups', async (req) => {
-    const scope = labScope(db, req.actor);
-    return {
-      methods: await scope.company
-        .selectFrom('method')
-        .select(['id', 'code', 'version', 'title'])
-        .orderBy('code')
-        .execute(),
-      analysts: await scope
-        .from('membership')
-        .innerJoin('person', 'person.id', 'membership.person_id')
-        .select(['person.id', 'person.display_name as displayName'])
-        .where('membership.role', '=', 'Analyst')
-        .orderBy('person.display_name')
-        .execute(),
-    };
+  app.route({
+    ...routes.lookups,
+    handler: async (req) => {
+      const scope = labScope(db, req.actor);
+      return {
+        methods: await scope.company
+          .selectFrom('method')
+          .select(['id', 'code', 'version', 'title'])
+          .orderBy('code')
+          .execute(),
+        analysts: await scope
+          .from('membership')
+          .innerJoin('person', 'person.id', 'membership.person_id')
+          .select(['person.id', 'person.display_name as displayName'])
+          .where('membership.role', '=', 'Analyst')
+          .orderBy('person.display_name')
+          .execute(),
+      };
+    },
   });
 
-  app.get('/api/tests', async (req) =>
-    visibleTests(labScope(db, req.actor)).orderBy('sample.number', 'desc').execute(),
-  );
-
-  app.get<{ Params: { id: string } }>('/api/tests/:id', { schema: byId }, async (req) =>
-    testView(labScope(db, req.actor), req.params.id),
-  );
-
-  app.get<{ Params: { id: string } }>('/api/tests/:id/report', { schema: byId }, async (req) => {
-    const { report, test, result, signatures } = await testView(labScope(db, req.actor), req.params.id);
-    return report ? { report, test, result, signatures } : refuse(404, 'this Test has no released Test Report');
+  app.route({
+    ...routes.tests,
+    handler: async (req) => visibleTests(labScope(db, req.actor)).orderBy('sample.number', 'desc').execute(),
   });
 
-  app.post('/api/audit/verify', async (req) => {
-    if (!req.actor.roles.includes('QA')) refuse(403, 'verifying the Audit Trail is a QA action');
-    const scope = labScope(db, req.actor);
-    return {
-      at: new Date().toISOString(),
-      lab: await scope.verifyChain('lab'),
-      company: await scope.verifyChain('company'),
-    };
+  app.route({ ...routes.test, handler: async (req) => testView(labScope(db, req.actor), req.params.id) });
+
+  app.route({
+    ...routes.report,
+    handler: async (req) => {
+      const { report, test, result, signatures } = await testView(labScope(db, req.actor), req.params.id);
+      return report ? { report, test, result, signatures } : refuse(404, 'this Test has no released Test Report');
+    },
+  });
+
+  app.route({
+    ...routes.verifyAuditTrail,
+    handler: async (req) => {
+      if (!req.actor.roles.includes('QA')) refuse(403, 'verifying the Audit Trail is a QA action');
+      const scope = labScope(db, req.actor);
+      return { at: new Date(), lab: await scope.verifyChain('lab'), company: await scope.verifyChain('company') };
+    },
   });
 }

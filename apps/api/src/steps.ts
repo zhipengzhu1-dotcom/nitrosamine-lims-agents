@@ -1,34 +1,30 @@
 import { randomUUID } from 'node:crypto';
 import type { DB } from '@lims/db';
-import { type Meaning, refusal, type Step, type StepFacts, type StepName, stepNames, steps } from '@lims/domain';
-import type { FastifyInstance } from 'fastify';
+import {
+  type ActorContext,
+  type Meaning,
+  type PersonId,
+  type RouteReply,
+  refusal,
+  type Step,
+  type StepBody,
+  type StepFacts,
+  type StepInput,
+  type StepName,
+  stepNames,
+  stepRoute,
+  steps,
+} from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
+import type { App } from './app.ts';
 import { reauthenticate } from './auth.ts';
-import { type ActorContext, type LabQueries, labScope, refuse } from './scope.ts';
+import { type LabQueries, labScope, refuse } from './scope.ts';
 
-export const uuid = { type: 'string', format: 'uuid' } as const;
-const text = { type: 'string', minLength: 1, maxLength: 200 } as const;
 const REFUSAL_STATUS = { state: 409, role: 403, guard: 403 } as const;
 
-interface Inputs {
-  submit: { methodId: string; description: string };
-  receive: Record<string, never>;
-  assign: { assigneeId: string };
-  enterResult: {
-    analyte: string;
-    value: string;
-    unit: string;
-    injectionSequenceRef: string;
-    notebookRef: string;
-    performedOn: string;
-  };
-  review: Record<string, never>;
-  release: Record<string, never>;
-}
-
 interface Effect<I> {
-  input: Record<string, object>;
   signedRecord?: 'test_report';
+  assignee?: (input: I) => PersonId;
   write(q: LabQueries, ctx: ActorContext, testId: string, input: I): Promise<unknown>;
 }
 
@@ -41,9 +37,8 @@ async function nextNumber(q: LabQueries, table: 'sample' | 'test_report', prefix
 }
 
 /** What each step writes besides moving the Test's state. */
-const effects: { [K in StepName]: Effect<Inputs[K]> } = {
+const effects: { [K in StepName]: Effect<StepInput<K>> } = {
   submit: {
-    input: { methodId: uuid, description: text },
     async write(q, ctx, testId, input) {
       const customerId = ctx.person.customerId ?? refuse(403, 'only a Customer User submits');
       const submission = await q.company
@@ -63,7 +58,6 @@ const effects: { [K in StepName]: Effect<Inputs[K]> } = {
     },
   },
   receive: {
-    input: {},
     write: (q, _ctx, testId) =>
       q
         .update('sample')
@@ -72,19 +66,11 @@ const effects: { [K in StepName]: Effect<Inputs[K]> } = {
         .execute(),
   },
   assign: {
-    input: { assigneeId: uuid },
+    assignee: (input) => input.assigneeId,
     write: (q, _ctx, testId, input) =>
       q.update('test').set({ assignee_id: input.assigneeId }).where('id', '=', testId).execute(),
   },
   enterResult: {
-    input: {
-      analyte: text,
-      value: { type: 'string', pattern: '^-?[0-9]+(\\.[0-9]+)?$' },
-      unit: text,
-      injectionSequenceRef: text,
-      notebookRef: text,
-      performedOn: { type: 'string', format: 'date' },
-    },
     write: (q, ctx, testId, input) =>
       q
         .insert('result', {
@@ -99,9 +85,8 @@ const effects: { [K in StepName]: Effect<Inputs[K]> } = {
         })
         .execute(),
   },
-  review: { input: {}, write: async () => {} },
+  review: { write: async () => {} },
   release: {
-    input: {},
     signedRecord: 'test_report',
     write: async (q, ctx, testId) =>
       q
@@ -194,66 +179,45 @@ async function sign(q: LabQueries, ctx: ActorContext, meaning: Meaning, table: '
     .execute();
 }
 
-function stepRoute<K extends StepName>(app: FastifyInstance, db: Kysely<DB>, name: K): void {
+function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): void {
   const step: Step = steps[name];
-  const effect: Effect<Inputs[K]> = effects[name];
-  const body = {
-    type: 'object',
-    additionalProperties: false,
-    required: [...(step.from ? ['testId'] : []), 'input', ...(step.signs ? ['signature'] : [])],
-    properties: {
-      testId: uuid,
-      input: {
-        type: 'object',
-        additionalProperties: false,
-        required: Object.keys(effect.input),
-        properties: effect.input,
-      },
-      signature: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['password'],
-        properties: { password: text },
-      },
-    },
-  };
+  const effect: Effect<StepInput<K>> = effects[name];
+  const route = stepRoute(name);
+  app.post<{ Body: StepBody<K>; Reply: RouteReply<typeof route> }>(route.url, { schema: route.schema }, async (req) => {
+    const { actor, body } = req;
+    const scope = labScope(db, actor);
+    const test =
+      body.testId === undefined
+        ? null
+        : ((await scope.from('test').selectAll().where('id', '=', body.testId).executeTakeFirst()) ??
+          refuse(404, 'no such Test in this Lab'));
+    const facts = await factsFor(scope, actor, test, effect.assignee?.(body.input));
+    const refused = refusal(name, test?.state ?? null, actor.roles, facts);
+    if (refused) refuse(REFUSAL_STATUS[refused.kind], refused.message);
+    if (step.signs) {
+      const { password } = body.signature ?? refuse(400, `${name} needs the signer's password`);
+      await reauthenticate(db, actor, password, name);
+    }
 
-  app.post<{ Body: { testId?: string; input: Inputs[K]; signature?: { password: string } } }>(
-    `/api/steps/${name}`,
-    { schema: { body } },
-    async (req) => {
-      const { actor, body } = req;
-      const scope = labScope(db, actor);
-      const test =
-        body.testId === undefined
-          ? null
-          : ((await scope.from('test').selectAll().where('id', '=', body.testId).executeTakeFirst()) ??
-            refuse(404, 'no such Test in this Lab'));
-      const facts = await factsFor(scope, actor, test, (body.input as { assigneeId?: string }).assigneeId);
-      const refused = refusal(name, test?.state ?? null, actor.roles, facts);
-      if (refused) refuse(REFUSAL_STATUS[refused.kind], refused.message);
-      if (step.signs) await reauthenticate(db, actor, body.signature!.password, name);
-
-      const testId = test?.id ?? randomUUID();
-      await scope.write(name, step.role, async (q) => {
-        if (test) {
-          const moved = await q
-            .update('test')
-            .set({ state: step.to })
-            .where('id', '=', testId)
-            .where('state', '=', test.state)
-            .executeTakeFirstOrThrow();
-          if (!moved.numUpdatedRows) refuse(409, 'the Test has moved on; reload it');
-        }
-        await effect.write(q, actor, testId, body.input);
-        if (step.signs) await sign(q, actor, step.signs, effect.signedRecord ?? 'test', testId);
-      });
-      return { testId, state: step.to };
-    },
-  );
+    const testId = test?.id ?? randomUUID();
+    await scope.write(name, step.role, async (q) => {
+      if (test) {
+        const moved = await q
+          .update('test')
+          .set({ state: step.to })
+          .where('id', '=', testId)
+          .where('state', '=', test.state)
+          .executeTakeFirstOrThrow();
+        if (!moved.numUpdatedRows) refuse(409, 'the Test has moved on; reload it');
+      }
+      await effect.write(q, actor, testId, body.input);
+      if (step.signs) await sign(q, actor, step.signs, effect.signedRecord ?? 'test', testId);
+    });
+    return { testId, state: step.to };
+  });
 }
 
 /** `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema. */
-export function stepRoutes(app: FastifyInstance, db: Kysely<DB>): void {
-  for (const name of stepNames) stepRoute(app, db, name);
+export function stepRoutes(app: App, db: Kysely<DB>): void {
+  for (const name of stepNames) registerStep(app, db, name);
 }
