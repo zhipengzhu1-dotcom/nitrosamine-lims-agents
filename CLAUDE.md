@@ -7,6 +7,7 @@ A demo LIMS for a nitrosamine QC lab, built to 21 CFR Part 11, EU GMP Annex 11 a
 - **Map.** The effort is charted on the wayfinder map, [Map: Nitrosamine LC-MS/MS LIMS prototype](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/1) (`gh issue view 1`). Its Destination, Notes and Decisions so far are the project's standing decisions: read them before choosing an approach, and build on a decision rather than reopening it. Notes also set autonomy: deploys, force-pushes and data deletion pause for the owner.
 - **Glossary.** `CONTEXT.md` holds the domain language. Name things in code, tickets and prose with its terms, and update it inline through the `domain-modeling` skill when a term is sharpened or added.
 - **Research.** Each closed research ticket's findings live on a `research/<name>` branch: `git show origin/research/<name>:docs/research/<name>.md`. The ticket's resolution comment names the branch.
+- **Coding standards.** `docs/coding-standards.md` holds the rules for all hand-written code, and `pnpm check` is the gate. Read it before you write or review code.
 
 ## Workflow
 
