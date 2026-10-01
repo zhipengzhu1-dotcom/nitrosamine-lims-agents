@@ -188,6 +188,14 @@ it('a refused press leaves its Commit Key unused, so the corrected retry commits
   assert.deepEqual(await writtenBy(testId), once);
 });
 
+it('a retry of a committed signing step answers its receipt whatever password it carries, and signs nothing', async () => {
+  const testId = await assigned();
+  const key = randomUUID();
+  const first = ok(await enterResult(key, testId));
+  assert.deepEqual(ok(await enterResult(key, testId, 'not-the-password')), first);
+  assert.deepEqual(await writtenBy(testId), once);
+});
+
 it('more concurrent signing presses than the connection pool holds all commit', { timeout: 30_000 }, async () => {
   const tests: string[] = [];
   for (let i = 0; i < 12; i++) tests.push(await assigned());
