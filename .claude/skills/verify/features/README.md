@@ -7,7 +7,7 @@ This directory is the maintained source for verifying what the LIMS does for the
 - Start an instance with `.claude/skills/verify/scripts/up.sh`, and require every line of `doctor.sh` to be `ok:`.
 - The database is seeded fresh: one Lab (`RD`), one Customer, the Method `RD-MTH-0001 v1`, the 8 demo accounts and no Tests.
 - Every account signs in with `verify-demo-password`.
-- Never drive an instance that this run did not start, such as `pnpm e2e`'s on port 5174 or the owner's `scripts/dev.sh` on 5173.
+- Never drive an instance that this run did not start, such as `pnpm e2e`'s, which takes this checkout's own ports in 10000-19999 (from `node packages/db/src/checkout.ts e2e-ports`) and owns `lims_e2e_<suffix>`, or the owner's `scripts/dev.sh` on 5173.
 
 ## Driving conventions
 
