@@ -391,7 +391,7 @@ A record that pauses a Test or Sample for a stated reason (a Deviation, a receip
 _Avoid_: On hold (as a status), suspension, quarantine
 
 **System Incident**:
-A record that the LIMS itself failed or misbehaved (an alarm, a missed backup or anchor, a failed restore drill, a clock step), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
+A record that the LIMS itself failed or misbehaved (an alarm, a missed backup or anchor, a failed restore drill, a clock step, an assistant failure or reported wrong answer), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
 _Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failures)
 
 **Training Record**:
@@ -505,8 +505,12 @@ What an Electronic Signature attests: Performed, Verified, Reviewed, Approved, R
 _Avoid_: Signature type, status
 
 **Authorisation**:
-QA's grant allowing a person to sign with a given Signature Meaning within a scope (a Method or record type) in one Lab, valid for 12 months unless renewed through a Competence Assessment. A Method Authorisation covers every version of that Method; each version still needs its own Training Record. QA may suspend one, citing a Deviation, and nobody grants, renews or lifts their own. It is separate from a Training Record: being trained is not being authorised.
+QA's grant allowing a person to perform one activity within a scope (a Method or record type) in one Lab: to sign with a given Signature Meaning, or to give Opinions and Interpretations. It is valid for 12 months unless renewed through a Competence Assessment. A Method Authorisation covers every version of that Method; each version still needs its own Training Record. QA may suspend one, citing a Deviation, and nobody grants, renews or lifts their own. It is separate from a Training Record: being trained is not being authorised.
 _Avoid_: Permission, access right, qualification
+
+**Opinion and Interpretation**:
+A marked statement of professional judgement about results, written into a Test Report comment or a Customer message by a person holding the Authorisation for it, labelled as such and linked to the Reportable Results or Document versions it rests on. It never states conformity, which only a Specification's stored verdict does.
+_Avoid_: Comment, conclusion, advice, statement of conformity
 
 **Return**:
 Sending a record back, with a reason, to the person who signed it Performed, instead of signing it. It is recorded but not signed.
@@ -537,9 +541,13 @@ One QA-approved version of the system's calculations, including how values are c
 _Avoid_: Algorithm version, software version, release
 
 **Assistant Call**:
-One question or request put to the LIMS's AI assistant and its reply, kept with who asked (or a non-person identity, for background work), when, the assistant configuration in force, the Record Versions it read, and the reply as first generated. It is the one reference any record uses to show the assistant was involved.
+One question or request put to the LIMS's AI assistant and its reply, kept with who asked, when, the Assistant Configuration in force, the Record Versions it read, any earlier Assistant Calls it carried, and the reply as first generated. It is the one reference any record uses to show the assistant was involved.
 _Avoid_: Call log row, request log entry, prompt, chat
 
 **Assistant Draft**:
 The text an Assistant Call offers for a person to edit and save into a record. It is never itself the record: once saved, the text is a Record Version authored by the person who saved it, whose Audit Trail entry names the Assistant Call.
 _Avoid_: AI suggestion, pencil draft, proposal
+
+**Assistant Configuration**:
+One approved version of everything that shapes the assistant's behaviour, taken together: the model, its instructions, the queries it may run and which roles may run them. Every Assistant Call records the version in force.
+_Avoid_: Model version, prompt version, AI settings
