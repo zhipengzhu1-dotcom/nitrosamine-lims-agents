@@ -1,5 +1,10 @@
 # Spec gaps found by the #24 thin slice
 
+These gaps were decided on 2026-10-01 in the resolution of [Decide the spec gaps the walking skeleton found](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/45). Twelve, counting merged questions once, were already settled by standing decisions. Two corrections from the review, with the questions otherwise left as written:
+
+- **Gap 1's premise is wrong.** [Decide the audit trail and electronic signature design](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13) already lists logins, logouts, failed attempts and lockouts as Audit Trail events.
+- **Gap 35's "(c)" is wrong.** §11.100(c) is the company's certification letter to FDA, not an acknowledgement by the person.
+
 For the grilling ticket after [#24](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/24) closes. Each is something the spec must decide, not something the slice builds.
 
 ## From the database unit (96957a3)

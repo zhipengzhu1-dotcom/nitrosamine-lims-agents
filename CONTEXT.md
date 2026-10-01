@@ -95,7 +95,7 @@ The part of a Specification for one Jurisdiction: its Specification Lines, its m
 _Avoid_: Sub-specification, regional spec
 
 **Specification Line**:
-One analyte's limit within a Specification Section. The limit is derived from an Acceptable Intake, a fixed concentration, a limit test at a stated concentration, or report only (no limit). It is kept as written, with its decimal places, together with a reporting threshold.
+One analyte's limit within a Specification Section. The limit is derived from an Acceptable Intake, a fixed concentration, a limit test at a stated concentration, or report only (no limit). A limit derived from an Acceptable Intake is the intake divided by the maximum daily dose, rounded half up to two significant figures; a tighter limit is a fixed-concentration line, no higher than the derived value and written to at least its decimals. It is kept as written, with its decimal places, together with a reporting threshold.
 _Avoid_: Spec limit, criterion
 
 **Acceptable Intake**:
@@ -115,7 +115,7 @@ The agreed way a Reportable Result is judged against a limit: simple or guarded 
 _Avoid_: Acceptance criteria, pass/fail rule
 
 **First Detection**:
-The first released GMP result at or above the LOQ for one analyte in one Product under an EMA or MHLW Specification Section, across all Labs. The Customer is told. If that result is later invalidated, the record is marked superseded, never removed.
+The first released GMP result at or above the LOQ for one analyte in one Product under an EMA or MHLW Specification Section, across all Labs. A valid Preparation's Result at or above the LOQ counts, even when the Reportable Result prints "< LOQ". The Customer is told. If that result is later invalidated, the record is marked superseded, never removed.
 _Avoid_: First positive, new finding
 
 **Specification Request**:
@@ -178,6 +178,10 @@ _Avoid_: Batch, sequence, sample list
 One acquisition from a vial within a Run, identified in the instrument's export by the ID the LIMS put in the Run's sample list. Every Injection in an imported Run is either matched to a Preparation, standard, check sample or blank, or excluded with a reason.
 _Avoid_: Shot, row, acquisition (alone)
 
+**No peak**:
+The explicit entry for an Injection with no integrated peak, picked in place of a number. Nobody types "ND" or "< LOQ"; an Injection that gives a number is entered as printed, with its sign and every digit.
+_Avoid_: ND, not detected (as an entry), zero
+
 **Import**:
 One upload of an instrument's export (the results file and its printed report) into a Run. The Analyst confirms it or rejects it as a whole with a reason, never edits it, and it is kept either way.
 _Avoid_: Upload (alone), file
@@ -207,7 +211,7 @@ The value for one analyte from one Preparation.
 _Avoid_: Reading, value
 
 **Reportable Result**:
-The value for one analyte on one Test that is compared with the Specification and printed on the Test Report: the mean of the Test's Preparations, each the mean of the Injections its Method counts.
+The value for one analyte on one Test that is compared with the Specification and printed on the Test Report: the mean of the Test's Preparations, each the mean of the Injections its Method counts. A Preparation that is below the LOD, negative or No peak never enters the mean across Preparations. Where one Preparation is between the LOD and the LOQ and the other at or above the LOQ, the two must agree within the Method's variability limit, and the Reportable Result is then their mean at full precision, printed as a number if it is at or above the LOQ and as "< LOQ" otherwise, with the Preparation at or above the LOQ printed beside it.
 _Avoid_: Final result, reported value
 
 **Reinjection**:
@@ -235,7 +239,7 @@ Moving a Sample, equipment or stock from one Lab to another, recorded as a dispa
 _Avoid_: Move, relocation
 
 **Test Report**:
-The signed document a Lab issues to a Customer with Reportable Results. It may be titled "Certificate of Analysis" when printed, but is never called a CoA in the system. Once released it changes only through a Deviation: superseded by an Amended Report, or Withdrawn when its results cannot be corrected.
+The signed document a Lab issues to a Customer with Reportable Results. Its printed title is always "Test Report", never "Certificate of Analysis". The Released signature is given on the Record Version holding the content the report prints, and the issued document is made from it once, at release, with that signature printed on it; every later copy is that same document. Once released it changes only through a Deviation: superseded by an Amended Report, or Withdrawn, by a Withdrawal notice, when its results cannot be corrected. Each of those takes its own number and cites the original's.
 _Avoid_: CoA, certificate, report
 
 ### Stability
@@ -489,8 +493,16 @@ One saved state of a record that can be signed. Changing a signable record makes
 _Avoid_: Revision, edit
 
 **Audit Trail**:
-The permanent, system-generated history of every change to records, accounts and configuration: who (with role and Lab), what (old and new value), when, and why. Nobody can edit or switch it off.
+The permanent, system-generated history of every change to records, accounts and configuration, and of every Access Event: who (with role and Lab), what (old and new value), when, and why. A normal forward step in a workflow, such as Receive, Performed or Released, records its action name as the reason; a step off that path, such as a Return, rejection, Hold, reassignment, cancellation, Reprocessing or account unlock, and any change to a saved value or setting, takes a reason picked from a list. Nobody can edit or switch it off.
 _Avoid_: Log, history, change log
+
+**Access Event**:
+The Audit Trail record of one sign-in (succeeded or failed), sign-out, lock, unlock, lockout, takeover, Lab switch, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
+_Avoid_: Login log, session log, access log
+
+**Workstation**:
+A bench PC the Admin has registered with its name, Lab and Room, which every session and Access Event from it carries. A device that is not registered shows as an unregistered device; the portal and desk PCs may be used that way.
+_Avoid_: Terminal, client, kiosk
 
 **Reason for Change**:
 The cause recorded with every change made after a record is first saved.
@@ -505,8 +517,16 @@ What an Electronic Signature attests: Performed, Verified, Reviewed, Approved, R
 _Avoid_: Signature type, status
 
 **Authorisation**:
-QA's grant allowing a person to sign with a given Signature Meaning within a scope (a Method or record type) in one Lab, valid for 12 months unless renewed through a Competence Assessment. A Method Authorisation covers every version of that Method; each version still needs its own Training Record. QA may suspend one, citing a Deviation, and nobody grants, renews or lifts their own. It is separate from a Training Record: being trained is not being authorised.
+QA's grant allowing a person to sign with a given Signature Meaning within a scope (a Method or record type) in one Lab, valid for 12 months unless renewed through a Competence Assessment. A Method Authorisation covers every version of that Method; each version still needs its own Training Record. QA may suspend one, citing a Deviation, and nobody grants, renews or lifts their own; QA's Approved signature on one rests on a current Appointment. It is separate from a Training Record: being trained is not being authorised. It is one of four separate facts that must all hold before a person can sign, with an Identity Verification, the Acknowledged e-signature policy and LIMS-use training. A Reviewed Authorisation on a Test's Method also lets its holder approve a correction to a result made after Performed and before Released, unless they proposed it or signed Performed.
 _Avoid_: Permission, access right, qualification
+
+**Appointment**:
+The record that gives a QA person the authority to sign Approved on Authorisations and Competence Assessments in one Lab, from a start date and against a named version of the role requirements. The manager named in the Effective quality manual signs it Approved; for that one signing the naming stands in for an Authorisation. Nobody else may sign it, and never the person appointed or an Admin. It is not an Authorisation: a QA's own Authorisations, such as to sign Released, are granted by another QA.
+_Avoid_: Designation, delegation, QA authorisation
+
+**Identity Verification**:
+The recorded check of who a person is (who checked, what, and when), made before their first credential is issued and again before a replacement authenticator is enrolled. It is one of the four facts that enable signing.
+_Avoid_: ID check, onboarding, vetting
 
 **Return**:
 Sending a record back, with a reason, to the person who signed it Performed, instead of signing it. It is recorded but not signed.
@@ -525,7 +545,7 @@ A typed value the system refused outright because a gate said the measurement ca
 _Avoid_: Rejected value, invalid entry, error
 
 **Amended Report**:
-A new version of a released Test Report that corrects it, linked to a Deviation and stating what changed and why. The original stays on record, marked Superseded.
+A new version of a released Test Report that corrects it, linked to a Deviation and stating what changed and why. It takes a new number and prints "Amendment to Report" with the original's number. The original stays on record, marked Superseded.
 _Avoid_: Revised report, reissue
 
 **Record Type Register**:
