@@ -22,7 +22,6 @@ declare module 'fastify' {
   }
 }
 
-/** What a handler may hand Fastify for a reply: the wire type, with a Date wherever the wire carries an Instant. */
 type Sent<T> = T extends Instant
   ? T | Date
   : T extends readonly (infer E)[]

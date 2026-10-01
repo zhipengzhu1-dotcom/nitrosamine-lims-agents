@@ -12,7 +12,7 @@ import { useApi } from './api.ts';
 import { Shell, Status, stepAction } from './rail.tsx';
 
 export const time = (iso: string | null) =>
-  // oxlint-disable-next-line no-restricted-globals -- the web's one display function formats the API's ISO instant for the screen; it reads no clock
+  // oxlint-disable-next-line no-restricted-globals -- the web's one display function; it reads no clock, and it puts any instant the date-time format admits, offsets included, into UTC
   iso ? `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')} UTC` : '';
 const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on Sample ${t.sampleNumber}`;
 

@@ -57,7 +57,6 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     ctx,
     ...inLab(db, labId),
     auditTrail: () => db.selectFrom('auditEntry').where('chain', '=', labId),
-    /** Recomputes both hash chains in one statement, stamped with that statement's database clock. */
     verifyAuditTrail: () =>
       db
         .selectNoFrom([
