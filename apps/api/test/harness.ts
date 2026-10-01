@@ -14,7 +14,6 @@ export interface Account {
   password: string;
 }
 
-/** The first word of each seeded username, which names that person in the tests. */
 type SeededName = SeededAccount['username'] extends infer U ? (U extends `${infer N}.${string}` ? N : never) : never;
 export type Answer<R extends Route> = Exclude<Reply<R>, { kind: 'breach' }>;
 
@@ -25,7 +24,6 @@ export class Client {
     this.base = base;
   }
 
-  /** Calls a route and checks the body against the route's contract, so a body outside it fails the test. */
   async call<R extends Route>(route: R, ...request: RouteInput<R>): Promise<Answer<R>> {
     const [input] = request;
     const post = route.method === 'POST';
@@ -43,14 +41,12 @@ export class Client {
   }
 }
 
-/** The reply of a call that succeeded; any other answer fails the test with its status and message. */
 export function ok<R extends Route>(answer: Answer<R>): RouteReply<R> {
   return answer.kind === 'reply'
     ? answer.body
     : assert.fail(`expected a reply, got ${answer.status}: ${answer.message}`);
 }
 
-/** The message of a call refused with this status; any other answer fails the test. */
 export function refusedWith<R extends Route>(answer: Answer<R>, status: number): string {
   return answer.kind === 'refused' && answer.status === status
     ? answer.message

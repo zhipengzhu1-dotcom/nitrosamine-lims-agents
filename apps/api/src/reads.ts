@@ -33,9 +33,11 @@ function visibleTests(scope: Scope) {
   return customerId === null ? tests : tests.where('submission.customer_id', '=', customerId);
 }
 
-/** The audit trigger stores each row with to_jsonb, so a snapshot is an object or absent. */
-const snapshot = (row: Json | null): RowSnapshot | null =>
-  typeof row === 'object' && row !== null && !Array.isArray(row) ? row : null;
+function snapshot(row: Json | null): RowSnapshot | null {
+  if (row === null) return null;
+  if (typeof row !== 'object' || Array.isArray(row)) throw new Error('an Audit Trail row snapshot is not an object');
+  return row;
+}
 
 async function testView(scope: Scope, id: string) {
   const test = (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ?? refuse(404, 'no such Test');

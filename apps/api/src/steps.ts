@@ -24,7 +24,6 @@ const REFUSAL_STATUS = { state: 409, role: 403, guard: 403 } as const;
 
 interface Effect<I> {
   signedRecord?: 'test_report';
-  /** The assignee this step's input names, for the step's guard. */
   assignee?: (input: I) => PersonId;
   write(q: LabQueries, ctx: ActorContext, testId: string, input: I): Promise<unknown>;
 }

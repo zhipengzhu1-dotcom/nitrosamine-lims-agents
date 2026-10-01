@@ -19,6 +19,8 @@ export function refuse(statusCode: number, message: string): never {
 
 function inLab(q: Kysely<DB>, labId: string) {
   const ofLab = (table: LabTable) => sql<boolean>`${sql.ref(`${table}.lab_id`)} = ${labId}`;
+  // Typed without the Lab tables, so a Lab row can only be reached through the filtered builders below.
+  const company: Kysely<Pick<DB, CompanyTable>> = q;
   return {
     from: <T extends LabTable>(table: T) =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot type a select from a generic Lab table; ofLab filters it
@@ -29,9 +31,7 @@ function inLab(q: Kysely<DB>, labId: string) {
     update: <T extends LabTable>(table: T) =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot type an update of a generic Lab table; ofLab filters it
       (q.updateTable(table) as unknown as UpdateQueryBuilder<DB, T, T, UpdateResult>).where(ofLab(table)),
-    // Typed without the Lab tables, so a Lab row can only be reached through the filtered builders above.
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- narrowing the tables a Kysely instance can name has no typed API
-    company: q as unknown as Kysely<Pick<DB, CompanyTable>>,
+    company,
   };
 }
 

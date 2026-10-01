@@ -31,7 +31,7 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
       : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) },
   );
   const json: unknown = await res.json().catch(() => ({}));
-  // oxlint-disable-next-line typescript/consistent-type-assertions -- the API serializes every 2xx through this route's reply schema
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- a wire body has no static type; the API serializes every 2xx through this route's reply schema, and the web does not repeat the check
   if (res.ok) return json as RouteReply<R>;
   const message =
     typeof json === 'object' && json !== null && 'message' in json && typeof json.message === 'string'
@@ -52,7 +52,6 @@ export async function signOut(): Promise<void> {
   signedOut('');
 }
 
-/** Reads a GET route into state, again on each reload. */
 export function useApi<R extends Route>(
   route: R,
   ...request: RouteInput<R>

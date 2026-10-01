@@ -18,10 +18,7 @@ export interface Field<N extends string = string> {
   kind: FieldKind;
 }
 
-/**
- * The web's only per-step table: what each step asks for, keyed by the step's input so a renamed input fails to compile.
- * Role, states and Signature Meaning come from the registry.
- */
+/** The web's only per-step table: what each step asks for. Role, states and Signature Meaning come from the registry. */
 export const stepUi: {
   [K in StepName]: { label: string; fields: readonly Field<Extract<keyof StepInput<K>, string>>[]; record?: string };
 } = {

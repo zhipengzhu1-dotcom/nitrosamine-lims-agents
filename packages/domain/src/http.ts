@@ -3,8 +3,6 @@ import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
 import { type Step, type StepName, stepNames, steps } from './steps.ts';
 
-// Each enum is built from an object that satisfies the generated Postgres enum,
-// so a value missing from, added to or misspelled against the database fails to compile.
 const role = Type.Enum({
   Admin: 'Admin',
   Analyst: 'Analyst',
@@ -37,7 +35,7 @@ export type Meaning = Static<typeof meaning>;
 
 const uuid = Type.String({ format: 'uuid' });
 const text = Type.String({ minLength: 1, maxLength: 200 });
-/** A decimal as typed. The web's input pattern reads the same source, so the two cannot drift. */
+/** A decimal as typed. */
 export const decimalPattern = '-?[0-9]+(\\.[0-9]+)?';
 const decimal = Type.String({ pattern: `^${decimalPattern}$` });
 const calendarDate = Type.String({ format: 'date' });
@@ -178,7 +176,7 @@ function route<
   return { method, url, schema: { ...request, response: { 200: reply, '4xx': refusalBody } } };
 }
 
-/** Every route the API serves besides the steps. The API registers each from its entry, and clients call each by it. */
+/** Every route the API serves besides the steps. */
 export const routes = {
   login: route('POST', '/api/login', { body: credentials }, actorContext),
   logout: route('POST', '/api/logout', {}, Type.Object({ ended: Type.Literal(true) })),

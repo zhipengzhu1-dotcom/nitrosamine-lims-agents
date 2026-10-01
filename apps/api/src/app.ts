@@ -20,10 +20,6 @@ declare module 'fastify' {
   }
 }
 
-/**
- * Types a request by its wire values and a handler's return by the decoded values, so a handler gives a Date where
- * the reply schema has an instant, and the response schema's serializer writes it as the wire value.
- */
 interface WireTypes extends FastifyTypeProvider {
   validator: this['schema'] extends TSchema ? Static<this['schema']> : unknown;
   serializer: this['schema'] extends TSchema ? StaticDecode<this['schema']> : unknown;
