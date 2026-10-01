@@ -1,4 +1,3 @@
-import cookie from '@fastify/cookie';
 import type { DB } from '@lims/db';
 import type { ActorContext, Instant } from '@lims/domain';
 import Fastify, {
@@ -12,6 +11,7 @@ import Fastify, {
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
 import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE } from './auth.ts';
+import { apiLogger, type LogSink } from './log.ts';
 import { readRoutes } from './reads.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
 import { stepRoutes } from './steps.ts';
@@ -19,6 +19,8 @@ import { stepRoutes } from './steps.ts';
 declare module 'fastify' {
   interface FastifyRequest {
     actor: ActorContext;
+    /** Who asked, once the session is known; null before sign-in, so the System Incident writer can read it on any route. */
+    requester: ActorContext | null;
   }
 }
 
@@ -41,47 +43,26 @@ export type App = FastifyInstance<
   WireTypes
 >;
 
-export interface LogSink {
-  write(line: string): void;
-}
 export interface AppOptions {
   log: LogSink | null;
   secureCookie: boolean;
 }
 
-const REDACTED = [
-  'req.body',
-  'req.headers.cookie',
-  'req.headers.authorization',
-  'res.headers["set-cookie"]',
-  'password',
-  '*.password',
-  '*.*.password',
-  // The err serializer copies pg's own fields onto the line, and detail quotes the failing row.
-  'err.detail',
-  'err.hint',
-  'err.where',
-  'err.internalQuery',
-];
-
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   const app = Fastify({
-    logger: options.log
-      ? { level: 'info', stream: options.log, redact: { paths: REDACTED, censor: '[redacted]' } }
-      : false,
+    logger: options.log ? apiLogger(options.log) : false,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
     genReqId: requestReference,
   }).withTypeProvider<WireTypes>();
-  app.setErrorHandler(answerThrown);
+  app.setErrorHandler(answerThrown(db));
+  app.decorateRequest('requester', null);
   app.setNotFoundHandler(() => refuse('notFound', 'no such route'));
-  app.register(cookie, {
-    parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: options.secureCookie },
-  });
-  loginRoutes(app, db);
+  loginRoutes(app, db, options.secureCookie);
   app.register(async (signedIn) => {
     signedIn.decorateRequest('actor');
     signedIn.addHook('onRequest', async (req) => {
       req.actor = await actorFor(db, req.cookies[SESSION_COOKIE]);
+      req.requester = req.actor;
     });
     logoutRoute(signedIn, db);
     readRoutes(signedIn, db);

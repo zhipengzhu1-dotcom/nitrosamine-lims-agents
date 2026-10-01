@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto';
+import type { DB } from '@lims/db';
 import type { RefusalKind } from '@lims/domain';
 import type { FastifyError, FastifyReply, FastifyRequest, FastifySchemaValidationError } from 'fastify';
+import type { Kysely } from 'kysely';
+import { openSystemIncident } from './incident.ts';
 
 /** Every refusal kind's status, chosen here and nowhere else. */
 const STATUS: { readonly [K in RefusalKind]: number } = {
@@ -53,13 +56,16 @@ export function requestReference(): string {
   return Array.from(randomBytes(8), (byte) => READ_ALOUD.charAt(byte % 32)).join('');
 }
 
-/** Every non-2xx body is written here: a refusal with its kind's status, or a failure logged with its cause and answered with a reference only. */
-export function answerThrown(error: FastifyError, req: FastifyRequest, reply: FastifyReply) {
-  const refused = error instanceof Refused ? error : refusedByFastify(error);
-  if (refused) return reply.code(STATUS[refused.kind]).send({ kind: refused.kind, message: refused.message });
-  req.log.error({ err: error }, 'unexpected failure');
-  return reply.code(STATUS.failure).send({
-    kind: 'failure',
-    message: `the LIMS could not finish this request; reload to see what was saved, and give the Admin reference ${req.id}`,
-  });
+/** Every non-2xx body is written here: a refusal with its kind's status, or a failure that opens a System Incident and is answered with its reference only. */
+export function answerThrown(db: Kysely<DB>) {
+  return async (error: FastifyError, req: FastifyRequest, reply: FastifyReply) => {
+    const refused = error instanceof Refused ? error : refusedByFastify(error);
+    if (refused) return reply.code(STATUS[refused.kind]).send({ kind: refused.kind, message: refused.message });
+    req.log.error({ err: error }, 'unexpected failure');
+    await openSystemIncident(db, req, error);
+    return reply.code(STATUS.failure).send({
+      kind: 'failure',
+      message: `the LIMS could not finish this request; reload to see what was saved, and give the Admin reference ${req.id}`,
+    });
+  };
 }

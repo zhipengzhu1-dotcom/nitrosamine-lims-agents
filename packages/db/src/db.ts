@@ -24,6 +24,21 @@ export function createDb(url: string): Kysely<DB> {
   });
 }
 
+export interface PostgresFault {
+  sqlstate: string;
+  constraint: string | null;
+  table: string | null;
+  column: string | null;
+}
+
+/** The Postgres error in `error` or its causes, reduced to the names it carries: never its message, detail or hint, which can quote a record. */
+export function postgresFault(error: unknown): PostgresFault | null {
+  for (let e = error; e instanceof Error; e = e.cause)
+    if (e instanceof pg.DatabaseError && e.code)
+      return { sqlstate: e.code, constraint: e.constraint ?? null, table: e.table ?? null, column: e.column ?? null };
+  return null;
+}
+
 export interface AuditContext {
   actor: string;
   role: string;

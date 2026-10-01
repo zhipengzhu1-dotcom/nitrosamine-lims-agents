@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import cookie from '@fastify/cookie';
 import { audited, type DB } from '@lims/db';
 import { verifyPassword } from '@lims/db/credentials';
 import { type ActorContext, routes } from '@lims/domain';
@@ -99,7 +100,8 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
   };
 }
 
-export function loginRoutes(app: App, db: Kysely<DB>): void {
+export function loginRoutes(app: App, db: Kysely<DB>, secureCookie: boolean): void {
+  app.register(cookie, { parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: secureCookie } });
   app.route({
     ...routes.login,
     handler: async (req, reply) => {

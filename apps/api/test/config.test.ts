@@ -31,6 +31,13 @@ it('a LIMS_ variable the API does not read stops it at start and names the close
   );
 });
 
+it('LIMS_LOG_FILE is a setting the API reads', () => {
+  const started = start({ LIMS_LOG_FILE: '/nonexistent/api.log', PORT: '' });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.match(started.stderr, /PORT/);
+  assert.doesNotMatch(started.stderr, /not a LIMS setting/);
+});
+
 it('LIMS_LOG is a setting the API reads', () => {
   const started = start({ LIMS_LOG: '1', PORT: '' });
   assert.equal(started.signal, null, 'the API stopped by itself instead of listening');

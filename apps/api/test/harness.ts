@@ -16,6 +16,7 @@ import {
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import { buildApp } from '../src/app.ts';
+import type { LogSink } from '../src/log.ts';
 
 const { server } = dbConfig();
 
@@ -87,9 +88,9 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
       );
 }
 
-async function listen(db: Kysely<DB>, { secureCookie = false } = {}) {
+async function listen(db: Kysely<DB>, { secureCookie = false, log }: { secureCookie?: boolean; log?: LogSink } = {}) {
   const lines: string[] = [];
-  const app = buildApp(db, { log: { write: (line) => lines.push(line) }, secureCookie });
+  const app = buildApp(db, { log: log ?? { write: (line) => lines.push(line) }, secureCookie });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(() => app.close());
   return {
@@ -125,7 +126,7 @@ export async function startApi(name: string) {
     app,
     log,
     logLines,
-    startAnotherApi: (options: { secureCookie?: boolean } = {}) => listen(db, options),
+    startAnotherApi: (options: { secureCookie?: boolean; log?: LogSink } = {}) => listen(db, options),
     labId,
     methodId,
     person(name: SeededName): Account {

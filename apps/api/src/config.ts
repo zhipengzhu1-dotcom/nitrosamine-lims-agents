@@ -4,10 +4,11 @@ export interface ApiConfig {
   databaseUrl: string;
   listen: { port: number; host: string };
   log: boolean;
+  logFile: string | null;
   secureCookie: boolean;
 }
 
-const API_SETTINGS = ['LIMS_LOG'];
+const API_SETTINGS = ['LIMS_LOG', 'LIMS_LOG_FILE'];
 
 function port(value: string | undefined): number {
   if (value === undefined) return 3000;
@@ -25,6 +26,7 @@ export function apiConfig(): ApiConfig {
     databaseUrl: databaseUrl(server, database, 'lims_app'),
     listen: { port: port(env.PORT), host: env.HOST ?? '127.0.0.1' },
     log: env.LIMS_LOG === '1',
+    logFile: env.LIMS_LOG_FILE || null,
     secureCookie: env.NODE_ENV === 'production',
   };
 }
