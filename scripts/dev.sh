@@ -4,6 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LIMS_DB=${LIMS_DB:-lims} PORT=${PORT:-3000}
+# A fresh key at each start, so no key is committed; local work never matches an HMAC across restarts.
+export LIMS_ACCESS_EVENT_KEY=${LIMS_ACCESS_EVENT_KEY:-$(openssl rand -hex 32)}
 WEB_PORT=${WEB_PORT:-5173}
 
 scripts/pg.sh start >/dev/null
