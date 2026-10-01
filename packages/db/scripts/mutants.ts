@@ -275,15 +275,15 @@ const MUTANTS: Mutant[] = [
   {
     name: "LA011 svc:auth revokes a person's grant",
     file: 'migrations/0065_service_scope.sql',
-    find: "and not (to_jsonb(old)->>'role' = 'svc:seed' and ",
-    replace: 'and not (',
+    find: "and changed <> '{}' and to_jsonb(old)->>'role' <> 'svc:seed' then",
+    replace: 'and false then',
     test: 'test/service-scope.test.ts',
   },
   {
-    name: "LA011 svc:auth restores the seed's revoked grant",
+    name: 'LA011 a service reopens what it ended',
     file: 'migrations/0065_service_scope.sql',
-    find: " and to_jsonb(old)->>'revoked_at' is null) then",
-    replace: ') then',
+    find: "where c in ('ended_at', 'used_at', 'revoked_at') and to_jsonb(old)->>c is not null) then",
+    replace: 'where false) then',
     test: 'test/service-scope.test.ts',
   },
   {

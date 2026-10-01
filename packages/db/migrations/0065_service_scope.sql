@@ -48,8 +48,9 @@ insert into lims.service_write values
 
 -- BEFORE INSERT OR UPDATE on every audited table. It reads only the role from the context:
 -- capture() validates the whole context on the same row, so a forged role still has to name a
--- live grant. The one role_grant change a service makes is svc:auth retiring the seed, so that is
--- the only one admitted: a person's grant, or a revoked grant restored, is refused.
+-- live grant. A stamp that ends something (a session's end, a link's use, a grant's revocation) is
+-- set by a service but never cleared, so nothing a service ended comes back. The one role_grant
+-- change a service makes is svc:auth retiring the seed, so a person's grant is refused.
 create function lims.service_scope() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -72,9 +73,12 @@ begin
     if not changed <@ allowed then
       raise exception '% may change only % on %, not %', v_role, allowed, tg_table_name, changed using errcode = 'LA011';
     end if;
-    if tg_table_name = 'role_grant' and changed <> '{}'
-       and not (to_jsonb(old)->>'role' = 'svc:seed' and to_jsonb(old)->>'revoked_at' is null) then
-      raise exception '% may only revoke the live svc:seed grant', v_role using errcode = 'LA011';
+    if exists (select 1 from unnest(changed) c
+                where c in ('ended_at', 'used_at', 'revoked_at') and to_jsonb(old)->>c is not null) then
+      raise exception '% may not clear or restamp % on %', v_role, changed, tg_table_name using errcode = 'LA011';
+    end if;
+    if tg_table_name = 'role_grant' and changed <> '{}' and to_jsonb(old)->>'role' <> 'svc:seed' then
+      raise exception '% may only revoke the svc:seed grant', v_role using errcode = 'LA011';
     end if;
   end if;
   return new;
