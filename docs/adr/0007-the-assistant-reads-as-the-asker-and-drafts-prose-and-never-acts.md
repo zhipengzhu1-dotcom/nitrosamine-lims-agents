@@ -25,5 +25,5 @@ Source: [Decide the assistant layer](https://github.com/zhipengzhu1-dotcom/09-28
 
 - **Don't give the assistant path a write grant or a new route "to save a click".** The test that every state-changing route rejects it is part of validation.
 - **Citations are built from the Assistant Call, never from the model's words.** A citation of a record the call didn't read is dropped and opens a System Incident.
-- **The Assistant Call table is a Part 11 record** on the Lab's hash chain, kept at least 4 years, or as long as the record a draft fed if longer.
+- **The Assistant Call table is a Part 11 record** on the Lab's hash chain, kept at least 4 years, or as long as the longest-kept record that links it (one a draft fed, a Review record, a System Incident or a Deviation), if longer.
 - **Revisit** when Annex 22 is final (targeted for Q4 2026) and on any model retirement notice. Both are change-control triggers.

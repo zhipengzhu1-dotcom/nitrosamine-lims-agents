@@ -549,5 +549,5 @@ The text an Assistant Call offers for a person to edit and save into a record. I
 _Avoid_: AI suggestion, pencil draft, proposal
 
 **Assistant Configuration**:
-One approved version of everything that shapes the assistant's behaviour, taken together: the model, its instructions, the queries it may run and which roles may run them. Every Assistant Call records the version in force.
+One approved version of everything that shapes the assistant's behaviour, taken together, including the model, its instructions and templates, the queries it may run and which roles may run them, retrieval and screening settings, region and quotas. Every Assistant Call records the version in force.
 _Avoid_: Model version, prompt version, AI settings
