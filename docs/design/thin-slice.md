@@ -30,7 +30,9 @@ The reason recorded with each step's writes is the step name.
 
 Company-owned: `person` (id, username, display_name, customer_id for Customer Users, password_hash, totp_secret, failed_logins, locked_at), `customer` (id, name), `method` (id, code, title, version), `submission` (id, customer_id, submitted_by).
 
-Lab-owned, `lab_id NOT NULL`, primary key `(lab_id, id)`, children referencing `(lab_id, parent_id)` so no row points into another Lab: `lab` (lab_id, code, name), `membership` (person_id, role), `training_record` (person_id, method_id), `sample` (submission_id, number with the Lab code, received_at), `test` (sample_id, method_id, state, gxp_class, assignee_id), `result` (test_id, value as written, unit, injection_sequence_ref, notebook_ref, performed_on, entered_by), `signature` (person_id, meaning, record_table, record_id, content bytes, content_hash generated as sha256(content), signed_at), `test_report` (test_id, number), `session` (person_id, token_hash, last_seen_at, ended_at).
+Roles, Test states and Signature Meanings are Postgres enums, so the generated Kysely types carry them as unions.
+
+Lab-owned, `lab_id NOT NULL` and first in every primary key, children referencing `(lab_id, parent_id)` so no row points into another Lab: `lab` (lab_id, code, name), `membership` (person_id, role), `training_record` (person_id, method_id), `sample` (submission_id, number with the Lab code, received_at), `test` (sample_id, method_id, state, gxp_class, assignee_id), `result` (test_id, value as written, unit, injection_sequence_ref, notebook_ref, performed_on, entered_by), `signature` (person_id, meaning, record_table, record_id, content bytes, content_hash generated as sha256(content), signed_at), `test_report` (test_id, number), `session` (person_id, token_hash, last_seen_at, ended_at).
 
 `audit_entry` (chain, seq, at, actor, role, reason, table_name, op, old_row, new_row, prev_hash, hash), chained per `audit_chain`: one chain per Lab plus a `company` chain for company-owned rows.
 
