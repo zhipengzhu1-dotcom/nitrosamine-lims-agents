@@ -18,7 +18,8 @@ import {
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
 import { reauthenticate } from './auth.ts';
-import { type LabQueries, labScope, refuse } from './scope.ts';
+import { refuse } from './refuse.ts';
+import { type LabQueries, labScope } from './scope.ts';
 
 interface Effect<I> {
   signedRecord?: 'test_report';

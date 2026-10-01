@@ -4,7 +4,7 @@ import { verifyPassword } from '@lims/db/credentials';
 import { type ActorContext, routes } from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
-import { refuse } from './scope.ts';
+import { refuse } from './refuse.ts';
 
 export const LOCKOUT_AFTER_FAILURES = 20;
 export const IDLE_LIMIT_MS = 8 * 60 * 60_000;
@@ -21,10 +21,7 @@ const authAudit = (person: Person, reason: string) => ({
 });
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
 
-/**
- * Checks the password before the lock, so that a wrong password answers the same whether or not the account is locked
- * and only the right password learns of the lock. A failure counts toward lockout and a success clears the count.
- */
+/** Checks the password before the lock, so that only the right password learns of the lock (#45, gap 18). */
 async function prove(db: Kysely<DB>, person: Person, password: string, reason: string): Promise<void> {
   if (await verifyPassword(password, person.passwordHash)) {
     if (person.lockedAt) refuse('accountLocked', 'this account is locked');

@@ -2,7 +2,8 @@ import type { DB, Json } from '@lims/db';
 import { nextStep, type RowSnapshot, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
-import { labScope, refuse, type Scope } from './scope.ts';
+import { refuse } from './refuse.ts';
+import { labScope, type Scope } from './scope.ts';
 import { factsFor } from './steps.ts';
 
 function visibleTests(scope: Scope) {
