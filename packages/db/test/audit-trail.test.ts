@@ -19,8 +19,8 @@ before(async () => {
   await admin.end();
   await migrate(DATABASE);
   await superuser.connect();
-  ({ lab_id: labId } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Set up the test Lab' }, (tx) =>
-    tx.insertInto('lab').values({ code: 'TL', name: 'Test Lab' }).returning('lab_id').executeTakeFirstOrThrow(),
+  ({ labId } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Set up the test Lab' }, (tx) =>
+    tx.insertInto('lab').values({ code: 'TL', name: 'Test Lab' }).returning('labId').executeTakeFirstOrThrow(),
   ));
 });
 
@@ -46,10 +46,10 @@ it('an audited write records who made it, in which role, why, and the old and ne
   });
 
   const entry = await app
-    .selectFrom('audit_entry')
+    .selectFrom('auditEntry')
     .selectAll()
     .select([sql<string>`old_row->>'name'`.as('oldName'), sql<string>`new_row->>'name'`.as('newName')])
-    .where('table_name', '=', 'customer')
+    .where('tableName', '=', 'customer')
     .where('op', '=', 'UPDATE')
     .where(sql`new_row->>'id'`, '=', customer)
     .executeTakeFirstOrThrow();
@@ -64,14 +64,14 @@ it('an Audit Trail row snapshot keeps the stored column names and leaves out the
   const { id } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a person' }, (tx) =>
     tx
       .insertInto('person')
-      .values({ username: 'snap.shot', display_name: 'Snap Shot', password_hash: 'not-a-real-hash' })
+      .values({ username: 'snap.shot', displayName: 'Snap Shot', passwordHash: 'not-a-real-hash' })
       .returning('id')
       .executeTakeFirstOrThrow(),
   );
-  const { new_row: row } = await app
-    .selectFrom('audit_entry')
-    .select('new_row')
-    .where('table_name', '=', 'person')
+  const { newRow: row } = await app
+    .selectFrom('auditEntry')
+    .select('newRow')
+    .where('tableName', '=', 'person')
     .where(sql`new_row->>'id'`, '=', id)
     .executeTakeFirstOrThrow();
   assert.ok(row && typeof row === 'object' && !Array.isArray(row), 'the snapshot is a row object');
@@ -108,13 +108,13 @@ it('audit entries cannot be updated or deleted, by the app or by the superuser',
   ]) {
     await assert.rejects(superuser.query(statement, ['rewritten']), refusedWith('LA002'));
   }
-  await assert.rejects(app.updateTable('audit_entry').set({ reason: 'rewritten' }).execute(), refusedWith('42501'));
-  await assert.rejects(app.deleteFrom('audit_entry').execute(), refusedWith('42501'));
+  await assert.rejects(app.updateTable('auditEntry').set({ reason: 'rewritten' }).execute(), refusedWith('42501'));
+  await assert.rejects(app.deleteFrom('auditEntry').execute(), refusedWith('42501'));
 });
 
 it("the Lab's chain verifies, and an entry tampered with as superuser is found at its seq", async () => {
   await audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
-    tx.updateTable('lab').set({ name: 'Test Laboratory' }).where('lab_id', '=', labId).execute(),
+    tx.updateTable('lab').set({ name: 'Test Laboratory' }).where('labId', '=', labId).execute(),
   );
   const verify = async () =>
     (await sql<{ broken: string | null }>`select lims.verify_chain(${labId}) as broken`.execute(app)).rows[0]?.broken;

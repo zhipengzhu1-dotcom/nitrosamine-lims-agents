@@ -9,28 +9,28 @@ function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
   const tests = scope
     .from('test')
-    .innerJoin('sample', 'sample.id', 'test.sample_id')
-    .innerJoin('submission', 'submission.id', 'sample.submission_id')
-    .innerJoin('customer', 'customer.id', 'submission.customer_id')
-    .innerJoin('method', 'method.id', 'test.method_id')
-    .leftJoin('person as assignee', 'assignee.id', 'test.assignee_id')
+    .innerJoin('sample', 'sample.id', 'test.sampleId')
+    .innerJoin('submission', 'submission.id', 'sample.submissionId')
+    .innerJoin('customer', 'customer.id', 'submission.customerId')
+    .innerJoin('method', 'method.id', 'test.methodId')
+    .leftJoin('person as assignee', 'assignee.id', 'test.assigneeId')
     .select([
       'test.id',
       'test.state',
-      'test.gxp_class as gxpClass',
+      'test.gxpClass',
       'sample.number as sampleNumber',
       'sample.description',
-      'sample.received_at as receivedAt',
+      'sample.receivedAt',
       'customer.name as customer',
       'method.code as methodCode',
       'method.version as methodVersion',
       'method.title as methodTitle',
-      'assignee.display_name as assignee',
-      'test.sample_id',
-      'test.method_id',
-      'test.assignee_id',
+      'assignee.displayName as assignee',
+      'test.sampleId',
+      'test.methodId',
+      'test.assigneeId',
     ]);
-  return customerId === null ? tests : tests.where('submission.customer_id', '=', customerId);
+  return customerId === null ? tests : tests.where('submission.customerId', '=', customerId);
 }
 
 function snapshot(row: Json | null): RowSnapshot | null {
@@ -41,8 +41,8 @@ function snapshot(row: Json | null): RowSnapshot | null {
 
 async function testView(scope: Scope, id: string) {
   const test = (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ?? refuse(404, 'no such Test');
-  const report = await scope.from('test_report').select(['id', 'number']).where('test_id', '=', id).executeTakeFirst();
-  const ids = [test.id, test.sample_id, ...(report ? [report.id] : [])];
+  const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
+  const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
   const visibleToActor = !isCustomer || test.state === 'Reported';
   return {
@@ -55,43 +55,33 @@ async function testView(scope: Scope, id: string) {
             'analyte',
             'value',
             'unit',
-            'injection_sequence_ref as injectionSequenceRef',
-            'notebook_ref as notebookRef',
+            'injectionSequenceRef',
+            'notebookRef',
             sql<string>`performed_on::text`.as('performedOn'),
           ])
-          .where('test_id', '=', id)
+          .where('testId', '=', id)
           .executeTakeFirst()) ?? null)
       : null,
     signatures: visibleToActor
       ? await scope
           .from('signature')
-          .innerJoin('person', 'person.id', 'signature.person_id')
+          .innerJoin('person', 'person.id', 'signature.personId')
           .select([
             'signature.meaning',
-            'person.display_name as signer',
-            'signature.signed_at as signedAt',
-            'signature.record_table as record',
+            'person.displayName as signer',
+            'signature.signedAt',
+            'signature.recordTable as record',
             sql<string>`encode(signature.content_hash, 'hex')`.as('contentHash'),
           ])
-          .where('signature.record_id', 'in', ids)
-          .orderBy('signature.signed_at')
+          .where('signature.recordId', 'in', ids)
+          .orderBy('signature.signedAt')
           .execute()
       : [],
     auditTrail: isCustomer
       ? []
       : await scope
           .auditTrail()
-          .select([
-            'seq',
-            'at',
-            'actor',
-            'role',
-            'reason',
-            'table_name as table',
-            'op',
-            'old_row as oldRow',
-            'new_row as newRow',
-          ])
+          .select(['seq', 'at', 'actor', 'role', 'reason', 'tableName as table', 'op', 'oldRow', 'newRow'])
           .where(sql<boolean>`coalesce(new_row, old_row)->>'id' = any(${ids}) or coalesce(new_row, old_row)->>'test_id' = ${id}
         or coalesce(new_row, old_row)->>'record_id' = any(${ids})`)
           .orderBy('seq')
@@ -116,10 +106,10 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
           .execute(),
         analysts: await scope
           .from('membership')
-          .innerJoin('person', 'person.id', 'membership.person_id')
-          .select(['person.id', 'person.display_name as displayName'])
+          .innerJoin('person', 'person.id', 'membership.personId')
+          .select(['person.id', 'person.displayName'])
           .where('membership.role', '=', 'Analyst')
-          .orderBy('person.display_name')
+          .orderBy('person.displayName')
           .execute(),
       };
     },
