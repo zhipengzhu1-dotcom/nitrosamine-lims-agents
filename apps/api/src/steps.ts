@@ -21,6 +21,9 @@ import { reauthenticate } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope } from './scope.ts';
 
+/** The records a Signature can be given on, each with its own canonical content in the database. */
+export type Signable = 'test' | 'test_report';
+
 interface Effect<I> {
   signedRecord?: 'test_report';
   assignee?: (input: I) => PersonId;
@@ -101,13 +104,7 @@ export async function factsFor(
   assigneeId?: string,
 ): Promise<StepFacts> {
   const signatures = test
-    ? await q
-        .from('signature')
-        .innerJoin('recordVersion', (j) =>
-          j
-            .onRef('recordVersion.labId', '=', 'signature.labId')
-            .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
-        )
+    ? await signedVersions(q)
         .select(['signature.meaning', 'signature.personId'])
         .where('recordVersion.recordId', '=', test.id)
         .execute()
@@ -136,18 +133,29 @@ export async function factsFor(
   };
 }
 
+/** Every Signature of the Lab joined to the Record Version it was given on. */
+export function signedVersions(q: LabQueries) {
+  return q
+    .from('signature')
+    .innerJoin('recordVersion', (j) =>
+      j
+        .onRef('recordVersion.labId', '=', 'signature.labId')
+        .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
+    );
+}
+
 /** The record's latest Record Version, which the database wrote as it changed: what a Signature given now binds to. */
-export function latestVersion(q: LabQueries, table: 'test' | 'test_report', recordId: string) {
+export function latestVersion(q: LabQueries, table: Signable, recordId: string) {
   return q
     .from('recordVersion')
-    .select(['id', 'version', sql<string>`encode(content_hash, 'hex')`.as('contentHash')])
+    .select(['id', 'version', 'canonicalForm', sql<string>`encode(content_hash, 'hex')`.as('contentHash')])
     .where('recordTable', '=', table)
     .where('recordId', '=', recordId)
     .orderBy('version', 'desc')
     .executeTakeFirstOrThrow();
 }
 
-async function sign(q: LabQueries, ctx: ActorContext, meaning: Meaning, table: 'test' | 'test_report', testId: string) {
+async function sign(q: LabQueries, ctx: ActorContext, meaning: Meaning, table: Signable, testId: string) {
   const recordId =
     table === 'test'
       ? testId

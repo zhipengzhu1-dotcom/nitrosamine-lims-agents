@@ -78,15 +78,18 @@ const result = Type.Object({
   performedOn: calendarDate,
 });
 export type Result = Static<typeof result>;
-/** The latest Record Version of a record: its number and the hex SHA-256 of its canonical content. */
-const recordVersionRef = Type.Object({ version: Type.Integer({ minimum: 1 }), contentHash: Type.String() });
+/** One Record Version of a record: its number, the canonical form that rendered it and the hex SHA-256 of its content. */
+const recordVersionRef = Type.Object({
+  version: Type.Integer({ minimum: 1 }),
+  canonicalForm: Type.Integer({ minimum: 0 }),
+  contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+});
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
   signedAt: instant,
   record: Type.String(),
-  recordVersion: Type.Integer({ minimum: 1 }),
-  contentHash: Type.String(),
+  recordVersion: recordVersionRef,
   /** True once the record has a Record Version later than the one this Signature was given on. */
   unsigned: Type.Boolean(),
 });
@@ -106,10 +109,11 @@ const auditEntry = Type.Object({
   newRow: nullable(rowSnapshot),
 });
 export type AuditEntry = Static<typeof auditEntry>;
-const reportRef = Type.Object({ number: Type.String() });
+const reportRef = Type.Object({ id: uuid, number: Type.String() });
+/** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
 const testView = Type.Object({
   test: testRow,
-  recordVersion: recordVersionRef,
+  recordVersion: nullable(recordVersionRef),
   report: nullable(reportRef),
   result: nullable(result),
   signatures: Type.Array(signature),

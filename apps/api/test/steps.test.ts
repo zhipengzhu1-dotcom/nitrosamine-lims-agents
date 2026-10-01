@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { it } from 'node:test';
-import { audited } from '@lims/db';
+import { audited, type Json, type JsonObject } from '@lims/db';
 import { sql } from 'kysely';
 import { routes, type StepInput, type StepName, stepNames, stepRoute, steps } from '@lims/domain';
 import { labScope } from '../src/scope.ts';
@@ -71,31 +71,25 @@ async function submitTestTo(state: 'Requested' | 'Ready' | 'Assigned', analyst: 
 
 const view = async (id: string, client = as.lena) => ok(await client.call(routes.test, { id }));
 
-type View = Awaited<ReturnType<typeof view>>;
-const reportIdOf = (v: View) =>
-  v.auditTrail.find((e) => e.table === 'test_report' && e.op === 'INSERT')?.newRow?.id?.toString() ?? assert.fail();
+/** Narrows a canonical content value to the object it is, so a test reads its fields without a cast. */
+function object(json: Json | undefined): JsonObject {
+  return typeof json === 'object' && json !== null && !Array.isArray(json) ? json : assert.fail('not an object');
+}
 
-async function recordVersions(table: 'test' | 'test_report', recordId: string) {
-  const rows = await api.db
+function recordVersions(table: 'test' | 'test_report', recordId: string) {
+  return api.db
     .selectFrom('recordVersion')
     .select([
       'version',
       'canonicalForm',
       'content as bytes',
       sql<string>`encode(content_hash, 'hex')`.as('contentHash'),
-      sql<string>`convert_from(content, 'UTF8')`.as('content'),
+      sql<JsonObject>`convert_from(content, 'UTF8')::jsonb`.as('content'),
     ])
     .where('recordTable', '=', table)
     .where('recordId', '=', recordId)
     .orderBy('version')
     .execute();
-  return rows.map((row) => ({
-    version: row.version,
-    canonicalForm: row.canonicalForm,
-    bytes: row.bytes,
-    contentHash: row.contentHash,
-    content: JSON.parse(row.content),
-  }));
 }
 
 const changeResult = (testId: string, value: string) =>
@@ -114,6 +108,11 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     'this Test has no released Test Report',
     'no Test Report for the Customer before release',
   );
+  assert.deepEqual(
+    [(await view(id, as.cora)).recordVersion, (await view(id, as.cora)).signatures],
+    [null, []],
+    'before release the Customer gets no Record Version hash, which could confirm a guessed Result',
+  );
   assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
 
   const reported = await view(id, as.quinn);
@@ -131,7 +130,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     'the Audit Trail shows each row snapshot under its stored column names',
   );
   assert.deepEqual(
-    reported.signatures.map((s) => [s.meaning, s.signer, s.record, s.recordVersion, s.unsigned]),
+    reported.signatures.map((s) => [s.meaning, s.signer, s.record, s.recordVersion.version, s.unsigned]),
     [
       ['Performed', 'Ana Ferreira', 'test', 3, false],
       ['Reviewed', 'Rui Tanaka', 'test', 3, false],
@@ -201,19 +200,16 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     },
     'the signed content is what the Test Report prints, with the Result as typed',
   );
-  assert.deepEqual(reported.recordVersion, { version: 3, contentHash: current.contentHash });
+  assert.deepEqual(reported.recordVersion, { version: 3, canonicalForm: 1, contentHash: current.contentHash });
+  const reportId = reported.report?.id ?? assert.fail();
+  const [reportVersion] = await recordVersions('test_report', reportId);
   assert.deepEqual(
-    reported.signatures.map((s) => s.contentHash),
-    [
-      current.contentHash,
-      current.contentHash,
-      (await recordVersions('test_report', reportIdOf(reported)))[0]?.contentHash,
-    ],
+    reported.signatures.map((s) => s.recordVersion.contentHash),
+    [current.contentHash, current.contentHash, reportVersion?.contentHash],
   );
-  const [reportVersion] = await recordVersions('test_report', reportIdOf(reported));
   assert.deepEqual(
     reportVersion?.content,
-    { id: reportIdOf(reported), number: report.report.number, test: current.content },
+    { id: reportId, number: report.report.number, test: current.content },
     'the Test Report is built on the Test content it was released with',
   );
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
@@ -230,17 +226,19 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
   assert.equal((await take(as.rui, 'review', id, {}, rui)).status, 200);
   assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
   const signed = await view(id, as.quinn);
-  const reportId = reportIdOf(signed);
+  const reportId = signed.report?.id ?? assert.fail();
+  const before = signed.recordVersion ?? assert.fail();
 
   await changeResult(id, '0.0380');
   const changed = await view(id, as.quinn);
+  const after = changed.recordVersion ?? assert.fail();
   assert.deepEqual(
-    [changed.recordVersion.version, changed.recordVersion.contentHash === signed.recordVersion.contentHash],
-    [signed.recordVersion.version + 1, false],
+    [after.version, after.contentHash === before.contentHash],
+    [before.version + 1, false],
     'the Test moved to a new Record Version with another hash',
   );
   assert.deepEqual(
-    changed.signatures.map((s) => [s.meaning, s.recordVersion, s.unsigned]),
+    changed.signatures.map((s) => [s.meaning, s.recordVersion.version, s.unsigned]),
     [
       ['Performed', 3, true],
       ['Reviewed', 3, true],
@@ -249,7 +247,7 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
     'each Signature keeps the version it was given on and is returned as unsigned',
   );
   assert.deepEqual(
-    (await recordVersions('test_report', reportId)).map((v) => [v.version, v.content.test.value]),
+    (await recordVersions('test_report', reportId)).map((v) => [v.version, object(v.content.test).value]),
     [
       [1, '0.0300'],
       [2, '0.0380'],
@@ -268,17 +266,17 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
   );
 
   await changeResult(id, '0.038');
-  const narrower = await view(id, as.quinn);
+  const narrower = (await view(id, as.quinn)).recordVersion ?? assert.fail();
   assert.notEqual(
-    narrower.recordVersion.contentHash,
-    changed.recordVersion.contentHash,
-    '0.038 is not 0.0380: the canonical content keeps the digits as typed',
+    narrower.contentHash,
+    after.contentHash,
+    '0.038 is not 0.0380: the content keeps the digits as typed',
   );
   await changeResult(id, '0.0380');
   const again = await view(id, as.quinn);
   assert.deepEqual(
-    [again.recordVersion.contentHash, again.recordVersion.version],
-    [changed.recordVersion.contentHash, signed.recordVersion.version + 3],
+    [again.recordVersion?.contentHash, again.recordVersion?.version],
+    [after.contentHash, before.version + 3],
     'the same content gives the same hash, on a new Record Version',
   );
   assert.ok(

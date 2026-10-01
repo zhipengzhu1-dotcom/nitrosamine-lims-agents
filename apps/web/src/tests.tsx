@@ -78,7 +78,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
     );
   const { test, result, report } = view;
   return (
-    <Shell me={me} active="tests" action={action}>
+    <Shell me={me} active="tests" action={action} notice={unsignedNotice(view.signatures)}>
       <h1>
         {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
       </h1>
@@ -101,10 +101,14 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         <dd>{test.assignee ?? 'not assigned'}</dd>
         <dt>Test Report</dt>
         <dd>{report ? <a href={`#/tests/${id}/report`}>{report.number}</a> : 'not released'}</dd>
-        <dt>Record Version</dt>
-        <dd>
-          {view.recordVersion.version} · <code className="hash">{view.recordVersion.contentHash}</code>
-        </dd>
+        {view.recordVersion && (
+          <>
+            <dt>Record Version</dt>
+            <dd>
+              {view.recordVersion.version} · <code className="hash">{view.recordVersion.contentHash}</code>
+            </dd>
+          </>
+        )}
       </dl>
       <h2>Result</h2>
       {result ? (
@@ -133,6 +137,12 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
 const resultLine = (r: Result) => `Result: ${r.analyte} ${r.value} ${r.unit}, performed on ${r.performedOn}`;
 
 const signatureKey = (s: Signature) => s.meaning + s.signedAt;
+
+/** The rail's line for a record with Signatures the server returns as unsigned, or nothing to say. */
+export function unsignedNotice(rows: Signature[]): string | undefined {
+  const unsigned = rows.filter((s) => s.unsigned).map((s) => s.meaning);
+  return unsigned.length ? `Unsigned: ${unsigned.join(', ')}. The record changed after signing.` : undefined;
+}
 const rowClass = (s: Signature, fresh?: ReadonlySet<string>) =>
   [fresh?.has(signatureKey(s)) ? 'row--fresh' : '', s.unsigned ? 'row--unsigned' : ''].join(' ').trim() || undefined;
 
@@ -166,9 +176,9 @@ export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: Readonl
             <td data-label="Signed by">{s.signer}</td>
             <td data-label="Time">{time(s.signedAt)}</td>
             <td data-label="Record">{s.record}</td>
-            <td data-label="Record Version">{s.recordVersion}</td>
+            <td data-label="Record Version">{s.recordVersion.version}</td>
             <td data-label="SHA-256">
-              <code className="hash">{s.contentHash}</code>
+              <code className="hash">{s.recordVersion.contentHash}</code>
             </td>
           </tr>
         ))}

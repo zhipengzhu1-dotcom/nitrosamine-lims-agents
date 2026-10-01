@@ -4,7 +4,7 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { factsFor, latestVersion } from './steps.ts';
+import { factsFor, latestVersion, signedVersions } from './steps.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -47,11 +47,11 @@ async function testView(scope: Scope, id: string) {
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
   const visibleToActor = !isCustomer || test.state === 'Reported';
-  const { version, contentHash } = await latestVersion(scope, 'test', id);
+  const { version, canonicalForm, contentHash } = await latestVersion(scope, 'test', id);
   return {
     test,
-    recordVersion: { version, contentHash },
-    report: report ? { number: report.number } : null,
+    recordVersion: visibleToActor ? { version, canonicalForm, contentHash } : null,
+    report: report ? { id: report.id, number: report.number } : null,
     result: visibleToActor
       ? ((await scope
           .from('result')
@@ -67,20 +67,15 @@ async function testView(scope: Scope, id: string) {
           .executeTakeFirst()) ?? null)
       : null,
     signatures: visibleToActor
-      ? await scope
-          .from('signature')
+      ? await signedVersions(scope)
           .innerJoin('person', 'person.id', 'signature.personId')
-          .innerJoin('recordVersion', (j) =>
-            j
-              .onRef('recordVersion.labId', '=', 'signature.labId')
-              .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
-          )
           .select([
             'signature.meaning',
             'person.displayName as signer',
             'signature.signedAt',
             'recordVersion.recordTable as record',
-            'recordVersion.version as recordVersion',
+            'recordVersion.version',
+            'recordVersion.canonicalForm',
             sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
             sql<boolean>`exists (select from lims.record_version later
               where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
@@ -91,6 +86,12 @@ async function testView(scope: Scope, id: string) {
           .where('recordVersion.recordId', 'in', ids)
           .orderBy('signature.signedAt')
           .execute()
+          .then((rows) =>
+            rows.map(({ version, canonicalForm, contentHash, ...signature }) => ({
+              ...signature,
+              recordVersion: { version, canonicalForm, contentHash },
+            })),
+          )
       : [],
     auditTrail: isCustomer
       ? []

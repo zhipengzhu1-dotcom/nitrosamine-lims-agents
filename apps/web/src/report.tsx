@@ -1,7 +1,7 @@
 import { type ActorContext, routes } from '@lims/domain';
 import { api, useApi } from './api.ts';
 import { demoSigning, type RailAction, Shell } from './rail.tsx';
-import { Signatures, time } from './tests.tsx';
+import { Signatures, time, unsignedNotice } from './tests.tsx';
 
 const verifyAction: RailAction = {
   label: 'Verify Audit Trail',
@@ -19,7 +19,12 @@ const verifyAction: RailAction = {
 export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
   const { data, error } = useApi(routes.report, { id });
   return (
-    <Shell me={me} active="tests" action={me.roles.includes('QA') ? verifyAction : null}>
+    <Shell
+      me={me}
+      active="tests"
+      action={me.roles.includes('QA') ? verifyAction : null}
+      notice={data && unsignedNotice(data.signatures)}
+    >
       {error && <p className="note--bad">{error}</p>}
       {data && (
         <article className="report">

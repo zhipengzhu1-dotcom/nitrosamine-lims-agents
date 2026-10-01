@@ -233,5 +233,6 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Reported');
   await expect(page.locator('dt:text-is("Record Version") + dd')).toContainText('4 ·');
   await expect(page.getByRole('row', { name: /unsigned/ })).toHaveCount(3);
+  await railSays(page, 'Unsigned: Performed, Reviewed, Released. The record changed after signing.');
   await shot(page, 'test-unsigned');
 });
