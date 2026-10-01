@@ -1,8 +1,9 @@
-"""Behaviour evals for the compliance expert agents in .claude/agents.
+"""Behaviour evals for the review agents in .claude/agents.
 
-Each case hands one agent a short design and grades only the agent's report:
-the `verdicts` block it must end with. Expected verdicts come from the research
-notes (research/* branches), not from the agent files.
+Each case hands one agent a short design or diff and grades only the agent's
+report: the `verdicts` block it must end with. Expected verdicts come from the
+research notes (research/* branches) or the owner's decision ticket, not from
+the agent files.
 
     python3 evals/agents/run.py            # every case
     python3 evals/agents/run.py p11-edit   # cases whose id starts with p11-edit
@@ -20,8 +21,13 @@ REPO = HERE.parent.parent
 OUT = HERE / "out"
 ALLOWED_TOOLS = "Read Grep Glob Bash(git show:*) Bash(git diff:*) Bash(git log:*) Bash(gh issue view:*)"
 PROMPT = "Review this proposed design for the LIMS. It is given inline; there is no diff.\n\n{artifact}"
+PROMPTS = {
+    "design-reviewer": "Review this change to apps/web. It is given inline; there is no diff range to load.\n\n{artifact}",
+}
 
-VERDICT_LINE = re.compile(r"^\s*[-*]?\s*(met|gap|procedural|unclear|n/a)\s*:\s*(.+?)\s*$", re.IGNORECASE)
+VERDICT_LINE = re.compile(
+    r"^\s*[-*]?\s*(met|gap|procedural|unclear|n/a|blocking|advisory|overall)\s*:\s*(.+?)\s*$", re.IGNORECASE
+)
 PART11_CITATION = re.compile(r"^(§?11\.\d|a11|di|ci|sa|pics|cs|rd|gmp|jirei|ch4|esl|62fr)")
 ISO_CITATION = re.compile(r"^\d\.\d")
 USP_CITATION = re.compile(r"^(<\d{1,4}(\.\d+)?>|gn\d)")
@@ -54,17 +60,15 @@ def grade(case, verdicts):
         return ["report has no ```verdicts block"]
     failures = []
     expect = case["expect"]
-    for group in expect.get("gap", []):
-        options = group if isinstance(group, list) else [group]
-        if not any(cited(verdicts, "gap", o) for o in options):
-            failures.append(f"no gap citing any of {options}")
-    for kind in ("met", "procedural"):
-        for c in expect.get(kind, []):
-            if not cited(verdicts, kind, c):
-                failures.append(f"no {kind} citing {c}")
-    for c in expect.get("not_gap", []):
-        if cited(verdicts, "gap", c):
-            failures.append(f"false alarm: gap citing {c}")
+    for kind in ("gap", "blocking", "met", "procedural", "advisory", "overall"):
+        for group in expect.get(kind, []):
+            options = group if isinstance(group, list) else [group]
+            if not any(cited(verdicts, kind, o) for o in options):
+                failures.append(f"no {kind} citing any of {options}")
+    for kind in ("gap", "blocking"):
+        for c in expect.get(f"not_{kind}", []):
+            if cited(verdicts, kind, c):
+                failures.append(f"false alarm: {kind} citing {c}")
     lane = expect.get("no_gap_in")
     if lane:
         foreign = LANES[lane]
@@ -75,7 +79,7 @@ def grade(case, verdicts):
 
 
 def run(case):
-    prompt = PROMPT.format(artifact=case["artifact"])
+    prompt = PROMPTS.get(case["agent"], PROMPT).format(artifact=case["artifact"])
     proc = subprocess.run(
         ["claude", "-p", "--agent", case["agent"], "--allowedTools", ALLOWED_TOOLS],
         input=prompt,

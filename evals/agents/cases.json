@@ -284,5 +284,223 @@
     "expect": {
       "no_gap_in": "part11"
     }
+  },
+  {
+    "id": "dr-early-motion",
+    "agent": "design-reviewer",
+    "seam": "catches planted blocking",
+    "source": "#52 comment 2026-10-01, Motion > Signed, verdict and status values, rule 1: motion starts only after the server's answer, never on the press",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\n```diff\n--- a/apps/web/src/tests.tsx\n+++ b/apps/web/src/tests.tsx\n+  const [shown, setShown] = useState(test.state);\n+  const [accent, setAccent] = useState(false);\n+  const inFlight = useRef(false);\n+  async function onReview(password: string) {\n+    if (inFlight.current) return;\n+    inFlight.current = true;\n+    setBusy(true);\n+    setShown('Reviewed');\n+    setAccent(true);\n+    await api.review(test.id, password);\n+    setBusy(false);\n+    inFlight.current = false;\n+  }\n-      <h1>{test.sampleNumber} <Status state={test.state} /></h1>\n+      <h1>{test.sampleNumber} <span className={accent ? 'status--accent' : ''}><Status state={shown} /></span></h1>\n+      <button className=\"rbtn\" disabled={busy} onClick={() => onReview(password)}>Review</button>\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.status--accent .track { animation: accent 180ms cubic-bezier(0.23, 1, 0.32, 1); }\n+@keyframes accent { from { transform: scale(1.12); } to { transform: none; } }\n+@media (prefers-reduced-motion: reduce) { .status--accent .track { animation: none; } }\n```",
+    "expect": {
+      "blocking": [
+        [
+          "early-motion"
+        ]
+      ],
+      "overall": [
+        "blocking"
+      ]
+    }
+  },
+  {
+    "id": "dr-status-crossfade",
+    "agent": "design-reviewer",
+    "seam": "catches planted blocking",
+    "source": "#52 comment 2026-10-01, Motion > Signed, verdict and status values, rule 2: the new status is legible from the first frame, never a crossfade that shows old and new together",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nAfter the server answers a Review, the Status chip crossfades from the old word to the new one.\n\n```diff\n--- a/apps/web/src/rail.tsx\n+++ b/apps/web/src/rail.tsx\n-export function Status({ state }: { state: TestState }) {\n+export function Status({ state, previous }: { state: TestState; previous?: TestState }) {\n   const at = stateOrder.indexOf(state);\n   return (\n     <span className={`status ${state === 'Reported' ? 'status--done' : ''}`}>\n-      {words(state)}\n+      <span className=\"swap\">\n+        {previous && <span className=\"swap__old\" key={previous}>{words(previous)}</span>}\n+        <span className=\"swap__new\" key={state}>{words(state)}</span>\n+      </span>\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.swap { display: inline-grid; }\n+.swap > span { grid-area: 1 / 1; }\n+.swap__old { animation: fade-out 220ms ease-out forwards; }\n+.swap__new { animation: fade-in 220ms ease-out; }\n+@keyframes fade-out { to { opacity: 0; } }\n+@keyframes fade-in { from { opacity: 0; } }\n+@media (prefers-reduced-motion: reduce) { .swap__old { display: none; } .swap__new { animation: none; } }\n--- a/apps/web/src/tests.tsx\n+++ b/apps/web/src/tests.tsx\n+    const updated = await api.review(test.id, password);\n+    setPrevious(test.state);\n+    setTest(updated);\n-      <h1>{test.sampleNumber} <Status state={test.state} /></h1>\n+      <h1>{test.sampleNumber} <Status state={test.state} previous={previous} /></h1>\n```",
+    "expect": {
+      "blocking": [
+        [
+          "status-legibility"
+        ]
+      ],
+      "not_blocking": [
+        "early-motion"
+      ],
+      "overall": [
+        "blocking"
+      ]
+    }
+  },
+  {
+    "id": "dr-live-control-exit",
+    "agent": "design-reviewer",
+    "seam": "catches planted blocking",
+    "source": "#52 comment 2026-10-01, Motion > Precedence: a control is inert from the first press until the server answers; an exit animation never leaves a live control on screen",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nThe signature sheet now slides away after a successful signing.\n\n```diff\n--- a/apps/web/src/rail.tsx\n+++ b/apps/web/src/rail.tsx\n+  const [closing, setClosing] = useState(false);\n+  async function sign() {\n+    await action.run(input, password);\n+    setClosing(true);\n+    setTimeout(() => setOpen(false), 200);\n+  }\n-    <div className=\"sheet\">\n+    <div className={closing ? 'sheet sheet--closing' : 'sheet'}>\n       ...\n-      <button className=\"rbtn\" disabled={busy} onClick={sign}>Sign</button>\n+      <button className=\"rbtn\" onClick={sign}>Sign</button>\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.sheet { transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1), opacity 200ms cubic-bezier(0.23, 1, 0.32, 1); }\n+.sheet--closing { transform: translateY(16px); opacity: 0; }\n+@media (prefers-reduced-motion: reduce) { .sheet--closing { transform: none; } .sheet { transition: opacity 120ms ease-out; } }\n```",
+    "expect": {
+      "blocking": [
+        [
+          "live-control"
+        ]
+      ],
+      "overall": [
+        "blocking"
+      ]
+    }
+  },
+  {
+    "id": "dr-no-reduced-motion",
+    "agent": "design-reviewer",
+    "seam": "catches planted blocking",
+    "source": "#52 comment 2026-10-01, Motion > Reduced motion: the device's setting is honoured (movement removed, short opacity fades kept); The review gate > Blocking: no reduced-motion handling",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nA toast confirms a Release once the server has answered, with the server's time.\n\n```diff\n--- a/apps/web/src/rail.tsx\n+++ b/apps/web/src/rail.tsx\n+    const receipt = await api.release(test.id, password);\n+    setToast(`Release recorded at ${time(receipt.recordedAt)}`);\n+  {toast && <div className=\"toast\" role=\"status\">{toast}</div>}\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.toast { position: fixed; right: 16px; bottom: calc(var(--rail-h) + 16px); transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1), opacity 200ms cubic-bezier(0.23, 1, 0.32, 1); }\n+@starting-style { .toast { transform: translateY(12px); opacity: 0; } }\n```",
+    "expect": {
+      "blocking": [
+        [
+          "reduced-motion"
+        ]
+      ],
+      "not_blocking": [
+        "layout-animation",
+        "early-motion"
+      ],
+      "overall": [
+        "blocking"
+      ]
+    }
+  },
+  {
+    "id": "dr-touch-size",
+    "agent": "design-reviewer",
+    "seam": "catches planted blocking",
+    "source": "#52 comment 2026-10-01, Devices > Touch targets: 44 x 44 CSS px for every control, 56 px for the rail's commit buttons, 16 px minimum text in inputs",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nA compact rail for phones, and a button that opens the SignatureBlock. No motion.\n\n```diff\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+@media (max-width: 600px) {\n+  .rbtn { height: 44px; padding: 0 12px; font-size: 15px; }\n+}\n+.sig-open { width: 32px; height: 32px; padding: 0; border: 0; background: none; }\n--- a/apps/web/src/rail.tsx\n+++ b/apps/web/src/rail.tsx\n+      <button className=\"sig-open\" aria-label=\"Open signature details\" onClick={openBlock}>i</button>\n```",
+    "expect": {
+      "blocking": [
+        [
+          "touch-size"
+        ]
+      ],
+      "overall": [
+        "blocking"
+      ]
+    }
+  },
+  {
+    "id": "dr-frequency-grid",
+    "agent": "design-reviewer",
+    "seam": "catches planted blocking",
+    "source": "#52 comment 2026-10-01, Motion > The limit: Emil's frequency rule holds; typed-entry grids, keyboard paths and bulk queue work stay instant",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nBench quick-entry for balance readings: the analyst types a reading and presses Enter; the server saves it and returns the saved row, which slides into the grid.\n\n```diff\n--- a/apps/web/src/readings.tsx\n+++ b/apps/web/src/readings.tsx\n+  async function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {\n+    if (e.key !== 'Enter' || saving.current) return;\n+    saving.current = true;\n+    const saved = await api.saveReading(balanceId, draft);\n+    setRows((rows) => [...rows, saved]);\n+    setDraft('');\n+    saving.current = false;\n+  }\n+  {rows.map((r) => <tr key={r.id} className=\"reading-row\"><td>{r.value}</td><td>{time(r.recordedAt)}</td></tr>)}\n+  <input className=\"reading-input\" inputMode=\"decimal\" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} />\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.reading-input { font-size: 16px; min-height: 44px; }\n+.reading-row { animation: row-in 160ms cubic-bezier(0.23, 1, 0.32, 1); }\n+@keyframes row-in { from { transform: translateY(-6px); opacity: 0; } }\n+@media (prefers-reduced-motion: reduce) { .reading-row { animation: none; } }\n```",
+    "expect": {
+      "blocking": [
+        [
+          "frequency"
+        ]
+      ],
+      "not_blocking": [
+        "unreturned-row"
+      ],
+      "overall": [
+        "blocking"
+      ]
+    }
+  },
+  {
+    "id": "dr-taste-only",
+    "agent": "design-reviewer",
+    "seam": "taste stays advisory",
+    "source": "#52 comment 2026-10-01, The review gate > Advisory: easing, duration and other judgement calls, listed for the owner and never blocking",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nA read-only dialog showing a Method's details, opened from a link. It closes instantly, with no exit animation.\n\n```diff\n--- a/apps/web/src/method-dialog.tsx\n+++ b/apps/web/src/method-dialog.tsx\n+    <dialog className=\"method-dialog\" open={open}>\n+      <button className=\"dialog-close\" aria-label=\"Close\" onClick={() => setOpen(false)}>×</button>\n+      <h2>{method.code} v{method.version}</h2>\n+    </dialog>\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.method-dialog { transform-origin: top left; transition: transform 350ms ease-in, opacity 350ms ease-in; }\n+@starting-style { .method-dialog[open] { transform: scale(0.9); opacity: 0; } }\n+.dialog-close { width: 44px; height: 44px; }\n+@media (prefers-reduced-motion: reduce) { .method-dialog { transition: opacity 150ms ease-out; } @starting-style { .method-dialog[open] { transform: none; } } }\n```",
+    "expect": {
+      "advisory": [
+        [
+          "easing",
+          "duration",
+          "origin"
+        ]
+      ],
+      "overall": [
+        "clear"
+      ]
+    }
+  },
+  {
+    "id": "dr-clean-accent",
+    "agent": "design-reviewer",
+    "seam": "no false alarm",
+    "source": "#52 comment 2026-10-01, Motion > Signed, verdict and status values, rules 1-4, and Reduced motion: an accent on a confirmed state, status accents instant under reduced motion",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nThe Status glyph track gives a short accent once the server has confirmed a Review.\n\n```diff\n--- a/apps/web/src/tests.tsx\n+++ b/apps/web/src/tests.tsx\n+  const inFlight = useRef(false);\n+  async function onReview(password: string) {\n+    if (inFlight.current) return;\n+    inFlight.current = true;\n+    setBusy(true);\n+    try {\n+      const updated = await api.review(test.id, password);\n+      setTest(updated);\n+      setAccent(true);\n+    } finally {\n+      setBusy(false);\n+      inFlight.current = false;\n+    }\n+  }\n-      <h1>{test.sampleNumber} <Status state={test.state} /></h1>\n+      <h1>{test.sampleNumber} <span className={accent ? 'status--accent' : ''} onAnimationEnd={() => setAccent(false)}><Status state={test.state} /></span></h1>\n+      <button className=\"rbtn\" disabled={busy} onClick={() => onReview(password)}>Review</button>\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.status--accent .track { animation: accent 180ms cubic-bezier(0.23, 1, 0.32, 1); }\n+@keyframes accent { from { transform: scale(1.12); } to { transform: none; } }\n+@media (prefers-reduced-motion: reduce) { .status--accent .track { animation: none; } }\n```",
+    "expect": {
+      "met": [
+        "early-motion",
+        "reduced-motion"
+      ],
+      "not_blocking": [
+        "early-motion",
+        "status-legibility",
+        "live-control",
+        "reduced-motion",
+        "layout-animation"
+      ],
+      "overall": [
+        "clear"
+      ]
+    }
+  },
+  {
+    "id": "dr-precedence-optimistic",
+    "agent": "design-reviewer",
+    "seam": "#23 wins over Emil",
+    "source": "#52 comment 2026-10-01, Motion > Precedence: the build rules of #23 always win over Emil's guidance; nothing signed, judged or given a status is shown before the server confirms it",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nPR description: \"Following emil-design-eng's Perceived performance section and mobile-native's 'feedback on pointer-down', Release now feels instant. On pointerdown the Status chip switches to Reported with the success accent and the SignatureLine reads Released. If the server refuses, the chip shakes and reverts.\"\n\n```diff\n--- a/apps/web/src/tests.tsx\n+++ b/apps/web/src/tests.tsx\n+  function onPointerDown() {\n+    if (inFlight.current) return;\n+    inFlight.current = true;\n+    setBusy(true);\n+    setShown('Reported');\n+    setAccent('success');\n+    api.release(test.id, password)\n+      .then(setTest)\n+      .catch(() => { setShown(test.state); setAccent('shake'); })\n+      .finally(() => { setBusy(false); inFlight.current = false; });\n+  }\n+      <h1>{test.sampleNumber} <span className={`status--${accent}`}><Status state={shown} /></span></h1>\n+      <button className=\"rbtn\" disabled={busy} onPointerDown={onPointerDown}>Release</button>\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.status--success .track { animation: accent 180ms cubic-bezier(0.23, 1, 0.32, 1); }\n+.status--shake { animation: shake 240ms ease-out; }\n+@keyframes accent { from { transform: scale(1.12); } to { transform: none; } }\n+@keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }\n+@media (prefers-reduced-motion: reduce) { .status--success .track, .status--shake { animation: none; } }\n```",
+    "expect": {
+      "blocking": [
+        [
+          "early-motion"
+        ]
+      ],
+      "overall": [
+        "blocking"
+      ]
+    }
+  },
+  {
+    "id": "dr-lane-signature",
+    "agent": "design-reviewer",
+    "seam": "stays in its lane",
+    "source": "#52 comment 2026-10-01, The review gate scope (motion, reduced motion, layout properties, touch, mobile-native); signature content belongs to the compliance experts per CLAUDE.md",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nThe SignatureLine is shortened on phones to the meaning and full name; username, role and the lab-local time move into the SignatureBlock. No motion.\n\n```diff\n--- a/apps/web/src/signature-line.tsx\n+++ b/apps/web/src/signature-line.tsx\n-      <span>{s.meaning} · {s.fullName} ({s.username}, {s.role}) · {labTime(s.signedAt)}</span>\n+      <span>{s.meaning} · {s.fullName}</span>\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.sig-line { min-height: 44px; display: flex; align-items: center; }\n```",
+    "expect": {
+      "overall": [
+        "clear"
+      ]
+    }
+  },
+  {
+    "id": "dr-colour-accent",
+    "agent": "design-reviewer",
+    "seam": "no false alarm",
+    "source": "#52 comment 2026-10-01, The review gate > Blocking: animating layout properties; Motion > rule 2: motion is an accent on a confirmed state (grilling Q8: a tint that fades, a brief highlight)",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nAfter the server confirms a Signature and the reloaded Test carries its new state, the Status gets a background tint that fades away.\n\n```diff\n--- a/apps/web/src/tests.tsx\n+++ b/apps/web/src/tests.tsx\n+  const [signedFrom, setSignedFrom] = useState<TestState | null>(null);\n-  const action = view?.next ? stepAction(view.next, id, what!, reload) : null;\n+  const action = view?.next ? stepAction(view.next, id, what!, () => { setSignedFrom(view.test.state); reload(); }) : null;\n-      <h1>{test.sampleNumber} <Status state={test.state} /></h1>\n+      <h1>{test.sampleNumber} <span className={signedFrom && test.state !== signedFrom ? 'status-fresh' : ''} onAnimationEnd={() => setSignedFrom(null)}><Status state={test.state} /></span></h1>\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n+.status-fresh { border-radius: 6px; animation: tint 600ms ease-out; }\n+@keyframes tint { from { background-color: var(--sig-tint); } to { background-color: transparent; } }\n+@media (prefers-reduced-motion: reduce) { .status-fresh { animation: none; } }\n```\n\n`stepAction` calls its last argument only after the server has accepted the step, and `test` is the Test that `useApi` last read from the server.",
+    "expect": {
+      "not_blocking": [
+        "layout-animation",
+        "early-motion",
+        "status-legibility",
+        "reduced-motion"
+      ],
+      "overall": [
+        "clear"
+      ]
+    }
+  },
+  {
+    "id": "dr-layout-height",
+    "agent": "design-reviewer",
+    "seam": "catches planted gap",
+    "source": "#52 comment 2026-10-01, The review gate > Blocking: animating layout properties; Motion > rule 2: motion is an accent on a confirmed state (grilling Q8: a tint that fades, a brief highlight)",
+    "artifact": "Serves an eval fixture; there is no ticket to load.\n\nThe signature sheet grows open from the rail. Its controls are disabled while it closes.\n\n```diff\n--- a/apps/web/src/app.css\n+++ b/apps/web/src/app.css\n-.sheet { position: fixed; left: 0; right: 0; bottom: var(--rail-h); }\n+.sheet { position: fixed; left: 0; right: 0; bottom: var(--rail-h); height: 420px; overflow: hidden; transition: height 220ms cubic-bezier(0.23, 1, 0.32, 1); }\n+@starting-style { .sheet { height: 0; } }\n+@media (prefers-reduced-motion: reduce) { .sheet { transition: none; } }\n```",
+    "expect": {
+      "blocking": [
+        [
+          "layout-animation"
+        ]
+      ],
+      "overall": [
+        "blocking"
+      ]
+    }
   }
 ]
