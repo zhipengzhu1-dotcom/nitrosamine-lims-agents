@@ -71,6 +71,7 @@ export interface AuditEntry {
   role: string;
   seq: Int8;
   tableName: string;
+  transactionId: string | null;
 }
 
 export interface Customer {
@@ -82,6 +83,7 @@ export interface Lab {
   code: string;
   labId: Generated<string>;
   name: string;
+  timeZone: string;
 }
 
 export interface Membership {
@@ -154,6 +156,7 @@ export interface Signature {
 export interface Submission {
   customerId: string;
   id: Generated<string>;
+  number: string;
   submittedBy: string;
 }
 
