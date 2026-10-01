@@ -30,6 +30,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, NotRequired, TypedDict
 
 REPO = Path(__file__).resolve().parents[4]
 EVIDENCE = REPO / "evals" / "agents" / "out" / "budget-time"
@@ -38,8 +39,46 @@ EVAL_TOOLS = "Read Grep Glob Bash(git show:*) Bash(git diff:*) Bash(git log:*) B
 EVAL_PROMPT = "Review this proposed design for the LIMS. It is given inline; there is no diff.\n\n{artifact}"
 FETCH_TOOLS = {"WebFetch", "WebSearch"}
 
+JsonObject = dict[str, Any]
 
-def context_size(usage):
+
+class Actor(TypedDict):
+    label: str
+    turns: int
+    first_context: int | None
+    peak_context: int
+    total_tokens: int | None
+    tool_calls: dict[str, int]
+
+
+class ModelTotals(TypedDict):
+    inputTokens: int | None
+    outputTokens: int | None
+    cacheReadInputTokens: int | None
+    cacheCreationInputTokens: int | None
+    costUSD: float | None
+
+
+class Report(TypedDict):
+    stream: str
+    finished: bool
+    terminal_reason: str | None
+    total_cost_usd: float | None
+    duration_ms: int | None
+    models: dict[str, ModelTotals]
+    subagents: int
+    actors: dict[str, Actor]
+    failures: NotRequired[list[str]]
+
+
+class SessionUsage(TypedDict):
+    turns: int
+    current_context: int
+    peak_context: int
+    output_tokens: int
+
+
+def context_size(usage: JsonObject) -> int:
     return (
         usage.get("input_tokens", 0)
         + usage.get("cache_creation_input_tokens", 0)
@@ -47,38 +86,37 @@ def context_size(usage):
     )
 
 
-def num(value):
+def num(value: int | None) -> str:
     return "-" if value is None else f"{value:,}"
 
 
-def read_jsonl(path):
+def read_jsonl(path: Path) -> list[JsonObject]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def analyse(stream):
+def analyse(stream: Path) -> Report:
     rows = read_jsonl(stream)
     labels = {
         r["tool_use_id"]: f"{r.get('subagent_type') or 'agent'}: {r.get('description', '')}"
         for r in rows
         if r.get("type") == "system" and r.get("subtype") == "task_started"
     }
-    actors, seen = {}, set()
+    actors: dict[str, Actor] = {}
+    seen: set[str] = set()
     for r in rows:
         if r.get("type") != "assistant":
             continue
         msg = r["message"]
-        parent = r.get("parent_tool_use_id") or "lead"
-        actor = actors.setdefault(
-            parent,
-            {
-                "label": "lead" if parent == "lead" else labels.get(parent, parent),
-                "turns": 0,
-                "first_context": None,
-                "peak_context": 0,
-                "total_tokens": None,
-                "tool_calls": {},
-            },
-        )
+        parent: str = r.get("parent_tool_use_id") or "lead"
+        fresh: Actor = {
+            "label": "lead" if parent == "lead" else labels.get(parent, parent),
+            "turns": 0,
+            "first_context": None,
+            "peak_context": 0,
+            "total_tokens": None,
+            "tool_calls": {},
+        }
+        actor = actors.setdefault(parent, fresh)
         for block in msg.get("content", []):
             if block.get("type") == "tool_use":
                 actor["tool_calls"][block["name"]] = actor["tool_calls"].get(block["name"], 0) + 1
@@ -95,25 +133,29 @@ def analyse(stream):
             actors[r["tool_use_id"]]["total_tokens"] = r.get("usage", {}).get("total_tokens")
     results = [r for r in rows if r.get("type") == "result"]
     final = results[-1] if results else {}
+    models: dict[str, ModelTotals] = {
+        m: {
+            "inputTokens": u.get("inputTokens"),
+            "outputTokens": u.get("outputTokens"),
+            "cacheReadInputTokens": u.get("cacheReadInputTokens"),
+            "cacheCreationInputTokens": u.get("cacheCreationInputTokens"),
+            "costUSD": u.get("costUSD"),
+        }
+        for m, u in final.get("modelUsage", {}).items()
+    }
     return {
         "stream": str(stream),
         "finished": bool(final) and not final.get("is_error", True),
         "terminal_reason": final.get("terminal_reason"),
         "total_cost_usd": final.get("total_cost_usd"),
         "duration_ms": final.get("duration_ms"),
-        "models": {
-            m: {
-                k: u.get(k)
-                for k in ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "costUSD")
-            }
-            for m, u in final.get("modelUsage", {}).items()
-        },
+        "models": models,
         "subagents": final.get("subagent_stats", {}).get("spawned", 0),
         "actors": actors,
     }
 
 
-def markdown(rep):
+def markdown(rep: Report) -> str:
     lines = [
         f"# Token report: {rep['stream']}",
         "",
@@ -146,8 +188,8 @@ def markdown(rep):
     return "\n".join(lines) + "\n"
 
 
-def check(rep, args):
-    failures = []
+def check(rep: Report, args: argparse.Namespace) -> list[str]:
+    failures: list[str] = []
     if not rep["finished"]:
         failures.append(f"run did not finish cleanly ({rep['terminal_reason']})")
     lead = rep["actors"].get("lead", {"tool_calls": {}, "peak_context": 0})
@@ -163,7 +205,7 @@ def check(rep, args):
     return failures
 
 
-def write_report(stream, args):
+def write_report(stream: Path, args: argparse.Namespace) -> int:
     rep = analyse(stream)
     rep["failures"] = check(rep, args)
     (stream.parent / "report.json").write_text(json.dumps(rep, indent=1))
@@ -173,7 +215,7 @@ def write_report(stream, args):
     return 1 if rep["failures"] else 0
 
 
-def session_usage(transcript):
+def session_usage(transcript: Path) -> SessionUsage:
     turns = {
         r["message"]["id"]: r["message"].get("usage", {})
         for r in read_jsonl(transcript)
@@ -188,7 +230,7 @@ def session_usage(transcript):
     }
 
 
-def session(args):
+def session(args: argparse.Namespace) -> int:
     if args.path:
         path = Path(args.path)
     elif os.environ.get("CLAUDE_CODE_SESSION_ID"):
@@ -209,7 +251,7 @@ def session(args):
     return 0
 
 
-def run(args):
+def run(args: argparse.Namespace) -> int:
     cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--max-budget-usd", str(args.budget)]
     if args.case:
         case = next((c for c in json.loads(CASES.read_text()) if c["id"] == args.case), None)
@@ -239,7 +281,7 @@ def run(args):
     return write_report(stream, args) or (1 if proc.returncode else 0)
 
 
-def main():
+def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     checks = argparse.ArgumentParser(add_help=False)

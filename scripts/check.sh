@@ -13,6 +13,10 @@ for tool in python3 uvx; do
   fi
 done
 
+if git grep -nIE '^(<{7}|>{7}) '; then
+  echo "A tracked file holds a merge conflict marker, at the file and line above. Resolve the conflict, delete the marker lines, and stage the file." >&2
+  exit 1
+fi
 if git grep -nE '"[~^][0-9]' -- '*package.json'; then
   echo "Pin every dependency to an exact version." >&2
   exit 1
