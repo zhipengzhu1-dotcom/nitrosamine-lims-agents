@@ -14,7 +14,7 @@ import {
   type ReviewFacts, type RunFacts, type TestFacts,
 } from '../../chain/facts.ts';
 import { labelOf, valueRef, type ValueFact } from '../values.ts';
-import { RELEASE_CHECKLIST, RUN_CHECKLIST, TEST_CHECKLIST, move, verdictSubject, type Checklist } from '../../chain/model.ts';
+import { RELEASE_CHECKLIST, RUN_CHECKLIST, TEST_CHECKLIST, move, preparationSubject, verdictSubject, type Checklist } from '../../chain/model.ts';
 import { renderReportPdf } from '../../chain/pdf.ts';
 import { judgementCanon, storeSectionVerdicts } from '../../chain/verdicts.ts';
 import type { Sealed } from '../index.ts';
@@ -26,6 +26,7 @@ const unverified = (fields: Fields, values: readonly ValueFact[]): string[] => v
 const pendingOf = (fields: Fields, values: readonly ValueFact[]): string[] => values.filter((v) => v.pending !== null).map((v) => labelOf(fields, v));
 
 const TEST_FIELD_SPECS: Fields = {
+  'prep.balance': { label: 'balance', critical: true, type: 'ref', subject: 'preparation', verifiedEach: true },
   'prep.weight': { label: 'weight', critical: true, type: 'decimal', unit: 'mg', subject: 'preparation', verifiedEach: true },
   'prep.dilution': { label: 'dilution volume', critical: true, type: 'decimal', unit: 'mL', subject: 'preparation', verifiedEach: true },
   'prep.result': { label: 'result', critical: true, type: 'decimal', unit: 'pg/µL', subject: 'preparation+analyte', verifiedEach: true },
@@ -74,6 +75,7 @@ async function testPerformedCheck(ctx: RuleContext, signer: Signer, t: TestFacts
     unverifiedValues: unverified(TEST_FIELD_SPECS, t.values),
     pendingChanges: pendingOf(TEST_FIELD_SPECS, t.values),
     runs: t.runs.map((r) => ({ run: r.number, performedStands: signedAndStanding(r.standing, 'Performed') })),
+    balances: t.preparations.flatMap((p) => (p.balance ? [{ preparation: preparationSubject(p.prepNo), equipment: { code: p.balance.equipment?.code ?? '(none)', fitness: p.balance.equipment?.fitness ?? 'Quarantined' } }] : [])),
     judgement,
     blockingHolds: t.holds,
   });
@@ -122,6 +124,7 @@ export const testKind: KindDef = {
       specification: { purpose: t.specification.purpose, versionNo: String(t.specification.ref.versionNo), ...(cite(t.specification.ref) as object) },
       preparations: t.preparations.map((p): Canon => ({
         preparation: p.id, prepNo: String(p.prepNo),
+        balance: p.balance ? { ...(cite(valueRef(p.balance.value)) as object), equipment: p.balance.equipment?.code ?? null } : null,
         weight: p.weight ? cite(valueRef(p.weight)) : null, dilution: p.dilution ? cite(valueRef(p.dilution)) : null,
         results: Object.fromEntries([...p.results].map(([a, v]) => [a, v ? cite(valueRef(v)) : null])),
       })),

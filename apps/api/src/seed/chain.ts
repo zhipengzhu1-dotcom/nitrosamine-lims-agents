@@ -29,7 +29,7 @@ export const assign = (tabs: Tabs, testId: string, analyst: Person): Promise<unk
 
 export type PreparationEntry = { readonly weightMg: string; readonly dilutionMl: string; readonly results: Readonly<Record<string, string>> };
 
-/** The Analyst's typed Run for one Test: instrument, sequence, True Copy, two Preparations and the two Run Checks. */
+/** The Analyst's typed Run for one Test: instrument, sequence, True Copy, two Preparations on the balance, and the two Run Checks. */
 export async function typeRun(tabs: Tabs, ref: Reference, testId: string, opts: {
   readonly preparations: readonly PreparationEntry[];
   readonly runChecks: Readonly<Record<string, string>>;
@@ -46,8 +46,9 @@ export async function typeRun(tabs: Tabs, ref: Reference, testId: string, opts: 
   const record = async (parent: string, field: string, subject: string, value: string, unit: string): Promise<string> =>
     (await tabs.ann.must('value.record', { role: 'Analyst', parent, field, subject, value: { type: 'decimal', value, unit } })).value;
   for (const p of opts.preparations) {
-    const prep = await tabs.ann.must('preparation.create', { testId });
+    const prep = await tabs.ann.must('preparation.create', { testId, balanceId: ref.equipment.bal1 });
     const subject = preparationSubject(prep.prepNo);
+    values[`balance ${subject}`] = prep.balanceValueId;
     values[`weight ${subject}`] = await record(testId, 'prep.weight', subject, p.weightMg, 'mg');
     values[`dilution ${subject}`] = await record(testId, 'prep.dilution', subject, p.dilutionMl, 'mL');
     for (const [analyte, c] of Object.entries(p.results)) values[`result ${resultSubject(prep.prepNo, analyte)}`] = await record(testId, 'prep.result', resultSubject(prep.prepNo, analyte), c, 'pg/µL');

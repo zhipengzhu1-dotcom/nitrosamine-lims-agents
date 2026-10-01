@@ -173,6 +173,9 @@ export type SignatureLineDto = SignatureDto & { readonly stands: boolean };
 export type RunSummaryDto = { readonly id: string; readonly number: string; readonly state: 'Open' | 'Performed' | 'Reviewed'; readonly version: VersionDto | null };
 
 /** One step of a Test as the server's step model computes it; a blocked step says why in words (rules 15, 17). */
+/** The Equipment kind a Preparation's balance is registered as; the workbench offers only these and preparation.create refuses any other. */
+export const BALANCE_KIND = 'Balance';
+
 export type StepDto = { readonly name: string; readonly state: 'done' | 'current' | 'next' | 'blocked'; readonly note: string | null; readonly reasons: readonly string[] };
 
 /** A Hold is its own tag, never a state; it names its kind and the step it blocks (decision 23). */
@@ -226,9 +229,9 @@ export type JudgementDto = {
 
 export type TestDetailDto = {
   readonly test: QueueTestDto & { readonly acceptanceReason: string | null; readonly methodVersionId: string | null; readonly specificationVersionId: string | null };
-  readonly method: { readonly number: string; readonly title: string; readonly version: number; readonly analytes: readonly string[]; readonly preparationCount: string } | null;
+  readonly method: { readonly number: string; readonly title: string; readonly version: number; readonly analytes: readonly string[]; readonly preparationCount: number } | null;
   readonly specification: { readonly purpose: string; readonly versionNo: number; readonly hash: string; readonly sections: readonly { readonly jurisdiction: string; readonly ruleSetVersion: string; readonly lines: readonly { readonly analyte: string; readonly limit: string; readonly unit: string }[] }[] } | null;
-  readonly preparations: readonly { readonly id: string; readonly prepNo: number; readonly subject: string }[];
+  readonly preparations: readonly { readonly id: string; readonly prepNo: number; readonly subject: string; readonly balance: { readonly code: string; readonly kind: string; readonly fitness: string } | null }[];
   readonly values: readonly ValueDto[];
   readonly missingValues: readonly string[];
   readonly runs: readonly RunSummaryDto[];

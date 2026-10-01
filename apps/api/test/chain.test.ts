@@ -285,14 +285,15 @@ describe('review fixes 1, 8 and 26: results integrity', () => {
     await seed.tabs.ann.must('test.start', { testId });
     const values: string[] = [];
     for (const p of PASSING.preparations) {
-      const prep = await seed.tabs.ann.must('preparation.create', { testId });
+      const prep = await seed.tabs.ann.must('preparation.create', { testId, balanceId: seed.reference.equipment.bal1 });
+      values.push(prep.balanceValueId);
       const subject = preparationSubject(prep.prepNo);
       const entries = [['prep.weight', subject, p.weightMg, 'mg'], ['prep.dilution', subject, p.dilutionMl, 'mL'], ['prep.result', resultSubject(prep.prepNo, 'NDMA'), p.results.NDMA, 'pg/µL']] as const;
       for (const [field, s, value, unit] of entries) {
         values.push((await seed.tabs.ann.must('value.record', { role: 'Analyst', parent: testId, field, subject: s, value: { type: 'decimal', value, unit } })).value);
       }
     }
-    const third = await seed.tabs.ann.command('preparation.create', { testId });
+    const third = await seed.tabs.ann.command('preparation.create', { testId, balanceId: seed.reference.equipment.bal1 });
     expect(third.status).toBe(409);
     expect(refusalOf(third).message).toMatch(/asks for exactly 2 Preparations/);
     expect((await seed.tabs.ann.view('test.detail', { testId })).body.preparations).toHaveLength(2);
@@ -303,6 +304,27 @@ describe('review fixes 1, 8 and 26: results integrity', () => {
     expect(refused.status).toBe(409);
     expect(refusalOf(refused).reasons!.map((r) => r.code)).toEqual(['no-run-linked']);
     expect(refusalOf(refused).message).toMatch(/^No Run is linked to Test RD-S-\d{4}-\d{6}\/T1; its results come from a Run\.$/);
+  });
+
+  it('a Preparation names the balance it was weighed on (fix 12): required, a Balance, and carried in the Test version', async () => {
+    const testId = seed.submissions.requested.samples[0]!.tests[0]!;
+    await seed.tabs.sam.must('test.accept', { testId });
+    await seed.tabs.sam.must('sample.receive', { sampleId: seed.submissions.requested.samples[0]!.sampleId });
+    await assign(seed.tabs, testId, seed.cast.ann);
+    await seed.tabs.ann.must('test.start', { testId });
+    expect((await seed.tabs.ann.command('preparation.create', { testId })).status).toBe(400);
+    const lcms = await seed.tabs.ann.command('preparation.create', { testId, balanceId: seed.reference.equipment.lcms1 });
+    expect(lcms.status).toBe(403);
+    expect(refusalOf(lcms).message).toBe('LCMS-01 is an LC-MS/MS, not a Balance.');
+    const prep = await seed.tabs.ann.must('preparation.create', { testId, balanceId: seed.reference.equipment.bal1 });
+    const detail = await seed.tabs.ann.view('test.detail', { testId });
+    expect(detail.body.preparations).toEqual([{ id: prep.preparationId, prepNo: 1, subject: 'P1', balance: { code: 'BAL-01', kind: 'Balance', fitness: 'In use' } }]);
+    expect(detail.body.values.find((v: { field: string }) => v.field === 'prep.balance')).toMatchObject({ label: 'P1 balance', subject: 'P1', verified: false });
+
+    const released = await api.db.app.selectFrom('effective_version').select('content').where('record_id', '=', seed.submissions.released.testId).executeTakeFirstOrThrow();
+    const body = JSON.parse(released.content!.toString('utf8')) as { preparations: { prepNo: string; balance: { equipment: string; version: string; sha256: string } }[] };
+    expect(body.preparations.map((p) => [p.prepNo, p.balance.equipment])).toEqual([['1', 'BAL-01'], ['2', 'BAL-01']]);
+    expect(body.preparations[0]!.balance.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 

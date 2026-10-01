@@ -4,7 +4,7 @@
 // again when read back, and the domain types are built from the parsed value.
 
 import { z } from 'zod';
-import { uuid } from '@lims/contract';
+import { BALANCE_KIND, uuid } from '@lims/contract';
 import type { Canon } from '@lims/domain/canonical';
 import { written } from '@lims/domain/decimal';
 import type { AnalyteKey } from '@lims/domain/ids';
@@ -124,11 +124,12 @@ export const methodTrainingDocument = (methodNumber: string, version: number): s
 // Recorded Value fields per kind, and how subjects are written.
 // ---------------------------------------------------------------------------------------------
 
-export const TEST_FIELDS = { weight: 'prep.weight', dilution: 'prep.dilution', result: 'prep.result' } as const;
+export const TEST_FIELDS = { balance: 'prep.balance', weight: 'prep.weight', dilution: 'prep.dilution', result: 'prep.result' } as const;
 export const RUN_FIELDS = { instrument: 'run.instrument', sequence: 'run.sequence', trueCopy: 'run.trueCopy', runCheck: 'runcheck.value' } as const;
 export const REVIEW_FIELDS = { tick: 'checklist.item', verdict: 'verdict.confirmation' } as const;
 
 export const preparationSubject = (prepNo: number): string => `P${prepNo}`;
+export { BALANCE_KIND };
 export const resultSubject = (prepNo: number, analyte: string): string => `P${prepNo}/${analyte}`;
 /** Named by the Test's label, so the prompt QA signs from prints which Test and Section each confirmation is for. */
 export const verdictSubject = (testLabel: string, jurisdiction: string): string => `${testLabel}, ${jurisdiction} Section`;

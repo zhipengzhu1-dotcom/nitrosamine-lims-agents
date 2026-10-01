@@ -135,6 +135,8 @@ export type TestPerformedFacts = {
   readonly unverifiedValues: readonly string[];
   readonly pendingChanges: readonly string[];
   readonly runs: readonly { readonly run: string; readonly performedStands: boolean }[];
+  /** The balance each Preparation was weighed on (usp 7, iso 5), checked In use like the Run's instrument. */
+  readonly balances: readonly { readonly preparation: string; readonly equipment: { readonly code: string; readonly fitness: FitnessStatus } }[];
   readonly judgement: TestJudgement;
   readonly blockingHolds: readonly string[];
 };
@@ -321,6 +323,7 @@ export function testPerformedGate(f: TestPerformedFacts): GateResult {
     ...each(f.pendingChanges, (value) => ({ code: 'change-pending', value })),
     ...(f.runs.length === 0 ? [noRun(f.test)] : []),
     ...f.runs.flatMap((r): Reasons => (r.performedStands ? [] : [{ code: 'unsigned-dependency', record: r.run, needs: 'Performed' }])),
+    ...f.balances.flatMap((b): Reasons => (b.equipment.fitness === 'In use' ? [] : [{ code: 'equipment-not-in-use', equipment: `${b.preparation} balance ${b.equipment.code}`, status: b.equipment.fitness }])),
     ...each(f.blockingHolds, (hold) => ({ code: 'open-hold', hold })),
     ...verdictReasons(f.judgement),
   ]);

@@ -272,6 +272,7 @@ describe('testPerformedGate', () => {
     isAssignee: true,
     valuesByOthers: [], missingValues: [], unverifiedValues: [], pendingChanges: [],
     runs: [{ run: 'RUN-2026-0042', performedStands: true }],
+    balances: [{ preparation: 'P1', equipment: { code: 'BAL-01', fitness: 'In use' } }],
     judgement: judge('0.012', '0.014'),
     blockingHolds: [],
   };
@@ -281,6 +282,7 @@ describe('testPerformedGate', () => {
     ['not the assigned Analyst', { ...base, isAssignee: false }, ['not-assignee']],
     ['a feeding Run not Performed', { ...base, runs: [{ run: 'RUN-2026-0042', performedStands: false }] }, ['unsigned-dependency']],
     ['no Run linked at all (usp 2, iso 1)', { ...base, runs: [] }, ['no-run-linked']],
+    ['a Preparation weighed on a balance not In use (usp 7, iso 5)', { ...base, balances: [{ preparation: 'P2', equipment: { code: 'BAL-01', fitness: 'Suspended' } }] }, ['equipment-not-in-use']],
     ['a Hold blocks Performed', { ...base, blockingHolds: ['HOLD-7'] }, ['open-hold']],
     ['a value another Analyst typed (split signing is not built)', { ...base, valuesByOthers: ['Preparation 1 weight'] }, ['not-built']],
     ['a Preparation fails although the mean passes (OOS)', { ...base, judgement: judge('0.030', '0.036') }, ['not-built']],

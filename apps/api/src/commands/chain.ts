@@ -15,9 +15,9 @@ import type { LabId, PersonId, RecordId, Sha256Hex } from '@lims/domain/ids';
 import { SampleMachine, TestMachine, TestReportMachine } from '@lims/domain/machines';
 import { refuse, type NotBuilt } from '@lims/domain/refusal';
 import {
-  acceptedSpecificationVersion, adoptionStatus, analystsIn, currentMethodVersion, labOf, loadReport, loadReview, loadTest, performerFacts,
+  acceptedSpecificationVersion, adoptionStatus, analystsIn, currentMethodVersion, equipmentById, labOf, loadReport, loadReview, loadTest, performerFacts,
 } from '../chain/facts.ts';
-import { checklistFor, labNumber, move, REVIEW_FIELDS, RUN_FIELDS, submissionNumber, verdictSubject, yearIn } from '../chain/model.ts';
+import { BALANCE_KIND, checklistFor, labNumber, move, preparationSubject, REVIEW_FIELDS, RUN_FIELDS, submissionNumber, TEST_FIELDS, verdictSubject, yearIn } from '../chain/model.ts';
 import { receipt, type CommandTx } from '../commit.ts';
 import { defineCommand } from '../doors.ts';
 import { LabIdSchema, RecordIdSchema } from '../wire.ts';
@@ -276,23 +276,29 @@ export const linkTest = defineCommand({
   },
 });
 
+/** A Preparation is weighed on a balance the Lab holds (usp 7, iso 5); the balance is a Recorded Value on the Test like the Run's instrument. */
 export const createPreparation = defineCommand({
   name: 'preparation.create',
-  input: z.object({ testId: RecordIdSchema }),
+  input: z.object({ testId: RecordIdSchema, balanceId: uuid }),
   acting: { as: 'role', role: 'Analyst' },
   reason: { kind: 'first_save' },
   ledgers: () => [],
-  run: async (tx, { testId }) => {
+  run: async (tx, { testId, balanceId }) => {
     const t = await loadTest(tx.db, testId);
     if (t.assignedAnalyst !== person(tx)) return { kind: 'not-permitted', message: `${t.label} is assigned to another Analyst.` };
     if (t.state !== 'InProgress') return { kind: 'transition', message: `${t.label} is ${TestMachine.states[t.state]}; Preparations are made on a Test In Progress.` };
     if (!t.method) return { kind: 'transition', message: `${t.label} has no pinned Method version.` };
     const count = t.method.data.preparations;
     if (t.preparations.length >= Number(count)) return { kind: 'transition', message: `${t.method.number} v${t.method.version} asks for exactly ${count} Preparations, and ${t.label} has them.` };
+    const balance = await equipmentById(tx.db, balanceId);
+    if (!balance) return { kind: 'not-permitted', message: 'No such Equipment in this Lab.' };
+    if (balance.kind !== BALANCE_KIND) return { kind: 'not-permitted', message: `${balance.code} is an ${balance.kind}, not a ${BALANCE_KIND}.` };
     const prepNo = t.preparations.length + 1;
     const id = randomUUID();
     await tx.db.insertInto('preparation').values({ lab_id: t.labId, id, test_id: testId, prep_no: prepNo }).execute();
-    return receipt(`Added Preparation P${prepNo} to ${t.label}. Record its weight, dilution volume and each result as you make them.`, 'audited', { preparationId: id, prepNo, subject: `P${prepNo}` });
+    const saved = await tx.records.record({ parent: testId, field: TEST_FIELDS.balance, subject: preparationSubject(prepNo), value: { type: 'ref', value: balanceId } });
+    if ('kind' in saved) return saved;
+    return receipt(`Added Preparation P${prepNo} to ${t.label}, weighed on ${balance.code}. Record its weight, dilution volume and each result as you make them.`, 'audited', { preparationId: id, prepNo, subject: `P${prepNo}`, balanceValueId: saved.value });
   },
 });
 
