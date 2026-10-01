@@ -45,12 +45,15 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     ctx,
     ...inLab(db, labId),
     auditTrail: () => db.selectFrom('auditEntry').where('chain', '=', labId),
-    verifyChain: async (chain: 'lab' | 'company') =>
-      (
-        await db
-          .selectNoFrom(sql<string | null>`lims.verify_chain(${chain === 'lab' ? labId : 'company'})`.as('broken'))
-          .executeTakeFirstOrThrow()
-      ).broken,
+    /** Recomputes both hash chains in one statement, stamped with that statement's database clock. */
+    verifyAuditTrail: () =>
+      db
+        .selectNoFrom([
+          sql<Date>`now()`.as('at'),
+          sql<string | null>`lims.verify_chain(${labId})`.as('lab'),
+          sql<string | null>`lims.verify_chain('company')`.as('company'),
+        ])
+        .executeTakeFirstOrThrow(),
     write: <R>(reason: string, role: Role, fn: (q: LabQueries) => Promise<R>) =>
       audited(db, { actor: `person:${ctx.person.username}`, role, reason }, (tx) => fn(inLab(tx, labId))),
   };

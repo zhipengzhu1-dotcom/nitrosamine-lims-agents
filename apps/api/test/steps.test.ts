@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
+import { sql } from 'kysely';
 import { routes, type StepInput, type StepName, stepNames, stepRoute, steps } from '@lims/domain';
 import { labScope } from '../src/scope.ts';
 import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
@@ -165,7 +166,10 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   }
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   assert.deepEqual([verified.lab, verified.company], [null, null]);
-  assert.ok(Math.abs(Date.parse(verified.at) - Date.now()) < 60_000, 'the server states when it checked');
+  const { recent } = await api.db
+    .selectNoFrom(sql<boolean>`${verified.at}::timestamptz between now() - interval '1 minute' and now()`.as('recent'))
+    .executeTakeFirstOrThrow();
+  assert.ok(recent, 'the server states when it checked, by the database clock');
 });
 
 it('a step by the wrong role is refused', async () => {

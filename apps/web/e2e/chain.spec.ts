@@ -65,7 +65,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     Unit: 'ppm',
     'Injection sequence': 'SEQ-2026-0042',
     'Notebook reference': 'RD-NB-0007-012',
-    'Performed on': new Date().toISOString().slice(0, 10),
+    'Performed on': '2026-09-30',
   };
   for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);

@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import cookie from '@fastify/cookie';
 import { createDb, type DB } from '@lims/db';
-import type { ActorContext } from '@lims/domain';
+import type { ActorContext, Instant } from '@lims/domain';
 import Fastify, {
   type FastifyBaseLogger,
   type FastifyInstance,
@@ -9,7 +9,7 @@ import Fastify, {
   type RawServerDefault,
 } from 'fastify';
 import type { Kysely } from 'kysely';
-import type { Static, StaticDecode, TSchema } from 'typebox';
+import type { Static, TSchema } from 'typebox';
 import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE } from './auth.ts';
 import { readRoutes } from './reads.ts';
 import { stepRoutes } from './steps.ts';
@@ -20,9 +20,17 @@ declare module 'fastify' {
   }
 }
 
+/** What a handler may hand Fastify for a reply: the wire type, with a Date wherever the wire carries an Instant. */
+type Sent<T> = T extends Instant
+  ? T | Date
+  : T extends readonly (infer E)[]
+    ? Sent<E>[]
+    : T extends object
+      ? { [K in keyof T]: Sent<T[K]> }
+      : T;
 interface WireTypes extends FastifyTypeProvider {
   validator: this['schema'] extends TSchema ? Static<this['schema']> : unknown;
-  serializer: this['schema'] extends TSchema ? StaticDecode<this['schema']> : unknown;
+  serializer: this['schema'] extends TSchema ? Sent<Static<this['schema']>> : unknown;
 }
 export type App = FastifyInstance<RawServerDefault, IncomingMessage, ServerResponse, FastifyBaseLogger, WireTypes>;
 
