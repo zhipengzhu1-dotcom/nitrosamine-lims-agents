@@ -11,7 +11,7 @@
     "e2e": "pnpm --filter @lims/web e2e"
   },
   "devDependencies": {
-    "@types/node": "^24.19.0",
-    "typescript": "^7.0.2"
+    "@types/node": "24.19.0",
+    "typescript": "7.0.2"
   }
 }
