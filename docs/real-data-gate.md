@@ -9,8 +9,8 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 1 | Commit keys | [#87](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/87) |
 | 1 | System Incidents with log volume, redaction and the unwritten-incident check | |
 | 1 | Access Events with the expiry sweep | [#91](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/91) (Access Events; the expiry sweep is [#92](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/92)) |
-| 1 | Counters | |
-| 1 | Transaction IDs | |
+| 1 | Counters | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
+| 1 | Transaction IDs | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
 | 2 | Signing function and Signature fields | |
 | 2 | Record Versions | |
 | 2 | Lab at sign-in | |

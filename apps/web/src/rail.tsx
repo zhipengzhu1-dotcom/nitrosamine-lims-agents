@@ -290,7 +290,7 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
         text:
           e instanceof Refused
             ? `Refused: ${e.message}.${a.signs && e.kind !== 'failure' ? ' Nothing has been signed.' : ''}`
-            : 'The LIMS did not answer. Press again with the same entries; they will not be saved twice.',
+            : `The LIMS did not answer. ${a.signs ? 'Type your password again and sign' : 'Press again'} with the same entries; they will not be saved twice.`,
         tone: 'bad',
         n: ++count.current,
       };

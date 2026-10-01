@@ -182,7 +182,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     return route.abort('connectionreset');
   });
   await sign(page, 'Released');
-  await railSays(page, 'The LIMS did not answer. Press again with the same entries; they will not be saved twice.');
+  await railSays(
+    page,
+    'The LIMS did not answer. Type your password again and sign with the same entries; they will not be saved twice.',
+  );
   await sign(page, 'Released');
   await railSays(page, 'now Reported');
   const [releaseKey, retryKey] = commitKeys.slice(-2);
@@ -191,10 +194,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   expect(presses.size, 'every other press sent a fresh Commit Key').toBe(commitKeys.length - 1);
   for (const key of presses)
     expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  const reportLink = page.getByRole('link', { name: /^RD-R\d{5}$/ });
+  const reportLink = page.getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ });
   await atLeast(reportLink, 44, 44);
   await reportLink.click();
-  await expect(page.getByRole('heading', { name: /Test Report RD-R\d{5}/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Test Report RD-R-\d{4}-\d{6}/ })).toBeVisible();
   await expect(page.getByRole('cell', { name: '0.0300', exact: true })).toBeVisible();
   for (const [meaning, signer] of [
     ['Performed', 'Ana Ferreira'],
