@@ -689,6 +689,7 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
     ['lims.result.version_record', 'record-version.test.ts'],
     ['lims.test_report.version_record', 'record-version.test.ts'],
     ['lims.sample.version_record', 'record-version.test.ts'],
+    ['lims.submission.version_record', 'record-version.test.ts'],
     ['lims.method.version_record', 'record-version.test.ts'],
     ['lims.customer.version_record', 'record-version.test.ts'],
   ]);

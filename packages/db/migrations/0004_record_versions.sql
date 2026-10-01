@@ -19,8 +19,9 @@ create table lims.record_version (
   unique (lab_id, record_table, record_id, version)
 );
 
--- Canonical form 1 of a Test: the fields its Signatures cover, as jsonb renders them (keys sorted, values as text).
--- Times and dates are rendered explicitly so the bytes never depend on the session's TimeZone or DateStyle.
+-- Canonical form 1 of a Test: the fields its Signatures cover, rendered by jsonb (its own key order, one space after
+-- each colon and comma), in UTF-8. Times and dates are rendered explicitly so the bytes never depend on the session's
+-- TimeZone or DateStyle. A change to this rendering is a new canonical form, never an edit of this one.
 create function lims.test_content(p_lab_id uuid, p_test_id uuid) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
@@ -56,7 +57,9 @@ language sql stable as $$
   where tr.lab_id = p_lab_id and tr.id = p_report_id
 $$;
 
--- Writes the next Record Version of one record when its canonical content differs from the latest version's.
+-- Writes the next Record Version of one record when its canonical content differs from the latest version's. It takes
+-- no lock of its own: capture() fires before it on the changed row (triggers fire in name order) and holds the Lab
+-- chain's row lock to commit, so one transaction at a time versions a Lab's records.
 create function lims.save_record_version(p_lab_id uuid, p_table text, p_record_id uuid) returns void
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -98,6 +101,9 @@ begin
     when 'test_report' then perform save_record_version(r.lab_id, 'test_report', r.id);
     when 'sample' then perform version_test(lab_id, id) from test where lab_id = r.lab_id and sample_id = r.id;
     when 'method' then perform version_test(lab_id, id) from test where method_id = r.id;
+    when 'submission' then perform version_test(t.lab_id, t.id) from test t
+      join sample s on s.lab_id = t.lab_id and s.id = t.sample_id
+      where s.submission_id = r.id;
     when 'customer' then perform version_test(t.lab_id, t.id) from test t
       join sample s on s.lab_id = t.lab_id and s.id = t.sample_id
       join submission sub on sub.id = s.submission_id
@@ -106,7 +112,8 @@ begin
   return null;
 end $$;
 
-revoke execute on function lims.save_record_version(uuid, text, uuid), lims.version_test(uuid, uuid) from public;
+revoke execute on function lims.test_content(uuid, uuid), lims.test_report_content(uuid, uuid),
+  lims.save_record_version(uuid, text, uuid), lims.version_test(uuid, uuid) from public;
 
 do $$
 declare
@@ -118,7 +125,7 @@ begin
            for each row execute function lims.refuse_change()';
   execute 'create trigger refuse_truncate before truncate on lims.record_version
            for each statement execute function lims.refuse_change()';
-  foreach t in array array['test', 'result', 'test_report', 'sample', 'method', 'customer'] loop
+  foreach t in array array['test', 'result', 'test_report', 'sample', 'submission', 'method', 'customer'] loop
     execute format('create trigger version_record after insert or update or delete on lims.%I
                     for each row execute function lims.version_on_change()', t);
   end loop;
@@ -128,9 +135,12 @@ end $$;
 -- carries neither of its own any more.
 alter table lims.signature add column record_version_id uuid;
 
--- The thin slice's Signatures hold the content they signed. Each distinct content becomes a Record Version in
--- canonical form 0, numbered in signing order, and the Signature binds to it. This is the one time Signature
--- rows are updated; the Audit Trail records it under svc:migrate, and the rows keep every value they had.
+-- The thin slice's Signatures hold the content they signed, rendered by the API (canonical form 0). Each distinct
+-- signed content becomes a Record Version in form 0, numbered in signing order; then every Test and Test Report gets
+-- its form-1 version of what it holds now. A Signature whose signed content still says what the record says (the same
+-- fields; the received time to the millisecond, which is all form 0 kept) binds to that form-1 version and stays
+-- signed. One that differs binds to its form-0 version, and shows as unsigned because a later version exists. This is
+-- the one time Signature rows are updated; the Audit Trail records it under svc:migrate.
 select set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 'system', true),
        set_config('lims.reason', 'Move the thin slice''s signed content onto Record Versions', true);
 insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
@@ -138,12 +148,28 @@ select lab_id, record_table, record_id,
        dense_rank() over (partition by lab_id, record_table, record_id order by min(signed_at)), 0, content
   from lims.signature
  group by lab_id, record_table, record_id, content;
+do $$ begin perform lims.version_test(lab_id, id) from lims.test; end $$;
+create function pg_temp.signed_content_holds(signed bytea, current jsonb, record_table text) returns boolean
+language sql immutable as $$
+  with f0 as (select convert_from(signed, 'UTF8')::jsonb as j),
+       f1 as (select case record_table when 'test' then current else current -> 'test' end as j)
+  select (f0.j - 'report' - 'receivedAt') = (f1.j - 'receivedAt')
+     and left(f0.j ->> 'receivedAt', 23) is not distinct from left(f1.j ->> 'receivedAt', 23)
+     and (record_table = 'test' or f0.j ->> 'report' = current ->> 'number')
+  from f0, f1
+$$;
 alter table lims.signature disable trigger refuse_change;
 update lims.signature s
-   set record_version_id = v.id
-  from lims.record_version v
- where v.lab_id = s.lab_id and v.record_table = s.record_table and v.record_id = s.record_id and v.content = s.content;
+   set record_version_id = coalesce(
+     (select v.id from lims.record_version v
+       where v.lab_id = s.lab_id and v.record_table = s.record_table and v.record_id = s.record_id
+         and v.canonical_form = 1
+         and pg_temp.signed_content_holds(s.content, convert_from(v.content, 'UTF8')::jsonb, s.record_table)),
+     (select v.id from lims.record_version v
+       where v.lab_id = s.lab_id and v.record_table = s.record_table and v.record_id = s.record_id
+         and v.content = s.content));
 alter table lims.signature enable trigger refuse_change;
+drop function pg_temp.signed_content_holds(bytea, jsonb, text);
 
 alter table lims.signature
   alter column record_version_id set not null,
