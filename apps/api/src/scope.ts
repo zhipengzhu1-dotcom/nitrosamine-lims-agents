@@ -41,6 +41,7 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     ...inLab(db, labId),
     /** Reaches only this Lab's chain and the company chain. */
     trail: () => db.selectFrom('auditEntry').where('chain', 'in', [labId, 'company']),
+    /** Recomputes this Lab's chain and the company chain in one statement, so both are read from one snapshot. */
     verifyAuditTrail: async () => {
       const lastEntry = (chain: string) =>
         sql<string>`coalesce((select seq from lims.audit_chain where chain = ${chain}), 0)::text`;

@@ -118,7 +118,7 @@ function RawDialog({ entry, onClose }: { entry: TrailEntry | null; onClose: () =
       {entry && (
         <>
           <h2>
-            Raw entry {entry.seq} on the {entry.chain} chain
+            Raw entry {entry.seq}, {chainWords[entry.chain]}
           </h2>
           <p className="muted">
             The stored values the hash covers, with the entry&apos;s SHA-256 and the previous one.

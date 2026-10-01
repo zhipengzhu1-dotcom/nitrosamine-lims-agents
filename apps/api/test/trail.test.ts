@@ -226,10 +226,22 @@ it("a company record out of this Lab's sight is not found: a person of another L
       .values({ name: 'Unseen Customer (fictional)' })
       .returning('id')
       .executeTakeFirstOrThrow();
-    return { personId, customerId };
+    const { id: submissionId } = await tx
+      .insertInto('submission')
+      .values({ customerId, submittedBy: personId })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const { id: sampleId } = await tx
+      .insertInto('sample')
+      .values({ labId, submissionId, number: 'OL-S00001', description: 'Capsules (fictional)' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    return { personId, customerId, submissionId, sampleId };
   });
   refusedWith(await as.rui.call(routes.recordTrail, { table: 'person', id: other.personId }), 'notFound');
   refusedWith(await as.rui.call(routes.recordTrail, { table: 'customer', id: other.customerId }), 'notFound');
+  refusedWith(await as.rui.call(routes.recordTrail, { table: 'submission', id: other.submissionId }), 'notFound');
+  refusedWith(await as.rui.call(routes.recordTrail, { table: 'sample', id: other.sampleId }), 'notFound');
   assert.ok(ok(await as.rui.call(routes.recordTrail, { table: 'person', id: ana.id })).entries.length > 0);
   const customerId = (
     await api.db.selectFrom('customer').select('id').where('name', 'like', 'Northwind%').executeTakeFirstOrThrow()

@@ -30,6 +30,7 @@ interface RecordSpec {
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : (JSON.stringify(value) ?? ''));
 
+/** The one place that says how each audited table reads: its glossary noun, its chain, its label and its fields' names. */
 export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
   customer: { kind: 'Customer', chain: 'company', label: (row) => text(row.name), fields: { name: { label: 'Name' } } },
   person: {
@@ -119,27 +120,39 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
   },
 };
 
+/** Every table `auditedRecords` reads, in registry order. */
 export const auditedTables = Object.keys(auditedRecords).filter((key): key is AuditedTable =>
   Object.hasOwn(auditedRecords, key),
 );
+/** True only for a table name `auditedRecords` reads. */
 export const isAuditedTable = (value: unknown): value is AuditedTable => auditedTables.some((t) => t === value);
+/** The chain an entry sits on: the Lab's when its chain is that Lab's id, the company's otherwise. */
+export const chainKindOf = (chain: string, labId: string): ChainKind => (chain === labId ? 'lab' : 'company');
 
 function referenceOf(field: FieldSpec, row: RowSnapshot): AuditedTable | null {
   const table = field.ref ?? (field.refTableIn === undefined ? undefined : row[field.refTableIn]);
   return isAuditedTable(table) ? table : null;
 }
 
+/** The username behind a `person:` actor, and null for a service actor such as `svc:seed`. */
 export const actorUsername = (actor: string): string | null =>
   actor.startsWith('person:') ? actor.slice('person:'.length) : null;
 
 const UNLISTED = new Set(['id', 'lab_id']);
 
+/** One row of an audited record as it stood at one instant. */
 export interface RowImage {
   table: AuditedTable;
   at: Instant;
   row: RowSnapshot;
 }
+/** The records of one table whose images a trail still needs. */
+export interface RecordIds {
+  table: AuditedTable;
+  ids: string[];
+}
 
+/** Each entry's own row image: the new row, or the old row of a deletion. */
 export function imagesOf(entries: readonly RawEntry[]): RowImage[] {
   return entries.flatMap((e) => {
     const row = e.newRow ?? e.oldRow;
@@ -192,7 +205,8 @@ export function currentLabel(images: readonly RowImage[], table: AuditedTable, i
   return latest ? indexImages(images)(latest.at).labelOf(table, id) : id;
 }
 
-export function referencedRecords(images: readonly RowImage[]): { table: AuditedTable; ids: string[] }[] {
+/** Every record the images reference, their own records included, so that `describeTrail` can label each. */
+export function referencedRecords(images: readonly RowImage[]): RecordIds[] {
   const ids = new Map<AuditedTable, Set<string>>();
   const add = (table: AuditedTable | null, id: unknown) => {
     if (table === null || typeof id !== 'string') return;
@@ -209,8 +223,9 @@ export function referencedRecords(images: readonly RowImage[]): { table: Audited
 /** An entry with its instant on the owning Lab's wall clock, which the API reads from the database beside `at`. */
 export type TimedEntry = RawEntry & { atLab: Instant | null };
 
+const bySeq = (a: string, b: string) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0);
 const byTime = (a: RawEntry, b: RawEntry) =>
-  (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) || a.chain.localeCompare(b.chain) || Number(BigInt(a.seq) - BigInt(b.seq));
+  (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) || a.chain.localeCompare(b.chain) || bySeq(a.seq, b.seq);
 
 /** Every entry in time order, its people and records labelled as they stood at its time from `images` and the entries' own rows. */
 export function describeTrail(
@@ -252,7 +267,7 @@ export function describeTrail(
         old: shown(column, before[column]),
         new: shown(column, after[column]),
       }));
-    const chain: ChainKind = e.chain === labId ? 'lab' : 'company';
+    const chain = chainKindOf(e.chain, labId);
     return {
       chain,
       seq: e.seq,
@@ -269,10 +284,11 @@ export function describeTrail(
   });
 }
 
+/** How QA reads a recomputed chain: intact through its last entry, or through the entry before the first that fails. */
 export function chainVerification(chain: ChainKind, lastEntry: string, firstFailure: string | null): ChainVerification {
   if (firstFailure === null)
     return { chain, lastEntry, intactThrough: lastEntry, firstFailure, report: `intact through entry ${lastEntry}` };
-  if (BigInt(firstFailure) > BigInt(lastEntry))
+  if (bySeq(firstFailure, lastEntry) > 0)
     return {
       chain,
       lastEntry,
@@ -280,7 +296,7 @@ export function chainVerification(chain: ChainKind, lastEntry: string, firstFail
       firstFailure,
       report: `the chain head does not match entry ${lastEntry}; intact through entry ${lastEntry}`,
     };
-  const intactThrough = String(BigInt(firstFailure) - 1n);
+  const intactThrough = String(Number(firstFailure) - 1);
   return {
     chain,
     lastEntry,

@@ -3,12 +3,14 @@ import {
   actorUsername,
   type AuditedTable,
   auditedRecords,
+  auditOp,
   chainVerification,
   currentLabel,
   describeTrail,
   imagesOf,
   type Instant,
   isAuditedTable,
+  type RecordIds,
   referencedRecords,
   type RowImage,
   type RowSnapshot,
@@ -17,6 +19,7 @@ import {
   type Trail,
 } from '@lims/domain';
 import { type ExpressionBuilder, type ExpressionWrapper, type Kysely, type SqlBool, sql } from 'kysely';
+import { Value } from 'typebox/value';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
@@ -28,7 +31,7 @@ function snapshot(row: Json | null): RowSnapshot | null {
 }
 
 function opOf(op: string): TimedEntry['op'] {
-  if (op === 'INSERT' || op === 'UPDATE' || op === 'DELETE') return op;
+  if (Value.Check(auditOp, op)) return op;
   throw new Error(`an Audit Trail entry has the op ${op}`);
 }
 
@@ -87,11 +90,7 @@ async function rawEntries(scope: Scope, where: Where): Promise<TimedEntry[]> {
   }));
 }
 
-async function imagesWanted(
-  scope: Scope,
-  wanted: { table: AuditedTable; ids: string[] }[],
-  usernames: string[],
-): Promise<RowImage[]> {
+async function imagesWanted(scope: Scope, wanted: RecordIds[], usernames: string[]): Promise<RowImage[]> {
   if (wanted.length === 0) return [];
   const rows = await scope
     .trail()
@@ -119,7 +118,7 @@ async function imagesWanted(
 async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<RowImage[]> {
   const usernames = [...new Set(entries.map((e) => actorUsername(e.actor)).filter((u) => u !== null))];
   const loaded = new Map<AuditedTable, Set<string>>();
-  const unloaded = (wanted: { table: AuditedTable; ids: string[] }[]) =>
+  const unloaded = (wanted: RecordIds[]) =>
     wanted
       .map(({ table, ids }) => ({ table, ids: ids.filter((id) => !loaded.get(table)?.has(id)) }))
       .filter(({ ids }) => ids.length > 0);

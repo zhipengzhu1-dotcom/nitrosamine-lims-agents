@@ -47,7 +47,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 - Never hold a measured value or a limit in a JavaScript `number`. Use a decimal string in TypeScript and `text` or `numeric` in Postgres, because a float loses the digits as typed.
 - Do arithmetic on values in one domain module, so that rounding ([ADR 0006](adr/0006-acceptance-criteria-round-the-value-once-to-the-limits-written-decimals.md)) has one implementation. Choose the decimal library when the first calculation is built.
 - Take every timestamp that is stored on a row from the database clock, because the API host's clock is not the record's clock.
-- Send a time over HTTP as an ISO 8601 UTC string, and format it for display in one web function, so that every screen shows time the same way.
+- Send a time over HTTP as an ISO 8601 UTC string, and format it for display in one web module, so that every screen shows time the same way. The one exception is an Audit Trail entry's time on its owning Lab's wall clock (`atLab`, [#111](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/111)): the Lab's zone is record data, not a display preference, so the database renders that instant as ISO 8601 with the Lab's offset and the same web module formats it.
 
 ## The database refuses bad data
 

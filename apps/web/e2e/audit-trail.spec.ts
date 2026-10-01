@@ -111,7 +111,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await atLeast(rawButton, 44, 44);
   await rawButton.click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('heading', { name: /^Raw entry \d+ on the lab chain$/ })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: /^Raw entry \d+, Lab chain$/ })).toBeVisible();
   await expect(dialog.locator('pre')).toContainText(/"hash": "[0-9a-f]{64}"/);
   await expect(dialog.locator('pre')).toContainText('"record_table": "test"');
   await dialog.getByRole('button', { name: 'Close' }).click();

@@ -42,8 +42,9 @@ const decimal = Type.String({ pattern: `^${decimalPattern}$` });
 const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
- * A point in time: on the wire, and so in the web and the tests, the ISO 8601 UTC string the database clock produced.
- * The API hands Fastify the Date that Kysely returns, and Fastify writes it with toISOString.
+ * A point in time: on the wire, and so in the web and the tests, an ISO 8601 string the database clock produced, in
+ * UTC unless the field says otherwise (`atLab` carries the Lab's offset). The API hands Fastify the Date that Kysely
+ * returns, and Fastify writes it with toISOString.
  */
 export type Instant = string & { readonly [instantBrand]: true };
 export const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' }));
@@ -105,16 +106,19 @@ export type AuditedTable = Static<typeof auditedTable>;
 const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
 export type ChainKind = Static<typeof chainKind>;
 const sha256Hex = Type.String({ pattern: '^[0-9a-f]{64}$' });
+/** A chain entry number as the database counts it: digits only, so that domain code can compare it without throwing. */
+const seq = Type.String({ pattern: '^[0-9]+$' });
+export const auditOp = Type.Enum({ INSERT: 'INSERT', UPDATE: 'UPDATE', DELETE: 'DELETE' } as const);
 /** An Audit Trail entry as the database holds it. */
 const rawEntry = Type.Object({
   chain: Type.String(),
-  seq: Type.String(),
+  seq,
   at: instant,
   actor: Type.String(),
   role: Type.String(),
   reason: Type.String(),
   table: Type.String(),
-  op: Type.Enum({ INSERT: 'INSERT', UPDATE: 'UPDATE', DELETE: 'DELETE' } as const),
+  op: auditOp,
   oldRow: nullable(rowSnapshot),
   newRow: nullable(rowSnapshot),
   prevHash: sha256Hex,
@@ -143,7 +147,7 @@ export type TrailChange = Static<typeof trailChange>;
  */
 const trailEntry = Type.Object({
   chain: chainKind,
-  seq: Type.String(),
+  seq,
   at: instant,
   atLab: nullable(instant),
   actor: Type.Object({ label: Type.String(), role: Type.String() }),
@@ -177,9 +181,9 @@ const lookups = Type.Object({
 });
 const chainVerification = Type.Object({
   chain: chainKind,
-  lastEntry: Type.String(),
-  intactThrough: Type.String(),
-  firstFailure: nullable(Type.String()),
+  lastEntry: seq,
+  intactThrough: seq,
+  firstFailure: nullable(seq),
   report: Type.String(),
 });
 export type ChainVerification = Static<typeof chainVerification>;
