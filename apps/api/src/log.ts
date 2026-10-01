@@ -5,11 +5,19 @@ export interface LogSink {
   write(line: string): void;
 }
 
-/** The API log on its own volume: appended line by line to a file only its owner can read or write. */
+/** The API log on its own volume: appended line by line to a file only its owner can read or write, and to stderr when the volume refuses a line. */
 export function logFile(path: string): LogSink {
   const fd = openSync(path, 'a', 0o600);
   fchmodSync(fd, 0o600);
-  return { write: (line) => writeSync(fd, line) };
+  return {
+    write: (line) => {
+      try {
+        writeSync(fd, line);
+      } catch {
+        process.stderr.write(line);
+      }
+    },
+  };
 }
 
 const REDACTED = [

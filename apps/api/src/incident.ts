@@ -14,7 +14,7 @@ const STEP_OF_ROUTE = new Map<string, string>([
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function stepOf(req: FastifyRequest): string {
-  const route = `${req.method} ${req.routeOptions.url ?? 'unknown route'}`;
+  const route = `${req.method === 'HEAD' ? 'GET' : req.method} ${req.routeOptions.url ?? 'unknown route'}`;
   return STEP_OF_ROUTE.get(route) ?? route;
 }
 
