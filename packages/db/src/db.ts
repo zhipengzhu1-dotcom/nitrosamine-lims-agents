@@ -3,6 +3,7 @@ import pg from 'pg';
 import type { DB } from './schema.ts';
 
 export type { DB };
+export { checkoutDatabase } from './checkout.ts';
 export { type DbConfig, dbConfig } from './config.ts';
 export type { Json, Meaning, Role, TestState } from './schema.ts';
 

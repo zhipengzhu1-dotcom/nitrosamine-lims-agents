@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
-import { databaseUrl, dbConfig } from '../src/db.ts';
+import { checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
 import { migrate, runnerLock } from '../src/migrate.ts';
 
 const { server } = dbConfig();
@@ -51,7 +51,9 @@ async function migrateAtOnce(databases: string[]): Promise<string[][]> {
 
 describe('migration runners started at the same moment on one cluster', () => {
   it('each migrate their own new database', async () => {
-    const databases = ['lims_migrate_1', 'lims_migrate_2', 'lims_migrate_3', 'lims_migrate_4'];
+    const databases = ['lims_migrate_1', 'lims_migrate_2', 'lims_migrate_3', 'lims_migrate_4'].map((base) =>
+      checkoutDatabase(base),
+    );
     const applied = await migrateAtOnce(databases);
     assert.deepEqual(
       applied,
@@ -61,7 +63,7 @@ describe('migration runners started at the same moment on one cluster', () => {
   });
 
   it('apply each migration to a shared new database exactly once', async () => {
-    const database = 'lims_migrate_shared';
+    const database = checkoutDatabase('lims_migrate_shared');
     const applied = await migrateAtOnce([database, database, database, database]);
     assert.deepEqual(applied.flat().sort(), migrations);
     assert.deepEqual(await recorded(database), migrations);
@@ -152,7 +154,7 @@ const probe = 'create table public.probe (id integer);\n';
 describe('the SHA-256 of each applied migration', () => {
   it('migrate records the SHA-256 of each file as it applies it', async () => {
     const folder = await copyOfMigrations();
-    const database = 'lims_migrate_hashes';
+    const database = checkoutDatabase('lims_migrate_hashes');
     assert.deepEqual(await fresh(database, folder), migrations);
     assert.deepEqual(await hashesRecorded(database), await hashesOnDisk(folder));
     assert.deepEqual(
@@ -163,7 +165,7 @@ describe('the SHA-256 of each applied migration', () => {
 
   it('migrate refuses a migration whose applied file gained one space, names the file and applies nothing', async () => {
     const folder = await copyOfMigrations();
-    const database = 'lims_migrate_edited';
+    const database = checkoutDatabase('lims_migrate_edited');
     await fresh(database, folder);
     const before = await hashesRecorded(database);
     await appendFile(new URL('0002_audit_trail.sql', folder), ' ');
@@ -191,7 +193,7 @@ describe('the SHA-256 of each applied migration', () => {
 
   it('migrate reruns an unchanged set without applying anything, then applies only a newly added file', async () => {
     const folder = await copyOfMigrations();
-    const database = 'lims_migrate_rerun';
+    const database = checkoutDatabase('lims_migrate_rerun');
     await fresh(database, folder);
     assert.deepEqual(await migrate(server, database, folder), []);
     await writeFile(new URL('9999_probe.sql', folder), probe);
@@ -201,7 +203,7 @@ describe('the SHA-256 of each applied migration', () => {
 
   it('migrate refuses when the file of an applied migration is missing, and names it', async () => {
     const folder = await copyOfMigrations();
-    const database = 'lims_migrate_missing';
+    const database = checkoutDatabase('lims_migrate_missing');
     await fresh(database, folder);
     await rm(new URL('0003_sample_chain.sql', folder));
     await assert.rejects(migrate(server, database, folder), /0003_sample_chain\.sql/);
@@ -209,7 +211,7 @@ describe('the SHA-256 of each applied migration', () => {
 
   it('migrate records the hash of the file on disk for a migration applied before hashes were kept', async () => {
     const folder = await copyOfMigrations();
-    const database = 'lims_migrate_legacy';
+    const database = checkoutDatabase('lims_migrate_legacy');
     await migrateWithoutHashes(database, folder);
     assert.deepEqual(await migrate(server, database, folder), []);
     assert.deepEqual(await hashesRecorded(database), await hashesOnDisk(folder));
@@ -224,7 +226,7 @@ describe('the SHA-256 of each applied migration', () => {
 
   it('migrate refuses a migration applied before hashes were kept whose file is missing, and adopts no hash', async () => {
     const folder = await copyOfMigrations();
-    const database = 'lims_migrate_legacy_missing';
+    const database = checkoutDatabase('lims_migrate_legacy_missing');
     await migrateWithoutHashes(database, folder);
     const wholeRows = 'select to_jsonb(m) as row from public.schema_migration m order by name';
     const before = await asSuperuser(database, wholeRows);
@@ -234,7 +236,7 @@ describe('the SHA-256 of each applied migration', () => {
   });
 
   it('the database refuses to update, delete or truncate a recorded migration', async () => {
-    const database = 'lims_migrate_refusal';
+    const database = checkoutDatabase('lims_migrate_refusal');
     await fresh(database, await copyOfMigrations());
     const superuser = new pg.Client({ connectionString: databaseUrl(server, database) });
     await superuser.connect();
@@ -258,7 +260,7 @@ describe('the SHA-256 of each applied migration', () => {
   });
 
   it('the database refuses a recorded migration without a 32-byte hash', async () => {
-    const database = 'lims_migrate_unhashed';
+    const database = checkoutDatabase('lims_migrate_unhashed');
     await fresh(database, await copyOfMigrations());
     await assert.rejects(
       asSuperuser(database, 'insert into public.schema_migration (name) values ($1)', ['9999_unhashed.sql']),
