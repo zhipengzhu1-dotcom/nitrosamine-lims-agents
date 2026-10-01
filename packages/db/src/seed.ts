@@ -23,7 +23,7 @@ export interface SeededAccount {
   password: string;
 }
 
-/** Seeds one Lab, one Customer, one Method and the demo people, who all share one password, into an empty database. */
+/** Seeds one Lab with two Rooms, one Customer, one Method and the demo people, who all share one password, into an empty database. */
 export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('base64url')): Promise<SeededAccount[]> {
   if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
@@ -44,6 +44,13 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
       .values({ code: 'RD', name: 'R&D Laboratory (fictional)', timeZone: 'America/New_York' })
       .returning('labId')
       .executeTakeFirstOrThrow();
+    await tx
+      .insertInto('room')
+      .values([
+        { labId, name: 'LC-MS/MS Room (fictional)' },
+        { labId, name: 'Sample Preparation Room (fictional)' },
+      ])
+      .execute();
     const out: SeededAccount[] = [];
     for (const p of people) {
       const { id } = await tx

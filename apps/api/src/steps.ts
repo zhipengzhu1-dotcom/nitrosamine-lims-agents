@@ -209,7 +209,14 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
     }
     if (step.signs) {
       const { password } = body.signature ?? refuse('malformed', `${name} needs the signer's password`);
-      await reauthenticate(db, { actor, session: req.sessionKey }, password, name, step.role, req.ip);
+      await reauthenticate(
+        db,
+        { actor, session: req.sessionKey },
+        password,
+        `Re-authenticate to sign ${name}`,
+        step.role,
+        req.ip,
+      );
     }
 
     const claim = { testId: test?.id ?? randomUUID(), state: step.to };

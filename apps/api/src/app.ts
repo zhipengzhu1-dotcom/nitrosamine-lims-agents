@@ -1,4 +1,3 @@
-import cookie from '@fastify/cookie';
 import type { DB } from '@lims/db';
 import type { ActorContext, Instant } from '@lims/domain';
 import Fastify, {
@@ -11,10 +10,11 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE, type SessionKey } from './auth.ts';
+import { actorFor, lockRoutes, loginRoutes, logoutRoute, SESSION_COOKIE, type SessionKey } from './auth.ts';
 import { readRoutes } from './reads.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
 import { stepRoutes } from './steps.ts';
+import { workstationRoutes } from './workstations.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -76,19 +76,24 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   }).withTypeProvider<WireTypes>();
   app.setErrorHandler(answerThrown);
   app.setNotFoundHandler(() => refuse('notFound', 'no such route'));
-  app.register(cookie, {
-    parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: options.secureCookie },
-  });
-  loginRoutes(app, db, options.accessEventKey);
-  app.register(async (signedIn) => {
-    signedIn.decorateRequest('actor');
-    signedIn.decorateRequest('sessionKey');
-    signedIn.addHook('onRequest', async (req) => {
-      ({ actor: req.actor, session: req.sessionKey } = await actorFor(db, req.cookies[SESSION_COOKIE]));
+  loginRoutes(app, db, options.accessEventKey, options.secureCookie);
+  const withSession = (whileLocked: boolean, routes: (scope: App) => void) =>
+    app.register(async (scope) => {
+      scope.decorateRequest('actor');
+      scope.decorateRequest('sessionKey');
+      scope.addHook('onRequest', async (req) => {
+        ({ actor: req.actor, session: req.sessionKey } = await actorFor(db, req.cookies[SESSION_COOKIE], {
+          whileLocked,
+        }));
+      });
+      routes(scope);
     });
+  withSession(true, (lockScreen) => lockRoutes(lockScreen, db));
+  withSession(false, (signedIn) => {
     logoutRoute(signedIn, db);
     readRoutes(signedIn, db);
     stepRoutes(signedIn, db);
+    workstationRoutes(signedIn, db);
   });
   return app;
 }

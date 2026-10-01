@@ -8,6 +8,7 @@ const STATUS: { readonly [K in RefusalKind]: number } = {
   malformed: 400,
   badCredentials: 401,
   noSession: 401,
+  sessionLocked: 423,
   role: 403,
   guard: 403,
   notFound: 404,

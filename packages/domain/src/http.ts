@@ -53,6 +53,8 @@ const actorContext = Type.Object({
   person: Type.Object({ id: uuid, username: Type.String(), displayName: Type.String(), customerId: nullable(uuid) }),
   lab: Type.Object({ id: uuid, code: Type.String(), name: Type.String() }),
   roles: Type.Array(role),
+  /** The Workstation the session's browser is enrolled as, or null for an unregistered device. */
+  workstation: nullable(Type.Object({ name: Type.String(), room: Type.String() })),
 });
 export type ActorContext = Static<typeof actorContext>;
 const testRow = Type.Object({
@@ -135,7 +137,7 @@ export type StepTaken = Static<typeof stepTaken>;
  * request Fastify refuses before the handler runs (a schema fault, unparseable JSON, a wrong media type, too large).
  * `badCredentials` is the one answer to every sign-in failure;
  * `accountLocked`, and `role` for an account with no Lab, come only after the right password. `noSession` covers no session presented and a session that
- * has ended. `stale` asks the person to reload; `state` says the step does not apply. `keyReused` is a Commit Key sent again
+ * has ended. `sessionLocked` answers every request on a locked session except unlocking it and signing in over it. `stale` asks the person to reload; `state` says the step does not apply. `keyReused` is a Commit Key sent again
  * with a different step or input, or from another session. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
@@ -145,6 +147,7 @@ export const refusalKinds = [
   'malformed',
   'badCredentials',
   'noSession',
+  'sessionLocked',
   'accountLocked',
   'role',
   'guard',
@@ -166,6 +169,18 @@ const credentials = Type.Object({ username: text, password: text }, closed);
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
 const reauthentication = Type.Object({ password: text }, closed);
+const room = Type.Object({ id: uuid, name: Type.String() });
+const workstation = Type.Object({
+  id: uuid,
+  name: Type.String(),
+  room: Type.String(),
+  browserPolicy: Type.String(),
+  enrolled: Type.Boolean(),
+});
+export type Workstation = Static<typeof workstation>;
+const workstations = Type.Object({ rooms: Type.Array(room), workstations: Type.Array(workstation) });
+const workstationRegistration = Type.Object({ name: text, roomId: uuid, browserPolicy: text, reason: text }, closed);
+const enrolment = Type.Object({ workstationId: uuid, reason: text }, closed);
 const stepEnvelope = Type.Object({
   commitKey: uuid,
   testId: Type.Optional(uuid),
@@ -217,6 +232,11 @@ function route<
 export const routes = {
   login: route('POST', '/api/login', { body: credentials }, actorContext),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
+  lock: route('POST', '/api/lock', { body: noBody }, Type.Object({ locked: Type.Literal(true) })),
+  unlock: route('POST', '/api/unlock', { body: reauthentication }, actorContext),
+  workstations: route('GET', '/api/workstations', {}, workstations),
+  registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
+  enrolWorkstation: route('POST', '/api/workstations/enrol', { body: enrolment }, workstation),
   me: route('GET', '/api/me', {}, actorContext),
   lookups: route('GET', '/api/lookups', {}, lookups),
   tests: route('GET', '/api/tests', {}, Type.Array(testRow)),

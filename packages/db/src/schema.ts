@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
+export type AccessEventKind = "Lock" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -37,7 +37,7 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoLab" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
+export type SignInFailure = "AccountLocked" | "NoLab" | "NotInWorkstationLab" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -53,6 +53,7 @@ export interface AccessEvent {
   sessionLabId: string | null;
   sourceAddress: string;
   subjectId: string | null;
+  takenById: string | null;
   typedUserIdHmac: Buffer | null;
   typedUserIdLength: number | null;
   workstationId: string | null;
@@ -132,6 +133,12 @@ export interface Result {
   value: string;
 }
 
+export interface Room {
+  id: Generated<string>;
+  labId: string;
+  name: string;
+}
+
 export interface Sample {
   description: string;
   id: Generated<string>;
@@ -147,8 +154,10 @@ export interface Session {
   id: Generated<string>;
   labId: string;
   lastSeenAt: Generated<Timestamp>;
+  lockedAt: Timestamp | null;
   personId: string;
   tokenHash: Buffer;
+  workstationId: string | null;
 }
 
 export interface Signature {
@@ -193,6 +202,15 @@ export interface TrainingRecord {
   personId: string;
 }
 
+export interface Workstation {
+  browserPolicy: string;
+  deviceTokenHash: Buffer | null;
+  id: Generated<string>;
+  labId: string;
+  name: string;
+  roomId: string;
+}
+
 export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
@@ -203,6 +221,7 @@ export interface DB {
   method: Method;
   person: Person;
   result: Result;
+  room: Room;
   sample: Sample;
   session: Session;
   signature: Signature;
@@ -210,4 +229,5 @@ export interface DB {
   test: Test;
   testReport: TestReport;
   trainingRecord: TrainingRecord;
+  workstation: Workstation;
 }
