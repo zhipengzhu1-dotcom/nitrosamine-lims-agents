@@ -61,7 +61,7 @@ To get a Test into a given state, run the chain helper. It takes a new Test thro
 node .claude/skills/verify/scripts/chain.ts [Requested|Ready|Assigned|SubmittedForReview|Reviewed|Reported]
 ```
 
-It prints the new Sample number (`RD-S0000n`) in `steps.log` and saves its own evidence. Sample numbers count up within the instance, and the newest one is the Test you just made.
+It writes the new Sample number (`RD-S0000n`) to `steps.log` and saves its own evidence. Sample numbers count up within the instance, and the newest one is the Test you just made.
 
 Stable handles, all from the shipped UI (`apps/web/src`):
 
@@ -74,7 +74,7 @@ Stable handles, all from the shipped UI (`apps/web/src`):
 - When the server accepts a step, the status line reads `... The Test is now <State in words>.` When it refuses, the line reads `Refused: <message>.` and adds ` Nothing has been signed.` for a signing step.
 - Test Report: the link `/^RD-R\d{5}$/` on a Reported Test, the heading `Test Report RD-R0000n`, and the QA-only button `Verify Audit Trail`.
 
-Demo accounts, all with the password `verify-demo-password`: `cora.customer`, `samir.custodian`, `lena.manager`, `ana.analyst` (trained on the Method), `theo.untrained` (an Analyst with no Training Record), `rui.reviewer`, `quinn.qa` and `ada.admin`.
+Twenty wrong passwords in a row lock an account for the life of the scratch database. Lock only `ada.admin`, and relaunch to unlock it. Demo accounts, all with the password `verify-demo-password`: `cora.customer`, `samir.custodian`, `lena.manager`, `ana.analyst` (trained on the Method), `theo.untrained` (an Analyst with no Training Record), `rui.reviewer`, `quinn.qa` and `ada.admin`.
 
 The feature recipes are in [features/README.md](features/README.md). Read the matching file before you drive. A proof that drives one entry point is incomplete when the map lists others.
 
@@ -93,7 +93,7 @@ Proof standards:
 - Drive the real path: sign in as the role that takes the step, and press the rail's buttons. Do not call `/api/steps/*` with curl, and do not write rows with psql. A write that skips `audited()` produces no Audit Trail and proves nothing.
 - Capture the action and the result. Take a screenshot before the commit and after the rail reports the server's answer, not only the final screen.
 - Check side effects in the database as well as on screen. For a step, that is the `lims.test.state`, the `lims.signature` row with its meaning, and the `lims.audit_entry` rows naming the actor, role and step as `reason`. `chain.ts` shows the queries.
-- For a refusal, prove that nothing changed: the state stayed the same, and no Signature or Audit Trail entry was added.
+- For a refusal, prove that nothing changed: the state stayed the same and no Signature was added. A refused step adds no Audit Trail entry, but every wrong password, at sign-in or on a signature sheet, adds a `person` entry with reason `Failed authentication`.
 - `v.sql()` connects as the postgres superuser. Use it only for `select`.
 
 ## Cleanup

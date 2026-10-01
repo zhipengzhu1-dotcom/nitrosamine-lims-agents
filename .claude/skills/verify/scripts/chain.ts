@@ -101,6 +101,7 @@ try {
     'audit-trail',
     `select chain, seq, at, actor, role, reason, table_name, op from lims.audit_entry
     where (coalesce(new_row, old_row)->>'id')::uuid in ${records}
+       or (coalesce(new_row, old_row)->>'id') = (select id::text from lims.sample where number = '${sample}')
        or (coalesce(new_row, old_row)->>'test_id')::uuid = ${test}
        or (coalesce(new_row, old_row)->>'record_id')::uuid in ${records}
     order by at, chain, seq`,
