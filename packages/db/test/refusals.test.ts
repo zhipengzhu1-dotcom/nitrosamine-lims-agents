@@ -27,6 +27,7 @@ const id = {
   laterRecordVersion: randomUUID(),
   signature: randomUUID(),
   session: randomUUID(),
+  commitKey: randomUUID(),
   transaction: randomUUID(),
   accessEvent: randomUUID(),
   otherPerson: randomUUID(),
@@ -101,6 +102,17 @@ const fixture: [string, Row][] = [
     },
   ],
   ['lims.session', { lab_id: id.lab, id: id.session, person_id: id.person, token_hash: token }],
+  [
+    'lims.commit_key',
+    {
+      lab_id: id.lab,
+      key: id.commitKey,
+      session_id: id.session,
+      request_hash: Buffer.alloc(32, 3),
+      test_id: id.test,
+      state: 'Ready',
+    },
+  ],
   [
     'lims.access_event',
     {
@@ -221,6 +233,18 @@ const tables = {
     noun: 'session',
     row: { lab_id: id.lab, person_id: id.person, token_hash: Buffer.alloc(32, 2) },
     notNull: ['lab_id', 'id', 'person_id', 'token_hash', 'created_at', 'last_seen_at'],
+  },
+  'lims.commit_key': {
+    noun: 'Commit Key',
+    row: {
+      lab_id: id.lab,
+      key: randomUUID(),
+      session_id: id.session,
+      request_hash: Buffer.alloc(32, 4),
+      test_id: id.test,
+      state: 'Assigned',
+    },
+    notNull: ['lab_id', 'key', 'session_id', 'request_hash', 'test_id', 'state', 'committed_at'],
   },
   'lims.counter': {
     noun: 'counter',
@@ -383,6 +407,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.record_version': { id: id.laterRecordVersion },
     'lims.signature': { id: id.signature },
     'lims.session': { id: id.session },
+    'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
     'lims.audit_chain': { chain: 'company' },
     'lims.audit_entry': { seq: 1 },
@@ -491,6 +516,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.session',
       change: { token_hash: token },
       constraint: 'session_token_hash_key',
+    },
+    {
+      name: 'a second Commit Key with the same key in one Lab is refused, from the same session or another, so a press commits once',
+      table: 'lims.commit_key',
+      change: { key: id.commitKey, session_id: id.session },
+      constraint: 'commit_key_pkey',
     },
   ]);
 });
@@ -621,6 +652,13 @@ describe('the database refuses a reference to a row that does not exist', () => 
       change: { person_id: missing },
       constraint: 'session_person_id_fkey',
     },
+    noLab('lims.commit_key', 'Commit Key'),
+    {
+      name: 'a Commit Key of a session that does not exist is refused',
+      table: 'lims.commit_key',
+      change: { session_id: missing },
+      constraint: 'commit_key_lab_id_session_id_fkey',
+    },
     {
       name: 'an Access Event about a person who does not exist is refused',
       table: 'lims.access_event',
@@ -646,6 +684,18 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'access_event_session_lab_id_session_id_subject_id_fkey',
     },
   ]);
+
+  const testOfKey = 'commit_key_test_after_claim_fkey';
+  covered.add(`lims.commit_key.${testOfKey}`);
+  it('a Commit Key whose receipt names a Test that does not exist is refused when its transaction commits', async () => {
+    await client.query('begin');
+    await client.query(...insert('lims.commit_key', { ...tables['lims.commit_key'].row, test_id: missing }));
+    const error = await client.query('commit').then(
+      () => assert.fail('the database committed a Commit Key for a Test that does not exist'),
+      (e: unknown) => (e instanceof pg.DatabaseError ? e : assert.fail(String(e))),
+    );
+    assertConstraint(error, '23503', 'lims.commit_key', testOfKey);
+  });
 });
 
 describe('the database refuses a value outside its allowed set', () => {
@@ -906,7 +956,7 @@ describe('an audited write without an actor, a role and a reason is refused', ()
   }
 });
 
-describe('a Signature, a Record Version, an Access Event or an Audit Trail entry is never changed or removed, even by the superuser', () => {
+describe('a Signature, a Record Version, an Access Event, an Audit Trail entry or a Commit Key is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
     {
       name: 'updating a Record Version is refused',
@@ -946,6 +996,24 @@ describe('a Signature, a Record Version, an Access Event or an Audit Trail entry
       statement: 'truncate lims.signature',
     },
     {
+      name: "changing a Commit Key's receipt is refused",
+      table: 'lims.commit_key',
+      trigger: 'refuse_change',
+      statement: `update lims.commit_key set state = 'Reported'`,
+    },
+    {
+      name: 'deleting a Commit Key is refused, so a late retry cannot commit again',
+      table: 'lims.commit_key',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.commit_key',
+    },
+    {
+      name: 'truncating the Commit Keys is refused',
+      table: 'lims.commit_key',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.commit_key',
+    },
+    {
       name: 'updating an Access Event is refused',
       table: 'lims.access_event',
       trigger: 'refuse_change',
@@ -978,6 +1046,19 @@ describe('a Signature, a Record Version, an Access Event or an Audit Trail entry
       assert.match(error.where ?? '', /function lims\.refuse_change\(\)/);
     });
   }
+});
+
+it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys, the counters and the Audit Trail itself', async () => {
+  const { rows } = await client.query<{ name: string }>(
+    `select 'lims.' || c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'lims' and c.relkind = 'r'
+        and not exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'capture')
+      order by 1`,
+  );
+  assert.deepEqual(
+    rows.map((row) => row.name),
+    ['lims.audit_chain', 'lims.audit_entry', 'lims.commit_key', 'lims.counter', 'lims.session'],
+  );
 });
 
 it('every constraint and trigger of a freshly migrated database has a refusing test', async () => {
