@@ -61,6 +61,7 @@
         "message": "The API host's clock is not the record's clock. Read the time in SQL."
       }
     ],
+    "node/no-process-env": "error",
     "typescript/consistent-type-assertions": ["error", { "assertionStyle": "never" }],
     "typescript/no-explicit-any": "error",
     "typescript/no-non-null-assertion": "error",
@@ -89,6 +90,15 @@
     ]
   },
   "overrides": [
+    {
+      "files": [
+        "apps/api/src/config.ts",
+        "packages/db/src/config.ts",
+        "apps/web/vite.config.ts",
+        "apps/web/playwright.config.ts"
+      ],
+      "rules": { "node/no-process-env": "off" }
+    },
     {
       "files": ["packages/db/**"],
       "rules": {

@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { after } from 'node:test';
-import { audited, createDb, databaseUrl, type Role } from '@lims/db';
+import { audited, createDb, databaseUrl, dbConfig, type Role } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
 import { migrate } from '@lims/db/migrate';
 import { type SeededAccount, seed } from '@lims/db/seed';
 import { pathOf, type Reply, type Route, type RouteInput, type RouteReply, readReply, routes } from '@lims/domain';
 import { sql } from 'kysely';
 import { buildApp } from '../src/app.ts';
+
+const { server } = dbConfig();
 
 export interface Account {
   id: string;
@@ -55,14 +57,14 @@ export function refusedWith<R extends Route>(answer: Answer<R>, status: number):
 
 /** A fresh migrated and seeded database behind a listening API, torn down after the file's tests. */
 export async function startApi(database: string) {
-  const admin = createDb(databaseUrl('postgres'));
+  const admin = createDb(databaseUrl(server, 'postgres'));
   await sql`drop database if exists ${sql.id(database)} with (force)`.execute(admin);
   await admin.destroy();
-  await migrate(database);
-  const db = createDb(databaseUrl(database, 'lims_app'));
-  const superuser = createDb(databaseUrl(database)).withSchema('lims');
+  await migrate(server, database);
+  const db = createDb(databaseUrl(server, database, 'lims_app'));
+  const superuser = createDb(databaseUrl(server, database)).withSchema('lims');
   const seeded = await seed(db);
-  const app = buildApp(db);
+  const app = buildApp(db, { log: null, secureCookie: false });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(async () => {
     await app.close();

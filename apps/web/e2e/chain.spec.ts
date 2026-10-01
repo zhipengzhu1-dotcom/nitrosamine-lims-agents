@@ -1,8 +1,8 @@
 import { expect, type Page, test } from '@playwright/test';
-import { DEMO_PASSWORD } from '../playwright.config.ts';
+import { DEMO_PASSWORD, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {
-  if (process.env.SHOTS) await page.screenshot({ path: `../../docs/design/thin-slice-shots/${name}.png` });
+  if (SHOTS) await page.screenshot({ path: `../../docs/design/thin-slice-shots/${name}.png` });
 };
 
 async function signIn(page: Page, username: string) {

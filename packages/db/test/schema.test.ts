@@ -6,22 +6,24 @@ import { after, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { CamelCasePlugin } from 'kysely';
 import pg from 'pg';
-import { camelCaseOptions, databaseUrl } from '../src/db.ts';
+import { camelCaseOptions, databaseUrl, dbConfig } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
+
+const { server } = dbConfig();
 
 const DATABASE = 'lims_schema_test';
 const SCRATCH = 'lims_schema_scratch_test';
 const packageDir = new URL('../', import.meta.url);
 
 async function freshlyMigrated(database: string, folder?: URL): Promise<void> {
-  const admin = new pg.Client({ connectionString: databaseUrl('postgres') });
+  const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   try {
     await admin.query(`drop database if exists ${pg.escapeIdentifier(database)} with (force)`);
   } finally {
     await admin.end();
   }
-  await migrate(database, folder);
+  await migrate(server, database, folder);
 }
 
 class RoundTrip extends CamelCasePlugin {
@@ -32,7 +34,7 @@ class RoundTrip extends CamelCasePlugin {
 const roundTrip = new RoundTrip(camelCaseOptions);
 
 async function namesThatDoNotRoundTrip(database: string): Promise<string[]> {
-  const client = new pg.Client({ connectionString: databaseUrl(database) });
+  const client = new pg.Client({ connectionString: databaseUrl(server, database) });
   await client.connect();
   try {
     const { rows } = await client.query<{ table: string; column: string | null }>(
@@ -53,9 +55,8 @@ const copies: string[] = [];
 after(() => Promise.all(copies.map((dir) => rm(dir, { recursive: true, force: true }))));
 
 function verifySchemaTs(database: string): void {
-  execFileSync('pnpm', ['types', '--verify'], {
+  execFileSync('env', [`LIMS_DB=${database}`, 'pnpm', 'types', '--verify'], {
     cwd: packageDir,
-    env: { ...process.env, LIMS_DB: database },
     encoding: 'utf8',
     stdio: 'pipe',
   });

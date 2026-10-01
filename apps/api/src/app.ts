@@ -1,4 +1,3 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import cookie from '@fastify/cookie';
 import { createDb, type DB } from '@lims/db';
 import type { ActorContext, Instant } from '@lims/domain';
@@ -6,11 +5,14 @@ import Fastify, {
   type FastifyBaseLogger,
   type FastifyInstance,
   type FastifyTypeProvider,
+  type RawReplyDefaultExpression,
+  type RawRequestDefaultExpression,
   type RawServerDefault,
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
 import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE } from './auth.ts';
+import { apiConfig } from './config.ts';
 import { readRoutes } from './reads.ts';
 import { stepRoutes } from './steps.ts';
 
@@ -32,14 +34,30 @@ interface WireTypes extends FastifyTypeProvider {
   validator: this['schema'] extends TSchema ? Static<this['schema']> : unknown;
   serializer: this['schema'] extends TSchema ? Sent<Static<this['schema']>> : unknown;
 }
-export type App = FastifyInstance<RawServerDefault, IncomingMessage, ServerResponse, FastifyBaseLogger, WireTypes>;
+export type App = FastifyInstance<
+  RawServerDefault,
+  RawRequestDefaultExpression,
+  RawReplyDefaultExpression,
+  FastifyBaseLogger,
+  WireTypes
+>;
 
-export function buildApp(db: Kysely<DB>): App {
+export interface LogSink {
+  write(line: string): void;
+}
+export interface AppOptions {
+  log: LogSink | null;
+  secureCookie: boolean;
+}
+
+export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   const app = Fastify({
-    logger: process.env.LIMS_LOG === '1',
+    logger: options.log ? { level: 'info', stream: options.log } : false,
     ajv: { customOptions: { coerceTypes: false } },
   }).withTypeProvider<WireTypes>();
-  app.register(cookie);
+  app.register(cookie, {
+    parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: options.secureCookie },
+  });
   loginRoutes(app, db);
   app.register(async (signedIn) => {
     signedIn.decorateRequest('actor');
@@ -54,5 +72,9 @@ export function buildApp(db: Kysely<DB>): App {
 }
 
 if (import.meta.main) {
-  await buildApp(createDb()).listen({ port: Number(process.env.PORT ?? 3000), host: process.env.HOST ?? '127.0.0.1' });
+  const config = apiConfig();
+  await buildApp(createDb(config.databaseUrl), {
+    log: config.log ? process.stdout : null,
+    secureCookie: config.secureCookie,
+  }).listen(config.listen);
 }

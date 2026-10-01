@@ -122,12 +122,7 @@ export function loginRoutes(app: App, db: Kysely<DB>): void {
         .insertInto('session')
         .values({ labId: membership.labId, personId: person.id, tokenHash: hashToken(token) })
         .execute();
-      reply.setCookie(SESSION_COOKIE, token, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === 'production',
-      });
+      reply.setCookie(SESSION_COOKIE, token);
       return actorFor(db, token);
     },
   });
@@ -144,7 +139,7 @@ export function logoutRoute(app: App, db: Kysely<DB>): void {
           .set({ endedAt: sql`now()` })
           .where('tokenHash', '=', hashToken(token))
           .execute();
-      reply.clearCookie(SESSION_COOKIE, { path: '/' });
+      reply.clearCookie(SESSION_COOKIE);
       return { ended: true } as const;
     },
   });
