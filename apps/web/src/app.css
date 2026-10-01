@@ -98,8 +98,13 @@ p {
 
 .frame {
   display: grid;
-  grid-template-rows: var(--top-h) minmax(0, 1fr) var(--rail-h);
+  grid-template: var(--top-h) minmax(0, 1fr) auto / minmax(0, 1fr);
   height: 100dvh;
+  overflow: hidden;
+}
+.frame > .plane,
+.sheet {
+  grid-area: 2 / 1;
 }
 .frame--bare {
   grid-template-rows: var(--top-h) minmax(0, 1fr);
@@ -249,6 +254,9 @@ td a,
 }
 
 .rail {
+  grid-row: 3;
+  z-index: 2;
+  min-height: var(--rail-h);
   display: flex;
   align-items: center;
   gap: 16px;
@@ -273,10 +281,43 @@ td a,
 }
 .rail__context {
   flex: 1;
+  min-width: 0;
   font-size: 15px;
   font-weight: 700;
+}
+.note {
+  margin: 0;
   padding-left: 12px;
   border-left: 4px solid transparent;
+}
+.note--ok {
+  animation: rise var(--dur-enter) var(--ease-out) both;
+}
+.note--bad,
+.refusal {
+  animation: shake var(--dur-enter) var(--ease-out) both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes shake {
+  25% {
+    transform: translateX(-6px);
+  }
+  50% {
+    transform: translateX(5px);
+  }
+  75% {
+    transform: translateX(-3px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
 }
 .rail .note--ok {
   border-left-color: #6fcf97;
@@ -300,7 +341,18 @@ td a,
   cursor: pointer;
   transition:
     transform var(--dur-press) var(--ease-out),
-    filter var(--dur-press) var(--ease-out);
+    filter var(--dur-press) var(--ease-out),
+    opacity var(--dur-enter) var(--ease-out);
+}
+@starting-style {
+  .rbtn--commit {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  .rbtn--commit[data-instant] {
+    opacity: 1;
+    transform: none;
+  }
 }
 @media (hover: hover) and (pointer: fine) {
   .rbtn:hover:not(:disabled) {
@@ -322,16 +374,33 @@ td a,
 }
 
 .sheet {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: var(--rail-h);
-  max-height: calc(100dvh - var(--rail-h) - var(--top-h));
+  --foot-h: 84px;
+  align-self: end;
+  z-index: 1;
+  max-height: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
+  scroll-padding-bottom: var(--foot-h);
   background: var(--canvas);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -12px 40px rgb(0 0 0 / 0.25);
-  padding: 16px 24px;
+  padding: 16px 24px 0;
+  transition: transform var(--dur-sheet-in) var(--ease-drawer);
+}
+@starting-style {
+  .sheet {
+    transform: translateY(100%);
+  }
+}
+.sheet[data-closing] {
+  transform: translateY(100%);
+  transition-duration: var(--dur-sheet-out);
+}
+.sheet__set {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 .sheet h2 {
   display: flex;
@@ -351,10 +420,36 @@ td a,
   gap: 16px;
 }
 .sheet__foot {
+  position: sticky;
+  bottom: 0;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 12px;
-  margin-top: 16px;
+  min-height: var(--foot-h);
+  margin-top: 4px;
+  padding: 12px 0 16px;
+  background: var(--canvas);
+}
+.sheet__line {
+  --lines: 2;
+  flex: 1;
+  min-height: calc(var(--lines) * 1lh + 19px);
+  margin: 0;
+  padding: 8px 12px;
+  border: 1.5px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--sheet-2);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+.sheet__line.refusal {
+  border-color: var(--bad);
+  background: var(--bad-tint);
+  color: var(--bad);
+}
+.sheet [aria-invalid="true"] {
+  border-color: var(--bad);
 }
 .sheet__foot .rbtn--quiet {
   background: var(--sheet);
@@ -440,6 +535,26 @@ select {
 @media (prefers-reduced-motion: reduce) {
   .rbtn:active:not(:disabled) {
     transform: none;
+  }
+  .sheet {
+    transition: opacity var(--dur-fade) var(--ease-out);
+  }
+  @starting-style {
+    .rbtn--commit {
+      transform: none;
+    }
+    .sheet {
+      transform: none;
+      opacity: 0;
+    }
+  }
+  .note--ok {
+    animation-name: fade;
+    animation-duration: var(--dur-fade);
+  }
+  .note--bad,
+  .refusal {
+    animation: none;
   }
 }
 
