@@ -1,0 +1,10 @@
+{
+  "name": "emil",
+  "version": "0.0.0+d16ebe6",
+  "description": "Ten of Emil Kowalski's UI and motion skills, pinned unedited at upstream commit d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128.",
+  "author": {
+    "name": "Emil Kowalski"
+  },
+  "homepage": "https://github.com/emilkowalski/skills",
+  "license": "MIT"
+}
