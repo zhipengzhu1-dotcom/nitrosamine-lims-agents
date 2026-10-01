@@ -31,6 +31,19 @@ it('a LIMS_ variable the API does not read stops it at start and names the close
   );
 });
 
+it('in production the API will not start without a log', () => {
+  const started = start({ NODE_ENV: 'production' });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.notEqual(started.status, 0);
+  assert.match(started.stderr, /needs LIMS_LOG_FILE/);
+});
+
+it('LIMS_LOG_FILE is a setting the API reads', () => {
+  const started = start({ LIMS_LOG_FILE: '/nonexistent/api.log', PORT: '' });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.match(started.stderr, /PORT/);
+  assert.doesNotMatch(started.stderr, /not a LIMS setting/);
+});
 for (const [name, key] of [
   ['without an', undefined],
   ['with a short', 'ab'.repeat(31)],

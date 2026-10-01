@@ -27,6 +27,7 @@ const id = {
   laterRecordVersion: randomUUID(),
   signature: randomUUID(),
   session: randomUUID(),
+  systemIncident: randomUUID(),
   commitKey: randomUUID(),
   transaction: randomUUID(),
   accessEvent: randomUUID(),
@@ -102,6 +103,21 @@ const fixture: [string, Row][] = [
     },
   ],
   ['lims.session', { lab_id: id.lab, id: id.session, person_id: id.person, token_hash: token }],
+  [
+    'lims.system_incident',
+    {
+      id: id.systemIncident,
+      kind: 'UnexpectedFailure',
+      reference: 'RF000001',
+      requested_by: id.person,
+      session_lab_id: id.lab,
+      step: 'enterResult',
+      record_id: id.test,
+      error_class: 'DatabaseError',
+      sqlstate: '23514',
+      constraint_name: 'result_value_check',
+    },
+  ],
   [
     'lims.commit_key',
     {
@@ -234,6 +250,21 @@ const tables = {
     row: { lab_id: id.lab, person_id: id.person, token_hash: Buffer.alloc(32, 2) },
     notNull: ['lab_id', 'id', 'person_id', 'token_hash', 'created_at', 'last_seen_at'],
   },
+  'lims.system_incident': {
+    noun: 'System Incident',
+    row: {
+      kind: 'UnexpectedFailure',
+      reference: 'RF000002',
+      requested_by: id.person,
+      session_lab_id: id.lab,
+      step: 'enterResult',
+      record_id: id.test,
+      error_class: 'DatabaseError',
+      sqlstate: '23514',
+      constraint_name: 'result_value_check',
+    },
+    notNull: ['id', 'kind', 'reference', 'opened_at', 'step', 'error_class', 'state'],
+  },
   'lims.commit_key': {
     noun: 'Commit Key',
     row: {
@@ -307,6 +338,7 @@ const auditedTables: Table[] = [
   'lims.test_report',
   'lims.record_version',
   'lims.signature',
+  'lims.system_incident',
   'lims.access_event',
 ];
 
@@ -407,6 +439,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.record_version': { id: id.laterRecordVersion },
     'lims.signature': { id: id.signature },
     'lims.session': { id: id.session },
+    'lims.system_incident': { id: id.systemIncident },
     'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
     'lims.audit_chain': { chain: 'company' },
@@ -516,6 +549,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.session',
       change: { token_hash: token },
       constraint: 'session_token_hash_key',
+    },
+    {
+      name: 'a second System Incident with the same reference is refused',
+      table: 'lims.system_incident',
+      change: { reference: 'RF000001' },
+      constraint: 'system_incident_reference_key',
     },
     {
       name: 'a second Commit Key with the same key in one Lab is refused, from the same session or another, so a press commits once',
@@ -660,6 +699,18 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'commit_key_lab_id_session_id_fkey',
     },
     {
+      name: 'a System Incident requested by a person who does not exist is refused',
+      table: 'lims.system_incident',
+      change: { requested_by: missing },
+      constraint: 'system_incident_requested_by_fkey',
+    },
+    {
+      name: 'a System Incident in a Lab that does not exist is refused',
+      table: 'lims.system_incident',
+      change: { session_lab_id: missing },
+      constraint: 'system_incident_session_lab_id_fkey',
+    },
+    {
       name: 'an Access Event about a person who does not exist is refused',
       table: 'lims.access_event',
       change: { subject_id: missing },
@@ -755,6 +806,20 @@ describe('the database refuses a value outside its allowed set', () => {
       'op',
       ['TRUNCATE', 'insert'],
       'audit_entry_op_check',
+    ),
+    ...each(
+      'a System Incident reference that is not eight read-aloud characters is refused',
+      'lims.system_incident',
+      'reference',
+      ['RF00001', 'RF0000001', 'rf000001', 'RF00000I', 'RF00000O', 'RF00000U'],
+      'system_incident_reference_check',
+    ),
+    ...each(
+      'a System Incident SQLSTATE that is not five digits or capitals is refused',
+      'lims.system_incident',
+      'sqlstate',
+      ['2351', '235140', '2351a'],
+      'system_incident_sqlstate_check',
     ),
     {
       name: 'an Audit Trail entry without a transaction ID is refused',
@@ -956,7 +1021,7 @@ describe('an audited write without an actor, a role and a reason is refused', ()
   }
 });
 
-describe('a Signature, a Record Version, an Access Event, an Audit Trail entry or a Commit Key is never changed or removed, even by the superuser', () => {
+describe('a Signature, a Record Version, an Access Event, an Audit Trail entry, a Commit Key or a System Incident is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
     {
       name: 'updating a Record Version is refused',
@@ -1037,6 +1102,18 @@ describe('a Signature, a Record Version, an Access Event, an Audit Trail entry o
       trigger: 'refuse_truncate',
       statement: 'truncate lims.audit_entry',
     },
+    {
+      name: 'deleting a System Incident is refused',
+      table: 'lims.system_incident',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.system_incident',
+    },
+    {
+      name: 'truncating the System Incidents is refused',
+      table: 'lims.system_incident',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.system_incident',
+    },
   ];
   for (const c of cases) {
     covered.add(`${c.table}.${c.trigger}`);
@@ -1046,6 +1123,32 @@ describe('a Signature, a Record Version, an Access Event, an Audit Trail entry o
       assert.match(error.where ?? '', /function lims\.refuse_change\(\)/);
     });
   }
+  covered.add('lims.system_incident.keep_facts');
+  it("changing any of a System Incident's recorded facts is refused", async () => {
+    const changes: Row = {
+      id: randomUUID(),
+      reference: 'RF000009',
+      opened_at: '2026-09-30T00:00:00Z',
+      requested_by: null,
+      session_lab_id: id.otherLab,
+      step: 'release',
+      record_id: null,
+      error_class: 'TypeError',
+      sqlstate: null,
+      constraint_name: null,
+    };
+    for (const [column, value] of Object.entries(changes)) {
+      const error = await refusalOf(
+        `update lims.system_incident set ${pg.escapeIdentifier(column)} = $1 where id = $2`,
+        [value, id.systemIncident],
+      );
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA002', "a System Incident's recorded facts are never changed"],
+        column,
+      );
+    }
+  });
 });
 
 it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys, the counters and the Audit Trail itself', async () => {

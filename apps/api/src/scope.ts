@@ -11,7 +11,7 @@ import {
 } from 'kysely';
 
 type CompanyTable = 'customer' | 'person' | 'method' | 'submission' | 'lab';
-type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session'>;
+type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session' | 'systemIncident'>;
 
 function inLab(q: Kysely<DB>, labId: string) {
   const ofLab = (table: LabTable) => sql<boolean>`${sql.ref(`${table}.labId`)} = ${labId}`;
