@@ -235,6 +235,7 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
     api.db,
     { actor: 'svc:test', role: 'system', reason: 'Add a second Lab' },
     async (tx) => {
+      // The Submission comes before the Lab: a transaction locks the company chain before any Lab's.
       const submission = await tx
         .insertInto('submission')
         .values({ customerId, submittedBy: cora.id, number: 'SUB-2026-900001' })

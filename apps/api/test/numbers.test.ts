@@ -139,6 +139,16 @@ it('a submit that rolls back after taking its numbers gives them to the next kep
   assert.equal(seqOf(next.sample), seqOf(kept.sample) + 1);
 });
 
+it('Submissions made at the same moment get distinct, consecutive numbers', async () => {
+  const taken = await Promise.all([1, 2, 3, 4].map(async () => numbersOf(ok(await submit(as.cora)).testId)));
+  const samples = taken.map((n) => seqOf(n.sample)).sort((a, b) => a - b);
+  const submissions = taken.map((n) => seqOf(n.submission)).sort((a, b) => a - b);
+  const [first = 0] = samples;
+  assert.deepEqual(samples, [first, first + 1, first + 2, first + 3]);
+  assert.equal(new Set(submissions).size, 4);
+  assert.equal((submissions.at(-1) ?? 0) - (submissions[0] ?? 0), 3);
+});
+
 it('the kinds the domain formats are the kinds the database counts', async () => {
   const { rows } = await sql<{
     kind: string;

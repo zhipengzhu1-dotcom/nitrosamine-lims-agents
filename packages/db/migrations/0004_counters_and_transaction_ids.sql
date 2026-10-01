@@ -35,9 +35,6 @@ declare
   held   text[] := coalesce(string_to_array(this_transaction('lims.chains'), ','), '{}');
   latest text   := held[cardinality(held)];
 begin
-  if p_chain <> 'company' and not exists (select from lab where lab_id::text = p_chain) then
-    raise exception 'there is no Audit Trail chain %', p_chain using errcode = 'LA005';
-  end if;
   if not p_chain = any(held) then
     if latest is not null and (p_chain = 'company' or (latest <> 'company' and p_chain::uuid < latest::uuid)) then
       raise exception 'chain % is locked after chain %; declare both chains when the transaction starts', p_chain, latest
@@ -54,6 +51,11 @@ language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
   c text;
 begin
+  foreach c in array p_chains loop
+    if c <> 'company' and not exists (select from lab where lab_id::text = c) then
+      raise exception 'there is no Audit Trail chain %', c using errcode = 'LA005';
+    end if;
+  end loop;
   foreach c in array (select array_agg(x order by x <> 'company', case when x <> 'company' then x::uuid end)
                         from unnest(p_chains) x) loop
     perform lock_chain(c);
@@ -77,12 +79,10 @@ begin
   if tg_op <> 'DELETE' then e.new_row := to_jsonb(new) - 'password_hash'; end if;
   e.chain := coalesce(coalesce(e.new_row, e.old_row) ->> 'lab_id', 'company');
 
-  -- The first write of a transaction draws its ID, so every entry the transaction writes carries the same one.
-  e.transaction_id := this_transaction('lims.transaction')::uuid;
-  if e.transaction_id is null then
-    e.transaction_id := gen_random_uuid();
-    perform set_this_transaction('lims.transaction', e.transaction_id::text);
-  end if;
+  -- Derived from the transaction itself, so no caller can choose it: the xid is unique within this cluster, and the
+  -- cluster's system identifier keeps it unique after a restore into another.
+  e.transaction_id := md5((select system_identifier from pg_control_system())::text || ':'
+                          || pg_current_xact_id()::text)::uuid;
 
   perform lock_chain(e.chain);
   select seq + 1, head into e.seq, e.prev_hash from audit_chain where chain = e.chain for update;
