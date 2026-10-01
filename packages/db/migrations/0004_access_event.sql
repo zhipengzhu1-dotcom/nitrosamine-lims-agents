@@ -4,7 +4,6 @@ create type lims.access_event_kind as enum ('SignInSucceeded', 'SignInFailed', '
 create type lims.sign_in_failure as enum ('UnknownUserId', 'WrongPassword', 'WrongPasswordOnLockedAccount',
                                           'AccountLocked', 'NoLab');
 
--- Company-owned: the session's Lab is session_lab_id, not lab_id, so lims.capture() writes it to the company chain.
 create table lims.access_event (
   id                   uuid                   primary key default gen_random_uuid(),
   kind                 lims.access_event_kind not null,
@@ -12,7 +11,6 @@ create table lims.access_event (
   typed_user_id_hmac   bytea                  check (octet_length(typed_user_id_hmac) = 32),
   typed_user_id_length int                    check (typed_user_id_length >= 0),
   source_address       inet                   not null,
-  -- Null is an unregistered device; #99 registers Workstations and adds the reference.
   workstation_id       uuid,
   session_lab_id       uuid,
   session_id           uuid,

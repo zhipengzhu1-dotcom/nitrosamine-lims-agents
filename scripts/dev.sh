@@ -4,7 +4,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LIMS_DB=${LIMS_DB:-lims} PORT=${PORT:-3000}
-# Only the API reads the key. A fresh one at each start keeps a key out of the repo.
 access_event_key=${LIMS_ACCESS_EVENT_KEY:-$(openssl rand -hex 32)}
 unset LIMS_ACCESS_EVENT_KEY
 WEB_PORT=${WEB_PORT:-5173}

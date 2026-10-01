@@ -21,11 +21,9 @@ export interface SignedIn {
   session: SessionKey;
 }
 
-/** The identity that writes every Access Event made before a session exists (#45). */
 const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', reason: 'Sign in' };
 
-/** Verified against an unknown user ID, so that it costs the same scrypt work as a known one (#45, gap 18). */
-const DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
+const HASH_TO_SPEND_A_KNOWN_USERS_SCRYPT_WORK_ON = await hashPassword(randomBytes(16).toString('base64url'));
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest();
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
@@ -50,8 +48,7 @@ async function rolesIn(db: Kysely<DB>, personId: string, labId: string): Promise
   return rows.map((r) => r.role);
 }
 
-/** The Lab a sign-in opens: one Membership's Lab, picked by ID, until #98 lets the person choose. */
-async function defaultLab(db: Kysely<DB>, personId: string): Promise<string | undefined> {
+async function lowestIdMembershipLab(db: Kysely<DB>, personId: string): Promise<string | undefined> {
   const membership = await db
     .selectFrom('membership')
     .select('labId')
@@ -61,7 +58,6 @@ async function defaultLab(db: Kysely<DB>, personId: string): Promise<string | un
   return membership?.labId;
 }
 
-/** Counts a wrong password and applies the lockout; Postgres 18's `old` and `new` tell whether this failure locked it. */
 async function countFailure(tx: Transaction<DB>, personId: string) {
   return tx
     .updateTable('person')
@@ -156,8 +152,7 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
   };
 }
 
-/** Writes an unknown user ID as typed only as its keyed HMAC and its length. */
-function unknownUserId(key: Buffer, typed: string) {
+function typedUserIdDigest(key: Buffer, typed: string) {
   return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: typed.length };
 }
 
@@ -170,12 +165,12 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): v
       const sourceAddress = req.ip;
       const person = await db.selectFrom('person').selectAll().where('username', '=', username).executeTakeFirst();
       if (!person) {
-        await verifyPassword(password, DECOY_HASH);
+        await verifyPassword(password, HASH_TO_SPEND_A_KNOWN_USERS_SCRYPT_WORK_ON);
         await audited(db, SIGN_IN_SERVICE, (tx) =>
           record(tx, {
             kind: 'SignInFailed',
             failureReason: 'UnknownUserId',
-            ...unknownUserId(accessEventKey, username),
+            ...typedUserIdDigest(accessEventKey, username),
             roles: [],
             sourceAddress,
           }),
@@ -184,7 +179,7 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): v
       }
 
       const proven = await verifyPassword(password, person.passwordHash);
-      const labId = await defaultLab(db, person.id);
+      const labId = await lowestIdMembershipLab(db, person.id);
       const roles: Role[] = labId ? await rolesIn(db, person.id, labId) : person.customerId ? ['Customer'] : [];
       const subject = { subjectId: person.id, roles, sourceAddress };
 
