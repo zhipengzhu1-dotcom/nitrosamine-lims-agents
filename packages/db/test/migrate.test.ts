@@ -169,6 +169,7 @@ describe('the SHA-256 of each applied migration', () => {
     const recordedHash = before.find((row) => row.name === '0002_audit_trail.sql')?.sha256 ?? '';
     const currentHash = (await hashesOnDisk(folder)).find((row) => row.name === '0002_audit_trail.sql')?.sha256 ?? '';
     assert.match(recordedHash, /^[0-9a-f]{64}$/);
+    assert.match(currentHash, /^[0-9a-f]{64}$/);
     assert.notEqual(recordedHash, currentHash);
 
     await assert.rejects(migrate(database, folder), (error) => {
@@ -217,6 +218,17 @@ describe('the SHA-256 of each applied migration', () => {
 
     await appendFile(new URL('0001_roles.sql', folder), ' ');
     await assert.rejects(migrate(database, folder), /0001_roles\.sql/);
+  });
+
+  it('migrate refuses a migration applied before hashes were kept whose file is missing, and adopts no hash', async () => {
+    const folder = await copyOfMigrations();
+    const database = 'lims_migrate_legacy_missing';
+    await migrateWithoutHashes(database, folder);
+    const wholeRows = 'select to_jsonb(m) as row from public.schema_migration m order by name';
+    const before = await asSuperuser(database, wholeRows);
+    await rm(new URL('0002_audit_trail.sql', folder));
+    await assert.rejects(migrate(database, folder), /0002_audit_trail\.sql.*applied before hashes were kept/);
+    assert.deepEqual(await asSuperuser(database, wholeRows), before);
   });
 
   it('the database refuses to update, delete or truncate a recorded migration', async () => {
