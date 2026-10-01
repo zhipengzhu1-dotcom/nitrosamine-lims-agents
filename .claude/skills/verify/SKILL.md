@@ -19,7 +19,7 @@ It installs dependencies if `node_modules` is missing. It then runs `scripts/dev
 
 `.verify/instance/env` holds the URL, ports, database name, password, the commit the instance started at, and `PGID`, the PID of `dev.sh`. `.verify/instance/server.log` holds the migrate and seed output and the API's request log.
 
-One instance per checkout. up.sh refuses to start a second one; drive the running one, or run down.sh first. Another checkout or worktree gets its own database suffix and its own free ports, so instances in two checkouts do not collide. Do not use `pnpm e2e` for this: it fixes ports 3100 and 5174 and owns the `lims_e2e` database.
+One instance per checkout. up.sh refuses to start a second one; drive the running one, or run down.sh first. Another checkout or worktree gets its own database suffix and its own free ports, so instances in two checkouts do not collide. Do not use `pnpm e2e` for this. It takes this checkout's own ports in 10000-19999 (from `node packages/db/src/checkout.ts e2e-ports`) and owns the `lims_e2e_<suffix>` database.
 
 ## Doctor
 
