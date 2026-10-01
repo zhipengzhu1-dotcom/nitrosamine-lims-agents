@@ -199,8 +199,9 @@ const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').match
 
 function unansweredText(e: unknown, signs: boolean): string {
   const message = e instanceof Error ? e.message : String(e);
-  if (e instanceof Refused && e.kind === 'failure') return `Not finished: ${message}.`;
-  return `Refused: ${message}.${signs ? ' Nothing has been signed.' : ''}`;
+  if (e instanceof Refused && e.kind !== 'failure')
+    return `Refused: ${message}.${signs ? ' Nothing has been signed.' : ''}`;
+  return `Not finished: ${message}.`;
 }
 
 function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {

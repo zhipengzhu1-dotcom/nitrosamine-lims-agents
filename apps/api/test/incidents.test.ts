@@ -135,12 +135,11 @@ it("on the log volume, a Postgres error's line keeps its SQLSTATE and constraint
     .filter(Boolean)
     .map((line): Record<string, unknown> => JSON.parse(line))
     .find((line) => line.reqId === reference && line.msg === 'unexpected failure');
-  assert.deepEqual(
+  assert.partialDeepStrictEqual(
     failure?.err,
     {
       type: 'DatabaseError',
       message: '[redacted]',
-      stack: '[redacted]',
       sqlstate: '23514',
       constraint: 'incident_probe',
       table: 'result',
@@ -154,6 +153,28 @@ it("on the log volume, a Postgres error's line keeps its SQLSTATE and constraint
   assert.ok(!log.includes(PROBE), "the request body's content is not in the log");
 });
 
+it('an error that is not from Postgres is logged by its class and stack frames, without its message', () => {
+  const typed = 'RD-NB-TYPED-VALUE-0.0300';
+  api.app.log.error({ err: new TypeError(`cannot read ${typed}`) }, 'unexpected failure');
+  const line = api.logLines().at(-1);
+  assert.equal(JSON.stringify(line?.err).includes(typed), false, 'the message is not in the log');
+  assert.match(JSON.stringify(line?.err), /"type":"TypeError".*"stack":"\s+at /);
+});
+
+it('a System Incident write that waits on a lock gives up, logs the incident unwritten, and still answers with the reference', async () => {
+  const testId = await assignedToLou();
+  const { status, reference } = await api.superuser.transaction().execute(async (tx) => {
+    await sql`select 1 from lims.audit_chain where chain = 'company' for update`.execute(tx);
+    return failEnterResult(as.lou, testId);
+  });
+  assert.equal(status, 500);
+  assert.deepEqual(await incidentsWith(reference), [], 'the database wrote no System Incident');
+  assert.ok(
+    api.logLines().some((line) => line.msg === 'unwritten System Incident' && line.reqId === reference),
+    'the log line holds the unwritten System Incident',
+  );
+});
+
 it('when the System Incident cannot be written, the log records it unwritten and the 500 still carries the reference', async () => {
   const testId = await assignedToLou();
   await sql`alter table lims.system_incident add constraint unwritable_probe check (record_id <> ${sql.lit(testId)})`.execute(
@@ -162,12 +183,11 @@ it('when the System Incident cannot be written, the log records it unwritten and
   const { status, reference } = await failEnterResult(as.lou, testId);
   assert.equal(status, 500);
   assert.deepEqual(await incidentsWith(reference), [], 'the database wrote no System Incident');
-  const unwritten = api.logLines().find((line) => line.msg === 'unwritten System Incident');
+  const unwritten = api.logLines().find((line) => line.msg === 'unwritten System Incident' && line.reqId === reference);
   assert.match(
     JSON.stringify(unwritten?.unwrittenSystemIncident),
     new RegExp(`"reference":"${reference}".*"recordId":"${testId}"`),
     'the log line holds the System Incident with the reference shown',
   );
   assert.equal(typeof unwritten?.time, 'number', 'the log line holds the instant');
-  assert.equal(unwritten?.reqId, reference);
 });

@@ -19,7 +19,7 @@ export const camelCaseOptions: Readonly<CamelCasePluginOptions> = { maintainNest
 /** Speaks camelCase to TypeScript and returns jsonb as stored, so Audit Trail row snapshots keep their column names. */
 export function createDb(url: string): Kysely<DB> {
   return new Kysely<DB>({
-    dialect: new PostgresDialect({ pool: new pg.Pool({ connectionString: url }) }),
+    dialect: new PostgresDialect({ pool: new pg.Pool({ connectionString: url, connectionTimeoutMillis: 10_000 }) }),
     plugins: [new CamelCasePlugin(camelCaseOptions)],
   });
 }

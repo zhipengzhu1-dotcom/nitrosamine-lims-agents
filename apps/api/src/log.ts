@@ -23,13 +23,11 @@ const REDACTED = [
 ];
 
 function errForLog(error: Error) {
-  const fault = postgresFault(error);
-  const type = error.constructor.name;
-  if (fault) return { type, message: '[redacted]', stack: '[redacted]', ...fault };
-  return { type, message: error.message, stack: error.stack ?? '' };
+  const frames = (error.stack ?? '').split('\n').filter((line) => line.startsWith('    at '));
+  return { type: error.constructor.name, message: '[redacted]', stack: frames.join('\n'), ...postgresFault(error) };
 }
 
-/** The logger that never writes a body, a password, a token, a cookie or a Postgres error's message. */
+/** The logger that never writes a body, a password, a token, a cookie or an error's message; a Postgres error keeps its SQLSTATE and the names it carries. */
 export function apiLogger(sink: LogSink) {
   return {
     level: 'info',

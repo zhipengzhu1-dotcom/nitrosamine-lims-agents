@@ -22,11 +22,18 @@ function port(value: string | undefined): number {
 export function apiConfig(): ApiConfig {
   const env = process.env;
   const { server, database } = dbConfig(API_SETTINGS);
+  const log = env.LIMS_LOG === '1';
+  const logFile = env.LIMS_LOG_FILE || null;
+  const secureCookie = env.NODE_ENV === 'production';
+  if (secureCookie && !log && !logFile)
+    throw new Error(
+      'In production the API needs LIMS_LOG_FILE: its log is the only witness of an unwritten System Incident',
+    );
   return {
     databaseUrl: databaseUrl(server, database, 'lims_app'),
     listen: { port: port(env.PORT), host: env.HOST ?? '127.0.0.1' },
-    log: env.LIMS_LOG === '1',
-    logFile: env.LIMS_LOG_FILE || null,
-    secureCookie: env.NODE_ENV === 'production',
+    log,
+    logFile,
+    secureCookie,
   };
 }
