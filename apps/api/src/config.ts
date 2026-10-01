@@ -20,7 +20,9 @@ function port(value: string | undefined): number {
 
 function accessEventKey(value: string | undefined): Buffer {
   if (value === undefined || !/^([0-9a-f]{2}){32,}$/i.test(value))
-    throw new Error('LIMS_ACCESS_EVENT_KEY must hold the Access Event HMAC key: at least 64 hex digits, such as `openssl rand -hex 32` prints');
+    throw new Error(
+      'LIMS_ACCESS_EVENT_KEY must hold the Access Event HMAC key: at least 64 hex digits, such as `openssl rand -hex 32` prints',
+    );
   return Buffer.from(value, 'hex');
 }
 

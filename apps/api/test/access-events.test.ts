@@ -28,9 +28,15 @@ const eventColumns = [
 ] as const;
 
 const eventsOf = (subjectId: string) =>
-  api.superuser.selectFrom('accessEvent').select(eventColumns).where('subjectId', '=', subjectId).orderBy('at').execute();
+  api.superuser
+    .selectFrom('accessEvent')
+    .select(eventColumns)
+    .where('subjectId', '=', subjectId)
+    .orderBy('at')
+    .execute();
 
-const dbNow = async () => (await sql<{ now: Date }>`select clock_timestamp() as now`.execute(api.superuser)).rows[0]?.now;
+const dbNow = async () =>
+  (await sql<{ now: Date }>`select clock_timestamp() as now`.execute(api.superuser)).rows[0]?.now;
 
 async function lock(account: Account): Promise<void> {
   await audited(api.db, SYSTEM, (tx) =>
@@ -170,7 +176,11 @@ it('an unknown user ID is kept only as its keyed HMAC and its length, never as t
 
 it('roles are those in the session Lab after sign-in and in the default Lab before, none for an unknown ID, never authentication', async () => {
   const otherLab = await audited(api.db, SYSTEM, (tx) =>
-    tx.insertInto('lab').values({ code: 'ACEV', name: 'Access Event Lab' }).returning('labId').executeTakeFirstOrThrow(),
+    tx
+      .insertInto('lab')
+      .values({ code: 'ACEV', name: 'Access Event Lab' })
+      .returning('labId')
+      .executeTakeFirstOrThrow(),
   );
   const person = await api.addPerson('access.roles', ['Analyst']);
   await audited(api.db, SYSTEM, (tx) =>
@@ -249,7 +259,7 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong password writes one lockout Access Eve
 
   const kinds = (await eventsOf(person.id)).map((e) => e.failureReason ?? e.kind);
   assert.deepEqual(kinds, [
-    ...Array<string>(LOCKOUT_AFTER_FAILURES).fill('WrongPassword'),
+    ...Array.from({ length: LOCKOUT_AFTER_FAILURES }, () => 'WrongPassword'),
     'Lockout',
     'WrongPasswordOnLockedAccount',
   ]);

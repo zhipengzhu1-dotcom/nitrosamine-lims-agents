@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, verifyPassword } from '@lims/db/credentials';
 import { type ActorContext, routes } from '@lims/domain';
-import { type Insertable, type Kysely, type Selectable, sql, type Transaction } from 'kysely';
+import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 
@@ -11,7 +11,6 @@ export const IDLE_LIMIT_MS = 8 * 60 * 60_000;
 export const ABSOLUTE_LIMIT_MS = 12 * 60 * 60_000;
 export const SESSION_COOKIE = 'lims_session';
 
-type Person = Selectable<DB['person']>;
 type AccessEvent = Insertable<DB['accessEvent']>;
 export interface SessionKey {
   labId: string;
@@ -157,9 +156,9 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
   };
 }
 
-/** Writes an unknown user ID as typed only as its keyed HMAC and its length in characters. */
+/** Writes an unknown user ID as typed only as its keyed HMAC and its length. */
 function unknownUserId(key: Buffer, typed: string) {
-  return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: [...typed].length };
+  return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: typed.length };
 }
 
 /** Signs a person in. Every attempt, refused or not, writes its Access Event in a transaction of its own that commits. */
