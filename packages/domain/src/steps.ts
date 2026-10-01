@@ -1,6 +1,5 @@
-import type { Meaning, Role, TestState } from '@lims/db';
+import type { Meaning, Role, TestState } from './http.ts';
 
-export type { Meaning, Role, TestState };
 export type PersonId = string;
 
 export interface StepFacts {
@@ -59,7 +58,7 @@ export const steps = {
 } satisfies Record<string, Step>;
 
 export type StepName = keyof typeof steps;
-export const stepNames = Object.keys(steps) as StepName[];
+export const stepNames = Object.keys(steps).filter((key): key is StepName => Object.hasOwn(steps, key));
 
 export interface Refusal {
   kind: 'state' | 'role' | 'guard';
