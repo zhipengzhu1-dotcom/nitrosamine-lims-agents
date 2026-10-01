@@ -1,5 +1,5 @@
 import type { Meaning, Role, StepName, TestState } from '@lims/domain';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface Me {
   person: { id: string; username: string; displayName: string; customerId: string | null };
@@ -85,13 +85,18 @@ export async function signOut(): Promise<void> {
   signedOut('');
 }
 
-export function useApi<T>(path: string): { data?: T; error?: string; reload: () => void } {
+/** `reload` settles once the page holds the server's answer, so a commit can wait for what it changed to be on screen. */
+export function useApi<T>(path: string): { data?: T; error?: string; reload: () => Promise<void> } {
   const [state, setState] = useState<{ data?: T; error?: string }>({});
   const [version, setVersion] = useState(0);
+  const waiting = useRef<(() => void)[]>([]);
   useEffect(() => {
     let live = true;
-    api<T>(path).then((data) => live && setState({ data }), (e: Error) => live && setState({ error: e.message }));
+    api<T>(path)
+      .then((data) => live && setState({ data }), (e: Error) => live && setState({ error: e.message }))
+      .finally(() => live && waiting.current.splice(0).forEach((settle) => settle()));
     return () => { live = false; };
   }, [path, version]);
-  return { ...state, reload: () => setVersion((v) => v + 1) };
+  const reload = () => new Promise<void>((settle) => { waiting.current.push(settle); setVersion((v) => v + 1); });
+  return { ...state, reload };
 }

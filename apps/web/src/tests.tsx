@@ -1,4 +1,5 @@
 import { steps } from '@lims/domain';
+import { useState } from 'react';
 import { type AuditEntry, type Me, type Row, type Signature, type TestRow, type TestView, useApi } from './api.ts';
 import { Shell, Status, stepAction } from './rail.tsx';
 
@@ -32,11 +33,12 @@ export function TestPage({ me, id }: { me: Me; id: string }) {
   const { data: view, error, reload } = useApi<TestView>(`/api/tests/${id}`);
   const what = view && [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])];
   const action = view?.next ? stepAction(view.next, id, what!, reload) : null;
+  const fresh = useFresh(view);
   if (!view) return <Shell me={me} active="tests" action={null}>{error ? <p className="note--bad">{error}</p> : null}</Shell>;
   const { test, result, report } = view;
   return (
     <Shell me={me} active="tests" action={action}>
-      <h1>{test.sampleNumber} <Status state={test.state} /></h1>
+      <h1>{test.sampleNumber} <Status key={test.state} state={test.state} fresh={fresh.state} /></h1>
       <dl className="facts">
         <dt>Sample</dt><dd>{test.sampleNumber}, {test.description}</dd>
         <dt>Customer</dt><dd>{test.customer}</dd>
@@ -56,24 +58,52 @@ export function TestPage({ me, id }: { me: Me; id: string }) {
         </dl>
       ) : <p className="muted">No Result entered.</p>}
       <h2>Signatures</h2>
-      <Signatures rows={view.signatures} />
+      <Signatures rows={view.signatures} fresh={fresh.signatures} />
       {me.person.customerId === null && <AuditTrail entries={view.auditTrail} />}
     </Shell>
   );
 }
 
+const signatureKey = (s: Signature) => s.meaning + s.signedAt;
+const nothingFresh = { state: false, signatures: new Set<string>() };
+
+/** What the latest server answer changed against the one before it on this page. A first load changes nothing. */
+function useFresh(view: TestView | undefined): { state: boolean; signatures: Set<string> } {
+  const [last, setLast] = useState(view);
+  const [fresh, setFresh] = useState(nothingFresh);
+  if (view !== last) {
+    setLast(view);
+    if (last && view) {
+      const before = new Set(last.signatures.map(signatureKey));
+      setFresh({ state: last.test.state !== view.test.state, signatures: new Set(view.signatures.map(signatureKey).filter((k) => !before.has(k))) });
+    }
+  }
+  return fresh;
+}
+
 const resultLine = (r: NonNullable<TestView['result']>) => `Result: ${r.analyte} ${r.value} ${r.unit}, performed on ${r.performedOn}`;
 
-export function Signatures({ rows }: { rows: Signature[] }) {
+/** Scrolls the plane just enough to show a row the server has just returned, so a phone shows the new Signature too. */
+function reveal(row: HTMLTableRowElement | null) {
+  const plane = row?.closest('.plane');
+  if (!row || !plane) return;
+  const below = row.getBoundingClientRect().bottom + 16 - plane.getBoundingClientRect().bottom;
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (below > 0) plane.scrollBy({ top: below, behavior: still ? 'instant' : 'smooth' });
+}
+
+/** `fresh` holds the keys of rows the server has just returned on this page; only those animate in. */
+export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: Set<string> }) {
   if (!rows.length) return <p className="muted">No Signatures yet.</p>;
   return (
-    <table>
+    <table className="sigs">
       <thead><tr><th>Meaning</th><th>Signed by</th><th>Time</th><th>Record</th><th>SHA-256 of the signed Record Version</th></tr></thead>
       <tbody>
         {rows.map((s) => (
-          <tr key={s.meaning + s.signedAt}>
-            <td className="sig">{s.meaning}</td><td>{s.signer}</td><td>{time(s.signedAt)}</td><td>{s.record}</td>
-            <td><code className="hash">{s.contentHash}</code></td>
+          <tr key={signatureKey(s)} {...(fresh?.has(signatureKey(s)) && { className: 'row--fresh', ref: reveal })}>
+            <td className="sig" data-label="Meaning">{s.meaning}</td><td data-label="Signed by">{s.signer}</td>
+            <td data-label="Time">{time(s.signedAt)}</td><td data-label="Record">{s.record}</td>
+            <td data-label="SHA-256"><code className="hash">{s.contentHash}</code></td>
           </tr>
         ))}
       </tbody>
@@ -99,17 +129,19 @@ function AuditTrail({ entries }: { entries: AuditEntry[] }) {
   return (
     <>
       <h2>Audit Trail</h2>
-      <table className="audit">
-        <thead><tr><th>#</th><th>Time</th><th>Who</th><th>Role</th><th>Reason</th><th>Record</th><th>Change</th></tr></thead>
-        <tbody>
-          {entries.map((e) => (
-            <tr key={e.seq}>
-              <td>{e.seq}</td><td>{time(e.at)}</td><td><code>{e.actor}</code></td><td>{e.role}</td><td>{e.reason}</td>
-              <td>{e.op} {e.table}</td><td>{changes(e)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="wide">
+        <table className="audit">
+          <thead><tr><th>#</th><th>Time</th><th>Who</th><th>Role</th><th>Reason</th><th>Record</th><th>Change</th></tr></thead>
+          <tbody>
+            {entries.map((e) => (
+              <tr key={e.seq}>
+                <td>{e.seq}</td><td>{time(e.at)}</td><td><code>{e.actor}</code></td><td>{e.role}</td><td>{e.reason}</td>
+                <td>{e.op} {e.table}</td><td>{changes(e)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
