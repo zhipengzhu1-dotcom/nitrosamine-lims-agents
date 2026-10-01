@@ -18,9 +18,8 @@ import {
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
 import { reauthenticate } from './auth.ts';
-import { type LabQueries, labScope, refuse } from './scope.ts';
-
-const REFUSAL_STATUS = { state: 409, role: 403, guard: 403 } as const;
+import { refuse } from './refuse.ts';
+import { type LabQueries, labScope } from './scope.ts';
 
 interface Effect<I> {
   signedRecord?: 'test_report';
@@ -40,7 +39,7 @@ async function nextNumber(q: LabQueries, table: 'sample' | 'testReport', prefix:
 const effects: { [K in StepName]: Effect<StepInput<K>> } = {
   submit: {
     async write(q, ctx, testId, input) {
-      const customerId = ctx.person.customerId ?? refuse(403, 'only a Customer User submits');
+      const customerId = ctx.person.customerId ?? refuse('role', 'only a Customer User submits');
       const submission = await q.company
         .insertInto('submission')
         .values({ customerId, submittedBy: ctx.person.id })
@@ -188,12 +187,12 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
       body.testId === undefined
         ? null
         : ((await scope.from('test').selectAll().where('id', '=', body.testId).executeTakeFirst()) ??
-          refuse(404, 'no such Test in this Lab'));
+          refuse('notFound', 'no such Test in this Lab'));
     const facts = await factsFor(scope, actor, test, effect.assignee?.(body.input));
     const refused = refusal(name, test?.state ?? null, actor.roles, facts);
-    if (refused) refuse(REFUSAL_STATUS[refused.kind], refused.message);
+    if (refused) refuse(refused.kind, refused.message);
     if (step.signs) {
-      const { password } = body.signature ?? refuse(400, `${name} needs the signer's password`);
+      const { password } = body.signature ?? refuse('malformed', `${name} needs the signer's password`);
       await reauthenticate(db, actor, password, name);
     }
 
@@ -206,7 +205,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
           .where('id', '=', testId)
           .where('state', '=', test.state)
           .executeTakeFirstOrThrow();
-        if (!moved.numUpdatedRows) refuse(409, 'the Test has moved on; reload it');
+        if (!moved.numUpdatedRows) refuse('stale', 'the Test has moved on; reload it');
       }
       await effect.write(q, actor, testId, body.input);
       if (step.signs) await sign(q, actor, step.signs, effect.signedRecord ?? 'test', testId);

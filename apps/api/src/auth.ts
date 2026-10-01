@@ -4,7 +4,7 @@ import { verifyPassword } from '@lims/db/credentials';
 import { type ActorContext, routes } from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
-import { refuse } from './scope.ts';
+import { refuse } from './refuse.ts';
 
 export const LOCKOUT_AFTER_FAILURES = 20;
 export const IDLE_LIMIT_MS = 8 * 60 * 60_000;
@@ -19,12 +19,12 @@ const authAudit = (person: Person, reason: string) => ({
   role: 'authentication',
   reason,
 });
-const notValid = () => refuse(401, 'the credentials are not valid');
+const notValid = () => refuse('badCredentials', 'the credentials are not valid');
 
-/** Checks the password. A failure counts toward lockout and a success clears the count. */
+/** Checks the password before the lock, so that only the right password learns of the lock (#45, gap 18). */
 async function prove(db: Kysely<DB>, person: Person, password: string, reason: string): Promise<void> {
-  if (person.lockedAt) refuse(423, 'this account is locked');
   if (await verifyPassword(password, person.passwordHash)) {
+    if (person.lockedAt) refuse('accountLocked', 'this account is locked');
     if (person.failedLogins > 0) {
       await audited(db, authAudit(person, reason), (tx) =>
         tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', person.id).execute(),
@@ -37,7 +37,7 @@ async function prove(db: Kysely<DB>, person: Person, password: string, reason: s
       .updateTable('person')
       .set({
         failedLogins: sql`failed_logins + 1`,
-        lockedAt: sql`case when failed_logins + 1 >= ${LOCKOUT_AFTER_FAILURES} then clock_timestamp() end`,
+        lockedAt: sql`coalesce(locked_at, case when failed_logins + 1 >= ${LOCKOUT_AFTER_FAILURES} then clock_timestamp() end)`,
       })
       .where('id', '=', person.id)
       .execute(),
@@ -45,7 +45,7 @@ async function prove(db: Kysely<DB>, person: Person, password: string, reason: s
   notValid();
 }
 
-/** Proves the signer before a Signature is written: a wrong password refuses with 401 and counts toward lockout. */
+/** Proves the signer before a Signature is written: a wrong password refuses as badCredentials and counts toward lockout. */
 export async function reauthenticate(db: Kysely<DB>, ctx: ActorContext, password: string, step: string): Promise<void> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', ctx.person.id).executeTakeFirstOrThrow();
   await prove(db, person, password, `Re-authenticate to sign ${step}`);
@@ -75,10 +75,10 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
       .where('tokenHash', '=', hashToken(token))
       .where('endedAt', 'is', null)
       .executeTakeFirst());
-  if (!session) return refuse(401, 'sign in first');
+  if (!session) return refuse('noSession', 'sign in first');
   if (session.expired) {
     await db.updateTable('session').set({ endedAt: sql`now()` }).where('id', '=', session.id).execute();
-    refuse(401, 'the session has ended; sign in again');
+    refuse('noSession', 'the session has ended; sign in again');
   }
   await db.updateTable('session').set({ lastSeenAt: sql`now()` }).where('id', '=', session.id).execute();
   const roles = await db
@@ -116,7 +116,7 @@ export function loginRoutes(app: App, db: Kysely<DB>): void {
           .select('labId')
           .where('personId', '=', person.id)
           .orderBy('labId')
-          .executeTakeFirst()) ?? refuse(403, 'this account belongs to no Lab');
+          .executeTakeFirst()) ?? refuse('role', 'this account belongs to no Lab');
       const token = randomBytes(32).toString('base64url');
       await db
         .insertInto('session')

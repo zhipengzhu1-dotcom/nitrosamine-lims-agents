@@ -1,7 +1,5 @@
-import { randomBytes } from 'node:crypto';
 import { audited, type DB } from '@lims/db';
 import type { ActorContext, Role } from '@lims/domain';
-import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import {
   type Insertable,
   type Kysely,
@@ -13,29 +11,6 @@ import {
 
 type CompanyTable = 'customer' | 'person' | 'method' | 'submission' | 'lab';
 type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session'>;
-
-/** The one place a refusal becomes an HTTP status: Fastify writes the thrown error as the route's 4xx body. */
-export function refuse(statusCode: number, message: string): never {
-  throw Object.assign(new Error(message), { statusCode });
-}
-
-const READ_ALOUD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
-/** Eight Crockford base32 characters from 40 random bits, so a reference is unlikely to repeat, even across restarts of the API. */
-export function requestReference(): string {
-  return Array.from(randomBytes(8), (byte) => READ_ALOUD.charAt(byte % 32)).join('');
-}
-
-/** A refusal keeps its own status and message; any other failure is logged with its cause and answered with a reference only. */
-export function answerThrown(error: FastifyError, req: FastifyRequest, reply: FastifyReply) {
-  if (typeof error.statusCode === 'number' && error.statusCode < 500) throw error;
-  req.log.error({ err: error }, 'unexpected failure');
-  return reply.code(500).send({
-    statusCode: 500,
-    error: 'Internal Server Error',
-    message: `the LIMS could not finish this request; reload to see what was saved, and give the Admin reference ${req.id}`,
-  });
-}
 
 function inLab(q: Kysely<DB>, labId: string) {
   const ofLab = (table: LabTable) => sql<boolean>`${sql.ref(`${table}.labId`)} = ${labId}`;

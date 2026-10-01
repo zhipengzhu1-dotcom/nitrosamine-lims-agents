@@ -129,6 +129,22 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   expect(field.y + field.height, 'the password field is clear of the sheet foot').toBeLessThanOrEqual(foot.y);
   expect((await box(sheet)).height, 'the sheet keeps its height').toBe(height);
 
+  await page.request.post('/api/logout', { data: {} });
+  const whoAmI: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/me')) whoAmI.push(request.url());
+  });
+  await sign(page, 'Reviewed');
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveText('sign in first');
+  expect(whoAmI, 'the web returned to sign-in by the kind, with no second request to decide it').toHaveLength(0);
+  await page.getByLabel('Username').fill('rui.reviewer');
+  await page.getByLabel('Password').fill(DEMO_PASSWORD);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('heading', { level: 1 }), 'signing in again returns to the Test it left').toContainText(
+    'Submitted For Review',
+  );
+
   await page.reload();
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Submitted For Review');
   await review.click();

@@ -62,21 +62,22 @@ it('an unexpected failure answers a generic 500 that names a reference, not the 
     signature: { password: lou.password },
   });
   assert.equal(failed.status, 500);
+  assert.match(failed.text, /^\{"kind":"failure","message":"[^"]*"\}$/, 'the 500 body has the one refusal shape');
   assert.doesNotMatch(failed.text, /log_probe|violates/, 'the database error stays out of the answer');
   assert.match(referenceIn(failed.text), /^[0-9A-HJKMNP-TV-Z]{8}$/, 'eight characters an Admin can read aloud');
 });
 
-it('a refusal and a request that fails validation answer with their own status and message', async () => {
+it('a refusal and a request that fails validation answer with their own status, kind and message', async () => {
   const testId = await assignedToLou();
   const refused = await post(as.cora, stepRoute('review').url, { testId, input: {}, signature: { password: 'x' } });
   assert.deepEqual(refused, {
     status: 409,
-    text: '{"statusCode":409,"error":"Conflict","message":"review needs a Test in SubmittedForReview state, not Assigned"}',
+    text: '{"kind":"state","message":"review needs a Test in SubmittedForReview state, not Assigned"}',
   });
   const invalid = await post(as.lou, stepRoute('enterResult').url, { testId, input: {} });
   assert.deepEqual(invalid, {
     status: 400,
-    text: `{"statusCode":400,"error":"Bad Request","message":"body must have required property 'signature'"}`,
+    text: `{"kind":"malformed","message":"body must have required property 'signature'"}`,
   });
 });
 

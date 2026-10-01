@@ -127,10 +127,39 @@ const auditTrailVerification = Type.Object({
   company: nullable(Type.String()),
 });
 const stepTaken = Type.Object({ testId: uuid, state: testState });
-/** The body Fastify writes for every refusal `refuse()` throws and every request that fails validation. */
-const refusalBody = Type.Object({ statusCode: Type.Integer(), error: Type.String(), message: Type.String() });
+/**
+ * Why the LIMS did not do what was asked, as one closed list the API, the web and the tests share. `unknownField` is
+ * a body with a field its closed schema does not name, whatever else is wrong with it; `malformed` is any other
+ * request Fastify refuses before the handler runs (a schema fault, unparseable JSON, a wrong media type, too large).
+ * `badCredentials` is the one answer to every sign-in failure;
+ * `accountLocked`, and `role` for an account with no Lab, come only after the right password. `noSession` covers no session presented and a session that
+ * has ended. `stale` asks the person to reload; `state` says the step does not apply. `notFound` also covers an
+ * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
+ * shape below.
+ */
+export const refusalKinds = [
+  'unknownField',
+  'malformed',
+  'badCredentials',
+  'noSession',
+  'accountLocked',
+  'role',
+  'guard',
+  'state',
+  'stale',
+  'notFound',
+  'failure',
+] as const;
+export type RefusalKind = (typeof refusalKinds)[number];
+/** Narrows a wire value to a kind on the list, so that the web can branch on it without a schema checker. */
+export const isRefusalKind = (value: unknown): value is RefusalKind => refusalKinds.some((k) => k === value);
+/** The body of every non-2xx reply the API writes. */
+export const refusalBody = Type.Object({ kind: Type.Enum(refusalKinds), message: Type.String() });
+export type RefusalBody = Static<typeof refusalBody>;
 
 const credentials = Type.Object({ username: text, password: text }, closed);
+/** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
+const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
 const reauthentication = Type.Object({ password: text }, closed);
 const stepEnvelope = Type.Object({ testId: Type.Optional(uuid), signature: Type.Optional(reauthentication) });
@@ -159,7 +188,7 @@ export type StepBody<K extends StepName> = Static<typeof stepEnvelope> & { input
 interface RouteSchema {
   params?: TObject;
   body?: TObject;
-  response: { 200: TSchema; '4xx': typeof refusalBody };
+  response: { 200: TSchema; '4xx': typeof refusalBody; '5xx': typeof refusalBody };
 }
 export interface Route {
   method: 'GET' | 'POST';
@@ -173,19 +202,19 @@ function route<
   const S extends Omit<RouteSchema, 'response'>,
   R extends TSchema,
 >(method: M, url: U, request: S, reply: R) {
-  return { method, url, schema: { ...request, response: { 200: reply, '4xx': refusalBody } } };
+  return { method, url, schema: { ...request, response: { 200: reply, '4xx': refusalBody, '5xx': refusalBody } } };
 }
 
 /** Every route the API serves besides the steps. */
 export const routes = {
   login: route('POST', '/api/login', { body: credentials }, actorContext),
-  logout: route('POST', '/api/logout', {}, Type.Object({ ended: Type.Literal(true) })),
+  logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
   me: route('GET', '/api/me', {}, actorContext),
   lookups: route('GET', '/api/lookups', {}, lookups),
   tests: route('GET', '/api/tests', {}, Type.Array(testRow)),
   test: route('GET', '/api/tests/:id', { params: byId }, testView),
   report: route('GET', '/api/tests/:id/report', { params: byId }, testReport),
-  verifyAuditTrail: route('POST', '/api/audit/verify', {}, auditTrailVerification),
+  verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
 } satisfies Record<string, Route>;
 
 /** The route of one step. Its body requires testId when the step starts from a state, and signature when it signs. */
@@ -199,12 +228,14 @@ export function stepRoute<K extends StepName>(name: K) {
 export type RouteInput<R extends Route> = R['schema'] extends { params: infer P extends TSchema }
   ? [params: Static<P>]
   : R['schema'] extends { body: infer B extends TSchema }
-    ? [body: Static<B>]
+    ? keyof Static<B> extends never
+      ? []
+      : [body: Static<B>]
     : [];
 export type RouteReply<R extends Route> = Static<R['schema']['response'][200]>;
 export type Reply<R extends Route> =
   | { kind: 'reply'; status: number; body: RouteReply<R> }
-  | { kind: 'refused'; status: number; message: string }
+  | { kind: 'refused'; status: number; body: RefusalBody }
   | { kind: 'breach'; status: number; problem: string };
 
 /** The path to request: the route's URL with each `:name` replaced by that param, encoded. */
@@ -225,7 +256,7 @@ export function readReply<R extends Route>(route: R, status: number, json: unkno
       ? { kind: 'reply', status, body: json }
       : breach(route, status, reply, json);
   return Value.Check(refusalBody, json)
-    ? { kind: 'refused', status, message: json.message }
+    ? { kind: 'refused', status, body: json }
     : breach(route, status, refusalBody, json);
 }
 

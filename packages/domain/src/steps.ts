@@ -1,4 +1,4 @@
-import type { Meaning, Role, TestState } from './http.ts';
+import type { Meaning, RefusalKind, Role, TestState } from './http.ts';
 
 export type PersonId = string;
 
@@ -61,7 +61,7 @@ export type StepName = keyof typeof steps;
 export const stepNames = Object.keys(steps).filter((key): key is StepName => Object.hasOwn(steps, key));
 
 export interface Refusal {
-  kind: 'state' | 'role' | 'guard';
+  kind: Extract<RefusalKind, 'state' | 'role' | 'guard'>;
   message: string;
 }
 

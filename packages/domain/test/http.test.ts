@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { pathOf, readReply, type Route, routes, type StepName, stepNames, stepRoute } from '../src/index.ts';
+import {
+  pathOf,
+  readReply,
+  type RefusalBody,
+  type Route,
+  routes,
+  type StepName,
+  stepNames,
+  stepRoute,
+} from '../src/index.ts';
 
 const row = {
   id: '8e46be82-9907-4ba5-a8b2-def4f8329bf0',
@@ -15,9 +24,9 @@ const row = {
   methodTitle: 'NDMA in metformin hydrochloride by LC-MS/MS',
   assignee: null,
 };
-const refusal = { statusCode: 404, error: 'Not Found', message: 'no such Test' };
+const refusal: RefusalBody = { kind: 'notFound', message: 'no such Test' };
 
-type Expected = { kind: 'reply' } | { kind: 'refused'; message: string } | { kind: 'breach'; problem: RegExp };
+type Expected = { kind: 'reply' } | { kind: 'refused'; body: RefusalBody } | { kind: 'breach'; problem: RegExp };
 
 describe('readReply tells a reply, a refusal and a breach apart', () => {
   const cases: { name: string; route: Route; status: number; json: unknown; expected: Expected }[] = [
@@ -29,11 +38,28 @@ describe('readReply tells a reply, a refusal and a breach apart', () => {
       expected: { kind: 'reply' },
     },
     {
-      name: "a 4xx body in Fastify's error shape is refused with its message",
+      name: 'a 4xx body with a kind and a message is refused with both',
       route: routes.test,
       status: 404,
       json: refusal,
-      expected: { kind: 'refused', message: 'no such Test' },
+      expected: { kind: 'refused', body: refusal },
+    },
+    {
+      name: 'a non-2xx body without a kind is a breach',
+      route: routes.test,
+      status: 404,
+      json: { statusCode: 404, error: 'Not Found', message: 'no such Test' },
+      expected: {
+        kind: 'breach',
+        problem: /^GET \/api\/tests\/:id answered 404 outside its schema at \/: must have required properties kind$/,
+      },
+    },
+    {
+      name: 'a non-2xx body with a kind outside the list is a breach at the kind',
+      route: routes.test,
+      status: 404,
+      json: { kind: 'gone', message: 'no such Test' },
+      expected: { kind: 'breach', problem: /outside its schema at \/kind/ },
     },
     {
       name: 'a 2xx body missing a declared field is a breach at its path',
@@ -50,7 +76,7 @@ describe('readReply tells a reply, a refusal and a breach apart', () => {
       expected: { kind: 'breach', problem: /outside its schema at \/0\/receivedAt/ },
     },
     {
-      name: "a non-2xx body outside Fastify's error shape is a breach",
+      name: 'a non-2xx body that is not an object is a breach',
       route: routes.me,
       status: 500,
       json: 'Internal Server Error',
@@ -61,7 +87,7 @@ describe('readReply tells a reply, a refusal and a breach apart', () => {
     it(c.name, () => {
       const answer = readReply(c.route, c.status, c.json);
       assert.equal(answer.kind, c.expected.kind);
-      if (answer.kind === 'refused' && c.expected.kind === 'refused') assert.equal(answer.message, c.expected.message);
+      if (answer.kind === 'refused' && c.expected.kind === 'refused') assert.deepEqual(answer.body, c.expected.body);
       if (answer.kind === 'breach' && c.expected.kind === 'breach') assert.match(answer.problem, c.expected.problem);
     });
 });
