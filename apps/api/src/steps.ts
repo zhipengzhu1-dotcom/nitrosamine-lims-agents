@@ -28,7 +28,7 @@ interface Effect<I> {
   write(q: LabQueries, ctx: ActorContext, testId: string, input: I): Promise<unknown>;
 }
 
-async function nextNumber(q: LabQueries, table: 'sample' | 'test_report', prefix: string): Promise<string> {
+async function nextNumber(q: LabQueries, table: 'sample' | 'testReport', prefix: string): Promise<string> {
   const { n } = await q
     .from(table)
     .select((eb) => eb.fn.countAll<string>().as('n'))
@@ -43,45 +43,45 @@ const effects: { [K in StepName]: Effect<StepInput<K>> } = {
       const customerId = ctx.person.customerId ?? refuse(403, 'only a Customer User submits');
       const submission = await q.company
         .insertInto('submission')
-        .values({ customer_id: customerId, submitted_by: ctx.person.id })
+        .values({ customerId, submittedBy: ctx.person.id })
         .returning('id')
         .executeTakeFirstOrThrow();
       const sample = await q
         .insert('sample', {
-          submission_id: submission.id,
+          submissionId: submission.id,
           description: input.description,
           number: await nextNumber(q, 'sample', `${ctx.lab.code}-S`),
         })
         .returning('id')
         .executeTakeFirstOrThrow();
-      await q.insert('test', { id: testId, sample_id: sample.id, method_id: input.methodId }).execute();
+      await q.insert('test', { id: testId, sampleId: sample.id, methodId: input.methodId }).execute();
     },
   },
   receive: {
     write: (q, _ctx, testId) =>
       q
         .update('sample')
-        .set({ received_at: sql`clock_timestamp()` })
-        .where('id', 'in', q.from('test').select('sample_id').where('id', '=', testId))
+        .set({ receivedAt: sql`clock_timestamp()` })
+        .where('id', 'in', q.from('test').select('sampleId').where('id', '=', testId))
         .execute(),
   },
   assign: {
     assignee: (input) => input.assigneeId,
     write: (q, _ctx, testId, input) =>
-      q.update('test').set({ assignee_id: input.assigneeId }).where('id', '=', testId).execute(),
+      q.update('test').set({ assigneeId: input.assigneeId }).where('id', '=', testId).execute(),
   },
   enterResult: {
     write: (q, ctx, testId, input) =>
       q
         .insert('result', {
-          test_id: testId,
+          testId,
           analyte: input.analyte,
           value: input.value,
           unit: input.unit,
-          injection_sequence_ref: input.injectionSequenceRef,
-          notebook_ref: input.notebookRef,
-          performed_on: input.performedOn,
-          entered_by: ctx.person.id,
+          injectionSequenceRef: input.injectionSequenceRef,
+          notebookRef: input.notebookRef,
+          performedOn: input.performedOn,
+          enteredBy: ctx.person.id,
         })
         .execute(),
   },
@@ -89,13 +89,11 @@ const effects: { [K in StepName]: Effect<StepInput<K>> } = {
   release: {
     signedRecord: 'test_report',
     write: async (q, ctx, testId) =>
-      q
-        .insert('test_report', { test_id: testId, number: await nextNumber(q, 'test_report', `${ctx.lab.code}-R`) })
-        .execute(),
+      q.insert('testReport', { testId, number: await nextNumber(q, 'testReport', `${ctx.lab.code}-R`) }).execute(),
   },
 };
 
-type FactsTest = Pick<Selectable<DB['test']>, 'id' | 'assignee_id' | 'method_id'>;
+type FactsTest = Pick<Selectable<DB['test']>, 'id' | 'assigneeId' | 'methodId'>;
 
 export async function factsFor(
   q: LabQueries,
@@ -104,29 +102,29 @@ export async function factsFor(
   assigneeId?: string,
 ): Promise<StepFacts> {
   const signatures = test
-    ? await q.from('signature').select(['meaning', 'person_id']).where('record_id', '=', test.id).execute()
+    ? await q.from('signature').select(['meaning', 'personId']).where('recordId', '=', test.id).execute()
     : [];
-  const assignee = assigneeId ?? test?.assignee_id ?? null;
+  const assignee = assigneeId ?? test?.assigneeId ?? null;
   const trained =
     assignee &&
     test &&
     (await q
-      .from('training_record')
+      .from('trainingRecord')
       .innerJoin('membership', (j) =>
         j
-          .onRef('membership.lab_id', '=', 'training_record.lab_id')
-          .onRef('membership.person_id', '=', 'training_record.person_id'),
+          .onRef('membership.labId', '=', 'trainingRecord.labId')
+          .onRef('membership.personId', '=', 'trainingRecord.personId'),
       )
-      .select('training_record.person_id')
+      .select('trainingRecord.personId')
       .where('membership.role', '=', 'Analyst')
-      .where('training_record.person_id', '=', assignee)
-      .where('training_record.method_id', '=', test.method_id)
+      .where('trainingRecord.personId', '=', assignee)
+      .where('trainingRecord.methodId', '=', test.methodId)
       .executeTakeFirst());
   return {
     actor: ctx.person.id,
     assignee,
     assigneeTrained: Boolean(trained),
-    signers: Object.fromEntries(signatures.map((s) => [s.meaning, s.person_id])),
+    signers: Object.fromEntries(signatures.map((s) => [s.meaning, s.personId])),
   };
 }
 
@@ -134,29 +132,29 @@ export async function factsFor(
 async function recordVersion(q: LabQueries, testId: string): Promise<Buffer> {
   const record = await q
     .from('test')
-    .innerJoin('sample', 'sample.id', 'test.sample_id')
-    .innerJoin('method', 'method.id', 'test.method_id')
-    .innerJoin('submission', 'submission.id', 'sample.submission_id')
-    .innerJoin('customer', 'customer.id', 'submission.customer_id')
-    .leftJoin('result', 'result.test_id', 'test.id')
-    .leftJoin('test_report', 'test_report.test_id', 'test.id')
+    .innerJoin('sample', 'sample.id', 'test.sampleId')
+    .innerJoin('method', 'method.id', 'test.methodId')
+    .innerJoin('submission', 'submission.id', 'sample.submissionId')
+    .innerJoin('customer', 'customer.id', 'submission.customerId')
+    .leftJoin('result', 'result.testId', 'test.id')
+    .leftJoin('testReport', 'testReport.testId', 'test.id')
     .select([
       'test.id',
       'customer.name as customer',
       'sample.number as sample',
       'sample.description',
-      'sample.received_at as receivedAt',
+      'sample.receivedAt',
       'method.code as method',
       'method.version as methodVersion',
       'method.title as methodTitle',
-      'test.gxp_class as gxpClass',
+      'test.gxpClass',
       'result.analyte',
       'result.value',
       'result.unit',
-      'result.injection_sequence_ref as injectionSequenceRef',
-      'result.notebook_ref as notebookRef',
+      'result.injectionSequenceRef',
+      'result.notebookRef',
       sql<string>`result.performed_on::text`.as('performedOn'),
-      'test_report.number as report',
+      'testReport.number as report',
     ])
     .where('test.id', '=', testId)
     .executeTakeFirstOrThrow();
@@ -167,13 +165,13 @@ async function sign(q: LabQueries, ctx: ActorContext, meaning: Meaning, table: '
   const recordId =
     table === 'test'
       ? testId
-      : (await q.from('test_report').select('id').where('test_id', '=', testId).executeTakeFirstOrThrow()).id;
+      : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id;
   await q
     .insert('signature', {
-      person_id: ctx.person.id,
+      personId: ctx.person.id,
       meaning,
-      record_table: table,
-      record_id: recordId,
+      recordTable: table,
+      recordId,
       content: await recordVersion(q, testId),
     })
     .execute();
@@ -213,6 +211,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
       await effect.write(q, actor, testId, body.input);
       if (step.signs) await sign(q, actor, step.signs, effect.signedRecord ?? 'test', testId);
     });
+    req.log.info({ step: name, testId }, 'step taken');
     return { testId, state: step.to };
   });
 }

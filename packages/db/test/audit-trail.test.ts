@@ -2,25 +2,26 @@ import assert from 'node:assert/strict';
 import { after, before, it } from 'node:test';
 import { sql } from 'kysely';
 import pg from 'pg';
-import { audited, createDb, databaseUrl } from '../src/db.ts';
+import { audited, createDb, databaseUrl, dbConfig } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const DATABASE = 'lims_test';
-const LAB_TABLES = ['membership', 'training_record', 'sample', 'test', 'result', 'test_report', 'signature', 'session'];
+const { server } = dbConfig();
 
-const app = createDb(databaseUrl(DATABASE, 'lims_app'));
-const superuser = new pg.Client({ connectionString: databaseUrl(DATABASE) });
+const DATABASE = 'lims_test';
+
+const app = createDb(databaseUrl(server, DATABASE, 'lims_app'));
+const superuser = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
 let labId: string;
 
 before(async () => {
-  const admin = new pg.Client({ connectionString: databaseUrl('postgres') });
+  const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   await admin.query(`drop database if exists ${DATABASE} with (force)`);
   await admin.end();
-  await migrate(DATABASE);
+  await migrate(server, DATABASE);
   await superuser.connect();
-  ({ lab_id: labId } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Set up the test Lab' }, (tx) =>
-    tx.insertInto('lab').values({ code: 'TL', name: 'Test Lab' }).returning('lab_id').executeTakeFirstOrThrow(),
+  ({ labId } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Set up the test Lab' }, (tx) =>
+    tx.insertInto('lab').values({ code: 'TL', name: 'Test Lab' }).returning('labId').executeTakeFirstOrThrow(),
   ));
 });
 
@@ -46,10 +47,10 @@ it('an audited write records who made it, in which role, why, and the old and ne
   });
 
   const entry = await app
-    .selectFrom('audit_entry')
+    .selectFrom('auditEntry')
     .selectAll()
     .select([sql<string>`old_row->>'name'`.as('oldName'), sql<string>`new_row->>'name'`.as('newName')])
-    .where('table_name', '=', 'customer')
+    .where('tableName', '=', 'customer')
     .where('op', '=', 'UPDATE')
     .where(sql`new_row->>'id'`, '=', customer)
     .executeTakeFirstOrThrow();
@@ -58,6 +59,31 @@ it('an audited write records who made it, in which role, why, and the old and ne
     { ...ctx, chain: 'company' },
   );
   assert.deepEqual([entry.oldName, entry.newName], ['Acme Labz', 'Acme Labs']);
+});
+
+it('an Audit Trail row snapshot keeps the stored column names and leaves out the password hash', async () => {
+  const { id } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a person' }, (tx) =>
+    tx
+      .insertInto('person')
+      .values({ username: 'snap.shot', displayName: 'Snap Shot', passwordHash: 'not-a-real-hash' })
+      .returning('id')
+      .executeTakeFirstOrThrow(),
+  );
+  const { newRow: row } = await app
+    .selectFrom('auditEntry')
+    .select('newRow')
+    .where('tableName', '=', 'person')
+    .where(sql`new_row->>'id'`, '=', id)
+    .executeTakeFirstOrThrow();
+  assert.ok(row && typeof row === 'object' && !Array.isArray(row), 'the snapshot is a row object');
+  assert.deepEqual(Object.keys(row).sort(), [
+    'customer_id',
+    'display_name',
+    'failed_logins',
+    'id',
+    'locked_at',
+    'username',
+  ]);
 });
 
 it('a write without a reason is refused and leaves nothing behind', async () => {
@@ -83,13 +109,13 @@ it('audit entries cannot be updated or deleted, by the app or by the superuser',
   ]) {
     await assert.rejects(superuser.query(statement, ['rewritten']), refusedWith('LA002'));
   }
-  await assert.rejects(app.updateTable('audit_entry').set({ reason: 'rewritten' }).execute(), refusedWith('42501'));
-  await assert.rejects(app.deleteFrom('audit_entry').execute(), refusedWith('42501'));
+  await assert.rejects(app.updateTable('auditEntry').set({ reason: 'rewritten' }).execute(), refusedWith('42501'));
+  await assert.rejects(app.deleteFrom('auditEntry').execute(), refusedWith('42501'));
 });
 
 it("the Lab's chain verifies, and an entry tampered with as superuser is found at its seq", async () => {
   await audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
-    tx.updateTable('lab').set({ name: 'Test Laboratory' }).where('lab_id', '=', labId).execute(),
+    tx.updateTable('lab').set({ name: 'Test Laboratory' }).where('labId', '=', labId).execute(),
   );
   const verify = async () =>
     (await sql<{ broken: string | null }>`select lims.verify_chain(${labId}) as broken`.execute(app)).rows[0]?.broken;
@@ -100,14 +126,4 @@ it("the Lab's chain verifies, and an entry tampered with as superuser is found a
   await superuser.query(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 2`, [labId]);
   await superuser.query('commit');
   assert.equal(await verify(), '2');
-});
-
-it('a lab-owned row without a lab_id is refused', async () => {
-  for (const table of LAB_TABLES) {
-    await assert.rejects(
-      superuser.query(`insert into lims.${table} default values`),
-      (error: { code?: string; column?: string }) => error.code === '23502' && error.column === 'lab_id',
-      table,
-    );
-  }
 });

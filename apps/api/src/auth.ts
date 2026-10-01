@@ -23,11 +23,11 @@ const notValid = () => refuse(401, 'the credentials are not valid');
 
 /** Checks the password. A failure counts toward lockout and a success clears the count. */
 async function prove(db: Kysely<DB>, person: Person, password: string, reason: string): Promise<void> {
-  if (person.locked_at) refuse(423, 'this account is locked');
-  if (await verifyPassword(password, person.password_hash)) {
-    if (person.failed_logins > 0) {
+  if (person.lockedAt) refuse(423, 'this account is locked');
+  if (await verifyPassword(password, person.passwordHash)) {
+    if (person.failedLogins > 0) {
       await audited(db, authAudit(person, reason), (tx) =>
-        tx.updateTable('person').set({ failed_logins: 0 }).where('id', '=', person.id).execute(),
+        tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', person.id).execute(),
       );
     }
     return;
@@ -36,8 +36,8 @@ async function prove(db: Kysely<DB>, person: Person, password: string, reason: s
     tx
       .updateTable('person')
       .set({
-        failed_logins: sql`failed_logins + 1`,
-        locked_at: sql`case when failed_logins + 1 >= ${LOCKOUT_AFTER_FAILURES} then clock_timestamp() end`,
+        failedLogins: sql`failed_logins + 1`,
+        lockedAt: sql`case when failed_logins + 1 >= ${LOCKOUT_AFTER_FAILURES} then clock_timestamp() end`,
       })
       .where('id', '=', person.id)
       .execute(),
@@ -57,49 +57,44 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
     token &&
     (await db
       .selectFrom('session')
-      .innerJoin('person', 'person.id', 'session.person_id')
-      .innerJoin('lab', 'lab.lab_id', 'session.lab_id')
+      .innerJoin('person', 'person.id', 'session.personId')
+      .innerJoin('lab', 'lab.labId', 'session.labId')
       .select([
         'session.id',
-        'session.created_at',
-        'session.last_seen_at',
+        sql<boolean>`person.locked_at is not null
+          or session.last_seen_at < now() - ${IDLE_LIMIT_MS} * interval '1 millisecond'
+          or session.created_at < now() - ${ABSOLUTE_LIMIT_MS} * interval '1 millisecond'`.as('expired'),
         'person.id as personId',
         'person.username',
-        'person.display_name',
-        'person.customer_id',
-        'person.locked_at',
-        'lab.lab_id',
+        'person.displayName',
+        'person.customerId',
+        'lab.labId',
         'lab.code',
         'lab.name',
       ])
-      .where('token_hash', '=', hashToken(token))
-      .where('ended_at', 'is', null)
+      .where('tokenHash', '=', hashToken(token))
+      .where('endedAt', 'is', null)
       .executeTakeFirst());
   if (!session) return refuse(401, 'sign in first');
-  const now = Date.now();
-  if (
-    session.locked_at ||
-    now - session.last_seen_at.getTime() > IDLE_LIMIT_MS ||
-    now - session.created_at.getTime() > ABSOLUTE_LIMIT_MS
-  ) {
-    await db.updateTable('session').set({ ended_at: new Date() }).where('id', '=', session.id).execute();
+  if (session.expired) {
+    await db.updateTable('session').set({ endedAt: sql`now()` }).where('id', '=', session.id).execute();
     refuse(401, 'the session has ended; sign in again');
   }
-  await db.updateTable('session').set({ last_seen_at: new Date() }).where('id', '=', session.id).execute();
+  await db.updateTable('session').set({ lastSeenAt: sql`now()` }).where('id', '=', session.id).execute();
   const roles = await db
     .selectFrom('membership')
     .select('role')
-    .where('lab_id', '=', session.lab_id)
-    .where('person_id', '=', session.personId)
+    .where('labId', '=', session.labId)
+    .where('personId', '=', session.personId)
     .execute();
   return {
     person: {
       id: session.personId,
       username: session.username,
-      displayName: session.display_name,
-      customerId: session.customer_id,
+      displayName: session.displayName,
+      customerId: session.customerId,
     },
-    lab: { id: session.lab_id, code: session.code, name: session.name },
+    lab: { id: session.labId, code: session.code, name: session.name },
     roles: roles.map((r) => r.role),
   };
 }
@@ -118,21 +113,16 @@ export function loginRoutes(app: App, db: Kysely<DB>): void {
       const membership =
         (await db
           .selectFrom('membership')
-          .select('lab_id')
-          .where('person_id', '=', person.id)
-          .orderBy('lab_id')
+          .select('labId')
+          .where('personId', '=', person.id)
+          .orderBy('labId')
           .executeTakeFirst()) ?? refuse(403, 'this account belongs to no Lab');
       const token = randomBytes(32).toString('base64url');
       await db
         .insertInto('session')
-        .values({ lab_id: membership.lab_id, person_id: person.id, token_hash: hashToken(token) })
+        .values({ labId: membership.labId, personId: person.id, tokenHash: hashToken(token) })
         .execute();
-      reply.setCookie(SESSION_COOKIE, token, {
-        path: '/',
-        httpOnly: true,
-        sameSite: 'strict',
-        secure: process.env.NODE_ENV === 'production',
-      });
+      reply.setCookie(SESSION_COOKIE, token);
       return actorFor(db, token);
     },
   });
@@ -146,10 +136,10 @@ export function logoutRoute(app: App, db: Kysely<DB>): void {
       if (token !== undefined)
         await db
           .updateTable('session')
-          .set({ ended_at: new Date() })
-          .where('token_hash', '=', hashToken(token))
+          .set({ endedAt: sql`now()` })
+          .where('tokenHash', '=', hashToken(token))
           .execute();
-      reply.clearCookie(SESSION_COOKIE, { path: '/' });
+      reply.clearCookie(SESSION_COOKIE);
       return { ended: true } as const;
     },
   });

@@ -6,7 +6,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 ## The gate decides what is green
 
-- Run `pnpm check` before you push. It runs the Biome format check, oxlint, the typecheck, ruff, shellcheck, and the TypeScript and Python tests. The tests need the checkout's own Postgres (`scripts/pg.sh start`), and ruff and shellcheck need `uvx`. The schema drift check joins the gate with item 6 of the task above.
+- Run `pnpm check` before you push. It runs the Biome format check, oxlint, the typecheck, ruff, shellcheck, and the TypeScript and Python tests. The tests need the checkout's own Postgres (`scripts/pg.sh start`), and ruff and shellcheck need `uvx`. The tests include the schema drift check, which fails when `packages/db/src/schema.ts` differs from what the `types` script generates from the migrations, or when a `lims` table or column name does not survive CamelCasePlugin's round trip. They also include the refusal completeness check in `packages/db/test/refusals.test.ts`, which fails when a database constraint or trigger has no test that shows it refusing. A rule shown refusing in another test file goes in that check's `elsewhere` map, with the file named.
 - GitHub Actions runs `pnpm check` on every pull request and on `main`, with the Playwright walk (`pnpm e2e`) as a second job. The repo's plan has no branch protection, so the person who merges checks that both jobs passed.
 - Biome formats at 120 columns (`pnpm format`). oxlint with tsgolint lints, and its type-aware rules use a TypeScript 7 checker. It also enforces the import direction between packages. `tsconfig.base.json` sets the compiler's strictness. This document does not repeat what those tools check. Read `.oxlintrc.json`, `biome.json` and `ruff.toml`.
 - Keep `main` green. Do not skip or weaken a check to pass the gate. Fix the code, or change the rule as the last section describes.
@@ -46,13 +46,12 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 - Never hold a measured value or a limit in a JavaScript `number`. Use a decimal string in TypeScript and `text` or `numeric` in Postgres, because a float loses the digits as typed.
 - Do arithmetic on values in one domain module, so that rounding ([ADR 0006](adr/0006-acceptance-criteria-round-the-value-once-to-the-limits-written-decimals.md)) has one implementation. Choose the decimal library when the first calculation is built.
-- Take every timestamp that is stored on a row from the database clock, never from `new Date()` or `Date.now()`, because the API host's clock is not the record's clock.
+- Take every timestamp that is stored on a row from the database clock, because the API host's clock is not the record's clock.
 - Send a time over HTTP as an ISO 8601 UTC string, and format it for display in one web function, so that every screen shows time the same way.
 
 ## The database refuses bad data
 
 - Write migrations forward-only. Fix a mistake with a new migration, never by editing one that is on `main`, because a database that already applied the old file would then differ from the repo.
-- Regenerate `packages/db/src/schema.ts` in the commit that adds the migration, and never edit it by hand, so that the types always describe the schema that the migrations build.
 - Make every rule that the database can enforce a constraint or a trigger, so that the database refuses bad data even when the API is wrong.
 - Write SQL with lowercase keywords, singular snake_case table names and schema-qualified names, so that each migration reads like the ones before it.
 - Send SQL from TypeScript only through Kysely or its `sql` tag with parameters, never through string concatenation, because concatenated SQL is how injection happens.
@@ -63,12 +62,12 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 - Give each test file its own database, and make each test create its own records, so that any test passes alone and in any order.
 - Test through the public interface: HTTP for the API, exported functions for the domain, SQL for database invariants. A test that reaches inside breaks on every refactor. Give a pure rule with many cases a table-driven test in `packages/domain`.
 - Name a test with a sentence that states the behaviour in glossary terms, because the name is what a failing run shows.
-- Do not chase a coverage percentage, because a percentage rewards lines, not refusals. Show every step-registry refusal and every database constraint or trigger refusing in a test, and land every bug fix with a test that failed first.
+- Do not chase a coverage percentage, because a percentage rewards lines, not refusals. Show every step-registry refusal in a test, and land every bug fix with a test that failed first.
 - Test the web with Playwright walks only, one for each user-visible flow. Move logic that needs a unit test to `@lims/domain`, so that the web stays free of rules.
 
 ## Packages stay apart
 
-- Keep `@lims/domain` free of I/O: no `process.env`, no `fetch`, nothing that reaches outside the process, because the browser runs it too.
+- Keep `@lims/domain` free of I/O: no `fetch`, nothing that reaches outside the process, because the browser runs it too.
 - Keep business rules out of the web, because a rule in the web is a rule that the API does not check. What a person may do comes from the step registry or from the API.
 - Reach another package only by its name, never by a relative path, because the lint rule sees only paths that spell `packages/` or `apps/`.
 - Bump dependency versions in the monthly patch round that ADR 0002 sets for image digests, so that upgrades arrive together and get one test pass.
@@ -76,7 +75,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 ## Configuration is read once, and logs carry no record content
 
-- Read the environment once, at process start, in one config module for each process, so that a missing value stops the process at start and not at the first request that needs it. No other file touches `process.env`.
+- Read the environment once, at process start, in one config module for each process, so that a missing value stops the process at start and not at the first request that needs it.
 - Give a secret no default in code, and never commit one, because a default secret ends up in a real deployment. A secret arrives through a file or a variable that the deploy config names, as `deploy/README.md` describes.
 - Log record IDs and step names. Never log a request body, a password, a token or record content, because signing requests carry passwords.
 - The seed script prints the demo password. ADR 0002 documents this as a demo exception.

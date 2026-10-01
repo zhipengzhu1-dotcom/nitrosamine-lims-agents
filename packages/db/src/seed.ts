@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import type { Kysely } from 'kysely';
+import { dbConfig } from './config.ts';
 import { hashPassword } from './credentials.ts';
-import { audited, createDb, type DB } from './db.ts';
+import { audited, createDb, type DB, databaseUrl } from './db.ts';
 
 // All fictional. Two Analysts so the assignment gate has someone to refuse.
 const people = [
@@ -23,17 +24,14 @@ export interface SeededAccount {
 }
 
 /** Seeds one Lab, one Customer, one Method and the demo people, who all share one password, into an empty database. */
-export async function seed(
-  db: Kysely<DB>,
-  password = process.env.DEMO_PASSWORD ?? randomBytes(6).toString('base64url'),
-): Promise<SeededAccount[]> {
-  if (await db.selectFrom('lab').select('lab_id').executeTakeFirst())
+export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('base64url')): Promise<SeededAccount[]> {
+  if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
   return audited(db, { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' }, async (tx) => {
-    const { lab_id } = await tx
+    const { labId } = await tx
       .insertInto('lab')
       .values({ code: 'RD', name: 'R&D Laboratory (fictional)' })
-      .returning('lab_id')
+      .returning('labId')
       .executeTakeFirstOrThrow();
     const customer = await tx
       .insertInto('customer')
@@ -51,15 +49,15 @@ export async function seed(
         .insertInto('person')
         .values({
           username: p.username,
-          display_name: p.name,
-          password_hash: await hashPassword(password),
-          customer_id: p.role === 'Customer' ? customer.id : null,
+          displayName: p.name,
+          passwordHash: await hashPassword(password),
+          customerId: p.role === 'Customer' ? customer.id : null,
         })
         .returning('id')
         .executeTakeFirstOrThrow();
-      await tx.insertInto('membership').values({ lab_id, person_id: id, role: p.role }).execute();
+      await tx.insertInto('membership').values({ labId, personId: id, role: p.role }).execute();
       if ('trained' in p)
-        await tx.insertInto('training_record').values({ lab_id, person_id: id, method_id: method.id }).execute();
+        await tx.insertInto('trainingRecord').values({ labId, personId: id, methodId: method.id }).execute();
       out.push({ id, username: p.username, role: p.role, password });
     }
     return out;
@@ -67,9 +65,10 @@ export async function seed(
 }
 
 if (import.meta.main) {
-  const db = createDb();
+  const { server, database, demoPassword } = dbConfig();
+  const db = createDb(databaseUrl(server, database, 'lims_app'));
   try {
-    const accounts = await seed(db);
+    const accounts = await seed(db, demoPassword);
     console.table(accounts.map((a) => ({ username: a.username, role: a.role })));
     const [first] = accounts;
     if (!first) throw new Error('the seed made no accounts');

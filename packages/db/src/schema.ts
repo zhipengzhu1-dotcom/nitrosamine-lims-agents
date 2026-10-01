@@ -36,14 +36,14 @@ export interface AuditEntry {
   at: Timestamp;
   chain: string;
   hash: Buffer;
-  new_row: Json | null;
-  old_row: Json | null;
+  newRow: Json | null;
+  oldRow: Json | null;
   op: string;
-  prev_hash: Buffer;
+  prevHash: Buffer;
   reason: string;
   role: string;
   seq: Int8;
-  table_name: string;
+  tableName: string;
 }
 
 export interface Customer {
@@ -53,13 +53,13 @@ export interface Customer {
 
 export interface Lab {
   code: string;
-  lab_id: Generated<string>;
+  labId: Generated<string>;
   name: string;
 }
 
 export interface Membership {
-  lab_id: string;
-  person_id: string;
+  labId: string;
+  personId: string;
   role: Role;
 }
 
@@ -71,24 +71,24 @@ export interface Method {
 }
 
 export interface Person {
-  customer_id: string | null;
-  display_name: string;
-  failed_logins: Generated<number>;
+  customerId: string | null;
+  displayName: string;
+  failedLogins: Generated<number>;
   id: Generated<string>;
-  locked_at: Timestamp | null;
-  password_hash: string;
+  lockedAt: Timestamp | null;
+  passwordHash: string;
   username: string;
 }
 
 export interface Result {
   analyte: string;
-  entered_by: string;
+  enteredBy: string;
   id: Generated<string>;
-  injection_sequence_ref: string;
-  lab_id: string;
-  notebook_ref: string;
-  performed_on: Timestamp;
-  test_id: string;
+  injectionSequenceRef: string;
+  labId: string;
+  notebookRef: string;
+  performedOn: Timestamp;
+  testId: string;
   unit: string;
   value: string;
 }
@@ -96,65 +96,65 @@ export interface Result {
 export interface Sample {
   description: string;
   id: Generated<string>;
-  lab_id: string;
+  labId: string;
   number: string;
-  received_at: Timestamp | null;
-  submission_id: string;
+  receivedAt: Timestamp | null;
+  submissionId: string;
 }
 
 export interface Session {
-  created_at: Generated<Timestamp>;
-  ended_at: Timestamp | null;
+  createdAt: Generated<Timestamp>;
+  endedAt: Timestamp | null;
   id: Generated<string>;
-  lab_id: string;
-  last_seen_at: Generated<Timestamp>;
-  person_id: string;
-  token_hash: Buffer;
+  labId: string;
+  lastSeenAt: Generated<Timestamp>;
+  personId: string;
+  tokenHash: Buffer;
 }
 
 export interface Signature {
   content: Buffer;
-  content_hash: Generated<Buffer>;
+  contentHash: Generated<Buffer>;
   id: Generated<string>;
-  lab_id: string;
+  labId: string;
   meaning: Meaning;
-  person_id: string;
-  record_id: string;
-  record_table: string;
-  signed_at: Generated<Timestamp>;
+  personId: string;
+  recordId: string;
+  recordTable: string;
+  signedAt: Generated<Timestamp>;
 }
 
 export interface Submission {
-  customer_id: string;
+  customerId: string;
   id: Generated<string>;
-  submitted_by: string;
+  submittedBy: string;
 }
 
 export interface Test {
-  assignee_id: string | null;
-  gxp_class: Generated<string>;
+  assigneeId: string | null;
+  gxpClass: Generated<string>;
   id: Generated<string>;
-  lab_id: string;
-  method_id: string;
-  sample_id: string;
+  labId: string;
+  methodId: string;
+  sampleId: string;
   state: Generated<TestState>;
 }
 
 export interface TestReport {
   id: Generated<string>;
-  lab_id: string;
+  labId: string;
   number: string;
-  test_id: string;
+  testId: string;
 }
 
 export interface TrainingRecord {
-  lab_id: string;
-  method_id: string;
-  person_id: string;
+  labId: string;
+  methodId: string;
+  personId: string;
 }
 
 export interface DB {
-  audit_entry: AuditEntry;
+  auditEntry: AuditEntry;
   customer: Customer;
   lab: Lab;
   membership: Membership;
@@ -166,6 +166,6 @@ export interface DB {
   signature: Signature;
   submission: Submission;
   test: Test;
-  test_report: TestReport;
-  training_record: TrainingRecord;
+  testReport: TestReport;
+  trainingRecord: TrainingRecord;
 }
