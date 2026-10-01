@@ -1,25 +1,39 @@
 #!/usr/bin/env bash
-# A project-local PostgreSQL 18 cluster for development and tests, trusting localhost only.
-# With LIMS_PG_EXTERNAL=1, start uses a server already listening on the port (CI's service container) instead.
+# A PostgreSQL 18 cluster for development and tests, one for each checkout, trusting localhost only.
+# The Node code finds the running cluster as this script does, in its postmaster.pid (packages/db/src/db.ts).
+# With LIMS_PG set, both use that server instead and start leaves the cluster alone (CI's service container).
 set -euo pipefail
 PGBIN=${PGBIN:-/opt/homebrew/opt/postgresql@18/bin}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-DATA=${LIMS_PGDATA:-$ROOT/.pg/data}
-PORT=${LIMS_PGPORT:-54339}
+DATA=$ROOT/.pg/data
+
+port() {
+  if [[ ${LIMS_PG:-} =~ ^postgres://postgres@localhost:([0-9]+)$ ]]; then
+    echo "${BASH_REMATCH[1]}"
+  elif [ -n "${LIMS_PG:-}" ]; then
+    echo "scripts/pg.sh reaches only postgres://postgres@localhost:<port>, and LIMS_PG names another server." >&2
+    return 1
+  elif [ -f "$DATA/postmaster.pid" ]; then
+    sed -n 4p "$DATA/postmaster.pid"
+  else
+    echo "This checkout has no PostgreSQL running. Run scripts/pg.sh start, or set LIMS_PG." >&2
+    return 1
+  fi
+}
 
 case "${1:-}" in
   start)
-    if [ "${LIMS_PG_EXTERNAL:-}" = 1 ]; then echo "postgres://postgres@localhost:$PORT"; exit 0; fi
-    if [ ! -d "$DATA" ]; then
-      "$PGBIN/initdb" -D "$DATA" -U postgres --auth=trust --encoding=UTF8 --locale=C >/dev/null
-    fi
-    if ! "$PGBIN/pg_ctl" -D "$DATA" status >/dev/null; then
+    if [ -z "${LIMS_PG:-}" ] && ! "$PGBIN/pg_ctl" -D "$DATA" status >/dev/null 2>&1; then
+      [ -d "$DATA" ] || "$PGBIN/initdb" -D "$DATA" -U postgres --auth=trust --encoding=UTF8 --locale=C >/dev/null
+      # The port comes from the checkout's path, so that two checkouts do not ask for the same one.
+      PORT=$((20000 + $(printf %s "$ROOT" | cksum | cut -d' ' -f1) % 12000))
       "$PGBIN/pg_ctl" -D "$DATA" -l "$ROOT/.pg/server.log" -w \
         -o "-p $PORT -c listen_addresses=localhost -c timezone=UTC" start >/dev/null
     fi
+    PORT=$(port)
     echo "postgres://postgres@localhost:$PORT"
     ;;
   stop) "$PGBIN/pg_ctl" -D "$DATA" -m fast stop ;;
-  psql) shift; exec "$PGBIN/psql" -h localhost -p "$PORT" -U postgres "$@" ;;
+  psql) shift; PORT=$(port); exec "$PGBIN/psql" -h localhost -p "$PORT" -U postgres "$@" ;;
   *) echo "usage: scripts/pg.sh start|stop|psql [args]" >&2; exit 2 ;;
 esac

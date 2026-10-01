@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { Kysely, PostgresDialect, sql, type Transaction } from 'kysely';
 import pg from 'pg';
 import type { DB } from './schema.ts';
@@ -5,8 +6,22 @@ import type { DB } from './schema.ts';
 export type { DB };
 export type { Meaning, Role, TestState } from './schema.ts';
 
+const PID_FILE = new URL('../../../.pg/data/postmaster.pid', import.meta.url);
+
+// PostgreSQL keeps a running cluster's port on line 4 of postmaster.pid, and scripts/pg.sh reads the same line.
+function serverUrl(): string {
+  if (process.env.LIMS_PG) return process.env.LIMS_PG;
+  try {
+    return `postgres://postgres@localhost:${readFileSync(PID_FILE, 'utf8').split('\n')[3]}`;
+  } catch (error) {
+    throw new Error('This checkout has no PostgreSQL running. Run scripts/pg.sh start, or set LIMS_PG.', {
+      cause: error,
+    });
+  }
+}
+
 export function databaseUrl(database = process.env.LIMS_DB ?? 'lims', user?: string): string {
-  const url = new URL(process.env.LIMS_PG ?? 'postgres://postgres@localhost:54339');
+  const url = new URL(serverUrl());
   url.pathname = `/${database}`;
   if (user) url.username = user;
   return url.href;
