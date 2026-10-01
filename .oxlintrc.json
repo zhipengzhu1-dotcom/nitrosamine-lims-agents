@@ -17,6 +17,7 @@
     "jsdoc/require-param": "off",
     "jsdoc/require-returns": "off",
     "jsx-a11y/prefer-tag-over-role": "off",
+    "max-lines": "off",
     "max-lines-per-function": "off",
     "no-await-in-loop": "off",
     "no-shadow": "off",
