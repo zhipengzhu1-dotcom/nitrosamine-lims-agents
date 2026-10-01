@@ -18,6 +18,8 @@ import {
 import { type Kysely, sql } from 'kysely';
 import { type AppOptions, buildApp } from '../src/app.ts';
 
+type LogSink = NonNullable<AppOptions['log']>;
+
 const { server } = dbConfig();
 
 /** The status each kind answers with, as the tests expect it; every refused answer is checked against this table. */
@@ -93,17 +95,18 @@ const accessEventKey = randomBytes(32);
 
 interface ListenOptions {
   secureCookie?: boolean;
+  log?: LogSink;
   login?: AppOptions['login'];
   sweepEveryMs?: number | null;
 }
 
 async function listen(
   db: Kysely<DB>,
-  { secureCookie = false, login = 'decided', sweepEveryMs = null }: ListenOptions = {},
+  { secureCookie = false, log, login = 'decided', sweepEveryMs = null }: ListenOptions = {},
 ) {
   const lines: string[] = [];
   const app = buildApp(db, {
-    log: { write: (line) => lines.push(line) },
+    log: log ?? { write: (line) => lines.push(line) },
     secureCookie,
     accessEventKey,
     login,

@@ -1,10 +1,12 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, verifyPassword } from '@lims/db/credentials';
 import { type ActorContext, routes, SESSION_ENDED, type SessionClock } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
-import { refuse } from './refuse.ts';
+import { openJobIncident } from './incident.ts';
+import { refuse, requestReference } from './refuse.ts';
 
 export const LOCKOUT_AFTER_FAILURES = 20;
 export const SESSION_COOKIE = 'lims_session';
@@ -165,15 +167,7 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined, limits
   const idle = interval(limits.idleMs);
   const absolute = interval(limits.absoluteMs);
   if (session.lockedAt) {
-    // An expired session is left to the sweep, which records its expiry; a live one ends with the lock.
-    await db
-      .updateTable('session')
-      .set({ endedAt: sql`now()` })
-      .where('labId', '=', key.labId)
-      .where('id', '=', key.id)
-      .where('endedAt', 'is', null)
-      .where(sql<boolean>`lims.session_end(last_seen_at, created_at, ${idle}, ${absolute}) > now()`)
-      .execute();
+    await endSession(db, key, limits);
     return refuse('noSession', SESSION_ENDED);
   }
   const { rows } = await sql<{
@@ -204,12 +198,49 @@ export async function endExpiredSessions(db: Kysely<DB>, limits: SessionLimits):
   );
 }
 
+/** Ends a session that has not reached its end, and says whether it did; a session past its end is left to the sweep, which records its expiry. */
+async function endSession(q: Kysely<DB>, key: SessionKey, limits: SessionLimits): Promise<boolean> {
+  const { rows } = await sql<{
+    ended: boolean;
+  }>`select lims.end_session(${key.labId}, ${key.id}, ${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}) as ended`.execute(
+    q,
+  );
+  return rows[0]?.ended === true;
+}
+
+/**
+ * Runs the expiry sweep every `everyMs` until the API closes. A failed sweep opens a System Incident and the next one
+ * retries, writing the same record, since each expiry is stamped at its computed end. A tick skips while a sweep is
+ * still running, and close waits for it.
+ */
+export function scheduleExpirySweep(app: App, db: Kysely<DB>, limits: SessionLimits, everyMs: number): void {
+  let running: Promise<void> | null = null;
+  const sweep = setInterval(() => {
+    running ??= endExpiredSessions(db, limits)
+      .catch((err: Error) => openJobIncident(db, app.log, { reference: requestReference(), step: 'expirySweep' }, err))
+      .finally(() => {
+        running = null;
+      });
+  }, everyMs);
+  app.addHook('onClose', async () => {
+    clearInterval(sweep);
+    await running;
+  });
+}
+
 function typedUserIdDigest(key: Buffer, typed: string) {
   return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: typed.length };
 }
 
 /** Signs a person in. Every attempt, refused or not, writes its Access Event in a transaction of its own that commits. */
-export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, limits: SessionLimits): void {
+export function loginRoutes(
+  app: App,
+  db: Kysely<DB>,
+  accessEventKey: Buffer,
+  secureCookie: boolean,
+  limits: SessionLimits,
+): void {
+  app.register(cookie, { parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: secureCookie } });
   app.route({
     ...routes.login,
     handler: async (req, reply) => {
@@ -282,21 +313,14 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, li
 }
 
 /** Ends the request's session and writes its sign-out Access Event, under the person who signs out. */
-export function logoutRoute(app: App, db: Kysely<DB>): void {
+export function logoutRoute(app: App, db: Kysely<DB>, limits: SessionLimits): void {
   app.route({
     ...routes.logout,
     handler: async (req, reply) => {
       const { actor, sessionKey: session } = req;
       const as = { actor: `person:${actor.person.username}`, role: SIGN_OUT_NEEDS_NO_ROLE, reason: 'Sign out' };
       await audited(db, as, async (tx) => {
-        const ended = await tx
-          .updateTable('session')
-          .set({ endedAt: sql`now()` })
-          .where('labId', '=', session.labId)
-          .where('id', '=', session.id)
-          .where('endedAt', 'is', null)
-          .executeTakeFirst();
-        if (!ended.numUpdatedRows) return;
+        if (!(await endSession(tx, session, limits))) return;
         await record(tx, {
           kind: 'SignOut',
           subjectId: actor.person.id,

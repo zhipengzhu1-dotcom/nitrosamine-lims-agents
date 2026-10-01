@@ -52,6 +52,19 @@ begin
   return left_ms;
 end $$;
 
+-- Ends a session that has not reached its end, at now(), and says whether it did. A session past its end is left to the
+-- sweep, so its expiry is always recorded. lims_app ends a session only through here.
+create function lims.end_session(p_lab_id uuid, p_id uuid, idle interval, absolute interval) returns boolean
+language plpgsql security definer set search_path = lims, pg_temp as $$
+begin
+  perform check_session_limits(idle, absolute);
+  update session s
+     set ended_at = now()
+   where s.lab_id = p_lab_id and s.id = p_id and s.ended_at is null
+     and session_end(s.last_seen_at, s.created_at, idle, absolute) > now();
+  return found;
+end $$;
+
 -- Ends every session past its end and writes its expiry Access Event at that end, not at the time the sweep runs.
 -- Only a session not yet ended is ended, so a second sweep, or one racing a sign-out, writes nothing more.
 -- Security definer because lims_app may not choose an Access Event's time; the caller sets the audit context.
@@ -81,11 +94,11 @@ end $$;
 
 create index session_open_idx on lims.session (last_seen_at) where ended_at is null;
 
--- lims_app opens a session and ends it, but its times move only through touch_session and the sweep.
+-- lims_app opens a session, but its times move and it ends only through touch_session, end_session and the sweep.
 revoke insert, update on lims.session from lims_app;
 grant insert (lab_id, person_id, token_hash) on lims.session to lims_app;
-grant update (ended_at) on lims.session to lims_app;
 
 grant execute on function lims.session_end(timestamptz, timestamptz, interval, interval) to lims_app;
 grant execute on function lims.touch_session(uuid, uuid, interval, interval) to lims_app;
+grant execute on function lims.end_session(uuid, uuid, interval, interval) to lims_app;
 grant execute on function lims.end_expired_sessions(interval, interval) to lims_app;

@@ -19,6 +19,10 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
+export type IncidentKind = "UnexpectedFailure";
+
+export type IncidentState = "Open";
+
 export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
 
 export type Json = JsonValue;
@@ -170,6 +174,21 @@ export interface Submission {
   submittedBy: string;
 }
 
+export interface SystemIncident {
+  constraintName: string | null;
+  errorClass: string;
+  id: Generated<string>;
+  kind: IncidentKind;
+  openedAt: Generated<Timestamp>;
+  recordId: string | null;
+  reference: string;
+  requestedBy: string | null;
+  sessionLabId: string | null;
+  sqlstate: string | null;
+  state: Generated<IncidentState>;
+  step: string;
+}
+
 export interface Test {
   assigneeId: string | null;
   gxpClass: Generated<string>;
@@ -207,6 +226,7 @@ export interface DB {
   session: Session;
   signature: Signature;
   submission: Submission;
+  systemIncident: SystemIncident;
   test: Test;
   testReport: TestReport;
   trainingRecord: TrainingRecord;

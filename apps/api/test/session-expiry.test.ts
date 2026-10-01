@@ -189,12 +189,13 @@ it('the sweep takes every login configuration the API offers', async () => {
   for (const limits of Object.values(SESSION_LIMITS)) await endExpiredSessions(api.db, limits);
 });
 
-it("the API's database role cannot move a session's times, so it cannot choose when an expiry is stamped", async () => {
+it("the API's database role cannot move or end a session itself, so it cannot choose when an expiry is stamped or skip it", async () => {
   const person = await api.addPerson('expiry.backdate', ['Analyst']);
   await api.login(person);
   for (const set of [
     { lastSeenAt: sql<Date>`now() - interval '1 day'` },
     { createdAt: sql<Date>`now() - interval '1 day'` },
+    { endedAt: sql<Date>`now() - interval '1 day'` },
   ])
     await assert.rejects(
       api.db.updateTable('session').set(set).where('personId', '=', person.id).execute(),
@@ -211,6 +212,40 @@ it('the API runs the sweep by itself on its schedule', async () => {
   for (let wait = 0; wait < 250 && (await expiriesOf(person)).length === 0; wait++) await sleep(20);
   await sweeping.app.close();
 
+  assert.deepEqual(
+    (await expiriesOf(person)).map((e) => e.kind),
+    ['IdleExpiry'],
+  );
+});
+
+it('a sweep that fails opens a System Incident, and the next sweep records the expiry', async () => {
+  const person = await api.addPerson('expiry.failing', ['Analyst']);
+  await api.login(person);
+  await api.advanceClock(person, idleMs + MINUTE_MS);
+  const incidents = () =>
+    api.superuser
+      .selectFrom('systemIncident')
+      .select(['step', 'sqlstate', 'requestedBy'])
+      .where('step', '=', 'expirySweep')
+      .execute();
+  const sweepAs = (grant: 'grant' | 'revoke') =>
+    sql`${sql.raw(grant)} execute on function lims.end_expired_sessions(interval, interval) ${sql.raw(grant === 'grant' ? 'to' : 'from')} lims_app`.execute(
+      api.superuser,
+    );
+
+  await sweepAs('revoke');
+  try {
+    const sweeping = await api.startAnotherApi({ sweepEveryMs: 20 });
+    for (let wait = 0; wait < 250 && (await incidents()).length === 0; wait++) await sleep(20);
+    await sweeping.app.close();
+  } finally {
+    await sweepAs('grant');
+  }
+
+  const [incident] = await incidents();
+  assert.deepEqual(incident, { step: 'expirySweep', sqlstate: '42501', requestedBy: null });
+  assert.deepEqual(await expiriesOf(person), [], 'the failed sweep wrote nothing');
+  await sweep();
   assert.deepEqual(
     (await expiriesOf(person)).map((e) => e.kind),
     ['IdleExpiry'],
