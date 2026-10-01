@@ -80,7 +80,7 @@
     "agent": "part11-expert",
     "seam": "no false alarm",
     "source": "research/part11 B1-B3, C4-C5 all satisfied",
-    "artifact": "Scope: the signing act and the signature record only. Release locking and report amendment are unchanged from decision #13. QA release is an e-signature. The signing dialog always asks for the typed user ID, the password and a fresh second factor: a TOTP code (accepted once) or a passkey assertion with user verification, even inside a session; the login session never counts toward the signature. The server stores an append-only signature row, linked into the Lab's audit chain, with signer, printed name, username, role, Lab, meaning 'Released', server UTC time taken from the database clock in the same transaction as the audit entry, the Lab's zone for display, record ID, record version, a SHA-256 hash of that version's canonical content, the version of the canonical form that produced the hash, the app release ID, the authenticator type and the session. The canonical content pins each child row's version ID and content hash and each attachment's SHA-256, and any change to a child row writes a new Record Version of every parent that includes it. Every canonical-form version stays in the code for the whole retention period and is never changed in place; the nightly chain verify recomputes every stored signature hash with the version it names. Every screen, PDF and export of the record renders the signature block after recomputing the SHA-256 of the signed version's canonical content with the canonical-form version stored on the signature; each signature is judged against the version it names. A later, unsigned version of the record shows 'UNSIGNED — changed after signature'; an earlier signed version keeps its signature block and is marked Superseded only once a later version carries a valid signature with the meaning that put it in force (Released for a Test Report); until then it stays in force with the note 'Draft vN+1 in progress (unsigned)'; a hash mismatch on the signed version itself shows 'SIGNATURE INVALID' and raises a System Incident that opens a Deviation.",
+    "artifact": "Scope: the signing act and the signature record only. Release locking and report amendment are unchanged from decision #13. QA release is an e-signature. The signing dialog always asks for the typed user ID, the password and a fresh second factor: a TOTP code (accepted once) or a passkey assertion with user verification, even inside a session; the login session never counts toward the signature. The server stores an append-only signature row, linked into the Lab's audit chain, with signer, printed name, username, role, Lab, meaning 'Released', server UTC time taken from the database clock in the same transaction as the audit entry, the Lab's zone for display, record ID, record version, a SHA-256 hash of that version's canonical content, the version of the canonical form that produced the hash, the app release ID, the versioned signature statement shown to the signer with that statement's hash, the Review Checklist version the signer confirmed, the authenticator type and the session. The canonical content pins each child row's version ID and content hash and each attachment's SHA-256, and any change to a child row writes a new Record Version of every parent that includes it. Every canonical-form version stays in the code for the whole retention period and is never changed in place; the nightly chain verify recomputes every stored signature hash with the version it names. Every screen and export of the record renders the signature block after recomputing the SHA-256 of the signed version's canonical content with the canonical-form version stored on the signature; each signature is judged against the version it names. The issued Test Report PDF is the one exception, per ADR 0007: it is rendered once in the releasing transaction with the Released signature printed (name, username, role, meaning, time with zone, Record Version and hash), stored with its SHA-256 in an audited issue entry on the Lab chain, never re-rendered, and served only after its hash matches that entry; a mismatch raises a System Incident instead of re-rendering. Status changes after release appear on the screen, the download page and the export, never inside the issued file. A later, unsigned version of the record shows 'UNSIGNED — changed after signature'; an earlier signed version keeps its signature block and is marked Superseded only once a later version carries a valid signature with the meaning that put it in force (Released for a Test Report); until then it stays in force with the note 'Draft vN+1 in progress (unsigned)'; a hash mismatch on the signed version itself shows 'SIGNATURE INVALID' and raises a System Incident that opens a Deviation.",
     "expect": {
       "met": [
         "11.50"
@@ -89,6 +89,21 @@
         "11.50",
         "11.70",
         "11.200"
+      ]
+    }
+  },
+  {
+    "id": "p11-later-signing-password-only",
+    "agent": "part11-expert",
+    "seam": "catches planted gap",
+    "source": "research/auth E-signature re-authentication, decision #13: every signing re-authenticates in full (typed user ID + password + fresh second factor); the series-of-signings allowance is not adopted",
+    "artifact": "Scope: the re-authentication step of the signing dialog only. The signature record, its binding to the Record Version and its display are unchanged from decision #13. The first signing in a login session asks for the typed user ID, the password and a fresh TOTP code. While that session stays unbroken, each later signing asks only for the password.",
+    "expect": {
+      "gap": [
+        [
+          "11.200",
+          "A11d §13.3"
+        ]
       ]
     }
   },

@@ -68,7 +68,7 @@ S = the software enforces it; P = the lab's procedure; S+P = both.
 - B1 S, §11.50(a), A11d §13.6: signature shows printed name, username, role, UTC time with stated zone, and meaning.
 - B2 S, §11.50(b): signatures are immutable, audited, and rendered on every screen and printout of the record.
 - B3 S, §11.70, A11d §13.8: the signature stores record ID, version and a hash of the canonical content; any later change makes the record show as unsigned.
-- C4/C5 S, §11.200(a)(1), A11d §13.3: signing re-authenticates with two components; the session never counts as a signature. The first signing in a session is at least as strong as login (password + TOTP); later signings in the same unbroken session may use the password.
+- C4/C5 S, §11.200(a)(1), A11d §13.3: every signing re-authenticates in full with the typed user ID, the password and a fresh second factor (a new TOTP code, or a passkey assertion with user verification); the login session never counts toward a signature. The project decision (map ticket #13) governs here and is stricter than the rules: the series-of-signings allowance in §11.200(a)(1)(i) and A11d §13.3 is not adopted, so a later signing in a session that asks for the password alone, or any signing that omits the typed user ID or the second factor, is a `gap`.
 - A10 P(S), §11.10(j): the user acknowledges the signature-accountability attestation before signing is enabled; the acknowledgement is recorded.
 
 **Copies, retention, backup, time**
