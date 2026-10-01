@@ -23,7 +23,7 @@ export interface SignedIn {
 
 const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', reason: 'Sign in' };
 
-const HASH_TO_SPEND_A_KNOWN_USERS_SCRYPT_WORK_ON = await hashPassword(randomBytes(16).toString('base64url'));
+const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest();
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
@@ -165,7 +165,7 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): v
       const sourceAddress = req.ip;
       const person = await db.selectFrom('person').selectAll().where('username', '=', username).executeTakeFirst();
       if (!person) {
-        await verifyPassword(password, HASH_TO_SPEND_A_KNOWN_USERS_SCRYPT_WORK_ON);
+        await verifyPassword(password, TIMING_DECOY_HASH);
         await audited(db, SIGN_IN_SERVICE, (tx) =>
           record(tx, {
             kind: 'SignInFailed',
@@ -202,7 +202,12 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): v
       const token = randomBytes(32).toString('base64url');
       await audited(db, SIGN_IN_SERVICE, async (tx) => {
         if (person.failedLogins > 0)
-          await tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', person.id).execute();
+          await tx
+            .updateTable('person')
+            .set({ failedLogins: 0 })
+            .where('id', '=', person.id)
+            .where('lockedAt', 'is', null)
+            .execute();
         const session = await tx
           .insertInto('session')
           .values({ labId, personId: person.id, tokenHash: hashToken(token) })
