@@ -104,7 +104,6 @@ These rules come from [Decide the frontend design cycle](https://github.com/zhip
 
 ## Python and shell follow the same gate
 
-- Put a type hint on every Python function signature, so that a reader knows each argument's type without running the script.
 - Test Python with `unittest`, because it needs no dependency.
 - When the pdfplumber worker arrives, manage its packages with uv and a lockfile, and add pyright to the gate, so that Python gets the same pins and type check as TypeScript.
 - Start every shell script with `set -euo pipefail`, so that a failed command stops the script.
