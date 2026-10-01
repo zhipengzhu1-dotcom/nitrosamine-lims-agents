@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { checkoutDatabase } from '../src/checkout.ts';
+import { checkoutDatabase, checkoutE2ePorts } from '../src/checkout.ts';
 
 const cli = fileURLToPath(new URL('../src/checkout.ts', import.meta.url));
 
@@ -22,5 +22,33 @@ describe('checkout-scoped database names', () => {
   it('the checkout CLI prints the database name the tests use', () => {
     const printed = execFileSync(process.execPath, [cli, 'database', 'lims_e2e'], { encoding: 'utf8' });
     assert.equal(printed.trim(), checkoutDatabase('lims_e2e'));
+  });
+});
+
+describe('checkout-scoped e2e ports', () => {
+  it('two checkout paths give different e2e ports, and one path gives the same ports each time', () => {
+    const one = checkoutE2ePorts('/a/one');
+    assert.notDeepEqual(one, checkoutE2ePorts('/a/two'));
+    assert.deepEqual(one, checkoutE2ePorts('/a/one'));
+  });
+
+  it('every checkout gets an even API port in 10000-19999 with the web port one above, clear of the dev, demo and cluster ports', () => {
+    const taken = new Set([80, 443, 3000, 5173]);
+    for (let i = 0; i < 2000; i++) {
+      const { api, web } = checkoutE2ePorts(`/checkouts/${i}`);
+      assert.equal(api % 2, 0, `API port ${api} is even`);
+      assert.ok(api >= 10_000 && web <= 19_999, `ports ${api} ${web} lie in 10000-19999`);
+      assert.equal(web, api + 1);
+      for (const port of [api, web]) {
+        assert.ok(!taken.has(port), `port ${port} is not a dev or demo port`);
+        assert.ok(port < 20_000 || port > 31_999, `port ${port} is outside the cluster range`);
+      }
+    }
+  });
+
+  it('the checkout CLI prints the e2e ports Playwright uses', () => {
+    const printed = execFileSync(process.execPath, [cli, 'e2e-ports'], { encoding: 'utf8' });
+    const { api, web } = checkoutE2ePorts();
+    assert.equal(printed.trim(), `${api} ${web}`);
   });
 });
