@@ -491,6 +491,7 @@ td a,
 }
 .sheet__line {
   --lines: 2;
+  display: grid;
   flex: 1;
   min-height: calc(var(--lines) * 1lh + 19px);
   margin: 0;
@@ -501,6 +502,14 @@ td a,
   color: var(--ink-2);
   font-size: 13px;
   font-weight: 700;
+}
+/* The note and the refusal share one cell, so a refusal takes the note's height whatever the font wraps it to. */
+.sheet__line > span {
+  grid-area: 1 / 1;
+}
+.sheet__line > [hidden] {
+  display: block;
+  visibility: hidden;
 }
 .sheet__line.refusal {
   border-color: var(--bad);

@@ -370,7 +370,8 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
             </div>
             <div className="sheet__foot">
               <p key={refusal?.n} id="sheet-line" className={`sheet__line ${refusal ? 'refusal' : ''}`}>
-                {refusal?.text ?? (shown.signs ? demoSigning : shown.context)}
+                <span hidden={refusal !== null}>{shown.signs ? demoSigning : shown.context}</span>
+                {refusal && <span>{refusal.text}</span>}
               </p>
               <button type="button" className="rbtn rbtn--quiet" onClick={() => close(false)}>
                 Cancel
