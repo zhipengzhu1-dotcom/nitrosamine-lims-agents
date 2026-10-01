@@ -13,7 +13,7 @@ import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
 import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE } from './auth.ts';
 import { readRoutes } from './reads.ts';
-import { answerThrown } from './scope.ts';
+import { answerThrown, requestReference } from './scope.ts';
 import { stepRoutes } from './steps.ts';
 
 declare module 'fastify' {
@@ -70,6 +70,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
       ? { level: 'info', stream: options.log, redact: { paths: REDACTED, censor: '[redacted]' } }
       : false,
     ajv: { customOptions: { coerceTypes: false } },
+    genReqId: requestReference,
   }).withTypeProvider<WireTypes>();
   app.setErrorHandler(answerThrown);
   app.register(cookie, {
