@@ -421,7 +421,7 @@ The shared contract holds for every item below unless it says otherwise: one mig
 - Who approves the QA person's own Released Authorisations when the company has one QA (decision 19 §5: two QA people approve each other's). Assumed: the Lab Manager holds QA as well, as a demo exception.
 - Whether replacing an authenticator through the handover repeats the Admin's identity check (decision 13 §1 says replacing a lost authenticator repeats step 1). Assumed not for the owner's own demo accounts; the check stays recorded. Reversed by S2 (part11 G4): `identity.reenrol` clears the check.
 - The unit of an S/N Run Check (a ratio; decision 36's catalogue names no unit). Written as `ratio`.
-- The AI-derived limit's stated digits (decision 29 rounds down to the stated digits; nothing states them). The seed writes NDMA at 320 mg/day as `0.30` ppm.
+- The AI-derived limit's stated digits (decision 29 rounds down to the stated digits; nothing states them). The seed writes NDMA at 320 mg/day as `0.30` ppm. Settled by C3b: two significant figures.
 - Whether a Reviewer may Return a Test that is Submitted for Review after the report is drafted (the report holds only Reviewed Tests, so the question does not arise in the slice).
 - Whether `submissionState` should read a Rejected Submission when every Test was rejected at Acceptance and the Sample was never received. Assumed yes; the portal prints it.
 - How the Reviewer unticks a checklist item (a change to a non-critical value needs a picklist reason). Not built; a tick stands.
@@ -496,7 +496,7 @@ The shared contract holds for every item below unless it says otherwise: every r
 
 The shared contract holds for every item below: reference records are still drafted by commands, sealed at once and made effective by QA's Approved signing, and each check is a pure function in `packages/domain` fed by the command or the signing rule.
 
-- **An AI-derived limit is typed, then checked, not computed and stored** (decision 29 says "computed by the server and never typed"). `reference.specification` computes AI ÷ MDD exactly and refuses a line whose limit is not that value rounded down to the limit's own written decimals (`derivationGate`, `packages/domain/src/limits.ts`), so the written decimals stay the Lab's choice while the value cannot drift from its derivation. The stored bytes equal what the server would compute. No LTL factor exists in the schema, so none is applied.
+- **An AI-derived limit is typed, then checked, not computed and stored** (decision 29 says "computed by the server and never typed"). `reference.specification` computes AI ÷ MDD exactly and refuses a line whose limit is not that value rounded down to the limit's own written decimals (`derivationGate`, `packages/domain/src/limits.ts`), so the written decimals stay the Lab's choice while the value cannot drift from its derivation. The stored bytes equal what the server would compute. No LTL factor exists in the schema, so none is applied. Superseded by C3b: the rounding is now half up to two significant figures, and a lower limit is allowed.
 - **`basis` is required on every Specification Line, not only nitrosamine lines.** Every line the skeleton can hold is AI-derived; fixed-concentration, limit-test and report-only lines are left out of the type (U2b), and a line kind will be added with them. The Acceptable Intake and the maximum daily dose must be positive.
 - **The Decision Rule is a field of each Section**, `{ rule: 'simple-acceptance', riskBasis, wording: { conforms, doesNotConform } }`, sealed into the version the Customer accepts. Guarded acceptance is not representable rather than refused, as report-only lines are, because it needs the Uncertainty Evaluation. The content tag moved to `specification@2`. Printing it is C4's.
 - **Adoption status is checked twice**, at `reference.adoption` and in the Approved signing rule, by one gate (`adoptionStatusGate`): `verified` and `verified-basic-compendial` only on a compendial basis, and basic compendial never with an Analyte whose Substance kind is `small-nitrosamine` or `ndsri`. The draft check saves a record that could never be approved; the signing check is the one that makes it effective, and a test drafts around the first to prove the second.
@@ -510,15 +510,34 @@ The shared contract holds for every item below: reference records are still draf
 
 ### Spec gaps found by C3
 
-- The AI-derived limit's stated digits (decision 29; carried from U5 and on the map). The check accepts any decimals, so a limit written with too few can round down to zero (96 ng/day over 1200 mg/day written `0.0`); the vectors pin that this is not decided here.
+- The AI-derived limit's stated digits (decision 29; carried from U5 and on the map). The check accepts any decimals, so a limit written with too few can round down to zero (96 ng/day over 1200 mg/day written `0.0`); the vectors pin that this is not decided here. Settled by C3b (the owner's 2026-09-30 decision).
 - Which of decision 20 §7's ticked items go on the Run's checklist and which on the Test's (§7 names one list for both). Assumed: raw-data items (chromatograms, excluded Injections) on the Run, calculations and result flags on the Test, the audit trail and Notebook Entries on both.
 - The §7 ticks on excluded Injections, Notebook Entries, the MassLynx processing history and result flags are left off until those records exist; a tick carries no comment, so the flag acknowledgement needs a comment field when it returns.
-- Whether a regulator-published limit may be entered as published (#29). Rounding down makes FDA's own NDMA example for metformin IR, 96 ng/day ÷ 2550 mg/day = 0.0376…, `0.037` ppm, where FDA publishes `0.038` (the usp-expert's review of C3). The check follows decision 29 as written.
+- Whether a regulator-published limit may be entered as published (#29). Rounding down makes FDA's own NDMA example for metformin IR, 96 ng/day ÷ 2550 mg/day = 0.0376…, `0.037` ppm, where FDA publishes `0.038` (the usp-expert's review of C3). The check follows decision 29 as written. Settled by C3b (the owner's 2026-09-30 decision).
 - Adoption statuses rest on no signed Method Report in the skeleton (ADR 0004 copies scope from one); the iso 11 exception covers only the LOQ. Assumed covered by the same exception until Method Reports are built.
 - The portal has no Specification screen, so nothing yet shows the Customer Approver the Decision Rule's risk basis and wording before `specification.accept` (ISO/IEC 17025 §7.1.3). The unit that builds the accept screen must print them.
 - The Run Performed gate reads the instrument's current Fitness Status, not its status at acquisition, now that no tick covers it. Harmless while fitness never changes (the iso 5 exception); the equipment module must judge it at the acquisition time.
 - The Decision Rule's risk basis and printed wording (decision 29 says the record holds them; nothing gives the words). The seed writes a simple-acceptance statement citing ILAC-G8:09/2019.
 - Which Substance kinds count as nitrosamine Analytes for basic compendial (decision 36 §4). Assumed `small-nitrosamine` and `ndsri`.
+
+### C3b, the AI-derived limit's rounding (the owner's 2026-09-30 decision, reopening decision 29 on this point)
+
+The owner ruled on 2026-09-30 that an AI-derived limit is AI ÷ MDD computed exactly, then rounded half up to two significant figures, following scientific notation, so the LIMS gives the figure FDA prints: metformin IR, 96 ng/day ÷ 2550 mg/day = 0.0376… ppm, is `0.038`, where decision 29's round-down gave `0.037`. This settles C3's spec gaps on the stated digits and on entering a regulator-published limit, and review-fixes.md's map question on the digits. The shared contract holds: the limit is still typed, checked by `derivationGate` in `reference.specification`, and kept as written; no database guard is involved, so there is no mutant.
+
+- **A line states the derived value exactly as written, or a lower value.** `0.038` and `0.0375` pass at 2550 mg/day; `0.04` and `0.0381` are refused, and the refusal names `0.038`. The derived value carries two significant figures, trailing zero included: 96 ÷ 320 is `0.30`, and 0.0995 carries to `0.10`.
+- **A lower limit must be written to at least the derived value's decimals** (the usp-expert's review of C3b). Under GN 7.20 a result is rounded to the limit's decimals, so fewer decimals loosen a limit: `0.3` against a derived `0.31` (96 ÷ 310) would pass 0.34. "Tighter (lower)" is read as lower and never looser in effect, so `0.03` against `0.038` is refused too, although it happens to be stricter; `0.030` passes. The refusal says "Write 0.038, or a lower limit with at least as many decimals."
+- **The same number written with other decimals is refused**, `0.3` and `0.300` where the derivation is `0.30`. The ruling names the derived value or a lower one, and neither is.
+- **A limit must be positive** (`PositiveDecimal` on the line). Once a lower limit is allowed, zero or a negative value would pass the derivation.
+- **Above 99 the derived value is an integer with its trailing zeros**, `190` for 192; a Written has no negative decimals, so the zeros are printed but not significant.
+
+### Spec gaps found by C3b
+
+- Whether the same number with more decimals (`0.300` against `0.30`) should pass: it is stricter under GN 7.20, but the ruling names only the derived value or a lower one, so it is refused.
+- Whether an NMPA Section, whose Rule Set may round half to even (GB/T 8170), also derives its limit half up. The ruling names half up with no Jurisdiction exception, so every Section derives half up; a tie needs AI ÷ MDD to end exactly on a 5 at the third significant figure.
+- Decision 29's text on the map still reads "rounded down to the stated digits"; the ruling needs recording there before #24 closes.
+- Whether "tighter (lower)" means numerically lower or stricter under GN 7.20. Assumed both: lower, and written to at least the derived value's decimals (the usp-expert's reading, for the owner to confirm).
+- Decision 29 keeps "its derivation" with the limit. The sealed version keeps the inputs (AI, its source, MDD) and the limit as written, but not the derived value or which rounding rule accepted it, so a version sealed under the round-down rule and one sealed under this one read alike (the iso17025-expert's review, 7.5.1, unclear). Storing the derived value and a rule id in each line changes the accepted body and its tag, and is left to the Specification module.
+- A version with a zero limit, which the round-down gate accepted, no longer parses under `PositiveDecimal`. The demo database is reseeded, never migrated (C3 above), so none exists.
 
 ### S1, database guards after the core review (`packages/db` migrations 0060–0063, `packages/domain/src/gates.ts`, `apps/api/src/records/kinds/chain.ts`)
 
