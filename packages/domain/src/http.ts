@@ -123,7 +123,11 @@ const lookups = Type.Object({
   analysts: Type.Array(Type.Object({ id: uuid, displayName: Type.String() })),
 });
 /** When both hash chains were recomputed, and the seq of the first broken entry of each, or null when it holds. */
-const chainCheck = Type.Object({ at: instant, lab: nullable(Type.String()), company: nullable(Type.String()) });
+const auditTrailVerification = Type.Object({
+  at: instant,
+  lab: nullable(Type.String()),
+  company: nullable(Type.String()),
+});
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** The body Fastify writes for every refusal `refuse()` throws and every request that fails validation. */
 const refusalBody = Type.Object({ statusCode: Type.Integer(), error: Type.String(), message: Type.String() });
@@ -183,7 +187,7 @@ export const routes = {
   tests: route('GET', '/api/tests', {}, Type.Array(testRow)),
   test: route('GET', '/api/tests/:id', { params: byId }, testView),
   report: route('GET', '/api/tests/:id/report', { params: byId }, testReport),
-  verifyAuditTrail: route('POST', '/api/audit/verify', {}, chainCheck),
+  verifyAuditTrail: route('POST', '/api/audit/verify', {}, auditTrailVerification),
 } satisfies Record<string, Route>;
 
 /** The route of one step. Its body requires testId when the step starts from a state, and signature when it signs. */

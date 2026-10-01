@@ -31,7 +31,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 ## Types say what crosses a boundary
 
-- Cast only inside a seam module, on a line whose lint-disable comment says why the types cannot express it, so that every cast has a stated reason and a small home. `scope.ts` and `apps/web/src/api.ts` are the two modules that need casts today. The web types a reply as its route's reply without checking it, because the API serializes every reply through that route's schema and the API tests check every reply against it, and a check in the browser would add TypeBox's checker to the bundle.
+- Turn a type check off (a cast, a non-null `!` or an `any`) only inside a seam module, on a line whose lint-disable comment says why the types cannot express it, so that every escape has a stated reason and a small home. `scope.ts` and `apps/web/src/api.ts` are the two modules that need casts today. The web types a reply as its route's reply without checking it, because the API serializes every reply through that route's schema and the API tests check every reply against it, and a check in the browser would add TypeBox's checker to the bundle.
 - Define each shape that crosses HTTP once, as a TypeBox schema in `@lims/domain`. Validate requests with it in the API, and import the derived type in the web and the tests, so that the three cannot drift apart.
 - Declare a response schema on every route, so that a column that is not in the schema never leaves the API.
 

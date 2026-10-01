@@ -45,6 +45,7 @@ async function prove(db: Kysely<DB>, person: Person, password: string, reason: s
   notValid();
 }
 
+/** Proves the signer before a Signature is written: a wrong password refuses with 401 and counts toward lockout. */
 export async function reauthenticate(db: Kysely<DB>, ctx: ActorContext, password: string, step: string): Promise<void> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', ctx.person.id).executeTakeFirstOrThrow();
   await prove(db, person, password, `Re-authenticate to sign ${step}`);

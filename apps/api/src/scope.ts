@@ -12,6 +12,7 @@ import {
 type CompanyTable = 'customer' | 'person' | 'method' | 'submission' | 'lab';
 type LabTable = Exclude<keyof DB, CompanyTable | 'audit_entry' | 'session'>;
 
+/** The one place a refusal becomes an HTTP status: Fastify writes the thrown error as the route's 4xx body. */
 export function refuse(statusCode: number, message: string): never {
   throw Object.assign(new Error(message), { statusCode });
 }
