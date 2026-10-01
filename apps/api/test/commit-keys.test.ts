@@ -159,7 +159,7 @@ it("the same Commit Key from another session is refused and does not answer the 
   const refused = await post(otherSession, 'submit', { commitKey: key, ...submission });
   assert.equal(
     refusedWith(refused, 'keyReused'),
-    'this press was already sent from another session; reload to see what was saved',
+    'this press was already saved under another sign-in; reload to see what was saved',
   );
   assert.deepEqual(await totals(), before, 'no second Submission');
 });
@@ -186,4 +186,14 @@ it('a refused press leaves its Commit Key unused, so the corrected retry commits
   refusedWith(await enterResult(key, testId, 'not-the-password'), 'badCredentials');
   assert.deepEqual(ok(await enterResult(key, testId)), { testId, state: 'SubmittedForReview' });
   assert.deepEqual(await writtenBy(testId), once);
+});
+
+it('more concurrent signing presses than the connection pool holds all commit', { timeout: 30_000 }, async () => {
+  const tests: string[] = [];
+  for (let i = 0; i < 12; i++) tests.push(await assigned());
+  const answers = await Promise.all(tests.map((testId) => enterResult(randomUUID(), testId)));
+  assert.deepEqual(
+    answers.map((answer) => ok(answer).state),
+    tests.map(() => 'SubmittedForReview'),
+  );
 });

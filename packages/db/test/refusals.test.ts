@@ -85,7 +85,7 @@ const fixture: [string, Row][] = [
       lab_id: id.lab,
       key: id.commitKey,
       session_id: id.session,
-      request: { step: 'receive', testId: id.test, input: {} },
+      request_hash: Buffer.alloc(32, 3),
       test_id: id.test,
       state: 'Ready',
     },
@@ -188,11 +188,11 @@ const tables = {
       lab_id: id.lab,
       key: randomUUID(),
       session_id: id.session,
-      request: { step: 'assign', testId: id.test, input: { assigneeId: id.person } },
+      request_hash: Buffer.alloc(32, 4),
       test_id: id.test,
       state: 'Assigned',
     },
-    notNull: ['lab_id', 'key', 'session_id', 'request', 'test_id', 'state', 'committed_at'],
+    notNull: ['lab_id', 'key', 'session_id', 'request_hash', 'test_id', 'state', 'committed_at'],
   },
   'lims.audit_chain': {
     noun: 'Audit Trail chain head',
@@ -617,7 +617,7 @@ describe('an audited write without an actor, a role and a reason is refused', ()
   }
 });
 
-describe('a Signature or an Audit Trail entry is never changed or removed, even by the superuser', () => {
+describe('a Signature, an Audit Trail entry or a Commit Key is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
     {
       name: 'updating a Signature is refused',
@@ -636,6 +636,24 @@ describe('a Signature or an Audit Trail entry is never changed or removed, even 
       table: 'lims.signature',
       trigger: 'refuse_truncate',
       statement: 'truncate lims.signature',
+    },
+    {
+      name: "changing a Commit Key's receipt is refused",
+      table: 'lims.commit_key',
+      trigger: 'refuse_change',
+      statement: `update lims.commit_key set state = 'Reported'`,
+    },
+    {
+      name: 'deleting a Commit Key is refused, so a late retry cannot commit again',
+      table: 'lims.commit_key',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.commit_key',
+    },
+    {
+      name: 'truncating the Commit Keys is refused',
+      table: 'lims.commit_key',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.commit_key',
     },
     {
       name: 'truncating the Audit Trail is refused',

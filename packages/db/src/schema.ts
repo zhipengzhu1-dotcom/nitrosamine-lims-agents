@@ -50,7 +50,7 @@ export interface CommitKey {
   committedAt: Generated<Timestamp>;
   key: string;
   labId: string;
-  request: Json;
+  requestHash: Buffer;
   sessionId: string;
   state: TestState;
   testId: string;

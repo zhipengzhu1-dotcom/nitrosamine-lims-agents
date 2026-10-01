@@ -79,7 +79,7 @@ export interface RailAction {
   context: string;
   fields: readonly Field[];
   signs: { meaning: SignedMeaning; what: string[] } | null;
-  run: (input: Record<string, string>, password: string | null, commitKey: string) => Promise<string>;
+  run: (input: Record<string, string>, password: string | null) => Promise<string>;
 }
 
 export function stepAction(
@@ -95,13 +95,21 @@ export function stepAction(
     context: what[0] ?? '',
     fields: ui.fields,
     signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
-    async run(input, password, commitKey) {
+    async run(input, password) {
+      // Kept until the server answers, even across a reload, so pressing again after no answer resends this press.
+      const press = `commitKey:${name}:${testId ?? 'new'}`;
+      const commitKey = sessionStorage.getItem(press) ?? crypto.randomUUID();
+      sessionStorage.setItem(press, commitKey);
       await api(stepRoute(name), {
         commitKey,
         ...(testId && { testId }),
         input,
         ...(password !== null && { signature: { password } }),
+      }).catch((e: unknown) => {
+        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(press);
+        throw e;
       });
+      sessionStorage.removeItem(press);
       await onDone();
       return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
@@ -198,12 +206,6 @@ type Sheet = { action: RailAction; closing: boolean } | null;
 const EXIT_FALLBACK_MS = 400;
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** The press the server never answered keeps its Commit Key when the same action is pressed again; any other press gets a new one. */
-function retryOrNewPress(unanswered: { action: string; commitKey: string } | null, a: RailAction) {
-  const action = `${a.label}\n${a.context}`;
-  return unanswered?.action === action ? unanswered : { action, commitKey: crypto.randomUUID() };
-}
-
 function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -213,7 +215,6 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
   const [refusal, setRefusal] = useState<Note | null>(null);
   const [instant, setInstant] = useState(false);
   const inFlight = useRef(false);
-  const unanswered = useRef<{ action: string; commitKey: string } | null>(null);
   const count = useRef(0);
   const returnFocus = useRef(false);
   const clearOnClose = useRef(false);
@@ -279,19 +280,16 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
-    unanswered.current = retryOrNewPress(unanswered.current, a);
     try {
-      const text = await a.run(values, a.signs ? password : null, unanswered.current.commitKey);
-      unanswered.current = null;
+      const text = await a.run(values, a.signs ? password : null);
       setNote({ text, tone: 'ok', n: ++count.current });
       returnFocus.current = true;
       if (sheet) close(true);
     } catch (e) {
-      if (e instanceof Refused && e.kind !== 'failure') unanswered.current = null;
       const refused: Note = {
         text:
           e instanceof Refused
-            ? `Refused: ${e.message}.${a.signs ? ' Nothing has been signed.' : ''}`
+            ? `Refused: ${e.message}.${a.signs && e.kind !== 'failure' ? ' Nothing has been signed.' : ''}`
             : 'The LIMS did not answer. Press again with the same entries; they will not be saved twice.',
         tone: 'bad',
         n: ++count.current,
