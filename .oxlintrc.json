@@ -131,6 +131,12 @@
       }
     },
     {
+      "files": ["packages/domain/test/**"],
+      "rules": {
+        "import/no-nodejs-modules": "off"
+      }
+    },
+    {
       "files": ["apps/web/**"],
       "rules": {
         "no-restricted-imports": [
