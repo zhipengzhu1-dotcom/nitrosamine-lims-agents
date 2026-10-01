@@ -94,8 +94,9 @@ try {
   const records = `(select ${test} union select id from lims.test_report where test_id = ${test})`;
   v.sql(
     'signatures',
-    `select meaning, record_table, signed_at from lims.signature
-    where record_id in ${records} order by signed_at`,
+    `select s.meaning, v.record_table, v.version, s.signed_at from lims.signature s
+    join lims.record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
+    where v.record_id in ${records} order by s.signed_at`,
   );
   v.sql(
     'audit-trail',
@@ -104,6 +105,8 @@ try {
        or (coalesce(new_row, old_row)->>'id') = (select id::text from lims.sample where number = '${sample}')
        or (coalesce(new_row, old_row)->>'test_id')::uuid = ${test}
        or (coalesce(new_row, old_row)->>'record_id')::uuid in ${records}
+       or (coalesce(new_row, old_row)->>'record_version_id')::uuid in
+          (select id from lims.record_version where record_id in ${records})
     order by at, chain, seq`,
   );
   v.note(`${sample} reached ${until}`);

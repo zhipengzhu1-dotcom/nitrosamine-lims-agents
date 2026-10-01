@@ -25,7 +25,7 @@ Preconditions:
 - **Content.** `getByRole('cell', { name: '0.0300', exact: true })` is visible, and for each Signature `getByRole('row', { name: /^Performed Ana Ferreira/ })` is visible (and the same for Reviewed and Released).
 - **Verify.** Press `Verify Audit Trail`. `steps.log` shows `POST /api/audit/verify -> 200`. The status line reads `Recomputed at <YYYY-MM-DD hh:mm:ss> UTC: Lab chain internally consistent, company chain internally consistent. Not anchored off-server (demo).`
 - **Not QA.** Sign in as `rui.reviewer` and open the same report. The rail holds only `Sign out`, and the status line reads `Nothing for you to commit here.`
-- **Proof.** Screenshot the report and the status line. Run `select number from lims.test_report`, and `select meaning, record_table from lims.signature order by signed_at desc limit 3`: `Released` is on `test_report`, `Reviewed` and `Performed` on `test`.
+- **Proof.** Screenshot the report and the status line. Run `select number from lims.test_report`, and `select s.meaning, v.record_table, v.version from lims.signature s join lims.record_version v on v.id = s.record_version_id order by s.signed_at desc limit 3`: `Released` is on `test_report` version 1, `Reviewed` and `Performed` on `test` version 3.
 
 ## Gotchas
 
