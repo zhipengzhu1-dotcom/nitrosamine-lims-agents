@@ -556,6 +556,21 @@ The shared contract holds for every item below unless it says otherwise.
 - Who records the retirement of a service identity (decision 13 names no author for service grants; migration 0030 is their only record). Assumed `svc:auth`, since the seed cannot revoke itself. The database admits a `svc:%` grant on any registered table, so only the app's `SERVICE_COMMANDS` keeps `svc:auth` to its own rows; a guard scoping it to the access-log tables and this one revocation needs a migration, which S2 may not add (part11 residual R2).
 - Whether a meaning's gate should also answer before re-authentication, so no refusal after the prompt ever spends a code (decision 23 rule 5 asks only that eligibility is shown first). Assumed not; `signing.prepare` shows it.
 
+### C2 after the core review: who writes a Recorded Value (review fix 4)
+
+The unit was stopped after fix 4 when the prototype was cut back to #24's question; fixes 5, 6 (the unit check on record and change), 28 and 29 were not built and go to the map. The shared contract holds for every item below unless it says otherwise.
+
+- **Each field spec names its writer** (`FieldSpec.writer`: `assignee`, `acquirer`, `reviewer`), and `records/writers.ts` resolves the name against the parent: a Test's values are written by the assigned Analyst while the Test is In Progress, a Run's by the Analyst who acquired it while the Run is Open (no standing Performed), a Review's by the person who opened it until a signature cites any version of it. `Records.record` and `Records.change` ask the rule before sealing, so every path (the value commands, `run.create`, `review.tick`, `review.confirmVerdict`) is covered and the refusal is `not-permitted`. A fourth name, `unrestricted`, exists only for a head that names no person; the test-only widget uses it and no chain kind does.
+- **`loadReview` counts only ticks and confirmations whose effective version the reviewer wrote**, so the Reviewed and Released gates attest only to the signer's own entries even if a tick is written past the app (a chain test plants one through the database doors and proves the refusal).
+- **A Critical Data Change after Performed is now reached only through a Return.** The disposition's "while In Progress" and "while the Run is open" mean a Reviewer finds the error, returns the Test (`test.return`, to In Progress), the assignee proposes the correction, and the Reviewer approves it; the Test's signed version is then UNSIGNED and signed again. Test-plan D20 was rewritten to that path. A Run's values cannot change once its Performed stands, because nothing returns a Run; so the Run-to-Test cite propagation D20 used to drive is no longer reachable through the API (`packages/db` still proves `version_stands` over the closure), and after Reviewed nothing on a Test changes until amendment or invalidation is built. The API test for fix 2 (a release waits for pending changes) plants its pending changes through the database doors for the same reason.
+- **The release-lock API test** no longer reaches LR001 through `value.change`, since the writer rule refuses first; it proves the writer refusal and then LR001 by writing past it.
+
+### Spec gaps found by C2
+
+- A Run Check error found at Review has no correction path: the Run has no Return, and its values are fixed once Performed stands (decision 20 names the Test's Return only). Either a Run Return, or a Critical Data Change allowed to the acquirer on a Performed Run whose Tests are all In Progress; the map decides.
+- Who may reject a proposed change is still open (S1's gap); the writer rule does not cover `value.reject`.
+- `plant` in `apps/api/test/chain.test.ts` writes a value version with the `value@1` body shape straight through `lims.seal`; a database guard that the body's `value.unit` equals `recorded_value.unit` (fix 6) would have to accept that shape, and the `packages/db` test helpers write a flatter body today.
+
 ## Open questions and risks
 
 - **Recorded Value as a glossary term.** Should "Recorded Value" enter `CONTEXT.md` ("One typed or chosen value on a signable record, with who recorded it and when; the unit of Verified signing and Critical Data Change")? Or does an existing term fit that I missed?

@@ -261,7 +261,7 @@ const MUTANTS: Mutant[] = [
   {
     name: "the release ignores a pending change on a Run's value",
     file: '../../apps/api/src/records/kinds/chain.ts',
-    find: ", ...(await Promise.all(t.runs.map((x) => loadRun(ctx.q, x.id)))).flatMap((x) => pendingOf(x.values).map((v) => `${x.label} ${v}`))]",
+    find: ", ...(await Promise.all(t.runs.map((x) => loadRun(ctx.q, x.id)))).flatMap((x) => pendingOf(RUN_FIELD_SPECS, x.values).map((v) => `${x.label} ${v}`))]",
     replace: ']',
     test: 'test/chain.test.ts',
     package: 'apps/api',

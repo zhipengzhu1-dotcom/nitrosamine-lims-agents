@@ -26,16 +26,16 @@ const unverified = (fields: Fields, values: readonly ValueFact[]): string[] => v
 const pendingOf = (fields: Fields, values: readonly ValueFact[]): string[] => values.filter((v) => v.pending !== null).map((v) => labelOf(fields, v));
 
 const TEST_FIELD_SPECS: Fields = {
-  'prep.weight': { label: 'weight', critical: true, type: 'decimal', unit: 'mg', subject: 'preparation', verifiedEach: true },
-  'prep.dilution': { label: 'dilution volume', critical: true, type: 'decimal', unit: 'mL', subject: 'preparation', verifiedEach: true },
-  'prep.result': { label: 'result', critical: true, type: 'decimal', unit: 'pg/µL', subject: 'preparation+analyte', verifiedEach: true },
+  'prep.weight': { writer: 'assignee', label: 'weight', critical: true, type: 'decimal', unit: 'mg', subject: 'preparation', verifiedEach: true },
+  'prep.dilution': { writer: 'assignee', label: 'dilution volume', critical: true, type: 'decimal', unit: 'mL', subject: 'preparation', verifiedEach: true },
+  'prep.result': { writer: 'assignee', label: 'result', critical: true, type: 'decimal', unit: 'pg/µL', subject: 'preparation+analyte', verifiedEach: true },
 };
 
 const RUN_FIELD_SPECS: Fields = {
-  'run.instrument': { label: 'instrument', critical: true, type: 'ref', subject: 'none', verifiedEach: true },
-  'run.sequence': { label: 'sequence ID', critical: false, type: 'text', subject: 'none', verifiedEach: true },
-  'run.trueCopy': { label: 'True Copy', critical: true, type: 'blob', subject: 'none', verifiedEach: true },
-  'runcheck.value': { label: 'Run Check', critical: true, type: 'decimal', subject: 'run-check', verifiedEach: true },
+  'run.instrument': { writer: 'acquirer', label: 'instrument', critical: true, type: 'ref', subject: 'none', verifiedEach: true },
+  'run.sequence': { writer: 'acquirer', label: 'sequence ID', critical: false, type: 'text', subject: 'none', verifiedEach: true },
+  'run.trueCopy': { writer: 'acquirer', label: 'True Copy', critical: true, type: 'blob', subject: 'none', verifiedEach: true },
+  'runcheck.value': { writer: 'acquirer', label: 'Run Check', critical: true, type: 'decimal', subject: 'run-check', verifiedEach: true },
 };
 
 /** The attestation a Reviewed or Released signing cites must be this signer's Review of this record, on the named checklist. */
@@ -224,8 +224,8 @@ export const runKind: KindDef = {
 export const reviewKind: KindDef = {
   kind: 'review',
   fields: {
-    'checklist.item': { label: 'Checklist', critical: false, type: 'boolean', subject: 'checklist-item', verifiedEach: false },
-    'verdict.confirmation': { label: 'Verdict', critical: false, type: 'text', subject: 'checklist-item', verifiedEach: false },
+    'checklist.item': { writer: 'reviewer', label: 'Checklist', critical: false, type: 'boolean', subject: 'checklist-item', verifiedEach: false },
+    'verdict.confirmation': { writer: 'reviewer', label: 'Verdict', critical: false, type: 'text', subject: 'checklist-item', verifiedEach: false },
   },
   label: async (q, record) => {
     const r = await loadReview(q, record);

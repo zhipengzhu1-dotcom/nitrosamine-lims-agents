@@ -15,6 +15,12 @@ import type { Deps } from '../commit.ts';
 import type { Sealed, SignatureRow } from './index.ts';
 import { valueKind } from './kinds/value.ts';
 
+/**
+ * Who writes a field's values, and while the parent is in which state (review fix 4). Each name is a
+ * rule in records/writers.ts. `unrestricted` is for a head that names no person; no chain kind uses it.
+ */
+export type Writer = 'assignee' | 'acquirer' | 'reviewer' | 'unrestricted';
+
 export type FieldSpec = {
   /** The field's name as a person reads it, e.g. "weight"; the subject is added by fieldLabel. */
   readonly label: string;
@@ -23,6 +29,7 @@ export type FieldSpec = {
   readonly unit?: string;
   readonly subject: 'none' | 'preparation' | 'preparation+analyte' | 'run-check' | 'checklist-item';
   readonly verifiedEach: boolean; // typed entry: a second person signs Verified per value
+  readonly writer: Writer;
 };
 
 export type Read = ReadDb<DB>;

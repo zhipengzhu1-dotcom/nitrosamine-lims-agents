@@ -21,6 +21,7 @@ import { NEEDS_ATTESTATION, type Meaning } from '@lims/domain/signing';
 import type { ReauthenticatedSigner } from '../identity/reauth.ts';
 import type { Deps } from '../commit.ts';
 import type { KindDef, RuleContext, Signer } from './kinds.ts';
+import { writerRefusal } from './writers.ts';
 
 export type TypedValue =
   | { readonly type: 'decimal'; readonly value: Written; readonly unit: string }
@@ -229,6 +230,8 @@ export function records(tx: AuditedTx, deps: Deps, acted: Acted): Records {
       const spec = kinds.get(p.kind).fields[field];
       if (!spec) throw new Error(`${p.kind} has no field ${field}`);
       if (spec.type !== value.type) throw new Error(`${field} takes a ${spec.type}, not a ${value.type}`);
+      const notWriter = await writerRefusal(q, spec.writer, parent, acted.person);
+      if (notWriter) return notWriter;
       const taken = await q.selectFrom('recorded_value').select('record_id').where('parent_id', '=', parent).where('field', '=', field).where('subject', '=', subject).executeTakeFirst();
       if (taken) return { kind: 'transition', message: `${field}${subject ? ` (${subject})` : ''} already has a value. Change it instead.` };
       const id = randomUUID() as RecordId;
@@ -244,6 +247,11 @@ export function records(tx: AuditedTx, deps: Deps, acted: Acted): Records {
       const rv = await q.selectFrom('recorded_value').select(['ledger_id', 'parent_id', 'field', 'subject', 'value_type']).where('record_id', '=', value).executeTakeFirst();
       if (!rv) throw new Error(`Recorded Value ${value} does not exist`);
       if (rv.value_type !== to.type) throw new Error(`${rv.field} takes a ${rv.value_type}, not a ${to.type}`);
+      const p = await recordRow(rv.parent_id as RecordId);
+      const spec = kinds.get(p.kind).fields[rv.field];
+      if (!spec) throw new Error(`${p.kind} has no field ${rv.field}`);
+      const notWriter = await writerRefusal(q, spec.writer, p.id, acted.person);
+      if (notWriter) return notWriter;
       return saveValueVersion(value, rv.ledger_id as LedgerId, { schema: 'value@1', parent: rv.parent_id, field: rv.field, subject: rv.subject, value: canonValue(to) }, to);
     },
 
