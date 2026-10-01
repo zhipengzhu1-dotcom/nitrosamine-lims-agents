@@ -39,15 +39,30 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
   return {
     ctx,
     ...inLab(db, labId),
-    auditTrail: () => db.selectFrom('auditEntry').where('chain', '=', labId),
-    verifyAuditTrail: () =>
-      db
+    /** The entries of this Lab's chain and the company chain; another Lab's chain is out of reach. */
+    trail: () => db.selectFrom('auditEntry').where('chain', 'in', [labId, 'company']),
+    /** Recomputes this Lab's chain and the company chain: each one's last entry and the first entry that fails, or null. */
+    verifyAuditTrail: async () => {
+      const lastEntry = (chain: string) =>
+        sql<string>`coalesce((select max(seq) from lims.audit_entry where chain = ${chain}), 0)::text`;
+      const firstFailure = (chain: string) => sql<string | null>`lims.verify_chain(${chain})::text`;
+      const found = await db
         .selectNoFrom([
           sql<Date>`now()`.as('at'),
-          sql<string | null>`lims.verify_chain(${labId})`.as('lab'),
-          sql<string | null>`lims.verify_chain('company')`.as('company'),
+          lastEntry(labId).as('labLast'),
+          firstFailure(labId).as('labFailure'),
+          lastEntry('company').as('companyLast'),
+          firstFailure('company').as('companyFailure'),
         ])
-        .executeTakeFirstOrThrow(),
+        .executeTakeFirstOrThrow();
+      return {
+        at: found.at,
+        chains: [
+          { chain: 'lab' as const, lastEntry: found.labLast, firstFailure: found.labFailure },
+          { chain: 'company' as const, lastEntry: found.companyLast, firstFailure: found.companyFailure },
+        ],
+      };
+    },
     write: <R>(reason: string, role: Role, fn: (q: LabQueries) => Promise<R>) =>
       audited(db, { actor: `person:${ctx.person.username}`, role, reason }, (tx) => fn(inLab(tx, labId))),
   };

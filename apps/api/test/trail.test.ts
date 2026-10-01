@@ -1,0 +1,262 @@
+import assert from 'node:assert/strict';
+import { it } from 'node:test';
+import { audited } from '@lims/db';
+import { routes, type StepInput, type StepName, stepRoute, type TrailEntry } from '@lims/domain';
+import { sql } from 'kysely';
+import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
+
+const api = await startApi('lims_api_trail_test');
+const [cora, samir, lena, ana, rui, quinn] = [
+  api.person('cora'),
+  api.person('samir'),
+  api.person('lena'),
+  api.person('ana'),
+  api.person('rui'),
+  api.person('quinn'),
+];
+const as = {
+  cora: await api.login(cora),
+  samir: await api.login(samir),
+  lena: await api.login(lena),
+  ana: await api.login(ana),
+  rui: await api.login(rui),
+  quinn: await api.login(quinn),
+};
+
+const result = {
+  analyte: 'NDMA',
+  value: '0.0300',
+  unit: 'ppm',
+  injectionSequenceRef: 'SEQ-2026-0042',
+  notebookRef: 'NB-RD-0001-012',
+  performedOn: '2026-09-30',
+};
+
+async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
+  const signature = signer && { password: signer.password };
+  assert.equal((await client.call(stepRoute(name), { testId, input, ...(signature && { signature }) })).status, 200);
+}
+
+const order = ['Requested', 'Ready', 'Assigned', 'SubmittedForReview', 'Reviewed', 'Reported'] as const;
+async function submitTestTo(state: (typeof order)[number]): Promise<string> {
+  const { testId: id } = ok(
+    await as.cora.call(stepRoute('submit'), {
+      input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
+    }),
+  );
+  const reach = order.indexOf(state);
+  if (reach >= 1) await take(as.samir, 'receive', id);
+  if (reach >= 2) await take(as.lena, 'assign', id, { assigneeId: ana.id });
+  if (reach >= 3) await take(as.ana, 'enterResult', id, result, ana);
+  if (reach >= 4) await take(as.rui, 'review', id, {}, rui);
+  if (reach >= 5) await take(as.quinn, 'release', id, {}, quinn);
+  return id;
+}
+
+const trailOf = async (id: string, client = as.rui) => ok(await client.call(routes.testTrail, { id }));
+const lastEntryOf = async (chain: string) =>
+  (
+    await api.db
+      .selectFrom('auditEntry')
+      .select(sql<string>`max(seq)::text`.as('last'))
+      .where('chain', '=', chain)
+      .executeTakeFirstOrThrow()
+  ).last;
+
+const rename = (table: 'person' | 'sample', id: string, change: Record<string, string>, reason: string) =>
+  audited(api.db, { actor: 'svc:test', role: 'system', reason }, (tx) =>
+    tx.updateTable(table).set(change).where('id', '=', id).execute(),
+  );
+
+it("the Test's trail lists the Test's, its Result's and Signatures' entries with its Sample's and its Submission's, in time order, each marked with its chain", async () => {
+  const other = await submitTestTo('Ready');
+  const id = await submitTestTo('Reported');
+  const { entries, record, labZone } = await trailOf(id);
+
+  assert.deepEqual(record, { table: 'test', id, kind: 'Test', label: `Test on ${entries[1]?.record.label}` });
+  assert.equal(labZone, 'America/New_York');
+  const tables = new Set(entries.map((e) => e.record.table));
+  assert.deepEqual([...tables].sort(), ['result', 'sample', 'signature', 'submission', 'test', 'test_report']);
+  assert.deepEqual(
+    entries.filter((e) => e.record.table === 'test').map((e) => e.op),
+    ['INSERT', 'UPDATE', 'UPDATE', 'UPDATE', 'UPDATE', 'UPDATE', 'UPDATE'],
+    'one entry for the Test itself per step, two for assign (its state, then its Analyst), and none of another Test',
+  );
+  assert.equal(entries.filter((e) => e.record.table === 'signature').length, 3);
+  for (const e of entries)
+    assert.equal(e.chain, e.record.table === 'submission' ? 'company' : 'lab', `${e.record.kind} on its chain`);
+  for (const [i, e] of entries.entries()) {
+    const previous = entries[i - 1];
+    if (previous) assert.ok(previous.at <= e.at, `entry ${previous.seq} before ${e.seq} in time`);
+  }
+  const otherTrail = await trailOf(other);
+  assert.ok(!entries.some((e) => otherTrail.entries.some((o) => o.raw.chain === e.raw.chain && o.seq === e.seq)));
+});
+
+it("each entry carries the actor's label and role, the field's glossary name, old and new value, the reason, and UTC plus Lab-zone time; company-chain entries carry UTC only", async () => {
+  const id = await submitTestTo('Assigned');
+  const { entries } = await trailOf(id);
+  const [moved, assign] = entries.filter((e) => e.reason === 'assign');
+  assert.ok(moved && assign, 'the two assign entries');
+  assert.deepEqual(
+    [moved, assign].map((e) => ({ actor: e.actor, reason: e.reason, op: e.op, changes: e.changes })),
+    [
+      {
+        actor: { label: 'Lena Varga', role: 'LabManager' },
+        reason: 'assign',
+        op: 'UPDATE',
+        changes: [
+          { field: 'state', label: 'State', old: { text: 'Ready', ref: null }, new: { text: 'Assigned', ref: null } },
+        ],
+      },
+      {
+        actor: { label: 'Lena Varga', role: 'LabManager' },
+        reason: 'assign',
+        op: 'UPDATE',
+        changes: [
+          {
+            field: 'assignee_id',
+            label: 'Analyst',
+            old: null,
+            new: { text: 'Ana Ferreira', ref: { table: 'person', id: ana.id } },
+          },
+        ],
+      },
+    ],
+  );
+  const { expected } = await api.db
+    .selectNoFrom(
+      sql<string>`(with t as (select ${assign.at}::timestamptz as at),
+                       d as (select (at at time zone 'America/New_York') - (at at time zone 'UTC') as off, at from t)
+                  select to_char(at at time zone 'America/New_York', 'YYYY-MM-DD HH24:MI:SS') || ' '
+                      || case when off < interval '0' then '-' else '+' end
+                      || to_char(greatest(off, -off), 'HH24:MI') from d)`.as('expected'),
+    )
+    .executeTakeFirstOrThrow();
+  assert.equal(assign.atLab, expected, 'the time in the Lab zone, as the database renders it');
+  assert.match(assign.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, 'UTC to the microsecond, as hashed');
+
+  const submission = entries.find((e) => e.record.table === 'submission') ?? assert.fail('the Submission entry');
+  assert.deepEqual(
+    { chain: submission.chain, atLab: submission.atLab, actor: submission.actor },
+    { chain: 'company', atLab: null, actor: { label: 'Cora Lindqvist', role: 'Customer' } },
+  );
+  const received = entries.find((e) => e.reason === 'receive' && e.record.table === 'sample');
+  assert.deepEqual(
+    received?.changes.map((c) => [c.label, c.old, c.new?.text === received.raw.newRow?.received_at]),
+    [['Received', null, true]],
+    'the Sample receipt reads as Received with the stored time',
+  );
+});
+
+it("after a person's printed name or a record's label changes, an earlier entry still shows the label as it stood at that entry's time", async () => {
+  const id = await submitTestTo('Assigned');
+  const sample = (await trailOf(id)).entries.find((e) => e.record.table === 'sample')?.record ?? assert.fail();
+  await rename('person', ana.id, { displayName: 'Ana Ferreira-Souza' }, 'Correct a printed name');
+  await rename('sample', sample.id, { number: `${sample.label}-R` }, 'Correct a Sample number');
+  await take(as.ana, 'enterResult', id, result, ana);
+  const { record, entries } = await trailOf(id);
+  await rename('person', ana.id, { displayName: 'Ana Ferreira' }, 'Restore a printed name');
+
+  const assign =
+    entries.find((e) => e.changes.some((c) => c.field === 'assignee_id')) ?? assert.fail('the assign entry');
+  const performed = entries.find((e) => e.reason === 'enterResult' && e.record.table === 'signature');
+  assert.equal(assign.changes[0]?.new?.text, 'Ana Ferreira', 'the assignee as named when assigned');
+  assert.equal(assign.record.label, `Test on ${sample.label}`, 'the Test labelled by its Sample number at the time');
+  assert.deepEqual(
+    [performed?.actor.label, performed?.changes.find((c) => c.field === 'person_id')?.new?.text],
+    ['Ana Ferreira-Souza', 'Ana Ferreira-Souza'],
+    'the signer as named when signing',
+  );
+  assert.equal(record.label, `Test on ${sample.label}-R`, 'the Test as it is labelled now');
+});
+
+it("a cited record's own trail holds only that record's entries, and a record out of reach is not found", async () => {
+  const id = await submitTestTo('Requested');
+  const { entries } = ok(await as.rui.call(routes.recordTrail, { table: 'method', id: api.methodId }));
+  assert.ok(entries.length > 0);
+  assert.deepEqual(
+    [...new Set(entries.map((e) => `${e.chain} ${e.record.kind} ${e.record.id}`))],
+    [`company Method ${api.methodId}`],
+  );
+  refusedWith(await as.rui.call(routes.recordTrail, { table: 'sample', id }), 'notFound');
+});
+
+it("QA's Verify chain on an untouched chain replies intact through entry N, with N the chain's last entry; another role is refused", async () => {
+  await submitTestTo('Ready');
+  const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
+  const [labLast, companyLast] = [await lastEntryOf(api.labId), await lastEntryOf('company')];
+  assert.deepEqual(verified.chains, [
+    {
+      chain: 'lab',
+      lastEntry: labLast,
+      intactThrough: labLast,
+      firstFailure: null,
+      report: `intact through entry ${labLast}`,
+    },
+    {
+      chain: 'company',
+      lastEntry: companyLast,
+      intactThrough: companyLast,
+      firstFailure: null,
+      report: `intact through entry ${companyLast}`,
+    },
+  ]);
+  assert.equal(
+    refusedWith(await as.rui.call(routes.verifyAuditTrail), 'role'),
+    'verifying the Audit Trail is a QA action',
+  );
+  refusedWith(await as.lena.call(routes.verifyAuditTrail), 'role');
+});
+
+it('a Customer User asking for any trail is refused', async () => {
+  const id = await submitTestTo('Reported');
+  ok(await as.cora.call(routes.test, { id }));
+  assert.equal(
+    refusedWith(await as.cora.call(routes.testTrail, { id }), 'role'),
+    'the Audit Trail is not shown to a Customer User',
+  );
+  refusedWith(await as.cora.call(routes.recordTrail, { table: 'test', id }), 'role');
+  refusedWith(await as.cora.call(routes.recordTrail, { table: 'method', id: api.methodId }), 'role');
+});
+
+it('the raw entry under each readable entry keeps the stored values and hashes', async () => {
+  const id = await submitTestTo('SubmittedForReview');
+  const { entries } = await trailOf(id);
+  const signature = entries.find((e) => e.record.table === 'signature') ?? assert.fail('the Signature entry');
+  const stored = await api.db
+    .selectFrom('auditEntry')
+    .select([sql<string>`encode(hash, 'hex')`.as('hash'), 'newRow'])
+    .where('chain', '=', api.labId)
+    .where('seq', '=', signature.seq)
+    .executeTakeFirstOrThrow();
+  assert.deepEqual([signature.raw.hash, signature.raw.newRow], [stored.hash, stored.newRow]);
+  const content = signature.changes.find((c) => c.field === 'content');
+  assert.equal(content?.label, 'Signed Record Version');
+  assert.equal(JSON.parse(content?.new?.text ?? '').analyte, 'NDMA', 'the signed bytes read as the Record Version');
+});
+
+it('after an entry is altered by the database owner, Verify chain names it as the first failure and reports intact only through the entry before it', async () => {
+  await submitTestTo('Ready');
+  const last = BigInt(await lastEntryOf(api.labId));
+  const altered = last - 2n;
+  await api.superuser.transaction().execute(async (tx) => {
+    await sql`set local session_replication_role = replica`.execute(tx);
+    await sql`update lims.audit_entry set reason = 'Routine update' where chain = ${api.labId} and seq = ${String(altered)}`.execute(
+      tx,
+    );
+  });
+  const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
+  assert.deepEqual(verified.chains[0], {
+    chain: 'lab',
+    lastEntry: String(last),
+    intactThrough: String(altered - 1n),
+    firstFailure: String(altered),
+    report: `entry ${altered} fails to verify; intact through entry ${altered - 1n}`,
+  });
+  assert.equal(verified.chains[1]?.firstFailure, null, 'the company chain is untouched');
+  const entry: TrailEntry | undefined = (
+    await trailOf((await api.db.selectFrom('test').select('id').executeTakeFirstOrThrow()).id)
+  ).entries[0];
+  assert.ok(entry, 'the trail still reads after a break; the break is reported by Verify chain');
+});

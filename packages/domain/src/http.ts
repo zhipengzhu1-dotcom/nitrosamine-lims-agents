@@ -46,6 +46,11 @@ declare const instantBrand: unique symbol;
  */
 export type Instant = string & { readonly [instantBrand]: true };
 const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' }));
+/** Parses a string into an Instant at a boundary, or throws: for a test's fixtures and a value read outside a route. */
+export function instantOf(value: string): Instant {
+  if (Value.Check(instant, value)) return value;
+  throw new Error(`${value} is not an ISO 8601 date-time`);
+}
 const nullable = <S extends TSchema>(schema: S) => Type.Union([schema, Type.Null()]);
 const closed = { additionalProperties: false } as const;
 
@@ -89,25 +94,75 @@ export type Signature = Static<typeof signature>;
 /** An Audit Trail row snapshot, keyed by its stored column names. */
 const rowSnapshot = Type.Record(Type.String(), Type.Unknown());
 export type RowSnapshot = Static<typeof rowSnapshot>;
-const auditEntry = Type.Object({
+/** The tables whose rows a trail reads; `packages/domain/src/audit.ts` says how each reads. */
+export const auditedTable = Type.Enum({
+  customer: 'customer',
+  person: 'person',
+  method: 'method',
+  submission: 'submission',
+  sample: 'sample',
+  test: 'test',
+  result: 'result',
+  test_report: 'test_report',
+  signature: 'signature',
+} as const);
+export type AuditedTable = Static<typeof auditedTable>;
+const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
+export type ChainKind = Static<typeof chainKind>;
+/** An Audit Trail entry as the database holds it, with its hashes in hex. */
+const rawEntry = Type.Object({
+  chain: Type.String(),
   seq: Type.String(),
   at: instant,
   actor: Type.String(),
   role: Type.String(),
   reason: Type.String(),
   table: Type.String(),
-  op: Type.String(),
+  op: Type.Enum({ INSERT: 'INSERT', UPDATE: 'UPDATE', DELETE: 'DELETE' } as const),
   oldRow: nullable(rowSnapshot),
   newRow: nullable(rowSnapshot),
+  prevHash: Type.String(),
+  hash: Type.String(),
 });
-export type AuditEntry = Static<typeof auditEntry>;
+export type RawEntry = Static<typeof rawEntry>;
+const recordRef = Type.Object({ table: Type.String(), id: Type.String(), kind: Type.String(), label: Type.String() });
+export type RecordRef = Static<typeof recordRef>;
+/** A value as the panel shows it: a reference reads as the record's label at the entry's time and links to its trail. */
+const shownValue = Type.Object({
+  text: Type.String(),
+  ref: nullable(Type.Object({ table: auditedTable, id: Type.String() })),
+});
+export type ShownValue = Static<typeof shownValue>;
+const trailChange = Type.Object({
+  field: Type.String(),
+  label: Type.String(),
+  old: nullable(shownValue),
+  new: nullable(shownValue),
+});
+export type TrailChange = Static<typeof trailChange>;
+/** One Audit Trail entry in glossary words. `atLab` is the time in the owning Lab's zone, and null on the company chain. */
+const trailEntry = Type.Object({
+  chain: chainKind,
+  seq: Type.String(),
+  at: instant,
+  atLab: nullable(Type.String()),
+  actor: Type.Object({ label: Type.String(), role: Type.String() }),
+  reason: Type.String(),
+  op: rawEntry.properties.op,
+  record: recordRef,
+  changes: Type.Array(trailChange),
+  afterFirstSave: Type.Boolean(),
+  raw: rawEntry,
+});
+export type TrailEntry = Static<typeof trailEntry>;
+const trail = Type.Object({ record: recordRef, labZone: Type.String(), entries: Type.Array(trailEntry) });
+export type Trail = Static<typeof trail>;
 const reportRef = Type.Object({ number: Type.String() });
 const testView = Type.Object({
   test: testRow,
   report: nullable(reportRef),
   result: nullable(result),
   signatures: Type.Array(signature),
-  auditTrail: Type.Array(auditEntry),
   next: nullable(Type.Enum(stepNames)),
 });
 const testReport = Type.Object({
@@ -120,12 +175,18 @@ const lookups = Type.Object({
   methods: Type.Array(Type.Object({ id: uuid, code: Type.String(), version: Type.String(), title: Type.String() })),
   analysts: Type.Array(Type.Object({ id: uuid, displayName: Type.String() })),
 });
-/** When both hash chains were recomputed, and the seq of the first broken entry of each, or null when it holds. */
-const auditTrailVerification = Type.Object({
-  at: instant,
-  lab: nullable(Type.String()),
-  company: nullable(Type.String()),
+/** One recomputed chain: its last entry, how far it is intact, the first entry that fails or null, and the sentence QA reads. */
+const chainVerification = Type.Object({
+  chain: chainKind,
+  lastEntry: Type.String(),
+  intactThrough: Type.String(),
+  firstFailure: nullable(Type.String()),
+  report: Type.String(),
 });
+export type ChainVerification = Static<typeof chainVerification>;
+/** When the Lab's and the company's chains were recomputed, by the database clock, and what each recomputation found. */
+const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
+export type AuditTrailVerification = Static<typeof auditTrailVerification>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /**
  * Why the LIMS did not do what was asked, as one closed list the API, the web and the tests share. `unknownField` is
@@ -214,6 +275,13 @@ export const routes = {
   tests: route('GET', '/api/tests', {}, Type.Array(testRow)),
   test: route('GET', '/api/tests/:id', { params: byId }, testView),
   report: route('GET', '/api/tests/:id/report', { params: byId }, testReport),
+  testTrail: route('GET', '/api/tests/:id/trail', { params: byId }, trail),
+  recordTrail: route(
+    'GET',
+    '/api/trails/:table/:id',
+    { params: Type.Object({ table: auditedTable, id: uuid }) },
+    trail,
+  ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
 } satisfies Record<string, Route>;
 
