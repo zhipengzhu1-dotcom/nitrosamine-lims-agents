@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI's check job runs this script unchanged.
-# The tests need the PostgreSQL that LIMS_PG points at (scripts/pg.sh start locally).
+# The tests need this checkout's PostgreSQL (scripts/pg.sh start), or the server that LIMS_PG names.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 RUFF=ruff@0.16.9
