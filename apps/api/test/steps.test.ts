@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { audited } from '@lims/db';
 import { type StepName, stepNames, steps } from '@lims/domain';
 import { labScope } from '../src/scope.ts';
-import { type Account, type Client, freshCode, startApi } from './harness.ts';
+import { type Account, type Client, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_steps_test');
 const { cora, samir, lena, ana, theo, rui, quinn } = api.people as Record<string, Account>;
@@ -24,7 +24,7 @@ const result = {
 };
 
 async function take(client: Client, name: StepName, testId: string, input: object = {}, signer?: Account) {
-  const signature = signer && { password: signer.password, code: await freshCode(signer) };
+  const signature = signer && { password: signer.password };
   return client.post(`/api/steps/${name}`, { testId, input, ...(signature && { signature }) });
 }
 
@@ -84,7 +84,7 @@ test('the Analyst who signed Performed cannot review, and the Reviewer who revie
   const id = await testIn('Assigned', dana);
   assert.equal((await take(as.dana!, 'enterResult', id, result, dana)).status, 200);
   assert.equal((await view(id, as.dana)).next, null, 'review is not offered to the Analyst who performed it');
-  const anySignature = { password: 'unused', code: '000000' };
+  const anySignature = { password: 'unused' };
   const selfReview = await as.dana!.post('/api/steps/review', { testId: id, input: {}, signature: anySignature });
   assert.deepEqual([selfReview.status, selfReview.body.message], [403, 'the Analyst who performed the Test cannot review it']);
 
@@ -94,17 +94,14 @@ test('the Analyst who signed Performed cannot review, and the Reviewer who revie
   assert.equal((await view(id)).test.state, 'Reviewed');
 });
 
-test('a signing with a wrong password or a replayed TOTP code is refused and changes nothing', async () => {
-  const [first, second] = [await testIn('Assigned', wes), await testIn('Assigned', wes)];
-  const before = [await view(first!), await view(second!)];
-  const code = await freshCode(wes);
-  const enter = (testId: string, password: string) => as.wes!.post('/api/steps/enterResult', { testId, input: result, signature: { password, code } });
+test('a signing with a wrong password is refused and changes nothing', async () => {
+  const id = await testIn('Assigned', wes);
+  const before = await view(id);
+  const enter = (password: string) => as.wes!.post('/api/steps/enterResult', { testId: id, input: result, signature: { password } });
 
-  assert.equal((await enter(first!, 'not-the-password')).status, 401);
-  assert.deepEqual(await view(first!), before[0], 'a wrong password leaves the Test, Result, Signatures and Audit Trail as they were');
-  assert.equal((await enter(first!, wes.password)).status, 200, 'the same code with the right password signs');
-  assert.equal((await enter(second!, wes.password)).status, 401, 'the spent code is refused');
-  assert.deepEqual(await view(second!), before[1], 'a replayed code leaves everything as it was');
+  assert.equal((await enter('not-the-password')).status, 401);
+  assert.deepEqual(await view(id), before, 'a wrong password leaves the Test, Result, Signatures and Audit Trail as they were');
+  assert.equal((await enter(wes.password)).status, 200);
 });
 
 test('a Customer User cannot read another Customer\'s Test', async () => {

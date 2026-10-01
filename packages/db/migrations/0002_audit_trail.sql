@@ -43,8 +43,8 @@ begin
   end if;
   e.table_name := tg_table_name;
   e.op := tg_op;
-  if tg_op <> 'INSERT' then e.old_row := to_jsonb(old) - array['password_hash', 'totp_secret']; end if;
-  if tg_op <> 'DELETE' then e.new_row := to_jsonb(new) - array['password_hash', 'totp_secret']; end if;
+  if tg_op <> 'INSERT' then e.old_row := to_jsonb(old) - 'password_hash'; end if;
+  if tg_op <> 'DELETE' then e.new_row := to_jsonb(new) - 'password_hash'; end if;
   e.chain := coalesce(coalesce(e.new_row, e.old_row) ->> 'lab_id', 'company');
 
   insert into audit_chain (chain) values (e.chain) on conflict do nothing;

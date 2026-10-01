@@ -17,7 +17,6 @@ create table lims.person (
   display_name  text not null,
   customer_id   uuid references lims.customer,
   password_hash text not null,
-  totp_secret   text not null,
   failed_logins int  not null default 0,
   locked_at     timestamptz
 );

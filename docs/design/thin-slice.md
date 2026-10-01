@@ -1,6 +1,6 @@
 # Thin slice of the sample chain
 
-Answers [#24](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/24) and stops: Customer submits, Sample Custodian receives, Lab Manager assigns to a trained Analyst, Analyst types a Result, Reviewer signs, QA releases the Test Report. Password + TOTP login, re-authenticating Electronic Signatures, an Audit Trail enforced in the database. Hard budget 5,000 counted lines (`scripts/loc.sh`). Ideas may come from `prototype/walking-skeleton`; code never does.
+Answers [#24](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/24) and stops: Customer submits, Sample Custodian receives, Lab Manager assigns to a trained Analyst, Analyst types a Result, Reviewer signs, QA releases the Test Report. One-step username and password login, Electronic Signatures that re-authenticate with the password, an Audit Trail enforced in the database. Hard budget 5,000 counted lines (`scripts/loc.sh`). Ideas may come from `prototype/walking-skeleton`; code never does.
 
 ## The chain-step table
 
@@ -28,7 +28,7 @@ The reason recorded with each step's writes is the step name.
 
 ## Tables (schema `lims`)
 
-Company-owned: `person` (id, username, display_name, customer_id for Customer Users, password_hash, totp_secret, totp_last_step so a code is accepted once, failed_logins, locked_at), `customer` (id, name), `method` (id, code, title, version), `submission` (id, customer_id, submitted_by).
+Company-owned: `person` (id, username, display_name, customer_id for Customer Users, password_hash, failed_logins, locked_at), `customer` (id, name), `method` (id, code, title, version), `submission` (id, customer_id, submitted_by).
 
 Roles, Test states and Signature Meanings are Postgres enums, so the generated Kysely types carry them as unions.
 
@@ -61,4 +61,6 @@ Planned 4,200. Stop and raise at 4,500. Generated `packages/db/src/schema.ts`, t
 - Specifications, limits, verdicts and Calculation Versions: the Result is printed as typed, with no pass or fail.
 - Critical Data Changes and corrections: a Result is entered once, at enterResult.
 - Authorisations (a Training Record stands in for the Method Authorisation), Document versions, GxP Class choice (every Test is GMP).
-- Release locks, Record Version history and "unsigned after change", the TOTP encryption key and password pepper, Admin screens. Every other module is one placeholder screen.
+- Release locks, Record Version history and "unsigned after change", the password pepper, Admin screens. Every other module is one placeholder screen.
+- The TOTP second factor, at login and at signing (owner, 2026-09-30: keep login simple for now). Decided for the product in map decisions 7 and 13.
+- The 15-character password rule, lockout at 5 failures and the 15-minute idle limit (owner, 2026-09-30: generous limits for the demo). The slice takes any password of 4 or more characters, locks at 20 failures, ends an idle session after 8 hours, and gives every demo account one password set at seed time.

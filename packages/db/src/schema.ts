@@ -79,8 +79,6 @@ export interface Person {
   id: Generated<string>;
   locked_at: Timestamp | null;
   password_hash: string;
-  totp_last_step: Generated<Int8>;
-  totp_secret: string;
   username: string;
 }
 

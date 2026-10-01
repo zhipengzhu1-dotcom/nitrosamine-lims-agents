@@ -3,7 +3,7 @@ import type { DB } from '@lims/db';
 import { type Meaning, refusal, type Step, type StepFacts, type StepName, stepNames, steps } from '@lims/domain';
 import type { FastifyInstance } from 'fastify';
 import { type Kysely, type Selectable, sql } from 'kysely';
-import { type Proof, reauthenticate } from './auth.ts';
+import { reauthenticate } from './auth.ts';
 import { type ActorContext, type LabQueries, labScope, refuse } from './scope.ts';
 
 export const uuid = { type: 'string', format: 'uuid' } as const;
@@ -119,12 +119,11 @@ function stepRoute<K extends StepName>(app: FastifyInstance, db: Kysely<DB>, nam
     properties: {
       testId: uuid,
       input: { type: 'object', additionalProperties: false, required: Object.keys(effect.input), properties: effect.input },
-      signature: { type: 'object', additionalProperties: false, required: ['password', 'code'],
-        properties: { password: text, code: { type: 'string', pattern: '^[0-9]{6}$' } } },
+      signature: { type: 'object', additionalProperties: false, required: ['password'], properties: { password: text } },
     },
   };
 
-  app.post<{ Body: { testId?: string; input: Inputs[K]; signature?: Required<Proof> } }>(`/api/steps/${name}`, { schema: { body } },
+  app.post<{ Body: { testId?: string; input: Inputs[K]; signature?: { password: string } } }>(`/api/steps/${name}`, { schema: { body } },
     async (req) => {
       const { actor, body } = req;
       const scope = labScope(db, actor);
@@ -133,7 +132,7 @@ function stepRoute<K extends StepName>(app: FastifyInstance, db: Kysely<DB>, nam
       const facts = await factsFor(scope, actor, test, (body.input as { assigneeId?: string }).assigneeId);
       const refused = refusal(name, test?.state ?? null, actor.roles, facts);
       if (refused) refuse(REFUSAL_STATUS[refused.kind], refused.message);
-      if (step.signs) await reauthenticate(db, actor, body.signature!, name);
+      if (step.signs) await reauthenticate(db, actor, body.signature!.password, name);
 
       const testId = test?.id ?? randomUUID();
       await scope.write(name, step.role, async (q) => {

@@ -2,29 +2,20 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sql } from 'kysely';
 import { ABSOLUTE_LIMIT_MS, IDLE_LIMIT_MS, LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
-import { Client, freshCode, startApi } from './harness.ts';
+import { Client, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_auth_test');
 
-test('a password alone gives no session, and a TOTP code is accepted only once', async () => {
+test('a wrong password or an unknown username gives no session, and the right password does', async () => {
   const rui = api.people.rui!;
   const client = new Client(api.base);
-  const first = await client.post('/api/login', { username: rui.username, password: rui.password });
-  assert.equal(first.status, 200);
-  assert.equal(client.cookie, '', 'no session cookie after the password');
+  assert.equal((await client.post('/api/login', { username: rui.username, password: 'not-the-password' })).status, 401);
+  assert.equal((await client.post('/api/login', { username: 'no.such-person', password: rui.password })).status, 401);
+  assert.equal(client.cookie, '', 'no session cookie after a refused sign-in');
   assert.equal((await client.get('/api/me')).status, 401);
-  client.cookie = `lims_session=${first.body.ticket}`;
-  assert.equal((await client.get('/api/me')).status, 401, 'the pending-login ticket is not a session');
 
-  const code = await freshCode(rui);
-  const signedIn = new Client(api.base);
-  await signedIn.post('/api/login/totp', { ticket: first.body.ticket, code });
+  const signedIn = await api.login(rui);
   assert.equal((await signedIn.get('/api/me')).body.person.username, rui.username);
-
-  const again = new Client(api.base);
-  const ticket = (await again.post('/api/login', { username: rui.username, password: rui.password })).body.ticket;
-  assert.equal((await again.post('/api/login/totp', { ticket, code })).status, 401, 'a replayed code is refused');
-  assert.equal(again.cookie, '');
 });
 
 test(`the ${LOCKOUT_AFTER_FAILURES}th failed login locks the account and ends its sessions`, async () => {
