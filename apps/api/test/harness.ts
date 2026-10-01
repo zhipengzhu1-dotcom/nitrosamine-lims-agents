@@ -16,7 +16,7 @@ import {
   routes,
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
-import { buildApp } from '../src/app.ts';
+import { type AppOptions, buildApp } from '../src/app.ts';
 
 const { server } = dbConfig();
 
@@ -90,9 +90,24 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
 
 const accessEventKey = randomBytes(32);
 
-async function listen(db: Kysely<DB>, { secureCookie = false } = {}) {
+interface ListenOptions {
+  secureCookie?: boolean;
+  login?: AppOptions['login'];
+  sweepEveryMs?: number | null;
+}
+
+async function listen(
+  db: Kysely<DB>,
+  { secureCookie = false, login = 'decided', sweepEveryMs = null }: ListenOptions = {},
+) {
   const lines: string[] = [];
-  const app = buildApp(db, { log: { write: (line) => lines.push(line) }, secureCookie, accessEventKey });
+  const app = buildApp(db, {
+    log: { write: (line) => lines.push(line) },
+    secureCookie,
+    accessEventKey,
+    login,
+    sweepEveryMs,
+  });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(() => app.close());
   return {
@@ -103,7 +118,10 @@ async function listen(db: Kysely<DB>, { secureCookie = false } = {}) {
   };
 }
 
-/** A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API that keeps its log lines, torn down after the file's tests. */
+/**
+ * A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API with the decided
+ * login and no sweep of its own, that keeps its log lines, torn down after the file's tests.
+ */
 export async function startApi(name: string) {
   const database = checkoutDatabase(name);
   const admin = createDb(databaseUrl(server, 'postgres'));
@@ -129,7 +147,17 @@ export async function startApi(name: string) {
     accessEventKey,
     log,
     logLines,
-    startAnotherApi: (options: { secureCookie?: boolean } = {}) => listen(db, options),
+    startAnotherApi: (options: ListenOptions = {}) => listen(db, options),
+    /** The clock seam: moves a person's open sessions `ms` into the past, as a clock advanced by `ms` would leave them. */
+    async advanceClock(account: Account, ms: number): Promise<void> {
+      const by = sql`${ms} * interval '1 millisecond'`;
+      await superuser
+        .updateTable('session')
+        .set({ createdAt: sql`created_at - ${by}`, lastSeenAt: sql`last_seen_at - ${by}` })
+        .where('personId', '=', account.id)
+        .where('endedAt', 'is', null)
+        .execute();
+    },
     labId,
     methodId,
     person(name: SeededName): Account {

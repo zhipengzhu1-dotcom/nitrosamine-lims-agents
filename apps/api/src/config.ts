@@ -1,4 +1,8 @@
 import { databaseUrl, dbConfig } from '@lims/db';
+import type { Login } from './auth.ts';
+
+/** How often the API runs the expiry sweep. */
+export const SWEEP_EVERY_MS = 60_000;
 
 export interface ApiConfig {
   databaseUrl: string;
@@ -6,9 +10,10 @@ export interface ApiConfig {
   log: boolean;
   secureCookie: boolean;
   accessEventKey: Buffer;
+  login: Login;
 }
 
-const API_SETTINGS = ['LIMS_LOG', 'LIMS_ACCESS_EVENT_KEY'];
+const API_SETTINGS = ['LIMS_LOG', 'LIMS_ACCESS_EVENT_KEY', 'LIMS_LOGIN'];
 
 function port(value: string | undefined): number {
   if (value === undefined) return 3000;
@@ -26,6 +31,12 @@ function accessEventKey(value: string | undefined): Buffer {
   return Buffer.from(value, 'hex');
 }
 
+function login(value: string | undefined): Login {
+  if (value === undefined) return 'demo';
+  if (value === 'demo' || value === 'decided') return value;
+  throw new Error(`LIMS_LOGIN must be decided or demo, not ${JSON.stringify(value)}`);
+}
+
 /** Reads the API's environment once, at start: a missing or malformed value stops the process here. */
 export function apiConfig(): ApiConfig {
   const env = process.env;
@@ -36,5 +47,6 @@ export function apiConfig(): ApiConfig {
     log: env.LIMS_LOG === '1',
     secureCookie: env.NODE_ENV === 'production',
     accessEventKey: accessEventKey(env.LIMS_ACCESS_EVENT_KEY),
+    login: login(env.LIMS_LOGIN),
   };
 }

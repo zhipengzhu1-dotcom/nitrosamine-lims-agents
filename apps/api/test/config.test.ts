@@ -44,6 +44,13 @@ for (const [name, key] of [
   });
 }
 
+it('a LIMS_LOGIN other than decided or demo stops the API at start and names LIMS_LOGIN', () => {
+  const started = start({ PORT: '3000', LIMS_ACCESS_EVENT_KEY: 'ab'.repeat(32), LIMS_LOGIN: 'strict' });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.notEqual(started.status, 0);
+  assert.match(started.stderr, /LIMS_LOGIN must be decided or demo, not "strict"/);
+});
+
 it('LIMS_LOG is a setting the API reads', () => {
   const started = start({ LIMS_LOG: '1', PORT: '' });
   assert.equal(started.signal, null, 'the API stopped by itself instead of listening');

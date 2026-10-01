@@ -94,7 +94,7 @@ async function testView(scope: Scope, id: string) {
 }
 
 export function readRoutes(app: App, db: Kysely<DB>): void {
-  app.route({ ...routes.me, handler: async (req) => req.actor });
+  app.route({ ...routes.me, handler: async (req) => ({ ...req.actor, session: req.sessionClock }) });
 
   app.route({
     ...routes.lookups,

@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
+export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -51,7 +51,7 @@ export interface AccessEvent {
   roles: ArrayType<Role>;
   sessionId: string | null;
   sessionLabId: string | null;
-  sourceAddress: string;
+  sourceAddress: string | null;
   subjectId: string | null;
   typedUserIdHmac: Buffer | null;
   typedUserIdLength: number | null;

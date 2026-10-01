@@ -1,7 +1,7 @@
-import { type ActorContext, routes } from '@lims/domain';
+import type { ActorContext } from '@lims/domain';
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { api, onSignedOut } from './api.ts';
+import { onSignedOut, resume } from './api.ts';
 import { Placeholder } from './placeholder.tsx';
 import { ReportPage } from './report.tsx';
 import { SignIn } from './signin.tsx';
@@ -41,7 +41,7 @@ function App() {
       setMe(null);
       setNotice(message);
     });
-    api(routes.me).then(setMe, () => setNotice(''));
+    resume().then(setMe, () => setNotice(''));
   }, []);
 
   if (me === undefined) return null;

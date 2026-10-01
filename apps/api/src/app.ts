@@ -1,6 +1,6 @@
 import cookie from '@fastify/cookie';
 import type { DB } from '@lims/db';
-import type { ActorContext, Instant } from '@lims/domain';
+import type { ActorContext, Instant, SessionClock } from '@lims/domain';
 import Fastify, {
   type FastifyBaseLogger,
   type FastifyInstance,
@@ -11,7 +11,16 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE, type SessionKey } from './auth.ts';
+import {
+  actorFor,
+  endExpiredSessions,
+  type Login,
+  loginRoutes,
+  logoutRoute,
+  SESSION_COOKIE,
+  SESSION_LIMITS,
+  type SessionKey,
+} from './auth.ts';
 import { readRoutes } from './reads.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
 import { stepRoutes } from './steps.ts';
@@ -20,6 +29,7 @@ declare module 'fastify' {
   interface FastifyRequest {
     actor: ActorContext;
     sessionKey: SessionKey;
+    sessionClock: SessionClock;
   }
 }
 
@@ -49,6 +59,9 @@ export interface AppOptions {
   log: LogSink | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
+  login: Login;
+  /** How often to run the expiry sweep, or null for an API whose caller runs it. */
+  sweepEveryMs: number | null;
 }
 
 const REDACTED = [
@@ -67,6 +80,7 @@ const REDACTED = [
 ];
 
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
+  const limits = SESSION_LIMITS[options.login];
   const app = Fastify({
     logger: options.log
       ? { level: 'info', stream: options.log, redact: { paths: REDACTED, censor: '[redacted]' } }
@@ -79,16 +93,30 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   app.register(cookie, {
     parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: options.secureCookie },
   });
-  loginRoutes(app, db, options.accessEventKey);
+  loginRoutes(app, db, options.accessEventKey, limits);
   app.register(async (signedIn) => {
     signedIn.decorateRequest('actor');
     signedIn.decorateRequest('sessionKey');
+    signedIn.decorateRequest('sessionClock');
     signedIn.addHook('onRequest', async (req) => {
-      ({ actor: req.actor, session: req.sessionKey } = await actorFor(db, req.cookies[SESSION_COOKIE]));
+      ({
+        actor: req.actor,
+        session: req.sessionKey,
+        clock: req.sessionClock,
+      } = await actorFor(db, req.cookies[SESSION_COOKIE], limits));
     });
     logoutRoute(signedIn, db);
     readRoutes(signedIn, db);
     stepRoutes(signedIn, db);
   });
+  if (options.sweepEveryMs !== null) {
+    // A failed sweep is logged and the next one retries: each expiry is recorded at its computed end, so a late sweep
+    // writes the same record.
+    const sweep = setInterval(
+      () => void endExpiredSessions(db, limits).catch((err: unknown) => app.log.error({ err }, 'expiry sweep failed')),
+      options.sweepEveryMs,
+    );
+    app.addHook('onClose', async () => clearInterval(sweep));
+  }
   return app;
 }

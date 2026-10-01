@@ -205,7 +205,7 @@ const tables = {
       source_address: '192.0.2.1',
       roles: '{Analyst}',
     },
-    notNull: ['id', 'kind', 'source_address', 'roles', 'at'],
+    notNull: ['id', 'kind', 'roles', 'at'],
   },
   'lims.audit_chain': {
     noun: 'Audit Trail chain head',
@@ -634,6 +634,26 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { kind, failure_reason: null },
       constraint: 'access_event_session_kind_check',
     })),
+    ...(['IdleExpiry', 'AbsoluteExpiry'] as const).flatMap((kind) => [
+      {
+        name: `an Access Event of kind ${kind} without a session is refused`,
+        table: 'lims.access_event' as const,
+        change: { kind, failure_reason: null, source_address: null },
+        constraint: 'access_event_session_kind_check',
+      },
+      {
+        name: `an Access Event of kind ${kind} with a source address is refused`,
+        table: 'lims.access_event' as const,
+        change: { kind, failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+        constraint: 'access_event_source_address_check',
+      },
+    ]),
+    {
+      name: 'an Access Event of a kind other than expiry without a source address is refused',
+      table: 'lims.access_event',
+      change: { source_address: null },
+      constraint: 'access_event_source_address_check',
+    },
     {
       name: 'a failed sign-in Access Event without a failure reason is refused',
       table: 'lims.access_event',

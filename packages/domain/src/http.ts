@@ -55,6 +55,17 @@ const actorContext = Type.Object({
   roles: Type.Array(role),
 });
 export type ActorContext = Static<typeof actorContext>;
+/**
+ * How long the session lasts from this answer: `idleLimitMs` if no request follows, and `absoluteLeftMs` at most.
+ * Durations, not instants, so the web counts down without comparing its clock with the server's.
+ */
+const sessionClock = Type.Object({
+  idleLimitMs: Type.Integer({ minimum: 1 }),
+  absoluteLeftMs: Type.Integer({ minimum: 0 }),
+});
+export type SessionClock = Static<typeof sessionClock>;
+const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock });
+export type SignedInView = Static<typeof signedIn>;
 const testRow = Type.Object({
   id: uuid,
   state: testState,
@@ -207,9 +218,9 @@ function route<
 
 /** Every route the API serves besides the steps. */
 export const routes = {
-  login: route('POST', '/api/login', { body: credentials }, actorContext),
+  login: route('POST', '/api/login', { body: credentials }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
-  me: route('GET', '/api/me', {}, actorContext),
+  me: route('GET', '/api/me', {}, signedIn),
   lookups: route('GET', '/api/lookups', {}, lookups),
   tests: route('GET', '/api/tests', {}, Type.Array(testRow)),
   test: route('GET', '/api/tests/:id', { params: byId }, testView),

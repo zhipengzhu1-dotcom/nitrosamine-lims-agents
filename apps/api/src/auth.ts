@@ -1,15 +1,30 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, verifyPassword } from '@lims/db/credentials';
-import { type ActorContext, routes } from '@lims/domain';
+import { type ActorContext, routes, type SessionClock } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 
 export const LOCKOUT_AFTER_FAILURES = 20;
-export const IDLE_LIMIT_MS = 8 * 60 * 60_000;
-export const ABSOLUTE_LIMIT_MS = 12 * 60 * 60_000;
 export const SESSION_COOKIE = 'lims_session';
+
+/** How long a session lives: `idleMs` after its last request, and `absoluteMs` after sign-in at most. */
+export interface SessionLimits {
+  idleMs: number;
+  absoluteMs: number;
+}
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+/**
+ * The session limits of each login configuration. The demo's 8-hour idle limit stands under ADR 0002's demo-login
+ * exception until the real-data gate (#102), which is to refuse `real` while the login is not `decided`.
+ */
+export const SESSION_LIMITS = {
+  decided: { idleMs: 15 * MINUTE_MS, absoluteMs: 12 * HOUR_MS },
+  demo: { idleMs: 8 * HOUR_MS, absoluteMs: 12 * HOUR_MS },
+} as const satisfies Record<string, SessionLimits>;
+export type Login = keyof typeof SESSION_LIMITS;
 
 type AccessEvent = Insertable<DB['accessEvent']>;
 export interface SessionKey {
@@ -19,9 +34,16 @@ export interface SessionKey {
 export interface SignedIn {
   actor: ActorContext;
   session: SessionKey;
+  clock: SessionClock;
 }
 
 const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', reason: 'Sign in' };
+const SWEEP_SERVICE: AuditContext = {
+  actor: 'svc:session-sweep',
+  role: 'system',
+  reason: 'End sessions past their limit',
+};
+const SESSION_ENDED = 'the session has ended; sign in again';
 
 const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
 
@@ -78,7 +100,7 @@ async function countFailure(tx: Transaction<DB>, personId: string) {
 /** Proves the signer before a Signature is written: a wrong password refuses as badCredentials, counts toward lockout, and a lockout it applies is an Access Event. */
 export async function reauthenticate(
   db: Kysely<DB>,
-  { actor, session }: SignedIn,
+  { actor, session }: Pick<SignedIn, 'actor' | 'session'>,
   password: string,
   step: string,
   role: Role,
@@ -109,8 +131,14 @@ export async function reauthenticate(
   notValid();
 }
 
-/** Builds the ActorContext from the session cookie. Reads the session tables directly: no context exists yet to scope by. */
-export async function actorFor(db: Kysely<DB>, token: string | undefined): Promise<SignedIn> {
+const interval = (ms: number) => sql<string>`${ms} * interval '1 millisecond'`;
+
+/**
+ * Builds the ActorContext from the session cookie, and counts the request as activity. A session past its end is
+ * refused and left for the sweep, which records its expiry. Reads the session tables directly: no context exists yet
+ * to scope by.
+ */
+export async function actorFor(db: Kysely<DB>, token: string | undefined, limits: SessionLimits): Promise<SignedIn> {
   const session =
     token &&
     (await db
@@ -119,9 +147,8 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
       .innerJoin('lab', 'lab.labId', 'session.labId')
       .select([
         'session.id',
-        sql<boolean>`person.locked_at is not null
-          or session.last_seen_at < now() - ${IDLE_LIMIT_MS} * interval '1 millisecond'
-          or session.created_at < now() - ${ABSOLUTE_LIMIT_MS} * interval '1 millisecond'`.as('expired'),
+        'session.endedAt',
+        'person.lockedAt',
         'person.id as personId',
         'person.username',
         'person.displayName',
@@ -131,14 +158,35 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
         'lab.name',
       ])
       .where('tokenHash', '=', hashToken(token))
-      .where('endedAt', 'is', null)
       .executeTakeFirst());
   if (!session) return refuse('noSession', 'sign in first');
-  if (session.expired) {
-    await db.updateTable('session').set({ endedAt: sql`now()` }).where('id', '=', session.id).execute();
-    refuse('noSession', 'the session has ended; sign in again');
+  if (session.endedAt) return refuse('noSession', SESSION_ENDED);
+  const key = { labId: session.labId, id: session.id };
+  if (session.lockedAt) {
+    await db
+      .updateTable('session')
+      .set({ endedAt: sql`now()` })
+      .where('labId', '=', key.labId)
+      .where('id', '=', key.id)
+      .execute();
+    return refuse('noSession', SESSION_ENDED);
   }
-  await db.updateTable('session').set({ lastSeenAt: sql`now()` }).where('id', '=', session.id).execute();
+  const touched = await db
+    .updateTable('session')
+    .set({ lastSeenAt: sql`now()` })
+    .where('labId', '=', key.labId)
+    .where('id', '=', key.id)
+    .where('endedAt', 'is', null)
+    .where(
+      sql<boolean>`lims.session_end(last_seen_at, created_at, ${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}) > now()`,
+    )
+    .returning(
+      sql<number>`(extract(epoch from created_at + ${interval(limits.absoluteMs)} - now()) * 1000)::integer`.as(
+        'absoluteLeftMs',
+      ),
+    )
+    .executeTakeFirst();
+  if (!touched) return refuse('noSession', SESSION_ENDED);
   return {
     actor: {
       person: {
@@ -150,8 +198,16 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined): Promi
       lab: { id: session.labId, code: session.code, name: session.name },
       roles: await rolesIn(db, session.personId, session.labId),
     },
-    session: { labId: session.labId, id: session.id },
+    session: key,
+    clock: { idleLimitMs: limits.idleMs, absoluteLeftMs: touched.absoluteLeftMs },
   };
+}
+
+/** Ends every session past its idle or absolute limit, each with its expiry Access Event at the instant it ended. Running it again ends none twice. */
+export async function endExpiredSessions(db: Kysely<DB>, limits: SessionLimits): Promise<void> {
+  await audited(db, SWEEP_SERVICE, (tx) =>
+    sql`select lims.end_expired_sessions(${interval(limits.idleMs)}, ${interval(limits.absoluteMs)})`.execute(tx),
+  );
 }
 
 function typedUserIdDigest(key: Buffer, typed: string) {
@@ -159,7 +215,7 @@ function typedUserIdDigest(key: Buffer, typed: string) {
 }
 
 /** Signs a person in. Every attempt, refused or not, writes its Access Event in a transaction of its own that commits. */
-export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): void {
+export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, limits: SessionLimits): void {
   app.route({
     ...routes.login,
     handler: async (req, reply) => {
@@ -225,7 +281,8 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): v
       });
       if (lockedMeanwhile) return REFUSAL.AccountLocked();
       reply.setCookie(SESSION_COOKIE, token);
-      return (await actorFor(db, token)).actor;
+      const { actor, clock } = await actorFor(db, token, limits);
+      return { ...actor, session: clock };
     },
   });
 }
