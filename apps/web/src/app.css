@@ -98,7 +98,7 @@ p {
 
 .frame {
   display: grid;
-  grid-template: var(--top-h) minmax(0, 1fr) auto / minmax(0, 1fr);
+  grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
 }
@@ -107,13 +107,14 @@ p {
   grid-area: 2 / 1;
 }
 .frame--bare {
-  grid-template-rows: var(--top-h) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 .top {
   display: flex;
   align-items: center;
   gap: 24px;
-  padding: 0 16px;
+  min-height: calc(var(--top-h) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
   background: var(--sheet);
   border-bottom: 1px solid var(--line);
 }
@@ -121,6 +122,8 @@ p {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: none;
+  white-space: nowrap;
   font-weight: 700;
 }
 .brand b {
@@ -134,13 +137,18 @@ p {
 }
 .top nav {
   display: flex;
+  flex: 1 1 auto;
+  align-self: stretch;
   gap: 16px;
-  height: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 .top nav a {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: none;
   min-width: 44px;
   color: var(--ink-2);
   font-weight: 600;
@@ -169,6 +177,7 @@ p.fict {
 }
 .plane {
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 16px 24px;
 }
 
@@ -266,10 +275,11 @@ td a,
 .status--fresh .now {
   animation: ring var(--dur-accent) var(--ease-out) both;
 }
+.row--fresh {
+  animation: row-tint var(--dur-accent) var(--ease-out) both;
+}
 .row--fresh td {
-  animation:
-    rise var(--dur-enter) var(--ease-out) both,
-    row-tint var(--dur-accent) var(--ease-out) both;
+  animation: rise var(--dur-enter) var(--ease-out) both;
 }
 @keyframes tint-out {
   0%,
@@ -302,14 +312,16 @@ td a,
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 8px 16px 12px;
+  padding: 8px max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
   background: var(--bench);
   color: var(--on-bench);
 }
 .who {
   display: flex;
   flex-direction: column;
-  min-width: 260px;
+  flex: 0 1 260px;
+  min-width: 0;
   padding-right: 16px;
   border-right: 1px solid var(--bench-line);
 }
@@ -320,6 +332,11 @@ td a,
 .who span {
   font-size: 13px;
   color: var(--on-bench-2);
+}
+.who > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rail__context {
   flex: 1;
@@ -562,6 +579,10 @@ select {
 .print-hide {
   float: right;
 }
+.wide {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
 .btn {
   min-width: 44px;
   height: 44px;
@@ -602,10 +623,124 @@ select {
   .status--fresh .now {
     animation-timing-function: var(--ease-step);
   }
+  .row--fresh {
+    animation-timing-function: var(--ease-step);
+  }
   .row--fresh td {
-    animation:
-      fade var(--dur-fade) var(--ease-out) both,
-      row-tint var(--dur-accent) var(--ease-step) both;
+    animation: fade var(--dur-fade) var(--ease-out) both;
+  }
+}
+
+@media (max-width: 900px) {
+  .rail {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  .who {
+    flex: 1;
+    padding-right: 0;
+    border-right: 0;
+  }
+  .rail__out {
+    height: 44px;
+  }
+  .rail__context {
+    order: 1;
+    flex-basis: 100%;
+    min-height: 2lh;
+    font-size: 14px;
+  }
+  .rbtn--commit {
+    order: 2;
+    flex-basis: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .top {
+    flex-wrap: wrap;
+    gap: 0 12px;
+    padding-inline: 12px;
+  }
+  .brand {
+    height: var(--top-h);
+  }
+  .top nav {
+    order: 1;
+    flex: 0 0 calc(100% + 24px);
+    gap: 0;
+    margin: 0 -12px;
+    padding: 0 6px;
+    border-top: 1px solid var(--line);
+  }
+  .top nav a {
+    padding: 0 10px;
+  }
+  .plane {
+    padding: 12px;
+  }
+  h1 {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-size: 22px;
+  }
+  .facts dd {
+    overflow-wrap: anywhere;
+  }
+  .stack,
+  .stack tbody,
+  .stack tr {
+    display: block;
+  }
+  .stack thead {
+    display: none;
+  }
+  .stack tr {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .stack td {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: 12px;
+    padding: 2px 0;
+    border: 0;
+  }
+  .stack td::before {
+    content: attr(data-label);
+    color: var(--ink-3);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .wide table {
+    min-width: 720px;
+  }
+  .sheet {
+    --foot-h: 156px;
+    padding: 12px 12px 0;
+  }
+  .sheet h2 {
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    font-size: 20px;
+  }
+  .sheet__foot {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 0 12px;
+  }
+  .sheet__line {
+    --lines: 3;
+    flex-basis: 100%;
+  }
+  .sheet__foot .rbtn {
+    flex: 1;
+  }
+  .signin {
+    margin-top: 24px;
+  }
+  .report {
+    padding: 16px;
   }
 }
 

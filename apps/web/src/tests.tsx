@@ -26,7 +26,7 @@ export function Worklist({ me }: { me: ActorContext }) {
     <Shell me={me} active="tests" action={action}>
       <h1>Tests</h1>
       {error && <p className="note--bad">{error}</p>}
-      <table>
+      <table className="stack">
         <thead>
           <tr>
             <th>Sample</th>
@@ -41,19 +41,19 @@ export function Worklist({ me }: { me: ActorContext }) {
         <tbody>
           {tests?.map((t) => (
             <tr key={t.id} className={freshTests.has(t.id) ? 'row--fresh' : undefined}>
-              <td>
+              <td data-label="Sample">
                 <a href={`#/tests/${t.id}`}>{t.sampleNumber}</a>
               </td>
-              <td>{t.description}</td>
-              <td>{t.customer}</td>
-              <td>
+              <td data-label="Description">{t.description}</td>
+              <td data-label="Customer">{t.customer}</td>
+              <td data-label="Method">
                 {t.methodCode} v{t.methodVersion}
               </td>
-              <td>
+              <td data-label="State">
                 <Status state={t.state} />
               </td>
-              <td>{t.assignee}</td>
-              <td>{time(t.receivedAt)}</td>
+              <td data-label="Analyst">{t.assignee}</td>
+              <td data-label="Received">{time(t.receivedAt)}</td>
             </tr>
           ))}
         </tbody>
@@ -134,7 +134,7 @@ const signatureKey = (s: Signature) => s.meaning + s.signedAt;
 export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: ReadonlySet<string> }) {
   if (!rows.length) return <p className="muted">No Signatures yet.</p>;
   return (
-    <table>
+    <table className="stack">
       <thead>
         <tr>
           <th>Meaning</th>
@@ -147,11 +147,13 @@ export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: Readonl
       <tbody>
         {rows.map((s) => (
           <tr key={signatureKey(s)} className={fresh?.has(signatureKey(s)) ? 'row--fresh' : undefined}>
-            <td className="sig">{s.meaning}</td>
-            <td>{s.signer}</td>
-            <td>{time(s.signedAt)}</td>
-            <td>{s.record}</td>
-            <td>
+            <td className="sig" data-label="Meaning">
+              {s.meaning}
+            </td>
+            <td data-label="Signed by">{s.signer}</td>
+            <td data-label="Time">{time(s.signedAt)}</td>
+            <td data-label="Record">{s.record}</td>
+            <td data-label="SHA-256">
               <code className="hash">{s.contentHash}</code>
             </td>
           </tr>
@@ -183,36 +185,38 @@ function AuditTrail({ entries }: { entries: AuditEntry[] }) {
   return (
     <>
       <h2>Audit Trail</h2>
-      <table className="audit">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Time</th>
-            <th>Who</th>
-            <th>Role</th>
-            <th>Reason</th>
-            <th>Record</th>
-            <th>Change</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((e) => (
-            <tr key={e.seq}>
-              <td>{e.seq}</td>
-              <td>{time(e.at)}</td>
-              <td>
-                <code>{e.actor}</code>
-              </td>
-              <td>{e.role}</td>
-              <td>{e.reason}</td>
-              <td>
-                {e.op} {e.table}
-              </td>
-              <td>{changes(e)}</td>
+      <div className="wide">
+        <table className="audit">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Time</th>
+              <th>Who</th>
+              <th>Role</th>
+              <th>Reason</th>
+              <th>Record</th>
+              <th>Change</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {entries.map((e) => (
+              <tr key={e.seq}>
+                <td>{e.seq}</td>
+                <td>{time(e.at)}</td>
+                <td>
+                  <code>{e.actor}</code>
+                </td>
+                <td>{e.role}</td>
+                <td>{e.reason}</td>
+                <td>
+                  {e.op} {e.table}
+                </td>
+                <td>{changes(e)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
