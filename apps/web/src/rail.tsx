@@ -124,6 +124,7 @@ function Rail({ me, action }: { me: Me; action: RailAction | null }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
   const [refusal, setRefusal] = useState<Note | null>(null);
+  const [instant, setInstant] = useState(false);
   const inFlight = useRef(false);
   const seq = useRef(0);
   const afterClose = useRef<{ clear: boolean } | null>(null);
@@ -144,7 +145,13 @@ function Rail({ me, action }: { me: Me; action: RailAction | null }) {
   }, [sheet]);
   useEffect(() => {
     if (!sheet || sheet.closing) return;
-    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape' && !inFlight.current) close(false); };
+    // Escape is a keyboard path, so the sheet goes at once and the commit button returns without its entrance.
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || inFlight.current) return;
+      afterClose.current = { clear: false };
+      setInstant(true);
+      setSheet(null);
+    };
     addEventListener('keydown', escape);
     return () => removeEventListener('keydown', escape);
   }, [sheet]);
@@ -160,6 +167,7 @@ function Rail({ me, action }: { me: Me; action: RailAction | null }) {
 
   function close(clear: boolean) {
     afterClose.current = { clear };
+    setInstant(false);
     setSheet((s) => s && { ...s, closing: true });
     setTimeout(closed, CLOSE_FALLBACK_MS);
   }
@@ -256,7 +264,7 @@ function Rail({ me, action }: { me: Me; action: RailAction | null }) {
             : <p className="note">{action?.context ?? 'Nothing for you to commit here.'}</p>}
         </div>
         {action && !sheet && (
-          <button ref={commitButton} type="button" className="rbtn rbtn--commit" disabled={busy} onClick={() => (direct ? void commit(action) : open(action))}>
+          <button ref={commitButton} type="button" className="rbtn rbtn--commit" data-instant={instant || undefined} disabled={busy} onClick={() => (direct ? void commit(action) : open(action))}>
             {busy ? 'Recording…' : action.label}
           </button>
         )}

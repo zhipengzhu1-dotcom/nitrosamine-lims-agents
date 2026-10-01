@@ -48,7 +48,7 @@ th { font-size: 12px; color: var(--ink-3); font-weight: 700; background: var(--s
 .facts dd { margin: 0; }
 .value { font-size: 20px; font-weight: 700; }
 .hash { word-break: break-all; }
-.facts a { display: inline-block; padding: 12px 0; margin: -12px 0; }
+.facts a { display: inline-block; padding: 13px 0; margin: -13px 0; }
 .sig { color: var(--sig); font-weight: 700; }
 
 .status { --accent: var(--act); position: relative; isolation: isolate; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; }
@@ -83,6 +83,8 @@ th { font-size: 12px; color: var(--ink-3); font-weight: 700; background: var(--s
 .rbtn:disabled { opacity: 0.6; cursor: wait; }
 .rbtn--quiet { background: var(--bench-2); border: 1px solid var(--bench-line); color: var(--on-bench); }
 .rbtn--commit { @starting-style { opacity: 0; transform: scale(0.96); } }
+/* Back from a sheet closed with Escape: a keyboard path stays instant. */
+.rbtn--commit[data-instant] { @starting-style { opacity: 1; transform: none; } }
 
 /* The sheet shares the plane's grid cell, bottom-aligned, and slides out from behind the rail and back into it. */
 .sheet { grid-row: 2; grid-column: 1; align-self: end; z-index: 1; max-height: 100%; overflow: auto; overscroll-behavior: contain;
