@@ -556,6 +556,23 @@ The shared contract holds for every item below unless it says otherwise.
 - Who records the retirement of a service identity (decision 13 names no author for service grants; migration 0030 is their only record). Assumed `svc:auth`, since the seed cannot revoke itself. The database admits a `svc:%` grant on any registered table, so only the app's `SERVICE_COMMANDS` keeps `svc:auth` to its own rows; a guard scoping it to the access-log tables and this one revocation needs a migration, which S2 may not add (part11 residual R2).
 - Whether a meaning's gate should also answer before re-authentication, so no refusal after the prompt ever spends a code (decision 23 rule 5 asks only that eligibility is shown first). Assumed not; `signing.prepare` shows it.
 
+### C1, results integrity (review fixes 1, 8, 26, the calculation half of 6, and 12)
+
+The shared contract holds for every item below. Fixes 11, 25, 30, 31, 32 and 33 were not built: the owner cut the prototype back to #24's question while this unit was in its third step, so they go to the map.
+
+- **A Test needs a Run** (fix 1). `testPerformedGate`, `reviewedGate` on a Test (`ReviewedFacts.kind`) and `releasedGate` (`hasRun` per Test) refuse with the new reason `no-run-linked`; a Run's own Review needs none. `loadTest` is unchanged: the gate counts the Runs it is handed, so the step bar and the signing refusal come from the same facts.
+- **The Method's Preparation count is exact** (fix 8). `MethodData.preparations` was documented as a minimum; it now means exactly that many, because the Reportable Result is their mean (usp 5). `preparation.create` refuses beyond it as a transition refusal, `loadTest` flags any other count, and the workbench hides Add Preparation once the count is reached. `TestDetailDto.method.minimumPreparations` became `preparationCount`, a number, since a count is not a value.
+- **Decimals are parsed once, at the door** (fix 26). `DecimalSchema` in `apps/api/src/wire.ts` refines with `parseWritten`, and the Method, Specification and value schemas use it, so `010` and `00.30` are refused with 400 instead of throwing in `written()` later.
+- **A dilution volume is positive and a concentration is not negative** (fix 6, calculation). `calculatePreparation` answers `dilution-not-positive` and `concentration-negative` (naming the Analyte) as values; `loadTest` lists each as a missing value, as it did a non-positive weight. Zero concentration stays a real reading, since below-LOQ reporting is not built.
+- **Each Preparation names its balance** (fix 12). `preparation.create` takes `balanceId`, an Equipment of kind `Balance` in the Lab (any other kind is refused by name), and records it as the Critical Recorded Value `prep.balance` with subject `P<n>`, Verified like the typed values. `TestPerformedFacts.balances` is checked In use with the existing `equipment-not-in-use` reason, worded `P1 balance BAL-01`. The Test version's bytes carry `preparations[].balance` as a cite plus the Equipment code, `test.detail` prints each Preparation's balance and Fitness Status, and the seed registers `BAL-01`. The kind string lives in `@lims/contract` (`BALANCE_KIND`) because the workbench filters its pickers by it: balances for Preparations, everything else for the Run's instrument.
+
+### Spec gaps found by C1
+
+- What makes an Equipment a balance. The equipment module is a stub with a free-text kind (iso 5 exception), so the kind string `Balance` is the rule until the module defines kinds.
+- Whether a Run's instrument may be a balance. The workbench no longer offers one; the server does not refuse it, since no decision names which Equipment kinds a Run may cite.
+- Nothing can take a balance out of use, so the In-use check on `prep.balance` at Test Performed is proved by the pure gate test only; the wiring mirrors the Run's instrument and is not pinned by an API test.
+- Whether a Method may ask for more Preparations than the count when a Preparation is lost or repeated (decision 29 names Retests, which are not built). Exact means exact: a spoiled Preparation has no path in the skeleton.
+
 ## Open questions and risks
 
 - **Recorded Value as a glossary term.** Should "Recorded Value" enter `CONTEXT.md` ("One typed or chosen value on a signable record, with who recorded it and when; the unit of Verified signing and Critical Data Change")? Or does an existing term fit that I missed?
