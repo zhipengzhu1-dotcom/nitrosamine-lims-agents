@@ -7,14 +7,24 @@ const PROBE = 'E2E-FAILURE-PROBE';
 const database = execFileSync(process.execPath, ['../../packages/db/src/checkout.ts', 'database', 'lims_e2e'], {
   encoding: 'utf8',
 }).trim();
-const psql = (statement: string) =>
-  execFileSync('../../scripts/pg.sh', ['psql', '-d', database, '-qtAc', statement], { encoding: 'utf8' }).trim();
+const psql = (script: string, variables: Record<string, string> = {}) =>
+  execFileSync(
+    '../../scripts/pg.sh',
+    [
+      'psql',
+      '-d',
+      database,
+      '-qtA',
+      ...Object.entries(variables).flatMap(([name, value]) => ['-v', `${name}=${value}`]),
+    ],
+    { input: script, encoding: 'utf8' },
+  ).trim();
 
 test.beforeAll(() => {
   psql(`do $$ begin
-          alter table lims.sample add constraint e2e_failure_probe check (description not like '%${PROBE}%');
+          alter table lims.sample add constraint e2e_failure_probe check (description not like '%E2E-FAILURE-PROBE%');
         exception when duplicate_object then null;
-        end $$`);
+        end $$;`);
 });
 
 test('an unexpected failure shows its reference on the Bench Rail and plays no success motion', async ({ page }) => {
@@ -34,7 +44,7 @@ test('an unexpected failure shows its reference on the Bench Rail and plays no s
   await expect(status).toContainText(/^Not finished: .* reference [0-9A-HJKMNP-TV-Z]{8}\.$/);
   const reference = /reference (\w{8})/.exec(await status.innerText())?.[1] ?? '';
   expect(
-    psql(`select step from lims.system_incident where reference = '${reference}'`),
+    psql(`select step from lims.system_incident where reference = :'reference';`, { reference }),
     'the reference names a System Incident',
   ).toBe('submit');
   await expect(page.locator('form.sheet .refusal'), 'the sheet stays open with the reference').toContainText(reference);

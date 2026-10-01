@@ -5,7 +5,7 @@ import type { Insertable, Kysely } from 'kysely';
 
 const INCIDENT_SERVICE = { actor: 'svc:incident', role: 'system', reason: 'Open a System Incident' };
 
-const NAMED = new Map<string, string>([
+const STEP_OF_ROUTE = new Map<string, string>([
   ...Object.entries(routes).map(([name, route]): [string, string] => [`${route.method} ${route.url}`, name]),
   ...stepNames.map((name): [string, string] => [`POST ${stepRoute(name).url}`, name]),
 ]);
@@ -13,7 +13,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function stepOf(req: FastifyRequest): string {
   const route = `${req.method} ${req.routeOptions.url ?? 'unknown route'}`;
-  return NAMED.get(route) ?? route;
+  return STEP_OF_ROUTE.get(route) ?? route;
 }
 
 function recordIdOf(req: FastifyRequest): string | null {
