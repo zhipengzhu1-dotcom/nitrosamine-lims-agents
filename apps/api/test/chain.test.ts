@@ -230,8 +230,9 @@ describe('review fix 4: each field names its writer and the states it is written
     typed = await typeRun(seed.tabs, seed.reference, testId, PASSING);
   });
 
-  it("a Test's values are written by the assigned Analyst, not by another Analyst or a Reviewer", async () => {
+  it("a Test's values are written by the assigned Analyst as an Analyst, not by another Analyst or a Reviewer", async () => {
     notPermitted(await seed.tabs.dee.command('value.record', { role: 'Analyst', parent: testId, field: 'prep.weight', subject: 'P3', value: decimal('1.00', 'mg') }), /assigned to another Analyst/);
+    notPermitted(await seed.tabs.ann.command('value.record', { role: 'Reviewer', parent: testId, field: 'prep.weight', subject: 'P3', value: decimal('1.00', 'mg') }), /recorded as an Analyst/);
     notPermitted(await seed.tabs.dee.command('value.change', { role: 'Analyst', value: typed.values['weight P1'], to: decimal('100.13', 'mg'), reason }), /assigned to another Analyst/);
     notPermitted(await seed.tabs.bob.command('value.change', { role: 'Reviewer', value: typed.values['weight P1'], to: decimal('100.13', 'mg'), reason }), /assigned to another Analyst/);
   });

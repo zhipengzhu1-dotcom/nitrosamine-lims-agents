@@ -230,7 +230,7 @@ export function records(tx: AuditedTx, deps: Deps, acted: Acted): Records {
       const spec = kinds.get(p.kind).fields[field];
       if (!spec) throw new Error(`${p.kind} has no field ${field}`);
       if (spec.type !== value.type) throw new Error(`${field} takes a ${spec.type}, not a ${value.type}`);
-      const notWriter = await writerRefusal(q, spec.writer, parent, acted.person);
+      const notWriter = await writerRefusal(q, spec.writer, parent, acted);
       if (notWriter) return notWriter;
       const taken = await q.selectFrom('recorded_value').select('record_id').where('parent_id', '=', parent).where('field', '=', field).where('subject', '=', subject).executeTakeFirst();
       if (taken) return { kind: 'transition', message: `${field}${subject ? ` (${subject})` : ''} already has a value. Change it instead.` };
@@ -250,7 +250,7 @@ export function records(tx: AuditedTx, deps: Deps, acted: Acted): Records {
       const p = await recordRow(rv.parent_id as RecordId);
       const spec = kinds.get(p.kind).fields[rv.field];
       if (!spec) throw new Error(`${p.kind} has no field ${rv.field}`);
-      const notWriter = await writerRefusal(q, spec.writer, p.id, acted.person);
+      const notWriter = await writerRefusal(q, spec.writer, p.id, acted);
       if (notWriter) return notWriter;
       return saveValueVersion(value, rv.ledger_id as LedgerId, { schema: 'value@1', parent: rv.parent_id, field: rv.field, subject: rv.subject, value: canonValue(to) }, to);
     },
