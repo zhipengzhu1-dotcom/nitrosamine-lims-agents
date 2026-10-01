@@ -38,6 +38,7 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
       .values({ code: 'RD-MTH-0001', version: '1', title: 'NDMA in metformin hydrochloride by LC-MS/MS' })
       .returning('id')
       .executeTakeFirstOrThrow();
+    // The Lab comes after the company rows: a transaction locks the company chain before any Lab's (lims.lock_chain).
     const { labId } = await tx
       .insertInto('lab')
       .values({ code: 'RD', name: 'R&D Laboratory (fictional)', timeZone: 'America/New_York' })

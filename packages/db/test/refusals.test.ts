@@ -626,11 +626,12 @@ it('a Lab in a time zone the database does not know is refused', async () => {
 });
 
 describe('a counter changes only when lims.take_number takes a number, even for the superuser', () => {
-  const cases: { name: string; trigger: string; statement: string }[] = [
+  const cases: { name: string; trigger: string; statement: string; values?: unknown[] }[] = [
     {
       name: 'adding a counter outside the numbering function is refused',
       trigger: 'refuse_change',
-      statement: `insert into lims.counter (lab_id, kind) values ('${id.otherLab}', 'Sample')`,
+      statement: `insert into lims.counter (lab_id, kind) values ($1, 'Sample')`,
+      values: [id.otherLab],
     },
     {
       name: 'moving a counter outside the numbering function is refused',
@@ -651,7 +652,7 @@ describe('a counter changes only when lims.take_number takes a number, even for 
   for (const c of cases) {
     covered.add(`lims.counter.${c.trigger}`);
     it(c.name, async () => {
-      const error = await refusalOf(c.statement, [], false);
+      const error = await refusalOf(c.statement, c.values, false);
       assert.deepEqual(
         [error.code, error.message],
         ['LA003', 'a counter changes only when lims.take_number takes a number'],
