@@ -60,6 +60,31 @@ it('an audited write records who made it, in which role, why, and the old and ne
   assert.deepEqual([entry.oldName, entry.newName], ['Acme Labz', 'Acme Labs']);
 });
 
+it('an Audit Trail row snapshot keeps the stored column names and leaves out the password hash', async () => {
+  const { id } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a person' }, (tx) =>
+    tx
+      .insertInto('person')
+      .values({ username: 'snap.shot', display_name: 'Snap Shot', password_hash: 'not-a-real-hash' })
+      .returning('id')
+      .executeTakeFirstOrThrow(),
+  );
+  const { new_row: row } = await app
+    .selectFrom('audit_entry')
+    .select('new_row')
+    .where('table_name', '=', 'person')
+    .where(sql`new_row->>'id'`, '=', id)
+    .executeTakeFirstOrThrow();
+  assert.ok(row && typeof row === 'object' && !Array.isArray(row), 'the snapshot is a row object');
+  assert.deepEqual(Object.keys(row).sort(), [
+    'customer_id',
+    'display_name',
+    'failed_logins',
+    'id',
+    'locked_at',
+    'username',
+  ]);
+});
+
 it('a write without a reason is refused and leaves nothing behind', async () => {
   await assert.rejects(
     audited(app, { actor: 'person:lena', role: 'LabManager', reason: '' }, (tx) =>

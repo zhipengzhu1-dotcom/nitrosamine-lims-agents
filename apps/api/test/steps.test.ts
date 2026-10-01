@@ -88,12 +88,18 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     '0.0300',
     'the Audit Trail keeps the Result as typed',
   );
+  const testInsert = reported.auditTrail.find((e) => e.table === 'test' && e.op === 'INSERT')?.newRow;
   assert.deepEqual(
-    reported.signatures.map((s) => [s.meaning, s.signer]),
+    Object.keys(testInsert ?? {}).sort(),
+    ['assignee_id', 'gxp_class', 'id', 'lab_id', 'method_id', 'sample_id', 'state'],
+    'the Audit Trail shows each row snapshot under its stored column names',
+  );
+  assert.deepEqual(
+    reported.signatures.map((s) => [s.meaning, s.signer, s.record]),
     [
-      ['Performed', 'Ana Ferreira'],
-      ['Reviewed', 'Rui Tanaka'],
-      ['Released', 'Quinn Adeyemi'],
+      ['Performed', 'Ana Ferreira', 'test'],
+      ['Reviewed', 'Rui Tanaka', 'test'],
+      ['Released', 'Quinn Adeyemi', 'test_report'],
     ],
   );
   const actors = {
@@ -129,6 +135,28 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   assert.equal(signed.length, 3);
   for (const { content } of signed) {
     const version = JSON.parse(content.toString());
+    assert.deepEqual(
+      Object.keys(version),
+      [
+        'id',
+        'customer',
+        'sample',
+        'description',
+        'receivedAt',
+        'method',
+        'methodVersion',
+        'methodTitle',
+        'gxpClass',
+        'analyte',
+        'value',
+        'unit',
+        'injectionSequenceRef',
+        'notebookRef',
+        'performedOn',
+        'report',
+      ],
+      'each signed Record Version names its fields in one fixed order',
+    );
     assert.deepEqual(
       [version.customer, version.description, version.receivedAt, version.methodTitle],
       [printed.customer, printed.description, printed.receivedAt, printed.methodTitle],
