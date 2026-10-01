@@ -63,7 +63,7 @@ describe('enrolment_link', () => {
 
 describe('alert', () => {
   it('is insert-only: lims_app cannot update or delete one', async () => {
-    await runAudited(db.app, fx.seedCtx(), { kind: 'company' }, async (tx) => {
+    await runAudited(db.app, fx.authCtx(), { kind: 'company' }, async (tx) => {
       await tx.db.insertInto('alert').values({ kind: 'lockout', person_id: fx.ann.id, detail: {} }).execute();
       return { commit: null };
     });

@@ -1,10 +1,10 @@
 // The report store and the file door: a stored file is named by its SHA-256 and served once per
 // token, and a token is spent by its first use.
-import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { COMPANY_LEDGER, SERVICE, readBlob, runAudited, sha256Hex, storeBlob } from '@lims/db';
+import { COMPANY_LEDGER, readBlob, runAudited, sha256Hex, storeBlob } from '@lims/db';
+import { seedFixture } from '@lims/db/testing';
 import type { Sha256Hex } from '@lims/domain/ids';
 import { FILE_TOKEN_SECONDS, FileTokens } from '../src/files.ts';
 import { testApi, type TestApi } from '../src/testing/harness.ts';
@@ -15,10 +15,9 @@ let sha: Sha256Hex;
 
 beforeAll(async () => {
   api = await testApi();
-  const out = await runAudited(api.db.app, {
-    person: SERVICE.seed.person, role: SERVICE.seed.role, actingLab: null, customer: null, action: 'test.store', reason: { kind: 'first_save' },
-    appRelease: 'test', session: null, commitKey: randomUUID() as never, ledgers: [COMPANY_LEDGER],
-  }, { kind: 'company' }, async (tx) => ({ commit: await storeBlob(tx, api.deps.reportStore, COMPANY_LEDGER, bytes, 'application/pdf') }));
+  const fx = await seedFixture(api.db.app);
+  const out = await runAudited(api.db.app, fx.ctx(fx.ann, 'Analyst', { action: 'test.store' }), { kind: 'lab', labId: fx.labA },
+    async (tx) => ({ commit: await storeBlob(tx, api.deps.reportStore, COMPANY_LEDGER, bytes, 'application/pdf') }));
   if (!('commit' in out)) throw new Error('store rolled back');
   sha = out.commit;
 });
