@@ -5,3 +5,4 @@ test-results/
 playwright-report/
 __pycache__/
 .ruff_cache/
+.verify/
