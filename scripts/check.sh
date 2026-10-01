@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The gate behind pnpm check: green here is green on main, and CI runs exactly this.
+# CI's check job runs this script unchanged.
 # The tests need the PostgreSQL that LIMS_PG points at (scripts/pg.sh start locally).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -9,6 +9,18 @@ SHELLCHECK=shellcheck-py==0.11.0.1
 for tool in python3 uvx; do
   if ! command -v "$tool" >/dev/null; then
     echo "pnpm check needs $tool, which is not on PATH (uvx comes with uv: https://docs.astral.sh/uv/)." >&2
+    exit 1
+  fi
+done
+
+if git grep -nE '"[~^][0-9]' -- '*package.json'; then
+  echo "Pin every dependency to an exact version." >&2
+  exit 1
+fi
+for dir in apps/*/test packages/*/test; do
+  [ -d "$dir" ] || continue
+  if ! grep -q '"test":' "$(dirname "$dir")/package.json"; then
+    echo "$dir holds tests, but its package has no test script, so pnpm test would skip them." >&2
     exit 1
   fi
 done

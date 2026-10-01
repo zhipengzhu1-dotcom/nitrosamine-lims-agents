@@ -113,7 +113,7 @@
               },
               {
                 "group": ["@lims/*", "!@lims/db"],
-                "message": "@lims/domain imports only types from @lims/db."
+                "message": "@lims/domain imports no workspace package except types from @lims/db."
               },
               {
                 "group": ["@lims/db/*"],

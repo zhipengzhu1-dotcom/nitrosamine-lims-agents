@@ -7,7 +7,7 @@
   "scripts": {
     "check": "scripts/check.sh",
     "format": "biome format --write .",
-    "lint": "oxlint",
+    "lint": "oxlint --deny-warnings",
     "loc": "scripts/loc.sh",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

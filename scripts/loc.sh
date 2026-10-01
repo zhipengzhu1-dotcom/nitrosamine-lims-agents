@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reports the hand-written lines (blank lines included) per area; it sets no limit.
+# Reports the hand-written lines (blank lines included) per area.
 # Not counted: docs and Markdown, the lockfile, generated database types, and files that predate the slice.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"

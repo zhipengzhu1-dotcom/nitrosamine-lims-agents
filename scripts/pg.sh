@@ -9,7 +9,7 @@ PORT=${LIMS_PGPORT:-54339}
 
 case "${1:-}" in
   start)
-    if [ -n "${LIMS_PG_EXTERNAL:-}" ]; then echo "postgres://postgres@localhost:$PORT"; exit 0; fi
+    if [ "${LIMS_PG_EXTERNAL:-}" = 1 ]; then echo "postgres://postgres@localhost:$PORT"; exit 0; fi
     if [ ! -d "$DATA" ]; then
       "$PGBIN/initdb" -D "$DATA" -U postgres --auth=trust --encoding=UTF8 --locale=C >/dev/null
     fi
