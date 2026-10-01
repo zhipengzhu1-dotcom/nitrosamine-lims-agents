@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const api = fileURLToPath(new URL('../src/app.ts', import.meta.url));
+const api = fileURLToPath(new URL('../src/main.ts', import.meta.url));
 
 it('an empty PORT stops the API at start and names PORT', () => {
   const started = spawnSync(process.execPath, [api], {

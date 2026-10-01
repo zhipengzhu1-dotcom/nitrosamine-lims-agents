@@ -1,5 +1,6 @@
 import { audited, type DB } from '@lims/db';
 import type { ActorContext, Role } from '@lims/domain';
+import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import {
   type Insertable,
   type Kysely,
@@ -15,6 +16,17 @@ type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session'>;
 /** The one place a refusal becomes an HTTP status: Fastify writes the thrown error as the route's 4xx body. */
 export function refuse(statusCode: number, message: string): never {
   throw Object.assign(new Error(message), { statusCode });
+}
+
+/** A refusal keeps its own status and message; any other failure is logged with its cause and answered with a reference only. */
+export function answerThrown(error: FastifyError, req: FastifyRequest, reply: FastifyReply) {
+  if (typeof error.statusCode === 'number' && error.statusCode < 500) throw error;
+  req.log.error({ err: error }, 'unexpected failure');
+  return reply.code(500).send({
+    statusCode: 500,
+    error: 'Internal Server Error',
+    message: `the LIMS could not finish this request; reload to see what was saved, and give the Admin reference ${req.id}`,
+  });
 }
 
 function inLab(q: Kysely<DB>, labId: string) {

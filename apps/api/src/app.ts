@@ -1,5 +1,5 @@
 import cookie from '@fastify/cookie';
-import { createDb, type DB } from '@lims/db';
+import type { DB } from '@lims/db';
 import type { ActorContext, Instant } from '@lims/domain';
 import Fastify, {
   type FastifyBaseLogger,
@@ -12,8 +12,8 @@ import Fastify, {
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
 import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE } from './auth.ts';
-import { apiConfig } from './config.ts';
 import { readRoutes } from './reads.ts';
+import { answerThrown } from './scope.ts';
 import { stepRoutes } from './steps.ts';
 
 declare module 'fastify' {
@@ -55,6 +55,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
     logger: options.log ? { level: 'info', stream: options.log } : false,
     ajv: { customOptions: { coerceTypes: false } },
   }).withTypeProvider<WireTypes>();
+  app.setErrorHandler(answerThrown);
   app.register(cookie, {
     parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: options.secureCookie },
   });
@@ -69,12 +70,4 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
     stepRoutes(signedIn, db);
   });
   return app;
-}
-
-if (import.meta.main) {
-  const config = apiConfig();
-  await buildApp(createDb(config.databaseUrl), {
-    log: config.log ? process.stdout : null,
-    secureCookie: config.secureCookie,
-  }).listen(config.listen);
 }
