@@ -4,6 +4,7 @@ import { it } from 'node:test';
 import { audited, type Json, type JsonObject } from '@lims/db';
 import { sql } from 'kysely';
 import { routes, type StepInput, type StepName, stepNames, stepRoute, steps } from '@lims/domain';
+import { LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
 import { labScope } from '../src/scope.ts';
 import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
 
@@ -330,6 +331,42 @@ it('a signing with a wrong password is refused and changes nothing, and a signin
 
   ok(await as.wes.call(routes.logout));
   assert.equal(refusedWith(await enter(wes.password), 'noSession'), 'sign in first');
+});
+
+it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and writes a lockout Access Event with the session and the step's role`, async () => {
+  const signer = await api.addPerson('lou.analyst', ['Analyst'], { trained: true });
+  const client = await api.login(signer);
+  const id = await submitTestTo('Assigned', signer);
+  for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
+    refusedWith(
+      await client.call(stepRoute('enterResult'), { testId: id, input: result, signature: { password: 'wrong' } }),
+      'badCredentials',
+    );
+
+  const events = await api.superuser
+    .selectFrom('accessEvent')
+    .select(['kind', 'sessionId', sql<string[]>`roles::text[]`.as('roles')])
+    .where('subjectId', '=', signer.id)
+    .orderBy('at')
+    .execute();
+  const session = await api.superuser
+    .selectFrom('session')
+    .select('id')
+    .where('personId', '=', signer.id)
+    .executeTakeFirstOrThrow();
+  assert.deepEqual(events, [
+    { kind: 'SignInSucceeded', sessionId: session.id, roles: ['Analyst'] },
+    { kind: 'Lockout', sessionId: session.id, roles: ['Analyst'] },
+  ]);
+  const roles = await api.superuser
+    .selectFrom('auditEntry')
+    .select('role')
+    .distinct()
+    .where('actor', '=', `person:${signer.username}`)
+    .where('tableName', 'in', ['person', 'access_event'])
+    .execute();
+  assert.deepEqual(roles, [{ role: steps.enterResult.role }], "the failures are recorded under the step's role");
+  refusedWith(await client.call(routes.me), 'noSession');
 });
 
 it("a Customer User cannot read another Customer's Test", async () => {

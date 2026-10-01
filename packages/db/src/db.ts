@@ -5,7 +5,7 @@ import type { DB } from './schema.ts';
 export type { DB };
 export { checkoutDatabase } from './checkout.ts';
 export { type DbConfig, dbConfig } from './config.ts';
-export type { Json, JsonObject, Meaning, Role, TestState } from './schema.ts';
+export type { Json, JsonObject, Meaning, Role, SignInFailure, TestState } from './schema.ts';
 
 export function databaseUrl(server: string, database: string, user?: string): string {
   const url = new URL(server);

@@ -236,3 +236,20 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await railSays(page, 'Unsigned: Performed, Reviewed, Released. The record changed after signing.');
   await shot(page, 'test-unsigned');
 });
+
+test('a wrong password and an unknown user ID show the same failure message', async ({ page }) => {
+  const attempt = async (username: string, password: string) => {
+    await page.goto('/');
+    await page.getByLabel('Username').fill(username);
+    await page.getByLabel('Password').fill(password);
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    const alert = page.getByRole('alert');
+    await expect(alert).toBeVisible();
+    return alert.textContent();
+  };
+  const wrongPassword = await attempt('rui.reviewer', 'not-the-password');
+  const unknownUserId = await attempt(`nobody-${randomUUID()}`, DEMO_PASSWORD);
+  expect(wrongPassword).toBe('the credentials are not valid');
+  expect(unknownUserId).toBe(wrongPassword);
+  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+});
