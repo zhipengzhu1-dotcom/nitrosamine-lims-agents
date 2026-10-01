@@ -2,6 +2,8 @@
 // and the signature rows on the versions it cites. Limits and results print as the stored strings.
 // Nothing here computes a verdict: it prints what the Test version's judgement recorded.
 
+import { readFileSync } from 'node:fs';
+import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { Canon } from '@lims/domain/canonical';
 import type { LabId, RecordId } from '@lims/domain/ids';
@@ -15,6 +17,11 @@ export type RenderInput = {
   /** The Released version's body as sealed, for what the report says about itself. */
   readonly body: Canon;
 };
+
+// Names arrive in any script; the standard fonts encode only WinAnsi. See assets/fonts/SOURCE.md.
+const fontBytes = (file: string): Uint8Array => readFileSync(new URL(`../../assets/fonts/${file}`, import.meta.url));
+const UNICODE_REGULAR = fontBytes('NotoSansSC-Regular.ttf');
+const UNICODE_BOLD = fontBytes('NotoSansSC-Bold.ttf');
 
 const utc = (d: Date): string => d.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
 /** "2026-07-14 09:09:10 EDT": the abbreviation comes from en-US, which names US zones by letters (rule 9). */
@@ -40,6 +47,7 @@ class Writer {
   readonly #font: PDFFont;
   readonly #bold: PDFFont;
   readonly #mono: PDFFont;
+  readonly #printable = new Map<PDFFont, Set<number>>();
 
   constructor(doc: PDFDocument, font: PDFFont, bold: PDFFont, mono: PDFFont) {
     this.#doc = doc; this.#font = font; this.#bold = bold; this.#mono = mono;
@@ -56,9 +64,19 @@ class Writer {
 
   line(text: string, opts: { size?: number; bold?: boolean; mono?: boolean; indent?: number } = {}): void {
     const size = opts.size ?? 10;
+    const font = opts.mono ? this.#mono : opts.bold ? this.#bold : this.#font;
+    this.#refuseUnprintable(text, font);
     this.#ensure(size + 4);
-    this.#page.drawText(text, { x: 50 + (opts.indent ?? 0), y: this.#y, size, font: opts.mono ? this.#mono : opts.bold ? this.#bold : this.#font, color: rgb(0.1, 0.1, 0.1) });
+    this.#page.drawText(text, { x: 50 + (opts.indent ?? 0), y: this.#y, size, font, color: rgb(0.1, 0.1, 0.1) });
     this.#y -= size + 4;
+  }
+
+  // An embedded font draws a character it lacks as an empty box; on a signed report that misstates a name.
+  #refuseUnprintable(text: string, font: PDFFont): void {
+    let printable = this.#printable.get(font);
+    if (!printable) this.#printable.set(font, (printable = new Set(font.getCharacterSet())));
+    const missing = [...new Set(text)].filter((c) => !printable.has(c.codePointAt(0)!));
+    if (missing.length > 0) throw new Error(`The report fonts cannot print ${missing.map((c) => `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`).join(', ')}`);
   }
 
   gap(h = 8): void { this.#y -= h; }
@@ -81,8 +99,9 @@ export async function renderReportPdf(q: Q, input: RenderInput): Promise<Uint8Ar
   doc.setTitle(`Test Report ${report.number}`);
   doc.setCreationDate(input.releasedSignature.signedAt);
   doc.setModificationDate(input.releasedSignature.signedAt);
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont(UNICODE_REGULAR, { subset: true });
+  const bold = await doc.embedFont(UNICODE_BOLD, { subset: true });
   const mono = await doc.embedFont(StandardFonts.Courier);
   const w = new Writer(doc, font, bold, mono);
 

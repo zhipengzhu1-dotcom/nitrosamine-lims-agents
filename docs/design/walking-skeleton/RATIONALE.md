@@ -575,6 +575,19 @@ The shared contract holds for every item below unless it says otherwise.
 - Who records the retirement of a service identity (decision 13 names no author for service grants; migration 0030 is their only record). Assumed `svc:auth`, since the seed cannot revoke itself. The database admits a `svc:%` grant on any registered table, so only the app's `SERVICE_COMMANDS` keeps `svc:auth` to its own rows; a guard scoping it to the access-log tables and this one revocation needs a migration, which S2 may not add (part11 residual R2).
 - Whether a meaning's gate should also answer before re-authentication, so no refusal after the prompt ever spends a code (decision 23 rule 5 asks only that eligibility is shown first). Assumed not; `signing.prepare` shows it.
 
+### C4-min, the report PDF prints a name in any script (the crash half of review fix 24)
+
+- **Regular and bold text use Noto Sans SC, embedded and subset** through `@pdf-lib/fontkit` 1.1.1, an addition to the pinned stack. The standard Helvetica encodes only WinAnsi, so a Customer or signer named 王芳 or Đặng threw inside the releasing transaction. Monospaced lines keep Courier; they print only hashes, times and numbers the server generates. The fonts, their OFL licence and their source are in `apps/api/assets/fonts/`. Rendering stays deterministic, so the stored SHA-256 still matches the download. The shared contract holds.
+- **The committed fonts are pre-subset** (the owner's choice) by `apps/api/assets/fonts/subset.py`, to Latin through Latin Extended-B, the Vietnamese ranges, common punctuation and the 6,763 GB 2312 hanzi. The script checks the source fonts' SHA-256 and reproduces the committed files byte for byte.
+- **Sizes, measured.** The two subset TTFs are 2.2 MB each, 4.5 MB in the repository and the API image, against 21.1 MB for the full fonts; the web bundle is unchanged. A one-page report grows from 2.4 KB to 11 KB, as each PDF carries a further subset of two fonts. The first render in a process takes about 37 ms, later ones about 15 ms.
+- **A character the fonts lack stops the release** (the iso17025-expert's review, 7.8.1.2 and 7.8.2.1). An embedded font would draw it as an empty box, misstating a name on a signed report, so `renderReportPdf` throws "The report fonts cannot print U+AE40, …" and the releasing transaction rolls back. It throws rather than refusing as a value because the render runs in the Released meaning's `after` hook, which has no refusal path; a missing script is a renderer limit to fix, not a user's error. A Korean name, or a hanzi outside GB 2312 such as 喆, stops the release this way.
+- **A test pins each font file to the SHA-256 in `SOURCE.md`**, so a swapped font under the same release fails CI instead of silently changing issued PDF bytes (the iso17025-expert's review, 7.5.1, unclear).
+- **Not in this unit:** rendering only from the sealed report content (the rest of fix 24) and printing the Decision Rule and limit source (fix 13).
+
+### Spec gaps found by C4-min
+
+- Which scripts a report must print. No decision names them; Latin, Vietnamese and GB 2312 Chinese print, and anything else, such as a rarer hanzi in a name, kana, Hangul, Greek or Cyrillic, stops the release. Adding a script is widening `subset.py` or adding a font. Whether the Released gate should refuse an unprintable name as a value before the signer re-authenticates is open too; today the render, after the signature, throws.
+
 ## Open questions and risks
 
 - **Recorded Value as a glossary term.** Should "Recorded Value" enter `CONTEXT.md` ("One typed or chosen value on a signable record, with who recorded it and when; the unit of Verified signing and Critical Data Change")? Or does an existing term fit that I missed?
