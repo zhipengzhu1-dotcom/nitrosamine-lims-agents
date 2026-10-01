@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
@@ -55,12 +56,13 @@ const result = {
 
 async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
   const signature = signer && { password: signer.password };
-  return client.call(stepRoute(name), { testId, input, ...(signature && { signature }) });
+  return client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) });
 }
 
 async function submitTestTo(state: 'Requested' | 'Ready' | 'Assigned', analyst: Account = ana): Promise<string> {
   const { testId: id } = ok(
     await as.cora.call(stepRoute('submit'), {
+      commitKey: randomUUID(),
       input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
     }),
   );
@@ -123,7 +125,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   }
 
   const report = ok(await as.cora.call(routes.report, { id }));
-  assert.match(report.report.number, /^RD-R\d{5}$/);
+  assert.match(report.report.number, /^RD-R-\d{4}-\d{6}$/);
   const printed = report.test;
   const signed = await api.db
     .selectFrom('signature')
@@ -200,11 +202,21 @@ it('the Analyst who signed Performed cannot review, and the Reviewer who reviewe
   assert.equal((await take(as.dana, 'enterResult', id, result, dana)).status, 200);
   assert.equal((await view(id, as.dana)).next, null, 'review is not offered to the Analyst who performed it');
   const anySignature = { password: 'unused' };
-  const selfReview = await as.dana.call(stepRoute('review'), { testId: id, input: {}, signature: anySignature });
+  const selfReview = await as.dana.call(stepRoute('review'), {
+    commitKey: randomUUID(),
+    testId: id,
+    input: {},
+    signature: anySignature,
+  });
   assert.equal(refusedWith(selfReview, 'guard'), 'the Analyst who performed the Test cannot review it');
 
   assert.equal((await take(as.rhea, 'review', id, {}, rhea)).status, 200);
-  const selfRelease = await as.rhea.call(stepRoute('release'), { testId: id, input: {}, signature: anySignature });
+  const selfRelease = await as.rhea.call(stepRoute('release'), {
+    commitKey: randomUUID(),
+    testId: id,
+    input: {},
+    signature: anySignature,
+  });
   refusedWith(selfRelease, 'guard');
   assert.equal((await view(id)).test.state, 'Reviewed');
 });
@@ -213,7 +225,12 @@ it('a signing with a wrong password is refused and changes nothing, and a signin
   const id = await submitTestTo('Assigned', wes);
   const before = await view(id);
   const enter = (password: string) =>
-    as.wes.call(stepRoute('enterResult'), { testId: id, input: result, signature: { password } });
+    as.wes.call(stepRoute('enterResult'), {
+      commitKey: randomUUID(),
+      testId: id,
+      input: result,
+      signature: { password },
+    });
 
   assert.equal(refusedWith(await enter('not-the-password'), 'badCredentials'), 'the credentials are not valid');
   assert.deepEqual(
@@ -233,7 +250,12 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
   const id = await submitTestTo('Assigned', signer);
   for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
     refusedWith(
-      await client.call(stepRoute('enterResult'), { testId: id, input: result, signature: { password: 'wrong' } }),
+      await client.call(stepRoute('enterResult'), {
+        commitKey: randomUUID(),
+        testId: id,
+        input: result,
+        signature: { password: 'wrong' },
+      }),
       'badCredentials',
     );
 
@@ -279,19 +301,20 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
     api.db,
     { actor: 'svc:test', role: 'system', reason: 'Add a second Lab' },
     async (tx) => {
-      const { labId } = await tx
-        .insertInto('lab')
-        .values({ code: 'OT', name: 'Other Lab' })
-        .returning('labId')
-        .executeTakeFirstOrThrow();
+      // The Submission comes before the Lab: a transaction locks the company chain before any Lab's.
       const submission = await tx
         .insertInto('submission')
-        .values({ customerId, submittedBy: cora.id })
+        .values({ customerId, submittedBy: cora.id, number: 'SUB-2026-900001' })
         .returning('id')
+        .executeTakeFirstOrThrow();
+      const { labId } = await tx
+        .insertInto('lab')
+        .values({ code: 'OT', name: 'Other Lab', timeZone: 'UTC' })
+        .returning('labId')
         .executeTakeFirstOrThrow();
       const sample = await tx
         .insertInto('sample')
-        .values({ labId, submissionId: submission.id, number: 'OT-S00001', description: 'x' })
+        .values({ labId, submissionId: submission.id, number: 'OT-S-2026-000001', description: 'x' })
         .returning('id')
         .executeTakeFirstOrThrow();
       return (

@@ -1,10 +1,11 @@
 import { audited, type DB } from '@lims/db';
-import type { ActorContext, Role } from '@lims/domain';
+import { type ActorContext, type NumberedKind, type NumberTaken, type Role, recordNumber } from '@lims/domain';
 import {
   type Insertable,
   type Kysely,
   type SelectQueryBuilder,
   sql,
+  type Transaction,
   type UpdateQueryBuilder,
   type UpdateResult,
 } from 'kysely';
@@ -31,6 +32,23 @@ function inLab(q: Kysely<DB>, labId: string) {
 }
 
 export type LabQueries = ReturnType<typeof inLab>;
+
+/** The Lab's queries inside one audited transaction, which alone can take a number, so a rollback gives it back. */
+function inWrite(tx: Transaction<DB>, labId: string) {
+  return {
+    ...inLab(tx, labId),
+    takeNumber: async (kind: NumberedKind) => {
+      const { rows } = await sql<Omit<NumberTaken, 'kind'>>`select * from lims.take_number(${kind}, ${labId})`.execute(
+        tx,
+      );
+      const [taken] = rows;
+      if (!taken) throw new Error(`lims.take_number returned no ${kind} number`);
+      return recordNumber({ kind, ...taken });
+    },
+  };
+}
+
+export type WriteQueries = ReturnType<typeof inWrite>;
 
 /** The one lab-scoped seam: every read and write after login goes through it, filtered to the context's Lab. */
 export function labScope(db: Kysely<DB>, ctx: ActorContext) {
@@ -63,8 +81,8 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
         ],
       };
     },
-    write: <R>(reason: string, role: Role, fn: (q: LabQueries) => Promise<R>) =>
-      audited(db, { actor: `person:${ctx.person.username}`, role, reason }, (tx) => fn(inLab(tx, labId))),
+    write: <R>(reason: string, role: Role, fn: (q: WriteQueries) => Promise<R>) =>
+      audited(db, { actor: `person:${ctx.person.username}`, role, reason }, (tx) => fn(inWrite(tx, labId))),
   };
 }
 

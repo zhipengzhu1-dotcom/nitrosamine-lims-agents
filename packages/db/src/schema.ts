@@ -71,6 +71,17 @@ export interface AuditEntry {
   role: string;
   seq: Int8;
   tableName: string;
+  transactionId: string | null;
+}
+
+export interface CommitKey {
+  committedAt: Generated<Timestamp>;
+  key: string;
+  labId: string;
+  requestHash: Buffer;
+  sessionId: string;
+  state: TestState;
+  testId: string;
 }
 
 export interface Customer {
@@ -82,7 +93,7 @@ export interface Lab {
   code: string;
   labId: Generated<string>;
   name: string;
-  timeZone: Generated<string>;
+  timeZone: string;
 }
 
 export interface Membership {
@@ -155,6 +166,7 @@ export interface Signature {
 export interface Submission {
   customerId: string;
   id: Generated<string>;
+  number: string;
   submittedBy: string;
 }
 
@@ -184,6 +196,7 @@ export interface TrainingRecord {
 export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
+  commitKey: CommitKey;
   customer: Customer;
   lab: Lab;
   membership: Membership;

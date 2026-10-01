@@ -41,7 +41,7 @@ const v = await open('assign-refusal');
 const { page } = v;
 try {
   await v.signIn('lena.manager');                       // lands on the Tests worklist
-  await page.getByRole('link', { name: 'RD-S00001', exact: true }).click();
+  await page.getByRole('link', { name: 'RD-S-2026-000001', exact: true }).click();
   await page.getByRole('button', { name: 'Assign' }).click();
   await page.getByLabel('Analyst').selectOption({ label: 'Theo Brandt' });
   await page.getByRole('button', { name: 'Assign' }).click();
@@ -61,18 +61,18 @@ To get a Test into a given state, run the chain helper. It takes a new Test thro
 node .claude/skills/verify/scripts/chain.ts [Requested|Ready|Assigned|SubmittedForReview|Reviewed|Reported]
 ```
 
-It writes the new Sample number (`RD-S0000n`) to `steps.log` and saves its own evidence. Sample numbers count up within the instance, and the newest one is the Test you just made.
+It writes the new Sample number (`RD-S-YYYY-00000n`) to `steps.log` and saves its own evidence. Sample numbers count up within the instance, and the newest one is the Test you just made.
 
 Stable handles, all from the shipped UI (`apps/web/src`):
 
 - Sign in: the fields `Username` and `Password`, and the button `Sign in`. A refusal shows in `role=alert`.
-- The worklist has the heading `Tests`. Each Test is a link named by its Sample number, which matches `/^RD-S\d{5}$/`.
+- The worklist has the heading `Tests`. Each Test is a link named by its Sample number, which matches `/^RD-S-\d{4}-\d{6}$/`.
 - On a Test page, the `h1` holds the Sample number and the state in words, such as `Submitted For Review`.
 - The rail is `role=contentinfo`. Its status line is `role=status`. It offers only the step the signed-in person may take next, as one button: `Submit`, `Receive`, `Assign`, `Enter Result`, `Review` or `Release`. `Sign out` is always there.
 - The step form fields are `Method`, `Sample description`, `Analyst`, `Analyte`, `Result as written`, `Unit`, `Injection sequence`, `Notebook reference` and `Performed on`. Use `{ exact: true }` for these labels.
 - The signature sheet has a field matching the label `/Password/` and the button `Sign as Performed|Reviewed|Released`.
 - When the server accepts a step, the status line reads `... The Test is now <State in words>.` When it refuses, the line reads `Refused: <message>.` and adds ` Nothing has been signed.` for a signing step.
-- Test Report: the link `/^RD-R\d{5}$/` on a Reported Test and the heading `Test Report RD-R0000n`.
+- Test Report: the link `/^RD-R-\d{4}-\d{6}$/` on a Reported Test, the heading `Test Report RD-R-YYYY-00000n`.
 - Audit Trail panel on a Test page: the region `Audit Trail`, its `listitem`s (one per entry, text starting with the chain and `#<seq>`), the field `Search the trail`, the select `Order`, each entry's `Raw entry <seq>` button and `details.long` values, and the QA-only button `Verify chain` whose answer lands in `.verdict`.
 
 Twenty wrong passwords in a row lock an account for the life of the scratch database. Lock only `ada.admin`, and relaunch to unlock it. Demo accounts, all with the password `verify-demo-password`: `cora.customer`, `samir.custodian`, `lena.manager`, `ana.analyst` (trained on the Method), `theo.untrained` (an Analyst with no Training Record), `rui.reviewer`, `quinn.qa` and `ada.admin`.

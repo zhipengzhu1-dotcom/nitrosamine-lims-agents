@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
 import {
@@ -42,13 +43,18 @@ const result = {
 
 async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
   const signature = signer && { password: signer.password };
-  assert.equal((await client.call(stepRoute(name), { testId, input, ...(signature && { signature }) })).status, 200);
+  assert.equal(
+    (await client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) }))
+      .status,
+    200,
+  );
 }
 
 const order = ['Requested', 'Ready', 'Assigned', 'SubmittedForReview', 'Reviewed', 'Reported'] as const;
 async function submitTestTo(state: (typeof order)[number]): Promise<string> {
   const { testId: id } = ok(
     await as.cora.call(stepRoute('submit'), {
+      commitKey: randomUUID(),
       input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
     }),
   );
@@ -71,7 +77,7 @@ const lastEntryOf = async (chain: string) =>
       .executeTakeFirstOrThrow()
   ).last;
 
-const rename = (table: 'person' | 'sample', id: string, change: Record<string, string>, reason: string) =>
+const rename = (table: 'person' | 'customer', id: string, change: Record<string, string>, reason: string) =>
   audited(api.db, { actor: 'svc:test', role: 'system', reason }, (tx) =>
     tx.updateTable(table).set(change).where('id', '=', id).execute(),
   );
@@ -168,29 +174,35 @@ it("each entry carries the actor's label and role, the field's glossary name, ol
 
 it("after a person's printed name or a record's label changes, an earlier entry still shows the label as it stood at that entry's time", async () => {
   const id = await submitTestTo('Assigned');
-  const sample = (await trailOf(id)).entries.find((e) => e.record.table === 'sample')?.record ?? assert.fail();
+  const before = await trailOf(id);
+  const submission = before.entries.find((e) => e.record.table === 'submission')?.record ?? assert.fail();
+  const customerId = before.entries[0]?.changes.find((c) => c.field === 'customer_id')?.new?.ref?.id ?? assert.fail();
   await rename('person', ana.id, { displayName: 'Ana Ferreira-Souza' }, 'Correct a printed name');
-  await rename('sample', sample.id, { number: `${sample.label}-R` }, 'Correct a Sample number');
+  await rename('customer', customerId, { name: 'Northwind Generics Ltd (fictional)' }, 'Correct a Customer name');
   await take(as.ana, 'enterResult', id, result, ana);
-  const { record, entries } = await trailOf(id);
+  const { entries } = await trailOf(id);
+  const submissionTrail = ok(await as.rui.call(routes.recordTrail, { table: 'submission', id: submission.id }));
   await rename('person', ana.id, { displayName: 'Ana Ferreira' }, 'Restore a printed name');
+  await rename('customer', customerId, { name: 'Northwind Generics (fictional)' }, 'Restore a Customer name');
 
   const assign =
     entries.find((e) => e.changes.some((c) => c.field === 'assignee_id')) ?? assert.fail('the assign entry');
   const performed = entries.find((e) => e.reason === 'enterResult' && e.record.table === 'signature');
   assert.equal(assign.changes[0]?.new?.text, 'Ana Ferreira', 'the assignee as named when assigned');
-  assert.equal(assign.record.label, sample.label, 'the Test labelled by its Sample number at the time');
+  assert.equal(
+    entries.find((e) => e.record.table === 'submission')?.record.label,
+    'from Northwind Generics (fictional)',
+    'the Submission labelled by its Customer as named at the time',
+  );
   assert.deepEqual(
     [performed?.actor.label, performed?.changes.find((c) => c.field === 'person_id')?.new?.text],
     ['Ana Ferreira-Souza', 'Ana Ferreira-Souza'],
     'the signer as named when signing',
   );
-  assert.equal(record.label, `${sample.label}-R`, 'the Test as it is labelled now');
-  await rename('sample', sample.id, { number: `${sample.label}-R2` }, 'Correct a Sample number again');
-  assert.equal(
-    (await trailOf(id)).record.label,
-    `${sample.label}-R2`,
-    "the heading follows the latest image even after the Test's last entry",
+  assert.deepEqual(
+    [submissionTrail.record.label, submissionTrail.entries[0]?.record.label],
+    ['from Northwind Generics Ltd (fictional)', 'from Northwind Generics (fictional)'],
+    "the heading follows the latest image even after the record's last entry; the entry keeps the label of its time",
   );
 });
 
@@ -210,17 +222,12 @@ it("a record's trail labels a reference two deep, such as a Sample's Submission 
 
 it("a company record out of this Lab's sight is not found: a person of another Lab, a Customer with no Sample here", async () => {
   const other = await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Add another Lab' }, async (tx) => {
-    const { labId } = await tx
-      .insertInto('lab')
-      .values({ code: 'OL', name: 'Other Lab', timeZone: 'Europe/Zurich' })
-      .returning('labId')
-      .executeTakeFirstOrThrow();
+    // Company rows first: a transaction locks the company chain before any Lab's (lims.lock_chains).
     const { id: personId } = await tx
       .insertInto('person')
       .values({ username: 'olaf.other-lab', displayName: 'Olaf Other', passwordHash: 'not-a-real-hash' })
       .returning('id')
       .executeTakeFirstOrThrow();
-    await tx.insertInto('membership').values({ labId, personId, role: 'Analyst' }).execute();
     const { id: customerId } = await tx
       .insertInto('customer')
       .values({ name: 'Unseen Customer (fictional)' })
@@ -228,12 +235,18 @@ it("a company record out of this Lab's sight is not found: a person of another L
       .executeTakeFirstOrThrow();
     const { id: submissionId } = await tx
       .insertInto('submission')
-      .values({ customerId, submittedBy: personId })
+      .values({ customerId, submittedBy: personId, number: 'SUB-2026-900002' })
       .returning('id')
       .executeTakeFirstOrThrow();
+    const { labId } = await tx
+      .insertInto('lab')
+      .values({ code: 'OL', name: 'Other Lab', timeZone: 'Europe/Zurich' })
+      .returning('labId')
+      .executeTakeFirstOrThrow();
+    await tx.insertInto('membership').values({ labId, personId, role: 'Analyst' }).execute();
     const { id: sampleId } = await tx
       .insertInto('sample')
-      .values({ labId, submissionId, number: 'OL-S00001', description: 'Capsules (fictional)' })
+      .values({ labId, submissionId, number: 'OL-S-2026-000001', description: 'Capsules (fictional)' })
       .returning('id')
       .executeTakeFirstOrThrow();
     return { personId, customerId, submissionId, sampleId };

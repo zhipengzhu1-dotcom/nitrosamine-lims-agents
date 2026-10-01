@@ -69,6 +69,7 @@ const entry = (over: Partial<TimedEntry>): TimedEntry => ({
   op: 'UPDATE',
   oldRow: null,
   newRow: null,
+  transactionId: null,
   prevHash: HASH,
   hash: HASH,
   ...over,

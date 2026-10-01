@@ -68,6 +68,7 @@ async function rawEntries(scope: Scope, where: Where): Promise<TimedEntry[]> {
       'op',
       'oldRow',
       'newRow',
+      'transactionId',
       sql<string>`encode(prev_hash, 'hex')`.as('prevHash'),
       sql<string>`encode(hash, 'hex')`.as('hash'),
     ])
@@ -85,6 +86,7 @@ async function rawEntries(scope: Scope, where: Where): Promise<TimedEntry[]> {
     op: opOf(e.op),
     oldRow: snapshot(e.oldRow),
     newRow: snapshot(e.newRow),
+    transactionId: e.transactionId,
     prevHash: e.prevHash,
     hash: e.hash,
   }));

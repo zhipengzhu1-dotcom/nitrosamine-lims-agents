@@ -704,6 +704,9 @@ select {
 .signin .rbtn {
   width: 100%;
 }
+.record-number {
+  white-space: nowrap;
+}
 .report {
   max-width: 900px;
   background: var(--sheet);
