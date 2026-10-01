@@ -3,16 +3,15 @@
 
 import { z } from 'zod';
 import { written } from '@lims/domain/decimal';
-import { RecordIdSchema, Sha256Schema, ValueRecordIdSchema, VersionRefSchema } from '../wire.ts';
+import { DecimalSchema, RecordIdSchema, Sha256Schema, ValueRecordIdSchema, VersionRefSchema } from '../wire.ts';
 import type { ReasonForChange } from '@lims/db';
 import { receipt } from '../commit.ts';
 import { defineCommand } from '../doors.ts';
 import type { TypedValue } from '../records/index.ts';
 
-const DecimalText = z.string().regex(/^-?\d+(\.\d+)?$/);
 
 export const TypedValueSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('decimal'), value: DecimalText, unit: z.string().min(1).max(16) }),
+  z.object({ type: z.literal('decimal'), value: DecimalSchema, unit: z.string().min(1).max(16) }),
   z.object({ type: z.literal('text'), value: z.string().max(4000) }),
   z.object({ type: z.literal('ref'), value: z.string().min(1).max(200) }),
   z.object({ type: z.literal('blob'), sha256: Sha256Schema, mediaType: z.string().min(1).max(100) }),

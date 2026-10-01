@@ -11,7 +11,7 @@ import { CHAIN } from '../src/chain/index.ts';
 import { readStanding } from '../src/records/standing.ts';
 import { acceptAndReceive, assign, idsOf, PASSING, review, runPerformedAndReviewed, submitOne, testPerformedAndReviewed, typeRun, verifyAll, type Tabs } from '../src/seed/chain.ts';
 import type { Person } from '../src/seed/drive.ts';
-import { RELEASE_CHECKLIST, RUN_CHECKLIST, TEST_CHECKLIST } from '../src/chain/model.ts';
+import { preparationSubject, RELEASE_CHECKLIST, resultSubject, RUN_CHECKLIST, TEST_CHECKLIST } from '../src/chain/model.ts';
 import { seedCounts, seedDemo, SEED_CAP, type SeedResult } from '../src/seed/index.ts';
 import { signAs, testApi, type TestApi } from '../src/testing/harness.ts';
 
@@ -355,6 +355,84 @@ describe('review fix 2: a release waits for every pending change behind it', () 
     const released = await signAs(seed.tabs.cid, seed.cast.cid, 'Released', 'QA', [drafted.reportId], reviewId);
     expect(released.status).toBe(200);
     expect((await seed.tabs.ann.view('test.detail', { testId })).body.test.state).toBe('Reported');
+  });
+});
+
+describe('review fixes 1, 8 and 26: results integrity', () => {
+  it('refuses Performed on a Test with no Run, a Preparation beyond the Method\'s count, and a padded decimal', async () => {
+    const submitted = await submitOne(seed.tabs.acme, seed.cast.lab.id, seed.reference.products.fic02, 'FIC-26-0777', [seed.reference.methods.lcms.id]);
+    await acceptAndReceive(seed.tabs, submitted);
+    const testId = submitted.samples[0]!.tests[0]!;
+    await assign(seed.tabs, testId, seed.cast.ann);
+    await seed.tabs.ann.must('test.start', { testId });
+    const values: string[] = [];
+    for (const p of PASSING.preparations) {
+      const prep = await seed.tabs.ann.must('preparation.create', { testId, balanceId: seed.reference.equipment.bal1 });
+      values.push(prep.balanceValueId);
+      const subject = preparationSubject(prep.prepNo);
+      const entries = [['prep.weight', subject, p.weightMg, 'mg'], ['prep.dilution', subject, p.dilutionMl, 'mL'], ['prep.result', resultSubject(prep.prepNo, 'NDMA'), p.results.NDMA, 'pg/µL']] as const;
+      for (const [field, s, value, unit] of entries) {
+        values.push((await seed.tabs.ann.must('value.record', { role: 'Analyst', parent: testId, field, subject: s, value: { type: 'decimal', value, unit } })).value);
+      }
+    }
+    const third = await seed.tabs.ann.command('preparation.create', { testId, balanceId: seed.reference.equipment.bal1 });
+    expect(third.status).toBe(409);
+    expect(refusalOf(third).message).toMatch(/asks for exactly 2 Preparations/);
+    expect((await seed.tabs.ann.view('test.detail', { testId })).body.preparations).toHaveLength(2);
+    const padded = await seed.tabs.ann.command('value.record', { role: 'Analyst', parent: testId, field: 'prep.weight', subject: 'P1', value: { type: 'decimal', value: '010', unit: 'mg' } });
+    expect(padded.status).toBe(400);
+    await verifyAll(seed.tabs, seed.cast, values);
+    const refused = await signAs(seed.tabs.ann, seed.cast.ann, 'Performed', 'Analyst', [testId]);
+    expect(refused.status).toBe(409);
+    expect(refusalOf(refused).reasons!.map((r) => r.code)).toEqual(['no-run-linked']);
+    expect(refusalOf(refused).message).toMatch(/^No Run is linked to Test RD-S-\d{4}-\d{6}\/T1; its results come from a Run\.$/);
+  });
+
+  it('a Preparation names the balance it was weighed on (fix 12): required, a Balance, and carried in the Test version', async () => {
+    const testId = seed.submissions.requested.samples[0]!.tests[0]!;
+    await seed.tabs.sam.must('test.accept', { testId });
+    await seed.tabs.sam.must('sample.receive', { sampleId: seed.submissions.requested.samples[0]!.sampleId });
+    await assign(seed.tabs, testId, seed.cast.ann);
+    await seed.tabs.ann.must('test.start', { testId });
+    expect((await seed.tabs.ann.command('preparation.create', { testId })).status).toBe(400);
+    const lcms = await seed.tabs.ann.command('preparation.create', { testId, balanceId: seed.reference.equipment.lcms1 });
+    expect(lcms.status).toBe(403);
+    expect(refusalOf(lcms).message).toBe('LCMS-01 is registered as LC-MS/MS, not a Balance.');
+    const prep = await seed.tabs.ann.must('preparation.create', { testId, balanceId: seed.reference.equipment.bal1 });
+    const detail = await seed.tabs.ann.view('test.detail', { testId });
+    expect(detail.body.preparations).toEqual([{ id: prep.preparationId, prepNo: 1, subject: 'P1', balance: { code: 'BAL-01', kind: 'Balance', fitness: 'In use' } }]);
+    expect(detail.body.values.find((v: { field: string }) => v.field === 'prep.balance')).toMatchObject({ label: 'P1 balance', subject: 'P1', verified: false });
+
+    const released = await api.db.app.selectFrom('effective_version').select('content').where('record_id', '=', seed.submissions.released.testId).executeTakeFirstOrThrow();
+    const body = JSON.parse(released.content!.toString('utf8')) as { preparations: { prepNo: string; balance: { equipment: string; version: string; sha256: string } }[] };
+    expect(body.preparations.map((p) => [p.prepNo, p.balance.equipment])).toEqual([['1', 'BAL-01'], ['2', 'BAL-01']]);
+    expect(body.preparations[0]!.balance.sha256).toMatch(/^[0-9a-f]{64}$/);
+
+    const asInstrument = await seed.tabs.ann.command('run.create', {
+      methodVersionId: seed.reference.methods.lcms.versionId, equipmentId: seed.reference.equipment.bal1, sequenceId: 'SEQ-BAL',
+      trueCopy: { mediaType: 'application/pdf', base64: Buffer.from('%PDF-1.7 fictional').toString('base64') },
+    });
+    expect(asInstrument.status).toBe(403);
+    expect(refusalOf(asInstrument).message).toBe('BAL-01 is a Balance, so it cannot be the Run\'s instrument.');
+
+    const changed = await seed.tabs.ann.must('value.change', { role: 'Analyst', value: detail.body.values.find((v: { field: string }) => v.field === 'prep.balance').valueId, to: { type: 'ref', value: seed.reference.equipment.lcms1 }, reason: { code: 'wrong-item-selected' } });
+    expect(changed.standing).toBe('pending');
+    expect((await signAs(seed.tabs.bob, seed.cast.bob, 'Approved', 'Reviewer', [changed.value])).status).toBe(200);
+    const refused = await signAs(seed.tabs.ann, seed.cast.ann, 'Performed', 'Analyst', [testId]);
+    expect(refused.status).toBe(409);
+    expect(refusalOf(refused).reasons!.map((r) => r.code)).toContain('equipment-wrong-kind');
+    expect(refusalOf(refused).message).toMatch(/P1 balance LCMS-01 is registered as LC-MS\/MS, not a Balance\./);
+  });
+
+  it('a balance that is not In use is refused when the Preparation is made (decision 15: judged per step)', async () => {
+    const testId = seed.submissions.requested.samples[0]!.tests[0]!;
+    const made = await seed.tabs.lena.must('reference.equipment', { code: 'BAL-02', kind: 'Balance' });
+    await api.db.superuser.query('set session_replication_role = replica');
+    await api.db.superuser.query("update lims.equipment set fitness_status = 'Suspended' where id = $1", [made.equipmentId]);
+    await api.db.superuser.query('set session_replication_role = default');
+    const r = await seed.tabs.ann.command('preparation.create', { testId, balanceId: made.equipmentId });
+    expect(r.status).toBe(403);
+    expect(refusalOf(r).message).toBe('BAL-02 is Suspended, not In use.');
   });
 });
 

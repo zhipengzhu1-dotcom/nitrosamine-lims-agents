@@ -2,13 +2,19 @@
 // is checked against the server's own definition here, where both are importable.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHANGE_REASONS, PASSWORD_RULES, SIGNS_AS, STATEMENT, type SessionAnswer } from '@lims/contract/session';
+import { BALANCE_KIND as DOMAIN_BALANCE_KIND } from '@lims/domain/gates';
 import { SIGNS_AS as DOMAIN_SIGNS_AS, STATEMENT as DOMAIN_STATEMENT } from '@lims/domain/signing';
+import { BALANCE_KIND } from '@lims/contract';
 import { ReasonSchema } from '../src/commands/values.ts';
 import { PASSWORD_PROBLEM_TEXT } from '../src/identity/password.ts';
 import { enrol, login, testApi, type TestApi } from '../src/testing/harness.ts';
 import { createLab } from './support.ts';
 
 describe('the contract copies of server rules', () => {
+  it('the Balance kind the workbench filters by is the one the gates refuse on', () => {
+    expect(BALANCE_KIND).toBe(DOMAIN_BALANCE_KIND);
+  });
+
   it('SIGNS_AS matches the domain\'s', () => {
     expect(SIGNS_AS).toEqual(DOMAIN_SIGNS_AS);
   });

@@ -53,6 +53,11 @@ export type SigningEnablement =
 
 export type FitnessStatus = 'Quarantined' | 'In use' | 'Suspended' | 'Expired' | 'Retired';
 
+/** The Equipment kind a Preparation is weighed on; a Run's instrument is never one (usp <41>, review fix 12). */
+export const BALANCE_KIND = 'Balance';
+
+export type EquipmentFitness = { readonly code: string; readonly kind: string; readonly fitness: FitnessStatus };
+
 export type AdoptionStatus =
   | 'in-development' | 'validated-here' | 'transferred-in' | 'verified' | 'verified-basic-compendial' | 'retired'
   | 'none'; // no Adoption of this Method version in this Lab
@@ -122,7 +127,7 @@ export type RunPerformedFacts = {
   readonly missingValues: readonly string[];
   readonly unverifiedValues: readonly string[];
   readonly pendingChanges: readonly string[];
-  readonly equipment: { readonly code: string; readonly fitness: FitnessStatus };
+  readonly equipment: EquipmentFitness;
   readonly runChecks: readonly { readonly check: string; readonly outcome: RunCheckOutcome }[]; // from judgeRunCheck
 };
 
@@ -135,12 +140,15 @@ export type TestPerformedFacts = {
   readonly unverifiedValues: readonly string[];
   readonly pendingChanges: readonly string[];
   readonly runs: readonly { readonly run: string; readonly performedStands: boolean }[];
+  /** The balance each Preparation was weighed on (usp 7, iso 5), checked In use like the Run's instrument. */
+  readonly balances: readonly { readonly preparation: string; readonly equipment: EquipmentFitness | null }[];
   readonly judgement: TestJudgement;
   readonly blockingHolds: readonly string[];
 };
 
-/** Reviewed on a Test (with the Runs feeding it) or on a Run (with none). */
+/** Reviewed on a Test (with the Runs feeding it, at least one) or on a Run (with none). */
 export type ReviewedFacts = {
+  readonly kind: 'test' | 'run';
   readonly record: string;
   readonly signer: ReviewerFacts;
   readonly performedStands: boolean;
@@ -160,6 +168,7 @@ export type ReleasedFacts = {
     readonly reviewedStands: boolean;
     readonly performedBy: readonly PersonId[]; // assigned Analysts and Performed signers, of the Test and its Runs
     readonly reviewedBy: readonly PersonId[]; // Reviewed signers, of the Test and its Runs
+    readonly hasRun: boolean;
     readonly blockingHolds: readonly string[];
     readonly pendingChanges: readonly string[]; // on the Test's values and its Runs' values: the lock would leave them unsettleable
     readonly verdicts: readonly { readonly jurisdiction: Jurisdiction; readonly confirmation: 'confirmed' | 'disagreed' | 'none' }[];
@@ -288,7 +297,8 @@ export function runPerformedGate(f: RunPerformedFacts): GateResult {
     ...each(f.missingValues, (field) => ({ code: 'value-missing', field })),
     ...each(f.unverifiedValues, (value) => ({ code: 'not-verified', value })),
     ...each(f.pendingChanges, (value) => ({ code: 'change-pending', value })),
-    ...(f.equipment.fitness === 'In use' ? [] : [{ code: 'equipment-not-in-use' as const, equipment: f.equipment.code, status: f.equipment.fitness }]),
+    ...fit(f.equipment, `instrument ${f.equipment.code}`),
+    ...(f.equipment.kind === BALANCE_KIND ? [{ code: 'equipment-wrong-kind' as const, equipment: f.equipment.code, kind: f.equipment.kind, needs: 'an instrument' }] : []),
     ...f.runChecks.flatMap(({ check, outcome }): Reasons => {
       switch (outcome.kind) {
         case 'not-recorded': return [{ code: 'run-check-missing', check }];
@@ -306,7 +316,10 @@ export function runPerformedGate(f: RunPerformedFacts): GateResult {
   ]);
 }
 
-/** Decisions 12, 19, 20 and 29: the assignee signs after every feeding Run, and no Preparation or Reportable Result fails. */
+const noRun = (test: string): GateReason => ({ code: 'no-run-linked', test });
+const fit = (e: EquipmentFitness, label: string): Reasons => (e.fitness === 'In use' ? [] : [{ code: 'equipment-not-in-use', equipment: label, status: e.fitness }]);
+
+/** Decisions 12, 19, 20 and 29: the assignee signs after every feeding Run (usp 2: at least one), and no Preparation or Reportable Result fails. */
 export function testPerformedGate(f: TestPerformedFacts): GateResult {
   return result([
     ...performerReasons(f.signer),
@@ -315,7 +328,13 @@ export function testPerformedGate(f: TestPerformedFacts): GateResult {
     ...each(f.missingValues, (field) => ({ code: 'value-missing', field })),
     ...each(f.unverifiedValues, (value) => ({ code: 'not-verified', value })),
     ...each(f.pendingChanges, (value) => ({ code: 'change-pending', value })),
+    ...(f.runs.length === 0 ? [noRun(f.test)] : []),
     ...f.runs.flatMap((r): Reasons => (r.performedStands ? [] : [{ code: 'unsigned-dependency', record: r.run, needs: 'Performed' }])),
+    ...f.balances.flatMap((b): Reasons => {
+      if (!b.equipment) return [{ code: 'equipment-not-in-use', equipment: `${b.preparation} balance (none)`, status: 'Quarantined' }];
+      const label = `${b.preparation} balance ${b.equipment.code}`;
+      return [...fit(b.equipment, label), ...(b.equipment.kind === BALANCE_KIND ? [] : [{ code: 'equipment-wrong-kind' as const, equipment: label, kind: b.equipment.kind, needs: `a ${BALANCE_KIND}` }])];
+    }),
     ...each(f.blockingHolds, (hold) => ({ code: 'open-hold', hold })),
     ...verdictReasons(f.judgement),
   ]);
@@ -329,6 +348,7 @@ export function reviewedGate(f: ReviewedFacts): GateResult {
     ...enablement(f.signer.signing),
     ...(f.performedSigners.includes(f.signer.person) ? [sod('reviewer-signed-performed', f.record)] : []),
     ...(f.performedStands ? [] : [{ code: 'unsigned-dependency' as const, record: f.record, needs: 'Performed' as const }]),
+    ...(f.kind === 'test' && f.feedingRuns.length === 0 ? [noRun(f.record)] : []),
     ...f.feedingRuns.flatMap((r): Reasons => (r.reviewedStands ? [] : [{ code: 'unsigned-dependency', record: r.run, needs: 'Reviewed' }])),
     ...each(f.pendingChanges, (value) => ({ code: 'change-pending', value })),
     ...each(f.blockingHolds, (hold) => ({ code: 'open-hold', hold })),
@@ -350,6 +370,7 @@ export function releasedGate(f: ReleasedFacts): GateResult {
     ...f.tests.flatMap((t): Reasons => [
       ...(t.performedStands ? [] : [{ code: 'unsigned-dependency' as const, record: t.test, needs: 'Performed' as const }]),
       ...(t.reviewedStands ? [] : [{ code: 'unsigned-dependency' as const, record: t.test, needs: 'Reviewed' as const }]),
+      ...(t.hasRun ? [] : [noRun(t.test)]),
       ...(t.performedBy.includes(me) ? [sod('releaser-performed', t.test)] : []),
       ...(t.reviewedBy.includes(me) ? [sod('releaser-reviewed', t.test)] : []),
       ...each(t.blockingHolds, (hold) => ({ code: 'open-hold', hold })),

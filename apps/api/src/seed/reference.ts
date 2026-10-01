@@ -4,7 +4,7 @@
 // four Products, two Methods.
 
 import type { DecisionRule, MethodData, SpecificationData } from '../chain/model.ts';
-import { methodTrainingDocument } from '../chain/model.ts';
+import { BALANCE_KIND, methodTrainingDocument } from '../chain/model.ts';
 import { createAdoption, createCustomer, createEquipment, createMethod, createMethodVersion, createProduct, createSpecification, createSubstance } from '../commands/reference.ts';
 import type { Cast } from './cast.ts';
 import { login, mustSign, type Client, type Driver } from './drive.ts';
@@ -24,7 +24,7 @@ export type Reference = {
   readonly substances: { readonly ndma: string; readonly fictionib: string; readonly zelotrin: string };
   readonly products: { readonly fic01: string; readonly fic02: string; readonly zel01: string; readonly betaApi: string };
   readonly methods: { readonly lcms: { id: string; versionId: string }; readonly gcms: { id: string; versionId: string } };
-  readonly equipment: { readonly lcms1: string };
+  readonly equipment: { readonly lcms1: string; readonly bal1: string };
   /** Cara's portal tabs, one per Customer she acts for. */
   readonly portal: { readonly acme: Client; readonly beta: Client };
 };
@@ -113,7 +113,10 @@ export async function seedReference(api: Driver, cast: Cast, customers: Referenc
   ];
   await mustSign(cast.tabs.cid, cast.cid, 'Approved', 'QA', adoptions);
 
-  const equipment = { lcms1: (await runAs(api, createEquipment, { code: 'LCMS-01', kind: 'LC-MS/MS' }, lab)).equipmentId };
+  const equipment = {
+    lcms1: (await runAs(api, createEquipment, { code: 'LCMS-01', kind: 'LC-MS/MS' }, lab)).equipmentId,
+    bal1: (await runAs(api, createEquipment, { code: 'BAL-01', kind: BALANCE_KIND }, lab)).equipmentId,
+  };
   return { customers, substances, products, methods: { lcms: { id: lcmsId, versionId: lcmsVersion }, gcms: { id: gcmsId, versionId: gcmsVersion } }, equipment, portal };
 }
 

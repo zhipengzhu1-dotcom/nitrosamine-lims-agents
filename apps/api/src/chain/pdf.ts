@@ -144,7 +144,7 @@ export async function renderReportPdf(q: Q, input: RenderInput): Promise<Uint8Ar
     w.line('Preparations as recorded', { bold: true, indent: 12 });
     for (const p of t.preparations) {
       const results = [...p.results].map(([a, v]) => `${a} ${v?.effective.text ?? '(missing)'} ${v?.unit ?? ''}`).join(', ');
-      w.line(`P${p.prepNo}: weight ${p.weight?.effective.text ?? '(missing)'} ${p.weight?.unit ?? ''}, dilution ${p.dilution?.effective.text ?? '(missing)'} ${p.dilution?.unit ?? ''}, ${results}`, { indent: 24, size: 9 });
+      w.line(`P${p.prepNo}: on ${p.balance?.equipment?.code ?? '(no balance)'}, weight ${p.weight?.effective.text ?? '(missing)'} ${p.weight?.unit ?? ''}, dilution ${p.dilution?.effective.text ?? '(missing)'} ${p.dilution?.unit ?? ''}, ${results}`, { indent: 24, size: 9 });
     }
     w.gap(4);
     w.line('Signatures', { bold: true, indent: 12 });

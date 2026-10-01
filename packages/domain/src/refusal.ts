@@ -38,6 +38,7 @@ export type GateReason =
   | { readonly code: 'not-verified'; readonly value: string }
   | { readonly code: 'change-pending'; readonly value: string }
   | { readonly code: 'unsigned-dependency'; readonly record: string; readonly needs: Meaning }
+  | { readonly code: 'no-run-linked'; readonly test: string }
   | { readonly code: 'run-check-missing'; readonly check: string }
   | {
       readonly code: 'criterion-misconfigured'; readonly check: string;
@@ -46,6 +47,7 @@ export type GateReason =
     }
   | { readonly code: 'variability-not-computed'; readonly analyte: string; readonly because: 'one-preparation' | 'zero-mean' }
   | { readonly code: 'equipment-not-in-use'; readonly equipment: string; readonly status: FitnessStatus }
+  | { readonly code: 'equipment-wrong-kind'; readonly equipment: string; readonly kind: string; readonly needs: string }
   | { readonly code: 'open-hold'; readonly hold: string }
   | { readonly code: 'checklist-incomplete'; readonly items: NonEmpty<string> }
   | { readonly code: 'verdict-not-confirmed'; readonly test: string; readonly jurisdiction: Jurisdiction }
@@ -180,6 +182,7 @@ export function describeReason(r: GateReason): string {
     case 'not-verified': return `${capitalise(r.value)} is not Verified.`;
     case 'change-pending': return `${capitalise(r.value)} has a change waiting for approval.`;
     case 'unsigned-dependency': return `${r.record} has no standing ${r.needs} signature.`;
+    case 'no-run-linked': return `No Run is linked to ${r.test}; its results come from a Run.`;
     case 'run-check-missing': return `Run Check ${r.check} is not recorded.`;
     case 'criterion-misconfigured': return mismatchSentence(r);
     case 'variability-not-computed':
@@ -187,6 +190,7 @@ export function describeReason(r: GateReason): string {
         ? `The variability between Preparations can't be computed for ${r.analyte}: it needs at least two Preparations.`
         : `The variability between Preparations can't be computed for ${r.analyte}: the Preparations' mean is zero.`;
     case 'equipment-not-in-use': return `${r.equipment} is ${r.status}, not In use.`;
+    case 'equipment-wrong-kind': return `${r.equipment} is registered as ${r.kind}, not ${r.needs}.`;
     case 'open-hold': return `Hold ${r.hold} is open.`;
     case 'checklist-incomplete': return `The Review Checklist is not complete: ${andList(r.items.map((i) => `"${i}"`))} not ticked.`;
     case 'verdict-not-confirmed': return `Confirm or disagree with the ${r.jurisdiction} verdict on ${r.test}.`;

@@ -76,12 +76,12 @@ export const testDetail = defineView({
       : [];
     return {
       test: { ...(await queueRow(q, t)), acceptanceReason: t.acceptanceReason, methodVersionId: t.method?.id ?? null, specificationVersionId: t.specification?.ref.versionId ?? null },
-      method: t.method ? { number: t.method.number, title: t.method.title, version: t.method.version, analytes: t.method.data.analytes.map((a) => a.key), minimumPreparations: t.method.data.preparations } : null,
+      method: t.method ? { number: t.method.number, title: t.method.title, version: t.method.version, analytes: t.method.data.analytes.map((a) => a.key), preparationCount: Number(t.method.data.preparations) } : null,
       specification: t.specification ? {
         purpose: t.specification.purpose, versionNo: t.specification.ref.versionNo, hash: t.specification.ref.hash,
         sections: t.specification.data.sections.map((s) => ({ jurisdiction: s.jurisdiction, ruleSetVersion: s.ruleSetVersion, lines: s.lines.map((l) => ({ analyte: l.analyte, limit: l.limit, unit: l.unit })) })),
       } : null,
-      preparations: t.preparations.map((p) => ({ id: p.id, prepNo: p.prepNo, subject: preparationSubject(p.prepNo) })),
+      preparations: t.preparations.map((p) => ({ id: p.id, prepNo: p.prepNo, subject: preparationSubject(p.prepNo), balance: p.balance?.equipment ? { code: p.balance.equipment.code, kind: p.balance.equipment.kind, fitness: p.balance.equipment.fitness } : null })),
       values: t.values.map((v) => valueDto(testKind.fields, v)),
       missingValues: t.missingValues,
       runs: t.runs.map((r) => ({ id: r.id, number: r.number, state: r.state, version: r.standing.version })),

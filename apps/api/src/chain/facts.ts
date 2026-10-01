@@ -6,7 +6,7 @@
 import { versionStands, type DB, type ReadDb } from '@lims/db';
 import { calculatePreparation, type PreparationResults } from '@lims/domain/calculation';
 import { written, type Written } from '@lims/domain/decimal';
-import type { AdoptionStatusFacts, PerformerFacts, ReleaserFacts, ReviewerFacts, FitnessStatus } from '@lims/domain/gates';
+import type { AdoptionStatusFacts, EquipmentFitness, PerformerFacts, ReleaserFacts, ReviewerFacts, FitnessStatus } from '@lims/domain/gates';
 import type { AnalyteKey, LabId, PersonId, PreparationId, RecordId, Sha256Hex, ValueRecordId, VersionId, VersionRef } from '@lims/domain/ids';
 import { runState, type RunState, type TestState } from '@lims/domain/machines';
 import { nonEmpty } from '@lims/domain/nonempty';
@@ -147,6 +147,15 @@ export async function currentMethodVersion(q: Q, methodId: string): Promise<Meth
   return null;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A ref value's text that is not a uuid names nothing, rather than failing the query. */
+export async function equipmentById(q: Q, id: string): Promise<EquipmentFacts | null> {
+  if (!UUID.test(id)) return null;
+  const e = await q.selectFrom('equipment').select(['id', 'code', 'kind', 'fitness_status']).where('id', '=', id).executeTakeFirst();
+  return e ? { id: e.id, code: e.code, kind: e.kind, fitness: e.fitness_status as FitnessStatus } : null;
+}
+
 export async function labOf(q: Q, lab: LabId): Promise<{ readonly id: LabId; readonly code: string; readonly zone: string }> {
   const l = await q.selectFrom('lab').select(['id', 'code', 'iana_zone']).where('id', '=', lab).executeTakeFirstOrThrow();
   return { id: l.id as LabId, code: l.code, zone: l.iana_zone };
@@ -208,9 +217,13 @@ export async function openHolds(q: Q, testId: string): Promise<readonly string[]
 // The Test
 // ---------------------------------------------------------------------------------------------
 
+export type EquipmentFacts = EquipmentFitness & { readonly id: string };
+
 export type PreparationFacts = {
   readonly id: PreparationId;
   readonly prepNo: number;
+  /** The balance it was weighed on (usp 7): the ref value, and the Equipment it names when one exists. */
+  readonly balance: { readonly value: ValueFact; readonly equipment: EquipmentFacts | null } | null;
   readonly weight: ValueFact | null;
   readonly dilution: ValueFact | null;
   readonly results: ReadonlyMap<AnalyteKey, ValueFact | null>;
@@ -261,12 +274,17 @@ export async function loadTest(q: Q, id: string): Promise<TestFacts> {
   const values = await valuesUnder(q, t.id as RecordId);
   const prepRows = await q.selectFrom('preparation').select(['id', 'prep_no']).where('test_id', '=', t.id).orderBy('prep_no').execute();
   const analytes = method ? method.data.analytes.map((a) => a.key as AnalyteKey) : [];
-  const preparations: PreparationFacts[] = prepRows.map((p) => ({
-    id: p.id as PreparationId, prepNo: p.prep_no,
-    weight: find(values, TEST_FIELDS.weight, preparationSubject(p.prep_no)),
+  const preparations: PreparationFacts[] = [];
+  for (const p of prepRows) {
+    const balanceValue = find(values, TEST_FIELDS.balance, preparationSubject(p.prep_no));
+    preparations.push({
+      id: p.id as PreparationId, prepNo: p.prep_no,
+      balance: balanceValue ? { value: balanceValue, equipment: await equipmentById(q, balanceValue.effective.text) } : null,
+      weight: find(values, TEST_FIELDS.weight, preparationSubject(p.prep_no)),
     dilution: find(values, TEST_FIELDS.dilution, preparationSubject(p.prep_no)),
-    results: new Map(analytes.map((a) => [a, find(values, TEST_FIELDS.result, resultSubject(p.prep_no, a))])),
-  }));
+      results: new Map(analytes.map((a) => [a, find(values, TEST_FIELDS.result, resultSubject(p.prep_no, a))])),
+    });
+  }
   const runRows = await q.selectFrom('run_test as rt').innerJoin('run as r', (j) => j.onRef('r.id', '=', 'rt.run_id').onRef('r.lab_id', '=', 'rt.lab_id'))
     .select(['r.id', 'r.number']).where('rt.test_id', '=', t.id).orderBy('r.number').execute();
   const runs: RunLinkFacts[] = [];
@@ -276,11 +294,12 @@ export async function loadTest(q: Q, id: string): Promise<TestFacts> {
   }
 
   const missing: string[] = [];
-  const minimum = method ? Number(method.data.preparations) : 0;
-  if (preparations.length < minimum) missing.push(`Preparations (${preparations.length} of ${minimum})`);
+  // usp 5: the Method's count is exact, so the Reportable Result is always the mean of that many.
+  if (method && preparations.length !== Number(method.data.preparations)) missing.push(`Preparations (${preparations.length} of ${method.data.preparations})`);
   const inputs: PreparationResults[] = [];
   for (const p of preparations) {
     const label = preparationSubject(p.prepNo);
+    if (!p.balance) missing.push(`${label} balance`);
     if (!p.weight) missing.push(`${label} weight`);
     if (!p.dilution) missing.push(`${label} dilution volume`);
     for (const [a, v] of p.results) if (!v) missing.push(`${label} ${a} result`);
@@ -289,8 +308,12 @@ export async function loadTest(q: Q, id: string): Promise<TestFacts> {
       preparation: p.id, weightMg: asWritten(p.weight), dilutionVolumeMl: asWritten(p.dilution), dilutionFactor: written(method.data.dilutionFactor),
       concentrations: new Map([...p.results].map(([a, v]) => [a, asWritten(v!)])),
     });
-    if (calculated.kind === 'weight-not-positive') missing.push(`${label} weight (not positive)`);
-    else inputs.push(calculated.results);
+    switch (calculated.kind) {
+      case 'calculated': inputs.push(calculated.results); break;
+      case 'weight-not-positive': missing.push(`${label} weight (not positive)`); break;
+      case 'dilution-not-positive': missing.push(`${label} dilution volume (not positive)`); break;
+      case 'concentration-negative': missing.push(`${label} ${calculated.analyte} result (negative)`); break;
+    }
   }
   const prepInputs = nonEmpty(inputs);
   const judgement = method && specification && missing.length === 0 && prepInputs
@@ -322,7 +345,7 @@ export type RunFacts = {
   readonly acquiredBy: PersonId;
   readonly method: MethodVersionFacts;
   readonly values: readonly ValueFact[];
-  readonly instrument: { readonly value: ValueFact; readonly equipment: { readonly id: string; readonly code: string; readonly kind: string; readonly fitness: FitnessStatus } | null } | null;
+  readonly instrument: { readonly value: ValueFact; readonly equipment: EquipmentFacts | null } | null;
   readonly sequence: ValueFact | null;
   readonly trueCopy: ValueFact | null;
   readonly runChecks: readonly RunCheckFacts[];
@@ -337,9 +360,7 @@ export async function loadRun(q: Q, id: string): Promise<RunFacts> {
   const method = await loadMethodVersion(q, r.method_version_id);
   const values = await valuesUnder(q, r.id as RecordId);
   const instrumentValue = find(values, RUN_FIELDS.instrument);
-  const equipment = instrumentValue
-    ? await q.selectFrom('equipment').select(['id', 'code', 'kind', 'fitness_status']).where('id', '=', instrumentValue.effective.text).executeTakeFirst()
-    : undefined;
+  const equipment = instrumentValue ? await equipmentById(q, instrumentValue.effective.text) : null;
   const runChecks: RunCheckFacts[] = method.data.runChecks.map((rc, i) => {
     const check = runChecksOf(method.data)[i]!;
     const value = find(values, RUN_FIELDS.runCheck, rc.name);
@@ -356,7 +377,7 @@ export async function loadRun(q: Q, id: string): Promise<RunFacts> {
   ];
   return {
     id: r.id as RecordId, labId: r.lab_id as LabId, number: r.number, label: `Run ${r.number}`, acquiredBy: r.acquired_by as PersonId, method, values,
-    instrument: instrumentValue ? { value: instrumentValue, equipment: equipment ? { id: equipment.id, code: equipment.code, kind: equipment.kind, fitness: equipment.fitness_status as FitnessStatus } : null } : null,
+    instrument: instrumentValue ? { value: instrumentValue, equipment } : null,
     sequence: find(values, RUN_FIELDS.sequence), trueCopy: find(values, RUN_FIELDS.trueCopy), runChecks,
     tests: testRows.map((t) => ({ id: t.id as RecordId, label: testLabel({ number: t.number, seq: t.seq, lotNumber: t.lot_number }) })),
     standing, state: runState({ performed: signedAndStanding(standing, 'Performed'), reviewed: signedAndStanding(standing, 'Reviewed') }),

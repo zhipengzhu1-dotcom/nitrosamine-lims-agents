@@ -14,7 +14,7 @@ import {
   type ReviewFacts, type RunFacts, type TestFacts,
 } from '../../chain/facts.ts';
 import { labelOf, valueRef, type ValueFact } from '../values.ts';
-import { RELEASE_CHECKLIST, RUN_CHECKLIST, TEST_CHECKLIST, move, verdictSubject, type Checklist } from '../../chain/model.ts';
+import { RELEASE_CHECKLIST, RUN_CHECKLIST, TEST_CHECKLIST, move, preparationSubject, verdictSubject, type Checklist } from '../../chain/model.ts';
 import { renderReportPdf } from '../../chain/pdf.ts';
 import { judgementCanon, storeSectionVerdicts } from '../../chain/verdicts.ts';
 import type { Sealed } from '../index.ts';
@@ -26,6 +26,7 @@ const unverified = (fields: Fields, values: readonly ValueFact[]): string[] => v
 const pendingOf = (fields: Fields, values: readonly ValueFact[]): string[] => values.filter((v) => v.pending !== null).map((v) => labelOf(fields, v));
 
 const TEST_FIELD_SPECS: Fields = {
+  'prep.balance': { writer: 'assignee', label: 'balance', critical: true, type: 'ref', subject: 'preparation', verifiedEach: true },
   'prep.weight': { writer: 'assignee', label: 'weight', critical: true, type: 'decimal', unit: 'mg', subject: 'preparation', verifiedEach: true },
   'prep.dilution': { writer: 'assignee', label: 'dilution volume', critical: true, type: 'decimal', unit: 'mL', subject: 'preparation', verifiedEach: true },
   'prep.result': { writer: 'assignee', label: 'result', critical: true, type: 'decimal', unit: 'pg/µL', subject: 'preparation+analyte', verifiedEach: true },
@@ -74,6 +75,7 @@ async function testPerformedCheck(ctx: RuleContext, signer: Signer, t: TestFacts
     unverifiedValues: unverified(TEST_FIELD_SPECS, t.values),
     pendingChanges: pendingOf(TEST_FIELD_SPECS, t.values),
     runs: t.runs.map((r) => ({ run: r.number, performedStands: signedAndStanding(r.standing, 'Performed') })),
+    balances: t.preparations.flatMap((p) => (p.balance ? [{ preparation: preparationSubject(p.prepNo), equipment: p.balance.equipment }] : [])),
     judgement,
     blockingHolds: t.holds,
   });
@@ -87,6 +89,7 @@ async function testReviewedCheck(ctx: RuleContext, signer: Signer, t: TestFacts,
   if ('kind' in review) return review;
   const own = await recordStanding(ctx.q, t.id);
   return reviewedGate({
+    kind: 'test',
     record: t.label,
     signer: await reviewerFacts(ctx.q, signer.person, t.method, ctx.lab, ctx.dbNow),
     performedStands: signedAndStanding(own, 'Performed'),
@@ -121,6 +124,7 @@ export const testKind: KindDef = {
       specification: { purpose: t.specification.purpose, versionNo: String(t.specification.ref.versionNo), ...(cite(t.specification.ref) as object) },
       preparations: t.preparations.map((p): Canon => ({
         preparation: p.id, prepNo: String(p.prepNo),
+        balance: p.balance ? { ...(cite(valueRef(p.balance.value)) as object), equipment: p.balance.equipment?.code ?? null } : null,
         weight: p.weight ? cite(valueRef(p.weight)) : null, dilution: p.dilution ? cite(valueRef(p.dilution)) : null,
         results: Object.fromEntries([...p.results].map(([a, v]) => [a, v ? cite(valueRef(v)) : null])),
       })),
@@ -161,7 +165,7 @@ async function runPerformedCheck(ctx: RuleContext, signer: Signer, r: RunFacts):
     missingValues: [...r.missingValues, ...r.runChecks.filter((c) => !c.value).map((c) => `Run Check ${c.check.name}`)],
     unverifiedValues: unverified(RUN_FIELD_SPECS, r.values),
     pendingChanges: pendingOf(RUN_FIELD_SPECS, r.values),
-    equipment: r.instrument?.equipment ? { code: r.instrument.equipment.code, fitness: r.instrument.equipment.fitness } : { code: '(none)', fitness: 'Quarantined' },
+    equipment: r.instrument?.equipment ?? { code: '(none)', kind: '(none)', fitness: 'Quarantined' },
     runChecks: r.runChecks.map((c) => ({ check: c.check.name, outcome: c.outcome })),
   });
 }
@@ -171,6 +175,7 @@ async function runReviewedCheck(ctx: RuleContext, signer: Signer, r: RunFacts, a
   const review = await attestationOf(ctx, signer, r.id, attestation, RUN_CHECKLIST);
   if ('kind' in review) return review;
   return reviewedGate({
+    kind: 'run',
     record: r.label,
     signer: await reviewerFacts(ctx.q, signer.person, r.method, ctx.lab, ctx.dbNow),
     performedStands: signedAndStanding(r.standing, 'Performed'),
@@ -300,6 +305,7 @@ export const testReportKind: KindDef = {
           reviewedStands: signedAndStanding(t.standing, 'Reviewed'),
           performedBy: [...(t.assignedAnalyst ? [t.assignedAnalyst] : []), ...signersOf(t.standing, 'Performed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Performed'))] as PersonId[],
           reviewedBy: [...signersOf(t.standing, 'Reviewed'), ...t.runs.flatMap((x) => signersOf(x.standing, 'Reviewed'))],
+          hasRun: t.runs.length > 0,
           blockingHolds: t.holds,
           pendingChanges: [...pendingOf(TEST_FIELD_SPECS, t.values), ...(await Promise.all(t.runs.map((x) => loadRun(ctx.q, x.id)))).flatMap((x) => pendingOf(RUN_FIELD_SPECS, x.values).map((v) => `${x.label} ${v}`))],
           verdicts: (t.specification?.data.sections ?? []).map((s) => ({ jurisdiction: s.jurisdiction, confirmation: review.confirmations.get(verdictSubject(t.label, s.jurisdiction)) ?? 'none' as const })),

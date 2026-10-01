@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import type { LabReferenceDto, RunDetailDto, TestDetailDto, ValueDto } from '@lims/contract';
+import { BALANCE_KIND, type LabReferenceDto, type RunDetailDto, type TestDetailDto, type ValueDto } from '@lims/contract';
 import { useCommand, useView } from '../../api/hooks';
 import { CommitButton } from '../../components/CommitButton';
 import { FitnessTag } from '../../components/FitnessTag';
@@ -69,7 +69,7 @@ function NewRun({ lab, form, onChange }: { lab: LabReferenceDto; form: RunForm; 
           <label htmlFor={`${id}-eq`}>Instrument</label>
           <select id={`${id}-eq`} value={form.equipmentId} onChange={(e) => onChange({ ...form, equipmentId: e.target.value })}>
             <option value="">Choose the instrument</option>
-            {lab.equipment.map((e) => (
+            {lab.equipment.filter((e) => e.kind !== BALANCE_KIND).map((e) => (
               <option key={e.id} value={e.id}>
                 {e.code} ({e.kind}), {e.fitness}
               </option>
@@ -106,10 +106,12 @@ export function TestWorkbench({ testId }: { testId: string }) {
   const start = useCommand<{ testId: string }>('test.start');
   const createRun = useCommand<{ methodVersionId: string; equipmentId: string; sequenceId: string; trueCopy: { mediaType: string; base64: string } }, { runId: string }>('run.create');
   const linkTest = useCommand<{ runId: string; testId: string }>('run.linkTest');
-  const addPreparation = useCommand<{ testId: string }>('preparation.create');
+  const addPreparation = useCommand<{ testId: string; balanceId: string }>('preparation.create');
   const signing = useSigning();
   const { refusal, act } = useAct();
   const [form, setForm] = useState<RunForm>({ equipmentId: '', sequenceId: '', file: null });
+  const [balanceId, setBalanceId] = useState('');
+  const balanceSelectId = useId();
   const [generation, setGeneration] = useState(0);
 
   const reload = () => {
@@ -186,13 +188,16 @@ export function TestWorkbench({ testId }: { testId: string }) {
             {(editable || dd.preparations.length > 0) && (
               <section className="panel" aria-label="Preparations">
                 <h2 className="h-sec">Preparations</h2>
-                {dd.method && <p className="sub">{dd.method.number} v{dd.method.version} asks for {dd.method.minimumPreparations} Preparations. The dilution factor comes from the Method.</p>}
+                {dd.method && <p className="sub">{dd.method.number} v{dd.method.version} asks for exactly {dd.method.preparationCount} Preparations, each weighed on a balance the Lab holds. The dilution factor comes from the Method.</p>}
                 <div className="preps">
                   {dd.preparations.map((p) => {
                     const v = (field: string, subject: string) => savedOf(dd.values.find((x) => x.field === field && x.subject === subject));
                     return (
                       <div key={p.id} className="prep" aria-label={`Preparation ${p.subject}`} role="group">
                         <h3 className="h-mini">Preparation {p.subject}</h3>
+                        <p className="sub">
+                          Weighed on {p.balance?.code ?? 'no balance'} {p.balance && <FitnessTag fitness={parseFitness(p.balance.fitness, 'as recorded on the Equipment')} />}
+                        </p>
                         {editable ? (
                           <>
                             <RecordedValueField parent={dd.test.id} field="prep.weight" subject={p.subject} label={`${p.subject} weight`} unit="mg" role="Analyst" critical limits={[]} saved={v('prep.weight', p.subject)} onSaved={reload} />
@@ -203,7 +208,7 @@ export function TestWorkbench({ testId }: { testId: string }) {
                           </>
                         ) : (
                           <ul className="replist">
-                            {dd.values.filter((x) => x.subject === p.subject || x.subject.startsWith(`${p.subject}/`)).map((x) => (
+                            {dd.values.filter((x) => x.type !== 'ref' && (x.subject === p.subject || x.subject.startsWith(`${p.subject}/`))).map((x) => (
                               <li key={x.valueId}>
                                 <span className="replist__label">{x.label}</span>
                                 <span className="v-ink">
@@ -217,10 +222,21 @@ export function TestWorkbench({ testId }: { testId: string }) {
                     );
                   })}
                 </div>
-                {editable && (
-                  <CommitButton tone="secondary" onCommit={() => act(addPreparation, { testId }, reload)}>
-                    Add Preparation P{dd.preparations.length + 1}
-                  </CommitButton>
+                {editable && lab.status === 'ok' && dd.method && dd.preparations.length < dd.method.preparationCount && (
+                  <div className="field prep-add">
+                    <label htmlFor={balanceSelectId}>Balance</label>
+                    <select id={balanceSelectId} value={balanceId} onChange={(e) => setBalanceId(e.target.value)}>
+                      <option value="">Choose the balance</option>
+                      {lab.data.equipment.filter((e) => e.kind === BALANCE_KIND).map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.code}, {e.fitness}
+                        </option>
+                      ))}
+                    </select>
+                    <CommitButton tone="secondary" disabled={balanceId === ''} onCommit={() => act(addPreparation, { testId, balanceId }, reload)}>
+                      Add Preparation P{dd.preparations.length + 1}
+                    </CommitButton>
+                  </div>
                 )}
               </section>
             )}
