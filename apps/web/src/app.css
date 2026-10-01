@@ -25,6 +25,15 @@
   --mono: "Atkinson Hyperlegible Mono", Consolas, ui-monospace, monospace;
   --top-h: 48px;
   --rail-h: 76px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-step: step-end;
+  --dur-press: 160ms;
+  --dur-enter: 240ms;
+  --dur-sheet-in: 300ms;
+  --dur-sheet-out: 200ms;
+  --dur-fade: 150ms;
+  --dur-accent: 1600ms;
   font: 400 14px / 1.3 var(--font);
   font-variant-numeric: tabular-nums slashed-zero;
   color: var(--ink);
@@ -33,9 +42,25 @@
 * {
   box-sizing: border-box;
 }
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+html,
+body {
+  overscroll-behavior: none;
+}
 body {
   margin: 0;
   overflow: hidden;
+}
+button,
+a {
+  touch-action: manipulation;
+}
+button {
+  user-select: none;
+  -webkit-user-select: none;
 }
 code {
   font-family: var(--mono);
@@ -264,6 +289,18 @@ th {
   background: var(--act-on-bench);
   color: #fff;
   cursor: pointer;
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    filter var(--dur-press) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .rbtn:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+}
+.rbtn:active:not(:disabled) {
+  transform: scale(0.97);
+  filter: brightness(0.92);
 }
 .rbtn:disabled {
   opacity: 0.6;
@@ -378,6 +415,12 @@ select {
 }
 .print-hide {
   float: right;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rbtn:active:not(:disabled) {
+    transform: none;
+  }
 }
 
 @media print {
