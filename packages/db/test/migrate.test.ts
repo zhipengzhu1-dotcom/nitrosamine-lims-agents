@@ -229,7 +229,7 @@ describe('the SHA-256 of each applied migration', () => {
     const wholeRows = 'select to_jsonb(m) as row from public.schema_migration m order by name';
     const before = await asSuperuser(database, wholeRows);
     await rm(new URL('0002_audit_trail.sql', folder));
-    await assert.rejects(migrate(database, folder), /0002_audit_trail\.sql.*applied before hashes were kept/);
+    await assert.rejects(migrate(server, database, folder), /0002_audit_trail\.sql.*applied before hashes were kept/);
     assert.deepEqual(await asSuperuser(database, wholeRows), before);
   });
 
