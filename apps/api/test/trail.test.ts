@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
-import { routes, type StepInput, type StepName, stepRoute, type TrailEntry } from '@lims/domain';
+import {
+  auditedRecords,
+  auditedTables,
+  routes,
+  type StepInput,
+  type StepName,
+  stepRoute,
+  type TrailEntry,
+} from '@lims/domain';
 import { sql } from 'kysely';
 import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
 
@@ -124,16 +132,25 @@ it("each entry carries the actor's label and role, the field's glossary name, ol
       },
     ],
   );
-  const { expected } = await api.db
-    .selectNoFrom(
-      sql<string>`(with t as (select ${assign.at}::timestamptz as at),
-                       d as (select (at at time zone 'America/New_York') - (at at time zone 'UTC') as off, at from t)
-                  select to_char(at at time zone 'America/New_York', 'YYYY-MM-DD HH24:MI:SS') || ' '
-                      || case when off < interval '0' then '-' else '+' end
-                      || to_char(greatest(off, -off), 'HH24:MI') from d)`.as('expected'),
-    )
-    .executeTakeFirstOrThrow();
-  assert.equal(assign.atLab, expected, 'the time in the Lab zone, as the database renders it');
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset',
+    // oxlint-disable-next-line no-restricted-globals -- the test's own rendering of the entry's instant, independent of the database's; reads no clock
+  }).formatToParts(new Date(assign.at));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '';
+  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice(3);
+  assert.equal(
+    assign.atLab,
+    `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${assign.at.slice(19, 26)}${offset}`,
+    'the same instant on the Lab wall clock, ISO 8601 with the offset, as Intl renders it',
+  );
   assert.match(assign.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, 'UTC to the microsecond, as hashed');
 
   const submission = entries.find((e) => e.record.table === 'submission') ?? assert.fail('the Submission entry');
@@ -169,6 +186,66 @@ it("after a person's printed name or a record's label changes, an earlier entry 
     'the signer as named when signing',
   );
   assert.equal(record.label, `${sample.label}-R`, 'the Test as it is labelled now');
+  await rename('sample', sample.id, { number: `${sample.label}-R2` }, 'Correct a Sample number again');
+  assert.equal(
+    (await trailOf(id)).record.label,
+    `${sample.label}-R2`,
+    "the heading follows the latest image even after the Test's last entry",
+  );
+});
+
+it("a record's trail labels a reference two deep, such as a Sample's Submission by its Customer", async () => {
+  const id = await submitTestTo('SubmittedForReview');
+  const trail = await trailOf(id);
+  const sample = trail.entries.find((e) => e.record.table === 'sample')?.record ?? assert.fail();
+  const result = trail.entries.find((e) => e.record.table === 'result')?.record ?? assert.fail();
+  const sampleTrail = ok(await as.rui.call(routes.recordTrail, { table: 'sample', id: sample.id }));
+  assert.equal(
+    sampleTrail.entries[0]?.changes.find((c) => c.field === 'submission_id')?.new?.text,
+    'from Northwind Generics (fictional)',
+  );
+  const resultTrail = ok(await as.rui.call(routes.recordTrail, { table: 'result', id: result.id }));
+  assert.equal(resultTrail.entries[0]?.changes.find((c) => c.field === 'test_id')?.new?.text, sample.label);
+});
+
+it("a company record out of this Lab's sight is not found: a person of another Lab, a Customer with no Sample here", async () => {
+  const other = await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Add another Lab' }, async (tx) => {
+    const { labId } = await tx
+      .insertInto('lab')
+      .values({ code: 'OL', name: 'Other Lab', timeZone: 'Europe/Zurich' })
+      .returning('labId')
+      .executeTakeFirstOrThrow();
+    const { id: personId } = await tx
+      .insertInto('person')
+      .values({ username: 'olaf.other-lab', displayName: 'Olaf Other', passwordHash: 'not-a-real-hash' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await tx.insertInto('membership').values({ labId, personId, role: 'Analyst' }).execute();
+    const { id: customerId } = await tx
+      .insertInto('customer')
+      .values({ name: 'Unseen Customer (fictional)' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    return { personId, customerId };
+  });
+  refusedWith(await as.rui.call(routes.recordTrail, { table: 'person', id: other.personId }), 'notFound');
+  refusedWith(await as.rui.call(routes.recordTrail, { table: 'customer', id: other.customerId }), 'notFound');
+  assert.ok(ok(await as.rui.call(routes.recordTrail, { table: 'person', id: ana.id })).entries.length > 0);
+  const customerId = (
+    await api.db.selectFrom('customer').select('id').where('name', 'like', 'Northwind%').executeTakeFirstOrThrow()
+  ).id;
+  assert.ok(ok(await as.rui.call(routes.recordTrail, { table: 'customer', id: customerId })).entries.length > 0);
+});
+
+it("the registry's chain for each audited table matches whether the table carries a lab_id column", async () => {
+  const { rows } = await sql<{ table: string }>`
+    select table_name as "table" from information_schema.columns
+     where table_schema = 'lims' and column_name = 'lab_id'`.execute(api.db);
+  const labTables = new Set(rows.map((r) => r.table));
+  assert.deepEqual(
+    Object.fromEntries(auditedTables.map((t) => [t, auditedRecords[t].chain])),
+    Object.fromEntries(auditedTables.map((t) => [t, labTables.has(t) ? 'lab' : 'company'])),
+  );
 });
 
 it("a cited record's own trail holds only that record's entries, and a record out of reach is not found", async () => {

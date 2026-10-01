@@ -21,7 +21,6 @@ async function atLeast(target: Locator, width: number, height: number) {
   expect(b.height + 0.01, 'touch target height').toBeGreaterThanOrEqual(height);
 }
 
-/** Takes a new Test to Submitted For Review through the API, as each role, so the walk starts at the trail. */
 async function submittedTest(page: Page, description: string): Promise<string> {
   const as = async (username: string) => {
     await page.request.post('/api/logout', { data: {} });
@@ -119,6 +118,17 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await expect(dialog).toBeHidden();
 
   await expect(trail.getByRole('button', { name: 'Verify chain' })).toHaveCount(0);
+  await page.getByLabel('Order').selectOption('Oldest first');
+  await search.fill('Reviewed');
+  await expect(entries).toHaveCount(0);
+  await page.getByRole('button', { name: 'Review', exact: true }).click();
+  await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
+  await page.getByRole('button', { name: 'Sign as Reviewed' }).click();
+  await expect(page.getByRole('status')).toContainText('now Reviewed');
+  await expect(entries, 'the Test state move and the Reviewed Signature arrive without a reload').toHaveCount(2);
+  await expect(entries.last()).toContainText('Rui Tanaka (Reviewer) created the Signature Reviewed');
+  await expect(entries.last()).toHaveClass(/entry--fresh/);
+  await search.fill('');
   await entries
     .filter({ hasText: 'created the Test RD-S' })
     .getByRole('link', { name: /^RD-MTH-0001 v1$/ })
@@ -139,6 +149,6 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
 
   await signIn(page, 'cora.customer');
   await page.goto(`/#/tests/${testId}`);
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Submitted For Review');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Reviewed');
   await expect(page.getByRole('region', { name: 'Audit Trail' })).toHaveCount(0);
 });

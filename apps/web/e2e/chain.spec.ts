@@ -175,7 +175,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(page.locator('.verdict')).toHaveText(
     /^Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC: Lab chain intact through entry \d+; Company chain intact through entry \d+\. Not anchored off-server \(demo\)\.$/,
   );
-  const reportLink = page.getByRole('link', { name: /^RD-R\d{5}$/ });
+  const reportLink = page.locator('.facts').getByRole('link', { name: /^RD-R\d{5}$/ });
   await atLeast(reportLink, 44, 44);
   await reportLink.click();
   await expect(page.getByRole('heading', { name: /Test Report RD-R\d{5}/ })).toBeVisible();

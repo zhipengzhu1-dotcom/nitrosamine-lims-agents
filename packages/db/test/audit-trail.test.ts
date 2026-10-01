@@ -113,17 +113,35 @@ it('audit entries cannot be updated or deleted, by the app or by the superuser',
   await assert.rejects(app.deleteFrom('auditEntry').execute(), refusedWith('42501'));
 });
 
-it("the Lab's chain verifies, and an entry tampered with as superuser is found at its seq", async () => {
-  await audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
-    tx.updateTable('lab').set({ name: 'Test Laboratory' }).where('labId', '=', labId).execute(),
-  );
+it("the Lab's chain verifies; an entry the database owner alters is the first failure, and the entries before it still verify", async () => {
+  const rename = (name: string) =>
+    audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
+      tx.updateTable('lab').set({ name }).where('labId', '=', labId).execute(),
+    );
+  await rename('Test Laboratory');
+  await rename('Test Laboratory, renamed');
+  await rename('Test Laboratory, renamed again');
   const verify = async () =>
     (await sql<{ broken: string | null }>`select lims.verify_chain(${labId}) as broken`.execute(app)).rows[0]?.broken;
+  const last = (
+    await sql<{ last: string }>`select max(seq)::text as last from lims.audit_entry where chain = ${labId}`.execute(app)
+  ).rows[0]?.last;
+  assert.equal(last, '4');
   assert.equal(await verify(), null);
 
-  await superuser.query('begin');
-  await superuser.query('set local session_replication_role = replica');
-  await superuser.query(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 2`, [labId]);
-  await superuser.query('commit');
-  assert.equal(await verify(), '2');
+  const alterAsOwner = async (seq: number) => {
+    await superuser.query('begin');
+    await superuser.query('set local role lims_owner');
+    await superuser.query('alter table lims.audit_entry disable trigger refuse_change');
+    await superuser.query(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = $2`, [
+      labId,
+      seq,
+    ]);
+    await superuser.query('alter table lims.audit_entry enable trigger refuse_change');
+    await superuser.query('commit');
+  };
+  await alterAsOwner(4);
+  assert.equal(await verify(), '4', 'the altered last entry fails; entries 1 to 3 verify');
+  await alterAsOwner(2);
+  assert.equal(await verify(), '2', 'the earliest altered entry is the first failure; entry 1 verifies');
 });

@@ -1,16 +1,19 @@
 import type { DB, Json } from '@lims/db';
 import {
+  actorUsername,
   type AuditedTable,
   auditedRecords,
   chainVerification,
+  currentLabel,
   describeTrail,
-  type HistoryEntry,
+  imagesOf,
   type Instant,
   isAuditedTable,
-  type RawEntry,
-  type RowSnapshot,
   referencedRecords,
+  type RowImage,
+  type RowSnapshot,
   routes,
+  type TimedEntry,
   type Trail,
 } from '@lims/domain';
 import { type ExpressionBuilder, type ExpressionWrapper, type Kysely, type SqlBool, sql } from 'kysely';
@@ -24,27 +27,37 @@ function snapshot(row: Json | null): RowSnapshot | null {
   return row;
 }
 
-/** The database's check on `op` admits these three; anything else is a failure, not a refusal. */
-function opOf(op: string): RawEntry['op'] {
+function opOf(op: string): TimedEntry['op'] {
   if (op === 'INSERT' || op === 'UPDATE' || op === 'DELETE') return op;
   throw new Error(`an Audit Trail entry has the op ${op}`);
 }
 
-/** The entry's instant to the microsecond, as the hashed bytes render it, so that order and labels never depend on a Date's milliseconds. */
+/** Selected as text, not a Date: the driver's Date keeps milliseconds, and order and labels compare `at` to the microsecond, as the hash renders it. */
 const atText = sql<Instant>`to_char(at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+/** The same instant on the owning Lab's wall clock, rendered by the database from the Lab's zone; null on the company chain. */
+const atLabText = sql<Instant | null>`(
+  select to_char(audit_entry.at at time zone l.time_zone, 'YYYY-MM-DD"T"HH24:MI:SS.US')
+      || case when (audit_entry.at at time zone l.time_zone) < (audit_entry.at at time zone 'UTC') then '-' else '+' end
+      || to_char(greatest((audit_entry.at at time zone l.time_zone) - (audit_entry.at at time zone 'UTC'),
+                          (audit_entry.at at time zone 'UTC') - (audit_entry.at at time zone l.time_zone)), 'HH24:MI')
+    from lims.lab l where l.lab_id::text = audit_entry.chain)`;
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
 const newId = sql<string>`new_row->>'id'`;
 const usernameOf = sql<string>`new_row->>'username'`;
 
 type Where = (eb: ExpressionBuilder<DB, 'auditEntry'>) => ExpressionWrapper<DB, 'auditEntry', SqlBool>;
 
-async function rawEntries(scope: Scope, where: Where): Promise<RawEntry[]> {
+const chainOf = (scope: Scope, table: AuditedTable) =>
+  auditedRecords[table].chain === 'lab' ? scope.ctx.lab.id : 'company';
+
+async function rawEntries(scope: Scope, where: Where): Promise<TimedEntry[]> {
   const rows = await scope
     .trail()
     .select([
       'chain',
       'seq',
       atText.as('at'),
+      atLabText.as('atLab'),
       'actor',
       'role',
       'reason',
@@ -61,6 +74,7 @@ async function rawEntries(scope: Scope, where: Where): Promise<RawEntry[]> {
     chain: e.chain,
     seq: e.seq,
     at: e.at,
+    atLab: e.atLab,
     actor: e.actor,
     role: e.role,
     reason: e.reason,
@@ -73,13 +87,11 @@ async function rawEntries(scope: Scope, where: Where): Promise<RawEntry[]> {
   }));
 }
 
-/** Every captured image of the records the entries reference, and of the people who acted, from their own chains. */
-async function historyFor(scope: Scope, entries: RawEntry[]): Promise<HistoryEntry[]> {
-  const usernames = [...new Set(entries.map((e) => e.actor).filter((a) => a.startsWith('person:')))].map((a) =>
-    a.slice('person:'.length),
-  );
-  const wanted = referencedRecords(entries);
-  if (usernames.length > 0 && !wanted.some((w) => w.table === 'person')) wanted.push({ table: 'person', ids: [] });
+async function imagesWanted(
+  scope: Scope,
+  wanted: { table: AuditedTable; ids: string[] }[],
+  usernames: string[],
+): Promise<RowImage[]> {
   if (wanted.length === 0) return [];
   const rows = await scope
     .trail()
@@ -90,7 +102,7 @@ async function historyFor(scope: Scope, entries: RawEntry[]): Promise<HistoryEnt
           const byUsername = table === 'person' && usernames.length > 0 ? [eb(usernameOf, 'in', usernames)] : [];
           return eb.and([
             eb('tableName', '=', table),
-            eb('chain', '=', auditedRecords[table].chain === 'lab' ? scope.ctx.lab.id : 'company'),
+            eb('chain', '=', chainOf(scope, table)),
             eb.or([...(ids.length > 0 ? [eb(newId, 'in', ids)] : []), ...byUsername]),
           ]);
         }),
@@ -103,6 +115,27 @@ async function historyFor(scope: Scope, entries: RawEntry[]): Promise<HistoryEnt
   });
 }
 
+/** Every image of every record the entries reference, following references until no label needs a record not yet loaded. */
+async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<RowImage[]> {
+  const usernames = [...new Set(entries.map((e) => actorUsername(e.actor)).filter((u) => u !== null))];
+  const loaded = new Map<AuditedTable, Set<string>>();
+  const unloaded = (wanted: { table: AuditedTable; ids: string[] }[]) =>
+    wanted
+      .map(({ table, ids }) => ({ table, ids: ids.filter((id) => !loaded.get(table)?.has(id)) }))
+      .filter(({ ids }) => ids.length > 0);
+  let wanted = unloaded(referencedRecords(imagesOf(entries)));
+  if (usernames.length > 0 && !wanted.some((w) => w.table === 'person')) wanted.push({ table: 'person', ids: [] });
+  const images: RowImage[] = [];
+  while (wanted.length > 0) {
+    for (const { table, ids } of wanted) loaded.set(table, new Set([...(loaded.get(table) ?? []), ...ids]));
+    const found = await imagesWanted(scope, wanted, usernames);
+    usernames.length = 0;
+    images.push(...found);
+    wanted = unloaded(referencedRecords(found));
+  }
+  return images;
+}
+
 async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, where: Where): Promise<Trail> {
   const entries = await rawEntries(scope, where);
   if (entries.length === 0) refuse('notFound', `no such ${auditedRecords[root.table].kind} in this Lab`);
@@ -111,19 +144,49 @@ async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, 
     .select('timeZone')
     .where('labId', '=', scope.ctx.lab.id)
     .executeTakeFirstOrThrow();
-  const described = describeTrail(entries, await historyFor(scope, entries), { id: scope.ctx.lab.id, zone: timeZone });
-  const own = described.findLast((e) => e.record.table === root.table && e.record.id === root.id)?.record;
+  const images = await imagesFor(scope, entries);
   return {
-    record: own ?? { table: root.table, id: root.id, kind: auditedRecords[root.table].kind, label: root.id },
+    record: {
+      table: root.table,
+      id: root.id,
+      kind: auditedRecords[root.table].kind,
+      label: currentLabel([...images, ...imagesOf(entries)], root.table, root.id),
+    },
     labZone: timeZone,
-    entries: described,
+    entries: describeTrail(entries, images, scope.ctx.lab.id),
   };
 }
 
-/** A Customer User never reads a trail, in the portal or by request; every other role reads the trails of what it can see. */
 function staffScope(db: Kysely<DB>, req: { actor: Scope['ctx'] }): Scope {
   if (req.actor.person.customerId !== null) refuse('role', 'the Audit Trail is not shown to a Customer User');
   return labScope(db, req.actor);
+}
+
+/** Whether a company record is one this Lab already sees: a Method always, a Person through a Membership here, a Customer or Submission through a Sample here. */
+async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promise<boolean> {
+  switch (table) {
+    case 'method':
+      return true;
+    case 'person':
+      return Boolean(await scope.from('membership').select('personId').where('personId', '=', id).executeTakeFirst());
+    case 'customer':
+      return Boolean(
+        await scope
+          .from('sample')
+          .innerJoin('submission', 'submission.id', 'sample.submissionId')
+          .select('sample.id')
+          .where('submission.customerId', '=', id)
+          .executeTakeFirst(),
+      );
+    case 'submission':
+      return Boolean(await scope.from('sample').select('id').where('submissionId', '=', id).executeTakeFirst());
+    case 'sample':
+    case 'test':
+    case 'result':
+    case 'test_report':
+    case 'signature':
+      return true;
+  }
 }
 
 export function trailRoutes(app: App, db: Kysely<DB>): void {
@@ -136,11 +199,11 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
         (await scope
           .from('test')
           .innerJoin('sample', 'sample.id', 'test.sampleId')
-          .select(['test.id', 'test.sampleId', 'sample.submissionId'])
+          .leftJoin('testReport', 'testReport.testId', 'test.id')
+          .select(['test.id', 'test.sampleId', 'sample.submissionId', 'testReport.id as reportId'])
           .where('test.id', '=', id)
           .executeTakeFirst()) ?? refuse('notFound', 'no such Test in this Lab');
-      const report = await scope.from('testReport').select('id').where('testId', '=', id).executeTakeFirst();
-      const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
+      const ids = [test.id, test.sampleId, ...(test.reportId ? [test.reportId] : [])];
       return trailOf(scope, { table: 'test', id }, (eb) =>
         eb.or([
           eb.and([
@@ -162,9 +225,10 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
     handler: async (req) => {
       const scope = staffScope(db, req);
       const { table, id } = req.params;
-      const chain = auditedRecords[table].chain === 'lab' ? scope.ctx.lab.id : 'company';
+      if (!(await seenFromLab(scope, table, id)))
+        refuse('notFound', `no such ${auditedRecords[table].kind} in this Lab`);
       return trailOf(scope, { table, id }, (eb) =>
-        eb.and([eb('chain', '=', chain), eb('tableName', '=', table), eb(rowId, '=', id)]),
+        eb.and([eb('chain', '=', chainOf(scope, table)), eb('tableName', '=', table), eb(rowId, '=', id)]),
       );
     },
   });

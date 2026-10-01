@@ -22,6 +22,7 @@ const testState = Type.Enum({
   Reported: 'Reported',
 } as const satisfies { [K in db.TestState]: K });
 export type TestState = Static<typeof testState>;
+export const isTestState = (value: unknown): value is TestState => Value.Check(testState, value);
 const meaning = Type.Enum({
   Acknowledged: 'Acknowledged',
   Approved: 'Approved',
@@ -45,12 +46,7 @@ declare const instantBrand: unique symbol;
  * The API hands Fastify the Date that Kysely returns, and Fastify writes it with toISOString.
  */
 export type Instant = string & { readonly [instantBrand]: true };
-const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' }));
-/** Parses a string into an Instant at a boundary, or throws: for a test's fixtures and a value read outside a route. */
-export function instantOf(value: string): Instant {
-  if (Value.Check(instant, value)) return value;
-  throw new Error(`${value} is not an ISO 8601 date-time`);
-}
+export const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' }));
 const nullable = <S extends TSchema>(schema: S) => Type.Union([schema, Type.Null()]);
 const closed = { additionalProperties: false } as const;
 
@@ -94,7 +90,6 @@ export type Signature = Static<typeof signature>;
 /** An Audit Trail row snapshot, keyed by its stored column names. */
 const rowSnapshot = Type.Record(Type.String(), Type.Unknown());
 export type RowSnapshot = Static<typeof rowSnapshot>;
-/** The tables whose rows a trail reads; `packages/domain/src/audit.ts` says how each reads. */
 export const auditedTable = Type.Enum({
   customer: 'customer',
   person: 'person',
@@ -109,7 +104,8 @@ export const auditedTable = Type.Enum({
 export type AuditedTable = Static<typeof auditedTable>;
 const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
 export type ChainKind = Static<typeof chainKind>;
-/** An Audit Trail entry as the database holds it, with its hashes in hex. */
+const sha256Hex = Type.String({ pattern: '^[0-9a-f]{64}$' });
+/** An Audit Trail entry as the database holds it. */
 const rawEntry = Type.Object({
   chain: Type.String(),
   seq: Type.String(),
@@ -121,8 +117,8 @@ const rawEntry = Type.Object({
   op: Type.Enum({ INSERT: 'INSERT', UPDATE: 'UPDATE', DELETE: 'DELETE' } as const),
   oldRow: nullable(rowSnapshot),
   newRow: nullable(rowSnapshot),
-  prevHash: Type.String(),
-  hash: Type.String(),
+  prevHash: sha256Hex,
+  hash: sha256Hex,
 });
 export type RawEntry = Static<typeof rawEntry>;
 const recordRef = Type.Object({ table: Type.String(), id: Type.String(), kind: Type.String(), label: Type.String() });
@@ -140,12 +136,16 @@ const trailChange = Type.Object({
   new: nullable(shownValue),
 });
 export type TrailChange = Static<typeof trailChange>;
-/** One Audit Trail entry in glossary words. `atLab` is the time in the owning Lab's zone, and null on the company chain. */
+/**
+ * One Audit Trail entry in glossary words. `at` is the instant in UTC to the microsecond, as the hashed bytes render
+ * it; `atLab` is the same instant on the owning Lab's wall clock, ISO 8601 with the Lab's offset, and null on the
+ * company chain. The web formats each in `apps/web/src/time.ts`.
+ */
 const trailEntry = Type.Object({
   chain: chainKind,
   seq: Type.String(),
   at: instant,
-  atLab: nullable(Type.String()),
+  atLab: nullable(instant),
   actor: Type.Object({ label: Type.String(), role: Type.String() }),
   reason: Type.String(),
   op: rawEntry.properties.op,
@@ -175,7 +175,6 @@ const lookups = Type.Object({
   methods: Type.Array(Type.Object({ id: uuid, code: Type.String(), version: Type.String(), title: Type.String() })),
   analysts: Type.Array(Type.Object({ id: uuid, displayName: Type.String() })),
 });
-/** One recomputed chain: its last entry, how far it is intact, the first entry that fails or null, and the sentence QA reads. */
 const chainVerification = Type.Object({
   chain: chainKind,
   lastEntry: Type.String(),
@@ -184,7 +183,6 @@ const chainVerification = Type.Object({
   report: Type.String(),
 });
 export type ChainVerification = Static<typeof chainVerification>;
-/** When the Lab's and the company's chains were recomputed, by the database clock, and what each recomputation found. */
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });

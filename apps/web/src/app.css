@@ -301,6 +301,9 @@ th {
   margin: 0;
   overflow-wrap: anywhere;
 }
+.changes .status {
+  margin-bottom: 0;
+}
 .long summary {
   cursor: pointer;
   min-height: 44px;

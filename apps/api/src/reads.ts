@@ -78,7 +78,6 @@ async function testView(scope: Scope, id: string) {
   };
 }
 
-/** The routes that read: the views here, and the Audit Trail's trails and verification in `trail.ts`. */
 export function readRoutes(app: App, db: Kysely<DB>): void {
   trailRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => req.actor });

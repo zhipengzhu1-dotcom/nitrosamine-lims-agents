@@ -533,7 +533,7 @@ describe('the database refuses a value outside its allowed set', () => {
       'a Lab time zone that the database does not know is refused',
       'lims.lab',
       'time_zone',
-      ['', 'Mars/Olympus', 'EST5EDT; drop table lims.lab'],
+      ['', 'Mars/Olympus', 'EDT', 'EST5EDT,M3.2.0,M11.1.0', 'posix/America/New_York', 'Factory'],
       'lab_time_zone_check',
     ),
     ...each(

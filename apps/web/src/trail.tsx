@@ -3,38 +3,46 @@ import {
   type AuditedTable,
   auditedRecords,
   type AuditTrailVerification,
+  isTestState,
   type ShownValue,
   routes,
   type Trail,
+  type TrailChange,
   type TrailEntry,
 } from '@lims/domain';
 import { useEffect, useRef, useState } from 'react';
 import { api, useApi, useFresh } from './api.ts';
-import { Shell, words } from './rail.tsx';
-import { time } from './time.ts';
+import { Shell, Status, words } from './rail.tsx';
+import { labTime, time } from './time.ts';
 
 const entryKey = (e: TrailEntry) => `${e.chain}:${e.seq}`;
 const action = { INSERT: 'created', UPDATE: 'changed', DELETE: 'removed' } as const;
+const chainWords = { lab: 'Lab chain', company: 'Company chain' } as const;
 const SHORT = 48;
+const NONE = 'none';
 
-/** The words a search matches against: everything the entry shows. */
 function searchText(e: TrailEntry): string {
   return [
-    e.seq,
-    e.chain,
+    `#${e.seq}`,
+    chainWords[e.chain],
+    time(e.at),
+    e.atLab ? labTime(e.atLab) : '',
     e.actor.label,
     words(e.actor.role),
+    action[e.op],
     e.reason,
     e.record.kind,
     e.record.label,
-    ...e.changes.flatMap((c) => [c.label, c.old?.text ?? '', c.new?.text ?? '']),
+    ...e.changes.flatMap((c) => [c.label, c.old?.text ?? NONE, c.new?.text ?? NONE]),
   ]
     .join(' ')
     .toLowerCase();
 }
 
-function Value({ value }: { value: ShownValue | null }) {
-  if (value === null) return <i className="muted">none</i>;
+function Value({ value, change, e }: { value: ShownValue | null; change: TrailChange; e: TrailEntry }) {
+  if (value === null) return <i className="muted">{NONE}</i>;
+  if (change.field === 'state' && e.record.table === 'test' && isTestState(value.text))
+    return <Status state={value.text} />;
   const text = value.ref ? (
     <a href={`#/trails/${value.ref.table}/${value.ref.id}`}>{value.text}</a>
   ) : (
@@ -52,16 +60,13 @@ function Value({ value }: { value: ShownValue | null }) {
 function Entry({ e, root, fresh, onRaw }: { e: TrailEntry; root: Trail['record']; fresh: boolean; onRaw: () => void }) {
   const own = e.record.table === root.table && e.record.id === root.id;
   return (
-    <li
-      className={`entry ${e.afterFirstSave ? 'entry--changed' : ''} ${fresh ? 'entry--fresh' : ''}`}
-      aria-label={`entry ${e.seq}`}
-    >
+    <li className={`entry ${e.afterFirstSave ? 'entry--changed' : ''} ${fresh ? 'entry--fresh' : ''}`}>
       <div className="entry__head">
-        <span className={`chain chain--${e.chain}`}>{e.chain === 'lab' ? 'Lab chain' : 'Company chain'}</span>
+        <span className={`chain chain--${e.chain}`}>{chainWords[e.chain]}</span>
         <span className="entry__seq">#{e.seq}</span>
         <span className="entry__time">
           {time(e.at)}
-          {e.atLab && <span className="muted"> · {e.atLab}</span>}
+          {e.atLab && <span className="muted"> · {labTime(e.atLab)}</span>}
         </span>
       </div>
       <p className="entry__line">
@@ -85,10 +90,10 @@ function Entry({ e, root, fresh, onRaw }: { e: TrailEntry; root: Trail['record']
               <dd>
                 {e.op === 'UPDATE' ? (
                   <>
-                    <Value value={c.old} /> → <Value value={c.new} />
+                    <Value value={c.old} change={c} e={e} /> → <Value value={c.new} change={c} e={e} />
                   </>
                 ) : (
-                  <Value value={e.op === 'INSERT' ? c.new : c.old} />
+                  <Value value={e.op === 'INSERT' ? c.new : c.old} change={c} e={e} />
                 )}
               </dd>
             </div>
@@ -129,15 +134,17 @@ function RawDialog({ entry, onClose }: { entry: TrailEntry | null; onClose: () =
 }
 
 function VerifyChain() {
+  const inFlight = useRef(false);
   const [busy, setBusy] = useState(false);
   const [verdict, setVerdict] = useState<{ text: string; tone: 'ok' | 'bad' } | null>(null);
   async function verify() {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       const found: AuditTrailVerification = await api(routes.verifyAuditTrail);
       const broken = found.chains.some((c) => c.firstFailure !== null);
-      const chains = found.chains.map((c) => `${c.chain === 'lab' ? 'Lab' : 'Company'} chain ${c.report}`).join('; ');
+      const chains = found.chains.map((c) => `${chainWords[c.chain]} ${c.report}`).join('; ');
       setVerdict({
         text: `Recomputed at ${time(found.at)}: ${chains}. Not anchored off-server (demo).`,
         tone: broken ? 'bad' : 'ok',
@@ -145,6 +152,7 @@ function VerifyChain() {
     } catch (error) {
       setVerdict({ text: error instanceof Error ? error.message : 'the LIMS did not answer', tone: 'bad' });
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   }
@@ -162,7 +170,6 @@ function VerifyChain() {
   );
 }
 
-/** The time-ordered trail of one record, searchable and sortable, with each raw entry one tap away. */
 export function TrailPanel({ me, trail }: { me: ActorContext; trail: Trail | undefined }) {
   const [search, setSearch] = useState('');
   const [newestFirst, setNewestFirst] = useState(false);
@@ -177,7 +184,8 @@ export function TrailPanel({ me, trail }: { me: ActorContext; trail: Trail | und
         <h2>Audit Trail</h2>
         {trail && (
           <p className="muted">
-            {trail.entries.length} entries. Times in UTC and in the Lab&apos;s zone, {trail.labZone}.
+            {trail.entries.length} entries. Times in UTC
+            {trail.entries.some((e) => e.atLab !== null) ? ` and in the Lab's zone, ${trail.labZone}` : ''}.
           </p>
         )}
       </div>
@@ -211,13 +219,26 @@ export function TrailPanel({ me, trail }: { me: ActorContext; trail: Trail | und
   );
 }
 
-export function TestTrail({ me, id }: { me: ActorContext; id: string }) {
-  const { data, error } = useApi(routes.testTrail, { id });
+/** The Test's trail; `onReload` receives the function that refetches it, so a step's commit can wait for the new entries. */
+export function TestTrail({
+  me,
+  id,
+  onReload,
+}: {
+  me: ActorContext;
+  id: string;
+  onReload: (reload: () => Promise<void>) => void;
+}) {
+  const { data, error, reload } = useApi(routes.testTrail, { id });
+  const latest = useRef(reload);
+  useEffect(() => {
+    latest.current = reload;
+  });
+  useEffect(() => onReload(() => latest.current()), [onReload]);
   if (error) return <p className="note--bad">{error}</p>;
   return <TrailPanel me={me} trail={data} />;
 }
 
-/** A cited record's own trail, reached from a link in another trail. */
 export function TrailPage({ me, table, id }: { me: ActorContext; table: AuditedTable; id: string }) {
   const { data, error } = useApi(routes.recordTrail, { table, id });
   return (

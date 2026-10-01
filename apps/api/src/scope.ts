@@ -39,12 +39,11 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
   return {
     ctx,
     ...inLab(db, labId),
-    /** The entries of this Lab's chain and the company chain; another Lab's chain is out of reach. */
+    /** Reaches only this Lab's chain and the company chain. */
     trail: () => db.selectFrom('auditEntry').where('chain', 'in', [labId, 'company']),
-    /** Recomputes this Lab's chain and the company chain: each one's last entry and the first entry that fails, or null. */
     verifyAuditTrail: async () => {
       const lastEntry = (chain: string) =>
-        sql<string>`coalesce((select max(seq) from lims.audit_entry where chain = ${chain}), 0)::text`;
+        sql<string>`coalesce((select seq from lims.audit_chain where chain = ${chain}), 0)::text`;
       const firstFailure = (chain: string) => sql<string | null>`lims.verify_chain(${chain})::text`;
       const found = await db
         .selectNoFrom([

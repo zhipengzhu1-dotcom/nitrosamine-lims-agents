@@ -1,17 +1,18 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { Value } from 'typebox/value';
 import {
   chainVerification,
   type ChainVerification,
+  currentLabel,
   describeTrail,
-  type HistoryEntry,
-  inZone,
-  instantOf,
-  type RawEntry,
+  instant,
+  type RowImage,
   referencedRecords,
+  type TimedEntry,
 } from '../src/index.ts';
 
-const instant = instantOf;
+const at = (s: string) => Value.Decode(instant, s);
 
 describe('a recomputed chain reads as how far it is intact', () => {
   const cases: { name: string; last: string; failure: string | null; expected: Omit<ChainVerification, 'chain'> }[] = [
@@ -54,22 +55,13 @@ describe('a recomputed chain reads as how far it is intact', () => {
     it(c.name, () => assert.deepEqual(chainVerification('lab', c.last, c.failure), { chain: 'lab', ...c.expected }));
 });
 
-describe('an instant renders on the wall clock of a zone with its offset', () => {
-  const cases: [string, string, string][] = [
-    ['2026-01-15T12:00:00.000000Z', 'America/New_York', '2026-01-15 07:00:00 -05:00'],
-    ['2026-07-15T12:00:00.123456Z', 'America/New_York', '2026-07-15 08:00:00 -04:00'],
-    ['2026-07-15T12:00:00.000000Z', 'UTC', '2026-07-15 12:00:00 +00:00'],
-    ['2026-07-15T23:30:00.000000Z', 'Asia/Kolkata', '2026-07-16 05:00:00 +05:30'],
-  ];
-  for (const [at, zone, expected] of cases)
-    it(`${at} in ${zone}`, () => assert.equal(inZone(instant(at), zone), expected));
-});
-
 const LAB = 'a4d6a9d1-0000-4000-8000-000000000001';
-const entry = (over: Partial<RawEntry>): RawEntry => ({
+const HASH = '0'.repeat(64);
+const entry = (over: Partial<TimedEntry>): TimedEntry => ({
   chain: LAB,
   seq: '1',
-  at: instant('2026-10-01T10:00:00.000000Z'),
+  at: at('2026-10-01T10:00:00.000000Z'),
+  atLab: at('2026-10-01T06:00:00.000000-04:00'),
   actor: 'person:lena.manager',
   role: 'LabManager',
   reason: 'assign',
@@ -77,27 +69,29 @@ const entry = (over: Partial<RawEntry>): RawEntry => ({
   op: 'UPDATE',
   oldRow: null,
   newRow: null,
-  prevHash: '00',
-  hash: '01',
+  prevHash: HASH,
+  hash: HASH,
   ...over,
 });
-const history: HistoryEntry[] = [
+const images: RowImage[] = [
   {
     table: 'person',
-    at: instant('2026-10-01T08:00:00.000000Z'),
+    at: at('2026-10-01T08:00:00.000000Z'),
     row: { id: 'p1', username: 'lena.manager', display_name: 'Lena Varga' },
   },
   {
     table: 'person',
-    at: instant('2026-10-01T08:00:00.000000Z'),
+    at: at('2026-10-01T08:00:00.000000Z'),
     row: { id: 'p2', username: 'ana.analyst', display_name: 'Ana Ferreira' },
   },
   {
     table: 'person',
-    at: instant('2026-10-01T11:00:00.000000Z'),
+    at: at('2026-10-01T11:00:00.000000Z'),
     row: { id: 'p2', username: 'ana.analyst', display_name: 'Ana Ferreira-Souza' },
   },
-  { table: 'sample', at: instant('2026-10-01T09:00:00.000000Z'), row: { id: 's1', number: 'RD-S00001' } },
+  { table: 'sample', at: at('2026-10-01T09:00:00.000000Z'), row: { id: 's1', number: 'RD-S00001' } },
+  { table: 'sample', at: at('2026-10-01T13:00:00.000000Z'), row: { id: 's1', number: 'RD-S00001-R' } },
+  { table: 'customer', at: at('2026-10-01T07:00:00.000000Z'), row: { id: 'c1', name: 'Northwind' } },
 ];
 
 describe('an entry reads in glossary words with labels as they stood at its time', () => {
@@ -107,7 +101,8 @@ describe('an entry reads in glossary words with labels as they stood at its time
   });
   const later = entry({
     seq: '2',
-    at: instant('2026-10-01T12:00:00.000000Z'),
+    at: at('2026-10-01T12:00:00.000000Z'),
+    atLab: at('2026-10-01T08:00:00.000000-04:00'),
     actor: 'person:ana.analyst',
     role: 'Analyst',
     reason: 'enterResult',
@@ -118,25 +113,23 @@ describe('an entry reads in glossary words with labels as they stood at its time
   const submission = entry({
     chain: 'company',
     seq: '7',
-    at: instant('2026-10-01T09:30:00.000000Z'),
+    at: at('2026-10-01T09:30:00.000000Z'),
+    atLab: null,
     actor: 'svc:seed',
     role: 'system',
     table: 'submission',
     op: 'INSERT',
     newRow: { id: 'sub1', customer_id: 'c1', submitted_by: 'p1' },
   });
-  const [first, second, third] = describeTrail([later, assign, submission], history, {
-    id: LAB,
-    zone: 'America/New_York',
-  });
+  const [first, second, third] = describeTrail([later, assign, submission], images, LAB);
 
-  it('orders by time across chains and marks each chain', () =>
+  it('orders by time across chains, marks each chain, and keeps the Lab-zone instant only on the Lab chain', () =>
     assert.deepEqual(
       [first, second, third].map((e) => [e?.chain, e?.seq, e?.atLab]),
       [
         ['company', '7', null],
-        ['lab', '1', '2026-10-01 06:00:00 -04:00'],
-        ['lab', '2', '2026-10-01 08:00:00 -04:00'],
+        ['lab', '1', '2026-10-01T06:00:00.000000-04:00'],
+        ['lab', '2', '2026-10-01T08:00:00.000000-04:00'],
       ],
     ));
 
@@ -151,7 +144,7 @@ describe('an entry reads in glossary words with labels as they stood at its time
       },
     ]));
 
-  it('labels the actor and the record as they stood at the time, and lists only the fields a row carries', () =>
+  it('labels the actor and the record as they stood at the time, two references deep, and lists only the fields a row carries', () =>
     assert.deepEqual(
       [
         [second?.actor, second?.record],
@@ -164,32 +157,61 @@ describe('an entry reads in glossary words with labels as they stood at its time
           { table: 'test', id: 't1', kind: 'Test', label: 'RD-S00001' },
         ],
         [{ label: 'Ana Ferreira-Souza', role: 'Analyst' }, 'NDMA 0.0300 ppm', 'Ana Ferreira-Souza'],
-        ['svc:seed', 'from c1', 2],
+        ['svc:seed', 'from Northwind', 2],
       ],
+    ));
+
+  it('a Submission is labelled after its kind, "Submission from <Customer>"', () =>
+    assert.equal(first?.record.label, 'from Northwind'));
+
+  it('the current label of a record is its latest image, after every entry', () =>
+    assert.equal(currentLabel(images, 'test', 't1'), 't1'));
+
+  it('the current label follows a reference to its latest image', () =>
+    assert.equal(
+      currentLabel(
+        [
+          ...images,
+          ...describeTrail([assign], [], LAB).map((e) => ({
+            table: 'test' as const,
+            at: e.at,
+            row: e.raw.newRow ?? {},
+          })),
+        ],
+        'test',
+        't1',
+      ),
+      'RD-S00001-R',
     ));
 
   it('highlights a change to a saved value after first save, not a forward step', () => {
     const renamed = entry({
       table: 'person',
       chain: 'company',
+      atLab: null,
       oldRow: { id: 'p2', display_name: 'Ana Ferreira', failed_logins: 0 },
       newRow: { id: 'p2', display_name: 'Ana Ferreira-Souza', failed_logins: 0 },
     });
     const signedIn = entry({
       table: 'person',
       chain: 'company',
+      atLab: null,
       oldRow: { id: 'p2', display_name: 'Ana Ferreira', failed_logins: 2 },
       newRow: { id: 'p2', display_name: 'Ana Ferreira', failed_logins: 0 },
     });
     assert.deepEqual(
-      describeTrail([assign, renamed, signedIn, later], history, { id: LAB, zone: 'UTC' }).map((e) => e.afterFirstSave),
+      describeTrail([assign, renamed, signedIn, later], images, LAB).map((e) => e.afterFirstSave),
       [false, true, false, false],
     );
   });
 
-  it('collects every record whose history the labels need', () =>
+  it("collects every record the given rows reference, each row's own record included", () =>
     assert.deepEqual(
-      referencedRecords([assign, later, submission])
+      referencedRecords([
+        { table: 'test', at: assign.at, row: assign.newRow ?? {} },
+        { table: 'result', at: later.at, row: later.newRow ?? {} },
+        { table: 'submission', at: submission.at, row: submission.newRow ?? {} },
+      ])
         .map((r) => `${r.table}: ${[...r.ids].sort().join(' ')}`)
         .sort(),
       ['customer: c1', 'person: p1 p2', 'result: r1', 'sample: s1', 'submission: sub1', 'test: t1'],

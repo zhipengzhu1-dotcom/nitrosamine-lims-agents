@@ -1,4 +1,5 @@
 import { type ActorContext, type Result, routes, type Signature, steps, type TestRow } from '@lims/domain';
+import { useCallback, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
 import { Shell, Status, stepAction } from './rail.tsx';
 import { time } from './time.ts';
@@ -54,10 +55,14 @@ export function Worklist({ me }: { me: ActorContext }) {
 
 export function TestPage({ me, id }: { me: ActorContext; id: string }) {
   const { data: view, error, reload } = useApi(routes.test, { id });
+  const [reloadTrail, setReloadTrail] = useState<() => Promise<void>>(() => async () => {});
+  const onTrailReload = useCallback((fn: () => Promise<void>) => setReloadTrail(() => fn), []);
   const freshState = useFresh(view, (v) => [v.test.state]);
   const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
   const action = view?.next
-    ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], reload)
+    ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], async () => {
+        await Promise.all([reload(), reloadTrail()]);
+      })
     : null;
   if (!view)
     return (
@@ -110,7 +115,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
       )}
       <h2>Signatures</h2>
       <Signatures rows={view.signatures} fresh={freshSignatures} />
-      {me.person.customerId === null && <TestTrail me={me} id={id} />}
+      {me.person.customerId === null && <TestTrail me={me} id={id} onReload={onTrailReload} />}
     </Shell>
   );
 }

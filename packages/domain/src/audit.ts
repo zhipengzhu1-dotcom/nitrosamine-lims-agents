@@ -15,14 +15,10 @@ type LabelOf = (table: AuditedTable, id: unknown) => string;
 
 interface FieldSpec {
   label: string;
-  /** A reference to another audited record, shown by that record's label as it stood at the entry's time. */
   ref?: AuditedTable;
-  /** A reference whose table is named by another column of the same row. */
-  refBy?: string;
-  /** Bytes the database stored as text, decoded for reading. */
-  utf8?: true;
-  /** A field a forward step moves, so a change to it is not a change to a saved value. */
-  workflow?: true;
+  refTableIn?: string;
+  bytesAsUtf8?: true;
+  movedByStep?: true;
 }
 
 interface RecordSpec {
@@ -34,7 +30,6 @@ interface RecordSpec {
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : (JSON.stringify(value) ?? ''));
 
-/** How each audited table reads in a trail: its glossary noun, which chain it is captured on, its label and its fields' names. */
 export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
   customer: { kind: 'Customer', chain: 'company', label: (row) => text(row.name), fields: { name: { label: 'Name' } } },
   person: {
@@ -45,8 +40,8 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       username: { label: 'Username' },
       display_name: { label: 'Printed name' },
       customer_id: { label: 'Customer', ref: 'customer' },
-      failed_logins: { label: 'Failed sign-ins', workflow: true },
-      locked_at: { label: 'Locked at', workflow: true },
+      failed_logins: { label: 'Failed sign-ins', movedByStep: true },
+      locked_at: { label: 'Locked at', movedByStep: true },
     },
   },
   method: {
@@ -58,7 +53,6 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
   submission: {
     kind: 'Submission',
     chain: 'company',
-    // Read after its kind: "the Submission from Northwind Generics".
     label: (row, labelOf) => `from ${labelOf('customer', row.customer_id)}`,
     fields: {
       customer_id: { label: 'Customer', ref: 'customer' },
@@ -72,19 +66,18 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     fields: {
       number: { label: 'Number' },
       description: { label: 'Description' },
-      received_at: { label: 'Received', workflow: true },
+      received_at: { label: 'Received', movedByStep: true },
       submission_id: { label: 'Submission', ref: 'submission' },
     },
   },
   test: {
     kind: 'Test',
     chain: 'lab',
-    // A Test is named by its Sample, as the Test page's heading names it.
     label: (row, labelOf) => labelOf('sample', row.sample_id),
     fields: {
-      state: { label: 'State', workflow: true },
+      state: { label: 'State', movedByStep: true },
       gxp_class: { label: 'GxP Class' },
-      assignee_id: { label: 'Analyst', ref: 'person', workflow: true },
+      assignee_id: { label: 'Analyst', ref: 'person', movedByStep: true },
       method_id: { label: 'Method', ref: 'method' },
       sample_id: { label: 'Sample', ref: 'sample' },
     },
@@ -118,8 +111,8 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       meaning: { label: 'Meaning' },
       person_id: { label: 'Signer', ref: 'person' },
       record_table: { label: 'Record kind' },
-      record_id: { label: 'Record', refBy: 'record_table' },
-      content: { label: 'Signed Record Version', utf8: true },
+      record_id: { label: 'Record', refTableIn: 'record_table' },
+      content: { label: 'Signed Record Version', bytesAsUtf8: true },
       content_hash: { label: 'SHA-256 of the Record Version' },
       signed_at: { label: 'Signed at' },
     },
@@ -131,14 +124,27 @@ export const auditedTables = Object.keys(auditedRecords).filter((key): key is Au
 );
 export const isAuditedTable = (value: unknown): value is AuditedTable => auditedTables.some((t) => t === value);
 
-/** The columns every row carries that say nothing about the change. */
+function referenceOf(field: FieldSpec, row: RowSnapshot): AuditedTable | null {
+  const table = field.ref ?? (field.refTableIn === undefined ? undefined : row[field.refTableIn]);
+  return isAuditedTable(table) ? table : null;
+}
+
+export const actorUsername = (actor: string): string | null =>
+  actor.startsWith('person:') ? actor.slice('person:'.length) : null;
+
 const UNLISTED = new Set(['id', 'lab_id']);
 
-/** One captured row image of an audited record, from which its label at that time is read. */
-export interface HistoryEntry {
+export interface RowImage {
   table: AuditedTable;
   at: Instant;
   row: RowSnapshot;
+}
+
+export function imagesOf(entries: readonly RawEntry[]): RowImage[] {
+  return entries.flatMap((e) => {
+    const row = e.newRow ?? e.oldRow;
+    return row && isAuditedTable(e.table) ? [{ table: e.table, at: e.at, row }] : [];
+  });
 }
 
 function decodeUtf8Bytes(value: unknown): string {
@@ -148,103 +154,87 @@ function decodeUtf8Bytes(value: unknown): string {
   return new TextDecoder().decode(bytes);
 }
 
-/** Labels at the time of one entry: the latest captured image of the record at or before `at`, or its first image when the record's history starts later. */
-function labelsAt(history: readonly HistoryEntry[], at: Instant) {
-  const imageAt = (table: AuditedTable, matches: (row: RowSnapshot) => boolean): RowSnapshot | null => {
-    let latest: HistoryEntry | null = null;
-    let first: HistoryEntry | null = null;
-    for (const h of history) {
-      if (h.table !== table || !matches(h.row)) continue;
-      if (h.at <= at && (latest === null || h.at >= latest.at)) latest = h;
-      if (first === null || h.at < first.at) first = h;
-    }
-    return (latest ?? first)?.row ?? null;
+const byAt = (a: RowImage, b: RowImage) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
+
+function indexImages(images: readonly RowImage[]) {
+  const byRecord = new Map<string, RowImage[]>();
+  const byUsername = new Map<string, RowImage[]>();
+  const push = (map: Map<string, RowImage[]>, key: string, image: RowImage) =>
+    map.set(key, [...(map.get(key) ?? []), image]);
+  for (const image of images) {
+    if (typeof image.row.id === 'string') push(byRecord, `${image.table}:${image.row.id}`, image);
+    if (image.table === 'person' && typeof image.row.username === 'string') push(byUsername, image.row.username, image);
+  }
+  for (const list of [...byRecord.values(), ...byUsername.values()]) list.sort(byAt);
+  // The image at or before `at`; a record whose images all come later shows its first.
+  const imageAt = (list: readonly RowImage[] | undefined, at: Instant): RowSnapshot | null => {
+    let found = list?.[0];
+    for (const image of list ?? []) if (image.at <= at) found = image;
+    return found?.row ?? null;
   };
-  const labelOf: LabelOf = (table, id) => {
-    const row = imageAt(table, (r) => r.id === id);
-    return row ? auditedRecords[table].label(row, labelOf) : text(id);
+  return (at: Instant) => {
+    const labelOf: LabelOf = (table, id) => {
+      const row = typeof id === 'string' ? imageAt(byRecord.get(`${table}:${id}`), at) : null;
+      return row ? auditedRecords[table].label(row, labelOf) : text(id);
+    };
+    const actorLabel = (actor: string): string => {
+      const username = actorUsername(actor);
+      const row = username === null ? null : imageAt(byUsername.get(username), at);
+      return row ? text(row.display_name) : actor;
+    };
+    return { labelOf, actorLabel };
   };
-  const actorLabel = (actor: string): string => {
-    const username = actor.startsWith('person:') ? actor.slice('person:'.length) : null;
-    const row = username === null ? null : imageAt('person', (r) => r.username === username);
-    return row ? text(row.display_name) : actor;
-  };
-  return { labelOf, actorLabel };
 }
 
-/** An instant rendered on the wall clock of `zone`: `YYYY-MM-DD HH:MM:SS` and the zone's offset from UTC at that instant. */
-export function inZone(at: Instant, zone: string): string {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: zone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-    timeZoneName: 'longOffset',
-    // oxlint-disable-next-line no-restricted-globals -- parses the database's instant to render it; reads no clock
-  }).formatToParts(new Date(at));
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
-  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice('GMT'.length);
-  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')} ${offset}`;
+/** The label of a record as its latest image gives it. */
+export function currentLabel(images: readonly RowImage[], table: AuditedTable, id: string): string {
+  const latest = [...images].sort(byAt).at(-1);
+  return latest ? indexImages(images)(latest.at).labelOf(table, id) : id;
 }
 
-/** The records whose history a trail needs for its labels: each entry's own record and every record its rows reference. */
-export function referencedRecords(entries: readonly RawEntry[]): { table: AuditedTable; ids: string[] }[] {
+export function referencedRecords(images: readonly RowImage[]): { table: AuditedTable; ids: string[] }[] {
   const ids = new Map<AuditedTable, Set<string>>();
-  const add = (table: unknown, id: unknown) => {
-    if (!isAuditedTable(table) || typeof id !== 'string') return;
+  const add = (table: AuditedTable | null, id: unknown) => {
+    if (table === null || typeof id !== 'string') return;
     ids.set(table, (ids.get(table) ?? new Set()).add(id));
   };
-  for (const e of entries) {
-    for (const row of [e.oldRow, e.newRow]) {
-      if (!row) continue;
-      add(e.table, row.id);
-      if (!isAuditedTable(e.table)) continue;
-      for (const [column, field] of Object.entries(auditedRecords[e.table].fields))
-        add(field.ref ?? (field.refBy === undefined ? undefined : row[field.refBy]), row[column]);
-    }
+  for (const { table, row } of images) {
+    add(table, row.id);
+    for (const [column, field] of Object.entries(auditedRecords[table].fields))
+      add(referenceOf(field, row), row[column]);
   }
   return [...ids].map(([table, set]) => ({ table, ids: [...set] }));
 }
 
-const byTime = (a: RawEntry, b: RawEntry) =>
-  a.at.localeCompare(b.at) || a.chain.localeCompare(b.chain) || Number(BigInt(a.seq) - BigInt(b.seq));
+/** An entry with its instant on the owning Lab's wall clock, which the API reads from the database beside `at`. */
+export type TimedEntry = RawEntry & { atLab: Instant | null };
 
-/**
- * Reads raw Audit Trail entries into the panel's entries, in time order: each with its chain, its actor and records
- * labelled as they stood at the entry's time (from `history` and from the entries' own row images), its fields by
- * their glossary names, and the raw entry it was read from.
- */
+const byTime = (a: RawEntry, b: RawEntry) =>
+  (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) || a.chain.localeCompare(b.chain) || Number(BigInt(a.seq) - BigInt(b.seq));
+
+/** Every entry in time order, its people and records labelled as they stood at its time from `images` and the entries' own rows. */
 export function describeTrail(
-  entries: readonly RawEntry[],
-  history: readonly HistoryEntry[],
-  lab: { id: string; zone: string },
+  entries: readonly TimedEntry[],
+  images: readonly RowImage[],
+  labId: string,
 ): TrailEntry[] {
-  const images: HistoryEntry[] = entries.flatMap((e) => {
-    const row = e.newRow ?? e.oldRow;
-    return row && isAuditedTable(e.table) ? [{ table: e.table, at: e.at, row }] : [];
-  });
-  const known = [...history, ...images];
-  return [...entries].sort(byTime).map((e) => {
-    const { labelOf, actorLabel } = labelsAt(known, e.at);
+  const labelsAt = indexImages([...images, ...imagesOf(entries)]);
+  return [...entries].sort(byTime).map(({ atLab, ...e }) => {
+    const { labelOf, actorLabel } = labelsAt(e.at);
     const row = e.newRow ?? e.oldRow ?? {};
     const spec = isAuditedTable(e.table) ? auditedRecords[e.table] : null;
     const record: RecordRef = {
       table: e.table,
       id: text(row.id),
       kind: spec?.kind ?? e.table,
-      label: spec && isAuditedTable(e.table) ? labelOf(e.table, row.id) : text(row.id),
+      label: isAuditedTable(e.table) ? labelOf(e.table, row.id) : text(row.id),
     };
     const shown = (column: string, value: unknown): ShownValue | null => {
       if (value === null || value === undefined) return null;
       const field = spec?.fields[column];
-      const refTable = field?.ref ?? (field?.refBy === undefined ? undefined : row[field.refBy]);
-      if (isAuditedTable(refTable))
-        return { text: labelOf(refTable, value), ref: { table: refTable, id: text(value) } };
-      return { text: field?.utf8 ? decodeUtf8Bytes(value) : text(value), ref: null };
+      const refTable = field ? referenceOf(field, row) : null;
+      if (refTable) return { text: labelOf(refTable, value), ref: { table: refTable, id: text(value) } };
+      return { text: field?.bytesAsUtf8 ? decodeUtf8Bytes(value) : text(value), ref: null };
     };
     const before: RowSnapshot = e.oldRow ?? {};
     const after: RowSnapshot = e.newRow ?? {};
@@ -262,23 +252,23 @@ export function describeTrail(
         old: shown(column, before[column]),
         new: shown(column, after[column]),
       }));
+    const chain: ChainKind = e.chain === labId ? 'lab' : 'company';
     return {
-      chain: e.chain === lab.id ? 'lab' : 'company',
+      chain,
       seq: e.seq,
       at: e.at,
-      atLab: e.chain === lab.id ? inZone(e.at, lab.zone) : null,
+      atLab: chain === 'lab' ? atLab : null,
       actor: { label: actorLabel(e.actor), role: e.role },
       reason: e.reason,
       op: e.op,
       record,
       changes,
-      afterFirstSave: e.op === 'UPDATE' && changes.some((c) => !spec?.fields[c.field]?.workflow),
+      afterFirstSave: e.op === 'UPDATE' && changes.some((c) => !spec?.fields[c.field]?.movedByStep),
       raw: e,
     };
   });
 }
 
-/** What QA reads after a chain is recomputed: how far it is intact, and the first entry that fails, when one does. */
 export function chainVerification(chain: ChainKind, lastEntry: string, firstFailure: string | null): ChainVerification {
   if (firstFailure === null)
     return { chain, lastEntry, intactThrough: lastEntry, firstFailure, report: `intact through entry ${lastEntry}` };
