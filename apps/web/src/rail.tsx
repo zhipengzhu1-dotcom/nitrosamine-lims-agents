@@ -198,6 +198,12 @@ type Sheet = { action: RailAction; closing: boolean } | null;
 const EXIT_FALLBACK_MS = 400;
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+/** The press the server never answered keeps its Commit Key when the same action is pressed again; any other press gets a new one. */
+function retryOrNewPress(unanswered: { action: string; commitKey: string } | null, a: RailAction) {
+  const action = `${a.label}\n${a.context}`;
+  return unanswered?.action === action ? unanswered : { action, commitKey: crypto.randomUUID() };
+}
+
 function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -207,7 +213,6 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
   const [refusal, setRefusal] = useState<Note | null>(null);
   const [instant, setInstant] = useState(false);
   const inFlight = useRef(false);
-  // A press the server never answered keeps its Commit Key, so pressing again retries it instead of committing twice.
   const unanswered = useRef<{ action: string; commitKey: string } | null>(null);
   const count = useRef(0);
   const returnFocus = useRef(false);
@@ -274,12 +279,9 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
-    const action = `${a.label}\n${a.context}`;
-    const press =
-      unanswered.current?.action === action ? unanswered.current : { action, commitKey: crypto.randomUUID() };
-    unanswered.current = press;
+    unanswered.current = retryOrNewPress(unanswered.current, a);
     try {
-      const text = await a.run(values, a.signs ? password : null, press.commitKey);
+      const text = await a.run(values, a.signs ? password : null, unanswered.current.commitKey);
       unanswered.current = null;
       setNote({ text, tone: 'ok', n: ++count.current });
       returnFocus.current = true;

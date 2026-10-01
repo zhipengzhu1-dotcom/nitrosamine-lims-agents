@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { type StepBody, type StepName, stepRoute } from '@lims/domain';
-import { sql } from 'kysely';
+import type { DB } from '@lims/db';
+import { sql, type Transaction } from 'kysely';
 import { type Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_commit_keys_test');
@@ -36,7 +37,6 @@ async function assigned(): Promise<string> {
 const enterResult = (commitKey: string, testId: string, password = ana.password) =>
   post(as.ana, 'enterResult', { commitKey, testId, input: result, signature: { password } });
 
-/** What enterResult wrote for one Test: its state moves, Signatures and Audit Trail entries. */
 async function writtenBy(testId: string) {
   const db = api.superuser;
   const entries = await db
@@ -98,24 +98,24 @@ it('a Submission sent twice with the same Commit Key creates one Submission and 
   assert.deepEqual(await totals(), before, 'the retry writes nothing');
 });
 
-/**
- * Holds every write to `table` until both presses wait at the database, so the second meets the first inside its
- * transaction: the first holds its Commit Key and waits on the table, the second waits on that key.
- */
-async function meetInTransaction<T>(table: 'submission' | 'result', presses: () => Promise<T>[]): Promise<T[]> {
+async function untilWaitingOnLocks(tx: Transaction<DB>, sessions: number): Promise<void> {
+  for (let waiting = 0; waiting < sessions; ) {
+    await sql`select pg_sleep(0.05)`.execute(tx);
+    ({ n: waiting } = await tx
+      .selectNoFrom(
+        sql<number>`(select count(*)::int from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock')`.as('n'),
+      )
+      .executeTakeFirstOrThrow());
+  }
+}
+
+async function bothWaitingOnLockedTable<T>(table: 'submission' | 'result', presses: () => Promise<T>[]) {
   let answers: Promise<T[]> | undefined;
   await api.superuser.transaction().execute(async (tx) => {
     await sql`lock table ${sql.table(`lims.${table}`)} in exclusive mode`.execute(tx);
     answers = Promise.all(presses());
-    for (let waiting = 0; waiting < 2; ) {
-      await sql`select pg_sleep(0.05)`.execute(tx);
-      ({ n: waiting } = await tx
-        .selectNoFrom(
-          sql<number>`(select count(*)::int from pg_stat_activity
-          where datname = current_database() and wait_event_type = 'Lock')`.as('n'),
-        )
-        .executeTakeFirstOrThrow());
-    }
+    await untilWaitingOnLocks(tx, 2);
   });
   return answers ?? assert.fail('the presses were sent');
 }
@@ -123,7 +123,7 @@ async function meetInTransaction<T>(table: 'submission' | 'result', presses: () 
 it('two concurrent Submissions with the same Commit Key commit once and both answer the first receipt', async () => {
   const before = await totals();
   const key = randomUUID();
-  const [a, b] = await meetInTransaction('submission', () => [
+  const [a, b] = await bothWaitingOnLockedTable('submission', () => [
     post(as.cora, 'submit', { commitKey: key, ...submission }),
     post(as.cora, 'submit', { commitKey: key, ...submission }),
   ]);
@@ -139,7 +139,7 @@ it('two concurrent Submissions with the same Commit Key commit once and both ans
 it('two concurrent signing steps with the same Commit Key commit once and both answer the first receipt', async () => {
   const testId = await assigned();
   const key = randomUUID();
-  const [a, b] = await meetInTransaction('result', () => [enterResult(key, testId), enterResult(key, testId)]);
+  const [a, b] = await bothWaitingOnLockedTable('result', () => [enterResult(key, testId), enterResult(key, testId)]);
   assert.deepEqual(ok(b ?? assert.fail()), ok(a ?? assert.fail()));
   assert.deepEqual(await writtenBy(testId), once);
 });
@@ -159,12 +159,12 @@ it("the same Commit Key from another session is refused and does not answer the 
   const refused = await post(otherSession, 'submit', { commitKey: key, ...submission });
   assert.equal(
     refusedWith(refused, 'keyReused'),
-    'this press was already sent with other entries; reload to see what was saved',
+    'this press was already sent from another session; reload to see what was saved',
   );
   assert.deepEqual(await totals(), before, 'no second Submission');
 });
 
-it('the same Commit Key with other input or for another step is refused as keyReused and writes nothing', async () => {
+it('the same Commit Key with other input or for another step is refused as a reused Commit Key and writes nothing', async () => {
   const testId = await assigned();
   const key = randomUUID();
   ok(await enterResult(key, testId));

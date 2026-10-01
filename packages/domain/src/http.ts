@@ -166,10 +166,8 @@ const credentials = Type.Object({ username: text, password: text }, closed);
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
 const reauthentication = Type.Object({ password: text }, closed);
-/** The Commit Key the client chose for one press, resent unchanged when it retries that press. */
-const commitKey = uuid;
 const stepEnvelope = Type.Object({
-  commitKey,
+  commitKey: uuid,
   testId: Type.Optional(uuid),
   signature: Type.Optional(reauthentication),
 });
@@ -227,7 +225,7 @@ export const routes = {
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
 } satisfies Record<string, Route>;
 
-/** The route of one step. Its body requires a commitKey, testId when the step starts from a state, and signature when it signs. */
+/** The route of one step, whose body requires a Commit Key, a testId when the step starts from a state, and a signature when it signs. */
 export function stepRoute<K extends StepName>(name: K) {
   const step: Step = steps[name];
   const required = [

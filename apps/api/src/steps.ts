@@ -182,12 +182,10 @@ type KeptCommit = Pick<Selectable<DB['commitKey']>, 'sessionId' | 'request' | 't
 
 const asJson = (value: object) => sql<Json>`cast(${JSON.stringify(value)} as jsonb)`;
 
-const keptCommit = (q: LabQueries, key: string) =>
-  q.from('commitKey').select(['sessionId', 'request', 'testId', 'state']).where('key', '=', key);
-
-/** The receipt a Commit Key was first answered with. A key answers only the session and request that first used it. */
 function receiptOf(kept: KeptCommit, sessionId: string, request: object): StepTaken {
-  if (kept.sessionId !== sessionId || !isDeepStrictEqual(kept.request, request))
+  if (kept.sessionId !== sessionId)
+    refuse('keyReused', 'this press was already sent from another session; reload to see what was saved');
+  if (!isDeepStrictEqual(kept.request, request))
     refuse('keyReused', 'this press was already sent with other entries; reload to see what was saved');
   return { testId: kept.testId, state: kept.state };
 }
@@ -198,39 +196,36 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
   const route = stepRoute(name);
   app.post<{ Body: StepBody<K>; Reply: RouteReply<typeof route> }>(route.url, { schema: route.schema }, async (req) => {
     const { actor, body, sessionId } = req;
-    const scope = labScope(db, actor);
     const request = { step: name, testId: body.testId ?? null, input: body.input };
-    const replay = (kept: KeptCommit) => {
-      const receipt = receiptOf(kept, sessionId, request);
-      req.log.info({ step: name, testId: receipt.testId }, 'step replayed');
-      return receipt;
-    };
-    const kept = await keptCommit(scope, body.commitKey).executeTakeFirst();
-    if (kept) return replay(kept);
-
-    const test =
-      body.testId === undefined
-        ? null
-        : ((await scope.from('test').selectAll().where('id', '=', body.testId).executeTakeFirst()) ??
-          refuse('notFound', 'no such Test in this Lab'));
-    const facts = await factsFor(scope, actor, test, effect.assignee?.(body.input));
-    const refused = refusal(name, test?.state ?? null, actor.roles, facts);
-    if (refused) refuse(refused.kind, refused.message);
-    if (step.signs) {
-      const { password } = body.signature ?? refuse('malformed', `${name} needs the signer's password`);
-      await reauthenticate(db, actor, password, name);
-    }
-
-    const receipt = { testId: test?.id ?? randomUUID(), state: step.to };
-    const { testId } = receipt;
-    // A concurrent press with the same key waits on the claim for the first to commit, then replays its receipt.
-    const replayed = await scope.write(name, step.role, async (q) => {
+    const claim = { testId: body.testId ?? randomUUID(), state: step.to };
+    const { testId } = claim;
+    const { receipt, replayed } = await labScope(db, actor).write(name, step.role, async (q) => {
+      // Claimed before any check, so a press whose key another transaction holds waits here for that one to commit.
       const claimed = await q
-        .insert('commitKey', { key: body.commitKey, sessionId, request: asJson(request), ...receipt })
+        .insert('commitKey', { key: body.commitKey, sessionId, request: asJson(request), ...claim })
         .onConflict((oc) => oc.doNothing())
         .returning('key')
         .executeTakeFirst();
-      if (!claimed) return replay(await keptCommit(q, body.commitKey).executeTakeFirstOrThrow());
+      if (!claimed) {
+        const kept = await q
+          .from('commitKey')
+          .select(['sessionId', 'request', 'testId', 'state'])
+          .where('key', '=', body.commitKey)
+          .executeTakeFirstOrThrow();
+        return { receipt: receiptOf(kept, sessionId, request), replayed: true };
+      }
+      const test =
+        body.testId === undefined
+          ? null
+          : ((await q.from('test').selectAll().where('id', '=', body.testId).executeTakeFirst()) ??
+            refuse('notFound', 'no such Test in this Lab'));
+      const facts = await factsFor(q, actor, test, effect.assignee?.(body.input));
+      const refused = refusal(name, test?.state ?? null, actor.roles, facts);
+      if (refused) refuse(refused.kind, refused.message);
+      if (step.signs) {
+        const { password } = body.signature ?? refuse('malformed', `${name} needs the signer's password`);
+        await reauthenticate(db, actor, password, name);
+      }
       if (test) {
         const moved = await q
           .update('test')
@@ -242,10 +237,9 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
       }
       await effect.write(q, actor, testId, body.input);
       if (step.signs) await sign(q, actor, step.signs, effect.signedRecord ?? 'test', testId);
-      return null;
+      return { receipt: claim, replayed: false };
     });
-    if (replayed) return replayed;
-    req.log.info({ step: name, testId }, 'step taken');
+    req.log.info({ step: name, testId: receipt.testId }, replayed ? 'step replayed' : 'step taken');
     return receipt;
   });
 }

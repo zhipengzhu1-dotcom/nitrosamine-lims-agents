@@ -51,13 +51,12 @@ export async function reauthenticate(db: Kysely<DB>, ctx: ActorContext, password
   await prove(db, person, password, `Re-authenticate to sign ${step}`);
 }
 
-/** A live session and the ActorContext it acts as. The session stays on the server: no reply carries its ID. */
 export interface SignedIn {
   actor: ActorContext;
   sessionId: string;
 }
 
-/** Builds the ActorContext from the session cookie. Reads the session tables directly: no context exists yet to scope by. */
+/** Finds the live session of the cookie and the ActorContext it acts as. Reads the session tables directly: no context exists yet to scope by. */
 export async function actorFor(db: Kysely<DB>, token: string | undefined): Promise<SignedIn> {
   const session =
     token &&

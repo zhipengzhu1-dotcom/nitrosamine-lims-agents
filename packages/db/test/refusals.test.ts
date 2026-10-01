@@ -417,7 +417,7 @@ describe('the database refuses a duplicate of a unique value', () => {
       constraint: 'session_token_hash_key',
     },
     {
-      name: 'a second Commit Key with the same key from the same session is refused, so a press commits once',
+      name: 'a second Commit Key with the same key in one Lab is refused, from the same session or another, so a press commits once',
       table: 'lims.commit_key',
       change: { key: id.commitKey, session_id: id.session },
       constraint: 'commit_key_pkey',
@@ -546,7 +546,7 @@ describe('the database refuses a reference to a row that does not exist', () => 
     },
   ]);
 
-  const testOfKey = 'commit_key_lab_id_test_id_fkey';
+  const testOfKey = 'commit_key_test_after_claim_fkey';
   covered.add(`lims.commit_key.${testOfKey}`);
   it('a Commit Key whose receipt names a Test that does not exist is refused when its transaction commits', async () => {
     await client.query('begin');
@@ -652,6 +652,19 @@ describe('a Signature or an Audit Trail entry is never changed or removed, even 
       assert.match(error.where ?? '', /function lims\.refuse_change\(\)/);
     });
   }
+});
+
+it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys and the Audit Trail itself', async () => {
+  const { rows } = await client.query<{ name: string }>(
+    `select 'lims.' || c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'lims' and c.relkind = 'r'
+        and not exists (select 1 from pg_trigger t where t.tgrelid = c.oid and t.tgname = 'capture')
+      order by 1`,
+  );
+  assert.deepEqual(
+    rows.map((row) => row.name),
+    ['lims.audit_chain', 'lims.audit_entry', 'lims.commit_key', 'lims.session'],
+  );
 });
 
 it('every constraint and trigger of a freshly migrated database has a refusing test', async () => {
