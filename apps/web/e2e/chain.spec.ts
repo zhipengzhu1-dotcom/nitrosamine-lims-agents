@@ -158,7 +158,8 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(password).toBeFocused();
   const [field, foot] = [await box(password), await box(sheet.locator('.sheet__foot'))];
   expect(field.y + field.height, 'the password field is clear of the sheet foot').toBeLessThanOrEqual(foot.y);
-  expect((await box(sheet)).height, 'the sheet keeps its height').toBe(height);
+  // A box at a fractional position measures a few ten-thousandths of a pixel differently between runs.
+  expect((await box(sheet)).height, 'the sheet keeps its height').toBeCloseTo(height, 2);
 
   await page.request.post('/api/logout', { data: {} });
   const whoAmI: string[] = [];
