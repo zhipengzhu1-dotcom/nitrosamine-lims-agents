@@ -14,6 +14,7 @@ import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TypedDict
 
 HERE = Path(__file__).parent
 REPO = HERE.parent.parent
@@ -27,16 +28,35 @@ ISO_CITATION = re.compile(r"^\d\.\d")
 USP_CITATION = re.compile(r"^(<\d{1,4}(\.\d+)?>|gn\d)")
 LANES = {"part11": PART11_CITATION, "iso17025": ISO_CITATION, "usp": USP_CITATION}
 
+Verdicts = list[tuple[str, str]]
 
-def normalize(citation):
+
+class Expect(TypedDict, total=False):
+    gap: list[str | list[str]]
+    met: list[str]
+    procedural: list[str]
+    not_gap: list[str]
+    no_gap_in: str
+
+
+class Case(TypedDict):
+    id: str
+    agent: str
+    seam: str
+    source: str
+    artifact: str
+    expect: Expect
+
+
+def normalize(citation: str) -> str:
     return re.sub(r"[\s§`*]", "", citation).lower()
 
 
-def parse_verdicts(report):
+def parse_verdicts(report: str) -> Verdicts | None:
     blocks = re.findall(r"```verdicts\n(.*?)```", report, re.DOTALL)
     if not blocks:
         return None
-    verdicts = []
+    verdicts: Verdicts = []
     for line in blocks[-1].splitlines():
         m = VERDICT_LINE.match(line)
         if m:
@@ -44,15 +64,15 @@ def parse_verdicts(report):
     return verdicts
 
 
-def cited(verdicts, kind, expected):
+def cited(verdicts: Verdicts, kind: str, expected: str) -> bool:
     want = normalize(expected)
     return any(v == kind and want in c for v, c in verdicts)
 
 
-def grade(case, verdicts):
+def grade(case: Case, verdicts: Verdicts | None) -> list[str]:
     if verdicts is None:
         return ["report has no ```verdicts block"]
-    failures = []
+    failures: list[str] = []
     expect = case["expect"]
     for group in expect.get("gap", []):
         options = group if isinstance(group, list) else [group]
@@ -74,7 +94,7 @@ def grade(case, verdicts):
     return failures
 
 
-def run(case):
+def run(case: Case) -> tuple[Case, list[str]]:
     prompt = PROMPT.format(artifact=case["artifact"])
     proc = subprocess.run(
         ["claude", "-p", "--agent", case["agent"], "--allowedTools", ALLOWED_TOOLS],
@@ -92,7 +112,7 @@ def run(case):
     return case, grade(case, parse_verdicts(report))
 
 
-def main():
+def main() -> None:
     prefix = sys.argv[1] if len(sys.argv) > 1 else ""
     cases = [c for c in json.loads((HERE / "cases.json").read_text()) if c["id"].startswith(prefix)]
     OUT.mkdir(exist_ok=True)

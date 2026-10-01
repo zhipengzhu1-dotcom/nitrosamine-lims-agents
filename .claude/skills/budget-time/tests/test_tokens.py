@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 import re
@@ -5,17 +6,19 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Sequence
 from pathlib import Path
-from types import SimpleNamespace
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "tokens.py"
 sys.path.insert(0, str(SCRIPT.parent))
 import tokens
 
+JsonObject = tokens.JsonObject
+
 SUB = "toolu_sub"
 
 
-def usage(context, output=1):
+def usage(context: int, output: int = 1) -> JsonObject:
     return {
         "input_tokens": 10,
         "cache_creation_input_tokens": context - 110,
@@ -24,7 +27,7 @@ def usage(context, output=1):
     }
 
 
-def assistant(msg_id, context, blocks=(), parent=None):
+def assistant(msg_id: str, context: int, blocks: Sequence[JsonObject] = (), parent: str | None = None) -> JsonObject:
     return {
         "type": "assistant",
         "parent_tool_use_id": parent,
@@ -32,11 +35,11 @@ def assistant(msg_id, context, blocks=(), parent=None):
     }
 
 
-def tool(name):
+def tool(name: str) -> JsonObject:
     return {"type": "tool_use", "name": name}
 
 
-def result(cost=0.5, models=None, is_error=False):
+def result(cost: float = 0.5, models: dict[str, JsonObject] | None = None, is_error: bool = False) -> JsonObject:
     return {
         "type": "result",
         "is_error": is_error,
@@ -57,7 +60,7 @@ TASK_STARTED = {
 TASK_DONE = {"type": "system", "subtype": "task_notification", "tool_use_id": SUB, "usage": {"total_tokens": 19288}}
 
 
-def delegating_run():
+def delegating_run() -> list[JsonObject]:
     return [
         assistant("m1", 1000, [{"type": "thinking"}]),
         assistant("m1", 1000, [tool("Agent")]),
@@ -72,27 +75,27 @@ def delegating_run():
 
 
 class Case(unittest.TestCase):
-    def setUp(self):
+    def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name)
 
-    def stream(self, rows):
+    def stream(self, rows: list[JsonObject]) -> Path:
         path = self.tmp / "stream.jsonl"
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
         return path
 
-    def analyse(self, rows):
+    def analyse(self, rows: list[JsonObject]) -> tokens.Report:
         return tokens.analyse(self.stream(rows))
 
 
 class AnalyseTest(Case):
-    def test_each_api_message_is_one_turn_but_every_event_counts_its_tool_calls(self):
+    def test_each_api_message_is_one_turn_but_every_event_counts_its_tool_calls(self) -> None:
         lead = self.analyse(delegating_run())["actors"]["lead"]
         self.assertEqual(lead["turns"], 3)
         self.assertEqual(lead["tool_calls"], {"Agent": 1})
 
-    def test_subagent_turns_are_attributed_to_the_spawning_call_not_the_lead(self):
+    def test_subagent_turns_are_attributed_to_the_spawning_call_not_the_lead(self) -> None:
         actors = self.analyse(delegating_run())["actors"]
         self.assertEqual(set(actors), {"lead", SUB})
         sub = actors[SUB]
@@ -101,56 +104,58 @@ class AnalyseTest(Case):
         self.assertEqual(sub["total_tokens"], 19288)
         self.assertNotIn("WebFetch", actors["lead"]["tool_calls"])
 
-    def test_peak_is_the_largest_turn_and_growth_is_peak_minus_first(self):
+    def test_peak_is_the_largest_turn_and_growth_is_peak_minus_first(self) -> None:
         lead = self.analyse(delegating_run())["actors"]["lead"]
         self.assertEqual((lead["first_context"], lead["peak_context"]), (1000, 3000))
         self.assertIn("| lead | 3 | 3,000 | 2,000 | - | Agent×1 |", tokens.markdown(self.analyse(delegating_run())))
 
-    def test_the_last_result_event_holds_the_totals(self):
+    def test_the_last_result_event_holds_the_totals(self) -> None:
         rep = self.analyse(delegating_run()[:-1] + [result(cost=0.1), result(cost=0.2)])
         self.assertEqual(rep["total_cost_usd"], 0.2)
 
-    def test_a_stream_without_a_result_event_is_reported_unfinished(self):
+    def test_a_stream_without_a_result_event_is_reported_unfinished(self) -> None:
         rep = self.analyse(delegating_run()[:-1])
         self.assertFalse(rep["finished"])
         self.assertIn("finished: False", tokens.markdown(rep))
         self.assertEqual(tokens.check(rep, checks()), ["run did not finish cleanly (None)"])
 
-    def test_a_model_without_cost_or_counts_renders_as_dashes(self):
+    def test_a_model_without_cost_or_counts_renders_as_dashes(self) -> None:
         rep = self.analyse(delegating_run()[:-1] + [result(models={"claude-x": {"outputTokens": 7}})])
         self.assertIn("| claude-x | - | 7 | - | - | - |", tokens.markdown(rep))
 
 
-def checks(**overrides):
-    return SimpleNamespace(**{"no_lead_fetch": False, "max_lead_context": None, "max_lead_growth": None, **overrides})
+def checks(**overrides: bool | int | None) -> argparse.Namespace:
+    return argparse.Namespace(
+        **{"no_lead_fetch": False, "max_lead_context": None, "max_lead_growth": None, **overrides}
+    )
 
 
 class CheckTest(Case):
-    def test_a_clean_delegating_run_passes_every_check(self):
+    def test_a_clean_delegating_run_passes_every_check(self) -> None:
         rep = self.analyse(delegating_run())
         self.assertEqual(tokens.check(rep, checks(no_lead_fetch=True, max_lead_context=3000, max_lead_growth=2000)), [])
 
-    def test_a_lead_fetch_fails_no_lead_fetch(self):
+    def test_a_lead_fetch_fails_no_lead_fetch(self) -> None:
         rows = delegating_run()
         rows.insert(0, assistant("m0", 900, [tool("WebFetch")]))
         self.assertEqual(
             tokens.check(self.analyse(rows), checks(no_lead_fetch=True)), ["lead fetched directly: {'WebFetch': 1}"]
         )
 
-    def test_a_lead_peak_above_the_ceiling_fails_max_lead_context(self):
+    def test_a_lead_peak_above_the_ceiling_fails_max_lead_context(self) -> None:
         self.assertEqual(
             tokens.check(self.analyse(delegating_run()), checks(max_lead_context=2999)),
             ["lead peak context 3,000 > 2,999"],
         )
 
-    def test_lead_growth_above_the_ceiling_fails_max_lead_growth(self):
+    def test_lead_growth_above_the_ceiling_fails_max_lead_growth(self) -> None:
         self.assertEqual(
             tokens.check(self.analyse(delegating_run()), checks(max_lead_growth=1999)),
             ["lead context grew 2,000 > 1,999"],
         )
 
 
-def turn(msg_id, context, output, model="claude-opus-5-5", sidechain=False):
+def turn(msg_id: str, context: int, output: int, model: str = "claude-opus-5-5", sidechain: bool = False) -> JsonObject:
     return {
         "type": "assistant",
         "isSidechain": sidechain,
@@ -175,7 +180,7 @@ SYNTHETIC = {
 }
 
 
-def transcript():
+def transcript() -> list[JsonObject]:
     return [
         {"type": "user", "message": {"role": "user", "content": "go"}},
         turn("a1", 30000, 200),
@@ -189,7 +194,7 @@ def transcript():
 
 
 class SessionTest(Case):
-    def test_reports_the_main_threads_last_turn_its_peak_and_output_once_per_message(self):
+    def test_reports_the_main_threads_last_turn_its_peak_and_output_once_per_message(self) -> None:
         self.assertEqual(
             tokens.session_usage(self.stream(transcript())),
             {"turns": 3, "current_context": 60000, "peak_context": 90000, "output_tokens": 1000},
@@ -197,7 +202,7 @@ class SessionTest(Case):
 
 
 class CliTest(Case):
-    def cli(self, *argv, env=None):
+    def cli(self, *argv: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SCRIPT), *argv],
             capture_output=True,
@@ -206,20 +211,20 @@ class CliTest(Case):
             check=False,
         )
 
-    def test_session_fails_when_current_context_is_over_the_ceiling(self):
+    def test_session_fails_when_current_context_is_over_the_ceiling(self) -> None:
         proc = self.cli("session", str(self.stream(transcript())), "--max-context", "59999")
         self.assertEqual(proc.returncode, 1)
         self.assertIn("current context: 60,000", proc.stdout)
         self.assertIn("FAIL: current context 60,000 > 59,999", proc.stdout)
 
-    def test_session_passes_at_the_ceiling_and_defaults_it_to_180k(self):
+    def test_session_passes_at_the_ceiling_and_defaults_it_to_180k(self) -> None:
         path = str(self.stream(transcript()))
         self.assertEqual(self.cli("session", path, "--max-context", "60000").returncode, 0)
         rows = transcript() + [turn("a4", 180001, 1)]
         proc = self.cli("session", str(self.stream(rows)))
         self.assertIn("FAIL: current context 180,001 > 180,000", proc.stdout)
 
-    def test_session_defaults_to_this_sessions_transcript(self):
+    def test_session_defaults_to_this_sessions_transcript(self) -> None:
         project = self.tmp / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(tokens.REPO))
         project.mkdir(parents=True)
         (project / "abc.jsonl").write_text(self.stream(transcript()).read_text())
@@ -227,7 +232,7 @@ class CliTest(Case):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("peak context: 90,000", proc.stdout)
 
-    def test_an_unknown_case_id_exits_with_a_message_before_spending(self):
+    def test_an_unknown_case_id_exits_with_a_message_before_spending(self) -> None:
         proc = self.cli("run", "--name", "x", "--case", "no-such-case")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("no case 'no-such-case' in evals/agents/cases.json", proc.stderr)
