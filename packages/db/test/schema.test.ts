@@ -53,15 +53,30 @@ async function namesThatDoNotRoundTrip(database: string): Promise<string[]> {
 const copies: string[] = [];
 after(() => Promise.all(copies.map((dir) => rm(dir, { recursive: true, force: true }))));
 
+/** Throws when `schema.ts` differs from what the `types` script generates from `database`. Never writes `schema.ts`. */
+function verifySchemaTs(database: string): void {
+  execFileSync('pnpm', ['types', '--verify'], {
+    cwd: packageDir,
+    env: { ...process.env, LIMS_DB: database },
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+}
+
+/** Migrates SCRATCH with the repo's migrations plus one that adds `lims.scratch (limit_2)`, a name that does not round-trip. */
+async function migratedWithScratchTable(): Promise<void> {
+  const dir = await mkdtemp(`${tmpdir()}/lims-migrations-`);
+  copies.push(dir);
+  await cp(new URL('../migrations/', import.meta.url), dir, { recursive: true });
+  const folder = pathToFileURL(`${dir}/`);
+  await writeFile(new URL('9999_scratch.sql', folder), 'create table lims.scratch (limit_2 integer);\n');
+  await freshlyMigrated(SCRATCH, folder);
+}
+
 it('schema.ts is what the types script generates from a freshly migrated database', async () => {
   await freshlyMigrated(DATABASE);
   try {
-    execFileSync('pnpm', ['types', '--verify'], {
-      cwd: packageDir,
-      env: { ...process.env, LIMS_DB: DATABASE },
-      encoding: 'utf8',
-      stdio: 'pipe',
-    });
+    verifySchemaTs(DATABASE);
   } catch (error) {
     throw new Error(
       'packages/db/src/schema.ts is not what the migrations generate. Run `pnpm --filter @lims/db types` and commit it.',
@@ -76,12 +91,15 @@ it("every lims table and column name survives CamelCasePlugin's round trip", asy
   assert.deepEqual(offenders, [], `CamelCasePlugin would map ${offenders.join(', ')} to another name`);
 });
 
+it('the drift check fails when schema.ts lacks a table the migrations create', async () => {
+  await migratedWithScratchTable();
+  assert.throws(
+    () => verifySchemaTs(SCRATCH),
+    (error) => error instanceof Error && 'stderr' in error && String(error.stderr).includes('Scratch'),
+  );
+});
+
 it('the round-trip check names a column CamelCasePlugin would map to another name', async () => {
-  const dir = await mkdtemp(`${tmpdir()}/lims-migrations-`);
-  copies.push(dir);
-  await cp(new URL('../migrations/', import.meta.url), dir, { recursive: true });
-  const folder = pathToFileURL(`${dir}/`);
-  await writeFile(new URL('9999_scratch.sql', folder), 'create table lims.scratch (limit_2 integer);\n');
-  await freshlyMigrated(SCRATCH, folder);
+  await migratedWithScratchTable();
   assert.deepEqual(await namesThatDoNotRoundTrip(SCRATCH), ['scratch.limit_2']);
 });
