@@ -73,6 +73,6 @@ export function readRoutes(app: FastifyInstance, db: Kysely<DB>): void {
   app.post('/api/audit/verify', async (req) => {
     if (!req.actor.roles.includes('QA')) refuse(403, 'verifying the Audit Trail is a QA action');
     const scope = labScope(db, req.actor);
-    return { lab: await scope.verifyChain('lab'), company: await scope.verifyChain('company') };
+    return { at: new Date().toISOString(), lab: await scope.verifyChain('lab'), company: await scope.verifyChain('company') };
   });
 }

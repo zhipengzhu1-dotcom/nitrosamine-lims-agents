@@ -93,8 +93,10 @@ export async function factsFor(q: LabQueries, ctx: ActorContext, test: FactsTest
 async function recordVersion(q: LabQueries, testId: string): Promise<Buffer> {
   const record = await q.from('test')
     .innerJoin('sample', 'sample.id', 'test.sample_id').innerJoin('method', 'method.id', 'test.method_id')
+    .innerJoin('submission', 'submission.id', 'sample.submission_id').innerJoin('customer', 'customer.id', 'submission.customer_id')
     .leftJoin('result', 'result.test_id', 'test.id').leftJoin('test_report', 'test_report.test_id', 'test.id')
-    .select(['test.id', 'sample.number as sample', 'method.code as method', 'method.version as methodVersion',
+    .select(['test.id', 'customer.name as customer', 'sample.number as sample', 'sample.description',
+      'sample.received_at as receivedAt', 'method.code as method', 'method.version as methodVersion', 'method.title as methodTitle',
       'test.gxp_class as gxpClass', 'result.analyte', 'result.value', 'result.unit',
       'result.injection_sequence_ref as injectionSequenceRef', 'result.notebook_ref as notebookRef',
       sql<string>`result.performed_on::text`.as('performedOn'), 'test_report.number as report'])

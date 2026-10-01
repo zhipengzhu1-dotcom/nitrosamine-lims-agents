@@ -62,7 +62,18 @@ test('the chain walks a submitted Test to Reported with three Signatures and an 
   const report = await as.cora!.get(`/api/tests/${id}/report`);
   assert.equal(report.status, 200);
   assert.match(report.body.report.number, /^RD-R\d{5}$/);
-  assert.deepEqual((await as.quinn!.post('/api/audit/verify')).body, { lab: null, company: null });
+  const printed = report.body.test;
+  const signed = await api.db.selectFrom('signature').select('content').where((eb) => eb.or([eb('record_id', '=', id),
+    eb('record_id', 'in', eb.selectFrom('test_report').select('id').where('test_id', '=', id))])).execute();
+  assert.equal(signed.length, 3);
+  for (const { content } of signed) {
+    const version = JSON.parse(content.toString());
+    assert.deepEqual([version.customer, version.description, version.receivedAt, version.methodTitle],
+      [printed.customer, printed.description, printed.receivedAt, printed.methodTitle], 'each Signature covers what the Test Report prints');
+  }
+  const verified = (await as.quinn!.post('/api/audit/verify')).body;
+  assert.deepEqual([verified.lab, verified.company], [null, null]);
+  assert.ok(Math.abs(Date.parse(verified.at) - Date.now()) < 60_000, 'the server states when it checked');
 });
 
 test('a step by the wrong role is refused', async () => {

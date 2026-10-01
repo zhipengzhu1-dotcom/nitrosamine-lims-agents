@@ -93,6 +93,7 @@ create table lims.result (
   performed_on           date    not null,
   entered_by             uuid    not null references lims.person,
   primary key (lab_id, id),
+  unique (lab_id, test_id),
   foreign key (lab_id, test_id) references lims.test
 );
 
