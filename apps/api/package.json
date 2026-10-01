@@ -1,0 +1,17 @@
+{
+  "name": "@lims/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/app.ts",
+    "test": "node --test --test-concurrency=1 test/*.test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@lims/db": "workspace:*",
+    "@lims/domain": "workspace:*",
+    "fastify": "^5.12.5",
+    "kysely": "^0.29.6"
+  }
+}

@@ -1,0 +1,216 @@
+import { type StepName, steps, type TestState } from '@lims/domain';
+import { type ReactNode, useEffect, useState } from 'react';
+import { api, type Lookups, type Me, signOut, useApi } from './api.ts';
+
+export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst';
+export interface Field { name: string; label: string; kind: FieldKind }
+
+/** The web's only per-step table: what each step asks for. Role, states and Signature Meaning come from the registry. */
+export const stepUi: Record<StepName, { label: string; fields: Field[]; record?: string }> = {
+  submit: {
+    label: 'Submit',
+    fields: [{ name: 'methodId', label: 'Method', kind: 'method' }, { name: 'description', label: 'Sample description', kind: 'text' }],
+  },
+  receive: { label: 'Receive', fields: [] },
+  assign: { label: 'Assign', fields: [{ name: 'assigneeId', label: 'Analyst', kind: 'analyst' }] },
+  enterResult: {
+    label: 'Enter Result',
+    fields: [
+      { name: 'analyte', label: 'Analyte', kind: 'text' },
+      { name: 'value', label: 'Result as written', kind: 'decimal' },
+      { name: 'unit', label: 'Unit', kind: 'text' },
+      { name: 'injectionSequenceRef', label: 'Injection sequence', kind: 'text' },
+      { name: 'notebookRef', label: 'Notebook reference', kind: 'text' },
+      { name: 'performedOn', label: 'Performed on', kind: 'date' },
+    ],
+  },
+  review: { label: 'Review', fields: [] },
+  release: { label: 'Release', fields: [], record: 'The Test Report this release issues' },
+};
+
+type SignedMeaning = NonNullable<(typeof steps)[StepName]['signs']>;
+
+export const meaningStatement: Record<SignedMeaning, string> = {
+  Performed: 'I performed this Test and the Result is as I entered it.',
+  Reviewed: 'I reviewed this Test, its Result and its record.',
+  Released: 'I release this Test Report to the Customer.',
+};
+
+export const demoSigning = 'Demo: accounts share one password, and a signing re-enters the password only.';
+const stateOrder = Object.values(steps).map((s) => s.to);
+export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
+
+export function Status({ state }: { state: TestState }) {
+  const at = stateOrder.indexOf(state);
+  return (
+    <span className={`status ${state === 'Reported' ? 'status--done' : ''}`}>
+      {words(state)}
+      <span className="track" aria-hidden>{stateOrder.map((s, i) => <i key={s} className={i <= at ? 'on' : ''} />)}</span>
+    </span>
+  );
+}
+
+export interface RailAction {
+  label: string;
+  context: string;
+  fields: readonly Field[];
+  signs: { meaning: SignedMeaning; what: string[] } | null;
+  run: (input: Record<string, string>, password: string | null) => Promise<string>;
+}
+
+export function stepAction(name: StepName, testId: string | null, what: string[], onDone: () => void): RailAction {
+  const step = steps[name];
+  const ui = stepUi[name];
+  return {
+    label: ui.label,
+    context: what[0] ?? '',
+    fields: ui.fields,
+    signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
+    async run(input, password) {
+      await api(`/api/steps/${name}`, { ...(testId && { testId }), input, ...(password !== null && { signature: { password } }) });
+      onDone();
+      return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
+    },
+  };
+}
+
+export const modules = [
+  { key: 'tests', name: 'Tests', holds: '' },
+  { key: 'equipment', name: 'Equipment', holds: 'Each instrument, balance and storage unit with its Check Plan, Checks, Excursions and Equipment Logbook.' },
+  { key: 'inventory', name: 'Inventory', holds: 'Materials, Material Lots, Packs and Solutions with their Fitness Status, CoA and SDS.' },
+  { key: 'deviations', name: 'Deviations', holds: 'Deviations from investigation to QA closure, with their Kind, Risk Level and CAPA Actions.' },
+  { key: 'documents', name: 'Documents', holds: 'The document vault: SOPs and Method Protocols by version, with Effective Dates and Periodic Review.' },
+  { key: 'training', name: 'Training', holds: 'Training Records per person and Document version, with Training Runs and Competence Assessments.' },
+  { key: 'stability', name: 'Stability', holds: 'Protocols, Studies, Placements and Pulls for each Storage Condition and Time Point.' },
+  { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
+  { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
+] as const;
+export type ModuleKey = (typeof modules)[number]['key'];
+
+export function Shell({ me, active, action, children }: { me: Me; active: ModuleKey; action: RailAction | null; children: ReactNode }) {
+  return (
+    <div className="frame">
+      <TopBar>
+        <nav>{modules.map((m) => <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>{m.name}</a>)}</nav>
+      </TopBar>
+      <main className="plane">{children}</main>
+      <Rail me={me} action={action} />
+    </div>
+  );
+}
+
+export function TopBar({ children }: { children?: ReactNode }) {
+  return (
+    <header className="top">
+      <span className="brand"><b>RD</b>Nitrosamine LIMS</span>
+      {children}
+      <span className="fict">Fictional data only</span>
+    </header>
+  );
+}
+
+function Rail({ me, action }: { me: Me; action: RailAction | null }) {
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ text: string; tone: 'ok' | 'bad' } | null>(null);
+  const actionKey = action && `${action.label} ${action.context}`;
+  useEffect(() => { setOpen(false); setValues({}); }, [actionKey]);
+
+  async function commit() {
+    if (!action || busy) return;
+    setBusy(true);
+    try {
+      const text = await action.run(values, action.signs ? password : null);
+      setNote({ text, tone: 'ok' });
+      setOpen(false);
+    } catch (e) {
+      setNote({ text: `Refused: ${(e as Error).message}.${action.signs ? ' Nothing has been signed.' : ''}`, tone: 'bad' });
+    } finally {
+      setBusy(false);
+      setPassword('');
+    }
+  }
+
+  const direct = action && !action.fields.length && !action.signs;
+  return (
+    <>
+      {open && action && (
+        <form className="sheet" onSubmit={(e) => { e.preventDefault(); void commit(); }}>
+          <h2>{action.signs ? `Sign ${action.signs.meaning}` : action.label}<span className="fict">Fictional data only</span></h2>
+          <div className="sheet__body">
+            {action.fields.length > 0 && (
+              <fieldset className="card">
+                <legend>{action.context}</legend>
+                {action.fields.map((f) => (
+                  <label key={f.name}>{f.label}
+                    <FieldInput field={f} value={values[f.name] ?? ''} onChange={(v) => setValues({ ...values, [f.name]: v })} />
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            {action.signs && (
+              <>
+                <section className="card">
+                  <h3>What you are signing</h3>
+                  {action.signs.what.map((line) => <p key={line}>{line}</p>)}
+                  {action.fields.map((f) => <p key={f.name}>{f.label}: <b>{values[f.name] || '(not entered)'}</b></p>)}
+                </section>
+                <section className="card">
+                  <h3>Who is signing</h3>
+                  <p className="who__name">{me.person.displayName}</p>
+                  <p className="muted"><code>{me.person.username}</code> · {me.roles.map(words).join(', ')} · {me.lab.name}</p>
+                  <div className="meaning"><b>{action.signs.meaning}</b><i>{meaningStatement[action.signs.meaning]}</i></div>
+                  <label>Password (type it again to sign)
+                    <input type="password" required autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} />
+                  </label>
+                  <p className="fict">{demoSigning}</p>
+                </section>
+              </>
+            )}
+          </div>
+          <div className="sheet__foot">
+            <button type="button" className="rbtn rbtn--quiet" onClick={() => setOpen(false)}>Cancel</button>
+            <button type="submit" className="rbtn" disabled={busy}>{action.signs ? `Sign as ${action.signs.meaning}` : action.label}</button>
+          </div>
+        </form>
+      )}
+      <footer className="rail">
+        <div className="who">
+          <b>{me.person.displayName}</b>
+          <span>{me.roles.map(words).join(', ')} · <code>{me.person.username}</code></span>
+        </div>
+        <div className={`rail__context ${note ? `note--${note.tone}` : ''}`} role="status">
+          {note?.text ?? action?.context ?? 'Nothing for you to commit here.'}
+        </div>
+        {action && !open && (
+          <button type="button" className="rbtn" disabled={busy} onClick={() => (direct ? void commit() : setOpen(true))}>{action.label}</button>
+        )}
+        <button type="button" className="rbtn rbtn--quiet" onClick={() => void signOut()}>Sign out</button>
+      </footer>
+    </>
+  );
+}
+
+function FieldInput({ field, value, onChange }: { field: Field; value: string; onChange: (v: string) => void }) {
+  const change = (e: { target: { value: string } }) => onChange(e.target.value);
+  if (field.kind === 'method' || field.kind === 'analyst') return <LookupSelect field={field} value={value} onChange={change} />;
+  const props = { required: true, value, onChange: change };
+  if (field.kind === 'date') return <input type="date" {...props} />;
+  if (field.kind === 'decimal') return <input inputMode="decimal" pattern="-?[0-9]+(\.[0-9]+)?" {...props} />;
+  return <input {...props} />;
+}
+
+function LookupSelect({ field, value, onChange }: { field: Field; value: string; onChange: (e: { target: { value: string } }) => void }) {
+  const { data } = useApi<Lookups>('/api/lookups');
+  const options = field.kind === 'method'
+    ? data?.methods.map((m) => ({ id: m.id, text: `${m.code} v${m.version} ${m.title}` }))
+    : data?.analysts.map((a) => ({ id: a.id, text: a.displayName }));
+  return (
+    <select required value={value} onChange={onChange}>
+      <option value="">Choose…</option>
+      {options?.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
+    </select>
+  );
+}

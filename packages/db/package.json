@@ -1,0 +1,26 @@
+{
+  "name": "@lims/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/db.ts",
+    "./credentials": "./src/credentials.ts",
+    "./seed": "./src/seed.ts",
+    "./migrate": "./src/migrate.ts"
+  },
+  "scripts": {
+    "migrate": "node src/migrate.ts",
+    "types": "kysely-codegen --dialect postgres --url \"$(node src/migrate.ts --print-url)\" --default-schema lims --exclude-pattern '{public.*,lims.audit_chain}' --out-file src/schema.ts",
+    "seed": "node src/seed.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "kysely": "^0.29.6",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "kysely-codegen": "^0.20.0"
+  }
+}
