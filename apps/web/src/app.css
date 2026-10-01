@@ -79,7 +79,7 @@ th { font-size: 12px; color: var(--ink-3); font-weight: 700; background: var(--s
 .rail .note--bad { border-left-color: #ff8a7d; color: #ffd0ca; }
 .note-text { display: block; }
 .note-text--ok { animation: note-in 260ms var(--ease-out) both; }
-@keyframes note-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes note-in { from { transform: translateY(6px); } }
 .note--bad { color: var(--bad); font-weight: 700; }
 .rbtn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; height: 56px; min-width: 44px; padding: 0 20px;
   border-radius: 10px; border: 0; font: 700 16px var(--font); background: var(--act-on-bench); color: #fff; cursor: pointer;
@@ -137,7 +137,7 @@ input:read-only { background: var(--sheet-2); }
   .sheet { opacity: 0; transition: opacity 160ms ease, visibility 0s linear 160ms; }
   .sheet[data-open="true"] { opacity: 1; transition: opacity 160ms ease, visibility 0s; }
   @starting-style { .sheet[data-open="true"] { opacity: 0; } }
-  .note-text--ok { animation: fade-in 160ms ease both; }
+  .note-text--ok { animation: none; }
   .status--fresh { animation-timing-function: steps(1, end); }
   .track i.just { animation: none; }
   .sigs .row--new { animation: fade-in 160ms ease both, row-tint 1800ms steps(1, end) both; }
