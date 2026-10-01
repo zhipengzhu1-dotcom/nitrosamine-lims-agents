@@ -31,7 +31,6 @@ class RoundTrip extends CamelCasePlugin {
 }
 const roundTrip = new RoundTrip(camelCaseOptions);
 
-/** Each `lims` table or `table.column` whose name CamelCasePlugin would write back to the database differently. */
 async function namesThatDoNotRoundTrip(database: string): Promise<string[]> {
   const client = new pg.Client({ connectionString: databaseUrl(database) });
   await client.connect();
@@ -53,7 +52,6 @@ async function namesThatDoNotRoundTrip(database: string): Promise<string[]> {
 const copies: string[] = [];
 after(() => Promise.all(copies.map((dir) => rm(dir, { recursive: true, force: true }))));
 
-/** Throws when `schema.ts` differs from what the `types` script generates from `database`. Never writes `schema.ts`. */
 function verifySchemaTs(database: string): void {
   execFileSync('pnpm', ['types', '--verify'], {
     cwd: packageDir,
@@ -63,7 +61,6 @@ function verifySchemaTs(database: string): void {
   });
 }
 
-/** Migrates SCRATCH with the repo's migrations plus one that adds `lims.scratch (limit_2)`, a name that does not round-trip. */
 async function migratedWithScratchTable(): Promise<void> {
   const dir = await mkdtemp(`${tmpdir()}/lims-migrations-`);
   copies.push(dir);

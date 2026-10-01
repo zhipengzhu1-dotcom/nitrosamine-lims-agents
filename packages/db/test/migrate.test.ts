@@ -7,7 +7,7 @@ import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
 import { databaseUrl } from '../src/db.ts';
-import { migrate } from '../src/migrate.ts';
+import { migrate, runnerLock } from '../src/migrate.ts';
 
 const repoMigrations = new URL('../migrations/', import.meta.url);
 const migrations = await sqlFiles(repoMigrations);
@@ -69,7 +69,6 @@ describe('migration runners started at the same moment on one cluster', () => {
 const copies: string[] = [];
 after(() => Promise.all(copies.map((dir) => rm(dir, { recursive: true, force: true }))));
 
-/** A private copy of the migrations folder, so a test can edit, add or remove files without touching the repo's. */
 async function copyOfMigrations(): Promise<URL> {
   const dir = await mkdtemp(join(tmpdir(), 'lims-migrations-'));
   copies.push(dir);
@@ -114,13 +113,11 @@ async function whenHashed(database: string): Promise<string[]> {
   return rows.map((row) => row.hashed);
 }
 
-/** Leaves a database as the runner left it before it kept hashes: its two-column table, each file applied and named. */
 async function migrateWithoutHashes(database: string, folder: URL): Promise<void> {
   const admin = new pg.Client({ connectionString: databaseUrl('postgres') });
   await admin.connect();
   try {
-    // The runner's lock, because 0001 creates cluster-wide roles while other test files migrate.
-    await admin.query('select pg_advisory_lock(58)');
+    await admin.query('select pg_advisory_lock($1)', [runnerLock]);
     await admin.query(`drop database if exists ${pg.escapeIdentifier(database)} with (force)`);
     await admin.query(`create database ${pg.escapeIdentifier(database)}`);
     const client = new pg.Client({ connectionString: databaseUrl(database) });
@@ -171,6 +168,7 @@ describe('the SHA-256 of each applied migration', () => {
     await writeFile(new URL('9999_probe.sql', folder), probe);
     const recordedHash = before.find((row) => row.name === '0002_audit_trail.sql')?.sha256 ?? '';
     const currentHash = (await hashesOnDisk(folder)).find((row) => row.name === '0002_audit_trail.sql')?.sha256 ?? '';
+    assert.match(recordedHash, /^[0-9a-f]{64}$/);
     assert.notEqual(recordedHash, currentHash);
 
     await assert.rejects(migrate(database, folder), (error) => {

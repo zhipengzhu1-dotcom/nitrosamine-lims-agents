@@ -5,21 +5,19 @@ import { databaseUrl } from './db.ts';
 
 const migrations = new URL('../migrations/', import.meta.url);
 
-/** A migration file as read from disk. `sha256` is the digest of the raw bytes, so a whitespace edit changes it. */
+export const runnerLock = 58;
+
 interface Migration {
   name: string;
   bytes: Buffer;
   sha256: Buffer;
 }
 
-/** A recorded migration. `sha256` is null only on a row written before hashes were kept, until migrate adopts it. */
 interface Applied {
   name: string;
   sha256: Buffer | null;
 }
 
-// Each statement is a no-op where it has already run. A row hashed when applied gets hashed_at = applied_at, and a row
-// adopted from before hashes were kept gets the adopting transaction's time, so hashed_at > applied_at marks it.
 const TABLE = [
   'create table if not exists public.schema_migration (name text primary key, applied_at timestamptz not null default now())',
   'alter table public.schema_migration add column if not exists sha256 bytea check (octet_length(sha256) = 32)',
@@ -49,7 +47,7 @@ export async function migrate(database: string, folder: URL = migrations): Promi
   try {
     // Runners on one cluster take turns, because the migrations create cluster-wide roles. An advisory lock belongs
     // to one database, so every runner takes it in `postgres`, under the same arbitrary key, until `admin` ends.
-    await admin.query('select pg_advisory_lock(58)');
+    await admin.query('select pg_advisory_lock($1)', [runnerLock]);
     const files = await readMigrations(folder);
     const { rowCount } = await admin.query('select from pg_database where datname = $1', [database]);
     if (!rowCount) await admin.query(`create database ${pg.escapeIdentifier(database)}`);
@@ -69,7 +67,6 @@ async function readMigrations(folder: URL): Promise<Migration[]> {
   );
 }
 
-/** One line for the person running migrate per applied migration whose file is gone or no longer hashes the same. */
 function diverged(applied: Applied[], files: Map<string, Migration>): string[] {
   return applied.flatMap(({ name, sha256 }) => {
     const recorded = sha256 ? `recorded SHA-256 ${sha256.toString('hex')}` : 'applied before hashes were kept';

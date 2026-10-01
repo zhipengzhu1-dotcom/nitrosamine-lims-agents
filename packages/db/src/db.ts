@@ -27,7 +27,6 @@ export function databaseUrl(database = process.env.LIMS_DB ?? 'lims', user?: str
   return url.href;
 }
 
-/** How every Kysely client maps names, so a check of the mapping uses the mapping the API uses. */
 export const camelCaseOptions: Readonly<CamelCasePluginOptions> = { maintainNestedObjectKeys: true };
 
 /** Speaks camelCase to TypeScript and returns jsonb as stored, so Audit Trail row snapshots keep their column names. */
