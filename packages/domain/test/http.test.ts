@@ -103,12 +103,12 @@ describe('pathOf', () => {
 
 describe('a step body requires testId when the step starts from a state, and signature when it signs', () => {
   const required: { [K in StepName]: string[] } = {
-    submit: ['input'],
-    receive: ['testId', 'input'],
-    assign: ['testId', 'input'],
-    enterResult: ['testId', 'input', 'signature'],
-    review: ['testId', 'input', 'signature'],
-    release: ['testId', 'input', 'signature'],
+    submit: ['commitKey', 'input'],
+    receive: ['commitKey', 'testId', 'input'],
+    assign: ['commitKey', 'testId', 'input'],
+    enterResult: ['commitKey', 'testId', 'input', 'signature'],
+    review: ['commitKey', 'testId', 'input', 'signature'],
+    release: ['commitKey', 'testId', 'input', 'signature'],
   };
   for (const name of stepNames)
     it(`${name} requires ${required[name].join(', ')}`, () => {

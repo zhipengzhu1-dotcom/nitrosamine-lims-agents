@@ -29,7 +29,10 @@ const { year } =
     .rows[0] ?? assert.fail('the database has a clock');
 
 async function submit(client: Client, methodId = api.methodId) {
-  return client.call(stepRoute('submit'), { input: { methodId, description: 'Metformin HCl tablets (fictional)' } });
+  return client.call(stepRoute('submit'), {
+    commitKey: randomUUID(),
+    input: { methodId, description: 'Metformin HCl tablets (fictional)' },
+  });
 }
 
 async function numbersOf(testId: string) {
@@ -107,7 +110,13 @@ it('a Test Report Draft is numbered RD-R with the year and six digits when it is
     client: Client,
     input = {},
     password?: string,
-  ) => client.call(stepRoute(name), { testId, input, ...(password && { signature: { password } }) });
+  ) =>
+    client.call(stepRoute(name), {
+      commitKey: randomUUID(),
+      testId,
+      input,
+      ...(password && { signature: { password } }),
+    });
   ok(await step('receive', as.samir));
   ok(await step('assign', as.lena, { assigneeId: ana.id }));
   ok(

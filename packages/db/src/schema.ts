@@ -74,6 +74,16 @@ export interface AuditEntry {
   transactionId: string | null;
 }
 
+export interface CommitKey {
+  committedAt: Generated<Timestamp>;
+  key: string;
+  labId: string;
+  requestHash: Buffer;
+  sessionId: string;
+  state: TestState;
+  testId: string;
+}
+
 export interface Customer {
   id: Generated<string>;
   name: string;
@@ -186,6 +196,7 @@ export interface TrainingRecord {
 export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
+  commitKey: CommitKey;
   customer: Customer;
   lab: Lab;
   membership: Membership;

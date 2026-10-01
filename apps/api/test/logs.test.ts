@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { stepRoute } from '@lims/domain';
@@ -30,11 +31,12 @@ const result = (notebookRef: string) => ({
 async function assignedToLou(): Promise<string> {
   const { testId } = ok(
     await as.cora.call(stepRoute('submit'), {
+      commitKey: randomUUID(),
       input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
     }),
   );
-  ok(await as.samir.call(stepRoute('receive'), { testId, input: {} }));
-  ok(await as.lena.call(stepRoute('assign'), { testId, input: { assigneeId: lou.id } }));
+  ok(await as.samir.call(stepRoute('receive'), { commitKey: randomUUID(), testId, input: {} }));
+  ok(await as.lena.call(stepRoute('assign'), { commitKey: randomUUID(), testId, input: { assigneeId: lou.id } }));
   return testId;
 }
 
@@ -57,6 +59,7 @@ const referenceIn = (text: string) => /reference (\w+)"/.exec(text)?.[1] ?? asse
 it('an unexpected failure answers a generic 500 that names a reference, not the database error', async () => {
   const testId = await assignedToLou();
   const failed = await post(as.lou, stepRoute('enterResult').url, {
+    commitKey: randomUUID(),
     testId,
     input: result(PROBE),
     signature: { password: lou.password },
@@ -69,12 +72,17 @@ it('an unexpected failure answers a generic 500 that names a reference, not the 
 
 it('a refusal and a request that fails validation answer with their own status, kind and message', async () => {
   const testId = await assignedToLou();
-  const refused = await post(as.cora, stepRoute('review').url, { testId, input: {}, signature: { password: 'x' } });
+  const refused = await post(as.cora, stepRoute('review').url, {
+    commitKey: randomUUID(),
+    testId,
+    input: {},
+    signature: { password: 'x' },
+  });
   assert.deepEqual(refused, {
     status: 409,
     text: '{"kind":"state","message":"review needs a Test in SubmittedForReview state, not Assigned"}',
   });
-  const invalid = await post(as.lou, stepRoute('enterResult').url, { testId, input: {} });
+  const invalid = await post(as.lou, stepRoute('enterResult').url, { commitKey: randomUUID(), testId, input: {} });
   assert.deepEqual(invalid, {
     status: 400,
     text: `{"kind":"malformed","message":"body must have required property 'signature'"}`,
@@ -85,6 +93,7 @@ it("a signed step logs its step name and the Test's id, and never the signer's p
   const testId = await assignedToLou();
   ok(
     await as.lou.call(stepRoute('enterResult'), {
+      commitKey: randomUUID(),
       testId,
       input: result('RD-NB-0007-012'),
       signature: { password: lou.password },
@@ -102,6 +111,7 @@ it("a signed step logs its step name and the Test's id, and never the signer's p
 it("a failed signed step logs the failure without the password or the Result's content", async () => {
   const testId = await assignedToLou();
   const failed = await post(as.lou, stepRoute('enterResult').url, {
+    commitKey: randomUUID(),
     testId,
     input: result(PROBE),
     signature: { password: lou.password },
@@ -128,7 +138,7 @@ it('each unexpected failure gets a reference no restart of the API reuses, and t
     const failed = await post(
       as.lou,
       stepRoute('enterResult').url,
-      { testId, input: result(PROBE), signature: { password: lou.password } },
+      { commitKey: randomUUID(), testId, input: result(PROBE), signature: { password: lou.password } },
       another.base,
     );
     assert.equal(failed.status, 500);

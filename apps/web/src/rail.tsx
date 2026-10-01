@@ -10,7 +10,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, signOut, useApi } from './api.ts';
+import { api, Refused, signOut, useApi } from './api.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst';
 export interface Field<N extends string = string> {
@@ -96,11 +96,20 @@ export function stepAction(
     fields: ui.fields,
     signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
     async run(input, password) {
+      // Kept until the server answers, even across a reload, so pressing again after no answer resends this press.
+      const press = `commitKey:${name}:${testId ?? 'new'}`;
+      const commitKey = sessionStorage.getItem(press) ?? crypto.randomUUID();
+      sessionStorage.setItem(press, commitKey);
       await api(stepRoute(name), {
+        commitKey,
         ...(testId && { testId }),
         input,
         ...(password !== null && { signature: { password } }),
+      }).catch((e: unknown) => {
+        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(press);
+        throw e;
       });
+      sessionStorage.removeItem(press);
       await onDone();
       return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
@@ -278,7 +287,10 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
       if (sheet) close(true);
     } catch (e) {
       const refused: Note = {
-        text: `Refused: ${e instanceof Error ? e.message : String(e)}.${a.signs ? ' Nothing has been signed.' : ''}`,
+        text:
+          e instanceof Refused
+            ? `Refused: ${e.message}.${a.signs && e.kind !== 'failure' ? ' Nothing has been signed.' : ''}`
+            : `The LIMS did not answer. ${a.signs ? 'Type your password again and sign' : 'Press again'} with the same entries; they will not be saved twice.`,
         tone: 'bad',
         n: ++count.current,
       };
