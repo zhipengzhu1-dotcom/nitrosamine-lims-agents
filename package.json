@@ -5,13 +5,19 @@
   "packageManager": "pnpm@12.8.1",
   "engines": { "node": ">=24" },
   "scripts": {
+    "check": "scripts/check.sh",
+    "format": "biome format --write .",
+    "lint": "oxlint --deny-warnings",
     "loc": "scripts/loc.sh",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "e2e": "pnpm --filter @lims/web e2e"
   },
   "devDependencies": {
-    "@types/node": "^24.19.0",
-    "typescript": "^7.0.2"
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "24.19.0",
+    "oxlint": "1.86.0",
+    "oxlint-tsgolint": "7.0.2003",
+    "typescript": "7.0.2"
   }
 }

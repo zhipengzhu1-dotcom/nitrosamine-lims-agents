@@ -16,11 +16,11 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "kysely": "^0.29.6",
+    "kysely": "0.29.6",
     "pg": "8.23.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.23.1",
-    "kysely-codegen": "^0.20.0"
+    "@types/pg": "8.23.1",
+    "kysely-codegen": "0.20.0"
   }
 }

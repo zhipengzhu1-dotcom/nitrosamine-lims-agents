@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # A project-local PostgreSQL 18 cluster for development and tests, trusting localhost only.
+# With LIMS_PG_EXTERNAL=1, start uses a server already listening on the port (CI's service container) instead.
 set -euo pipefail
 PGBIN=${PGBIN:-/opt/homebrew/opt/postgresql@18/bin}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -8,6 +9,7 @@ PORT=${LIMS_PGPORT:-54339}
 
 case "${1:-}" in
   start)
+    if [ "${LIMS_PG_EXTERNAL:-}" = 1 ]; then echo "postgres://postgres@localhost:$PORT"; exit 0; fi
     if [ ! -d "$DATA" ]; then
       "$PGBIN/initdb" -D "$DATA" -U postgres --auth=trust --encoding=UTF8 --locale=C >/dev/null
     fi
