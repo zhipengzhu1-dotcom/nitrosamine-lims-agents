@@ -32,17 +32,13 @@ describe('checkout-scoped e2e ports', () => {
     assert.deepEqual(one, checkoutE2ePorts('/a/one'));
   });
 
-  it('every checkout gets an even API port in 10000-19999 with the web port one above, clear of the dev, demo and cluster ports', () => {
-    const taken = new Set([80, 443, 3000, 5173]);
-    for (let i = 0; i < 2000; i++) {
-      const { api, web } = checkoutE2ePorts(`/checkouts/${i}`);
-      assert.equal(api % 2, 0, `API port ${api} is even`);
+  it('every checkout gets ports in 10000-19999, clear of the dev, demo and cluster ports, and its web port is never another checkout API port', () => {
+    const pairs = Array.from({ length: 2000 }, (_, i) => checkoutE2ePorts(`/checkouts/${i}`));
+    const apiPorts = new Set(pairs.map(({ api }) => api));
+    for (const { api, web } of pairs) {
       assert.ok(api >= 10_000 && web <= 19_999, `ports ${api} ${web} lie in 10000-19999`);
       assert.equal(web, api + 1);
-      for (const port of [api, web]) {
-        assert.ok(!taken.has(port), `port ${port} is not a dev or demo port`);
-        assert.ok(port < 20_000 || port > 31_999, `port ${port} is outside the cluster range`);
-      }
+      assert.ok(!apiPorts.has(web), `web port ${web} is no checkout's API port`);
     }
   });
 

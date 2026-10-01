@@ -5,6 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
 export const DEMO_PASSWORD = 'e2e-demo-password';
 export const SHOTS = Boolean(process.env.SHOTS);
 
+// The web imports only @lims/domain, so ask the checkout CLI for the ports, as scripts/dev.sh does.
 const checkout = fileURLToPath(new URL('../../packages/db/src/checkout.ts', import.meta.url));
 const printed = execFileSync(process.execPath, [checkout, 'e2e-ports'], { encoding: 'utf8' }).trim();
 const [apiPort, webPort] = printed.split(' ');
@@ -22,7 +23,7 @@ export default defineConfig({
   ],
   webServer: {
     command: '../../scripts/dev.sh --scratch',
-    url: webURL,
+    url: `${webURL}/api/me`,
     env: { LIMS_DB: 'lims_e2e', PORT: apiPort, WEB_PORT: webPort, DEMO_PASSWORD },
     stdout: 'ignore',
   },

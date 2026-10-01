@@ -8,7 +8,7 @@ interface E2ePorts {
 }
 
 interface Checkout {
-  port: number;
+  clusterPort: number;
   suffix: string;
   e2e: E2ePorts;
 }
@@ -25,7 +25,7 @@ function checkoutOf(root: string): Checkout {
   const digest = createHash('sha256').update(root).digest();
   const api = E2E_PORT_BASE + 2 * (digest.readUInt32BE(4) % E2E_PORT_SLOTS);
   return {
-    port: CLUSTER_PORT_BASE + (digest.readUInt32BE(0) % CLUSTER_PORT_SLOTS),
+    clusterPort: CLUSTER_PORT_BASE + (digest.readUInt32BE(0) % CLUSTER_PORT_SLOTS),
     suffix: digest.toString('hex').slice(0, 8),
     e2e: { api, web: api + 1 },
   };
@@ -46,7 +46,7 @@ export function checkoutE2ePorts(root: string = ROOT): E2ePorts {
 
 if (import.meta.main) {
   const [command, base] = process.argv.slice(2);
-  if (command === 'port') console.log(checkoutOf(ROOT).port);
+  if (command === 'port') console.log(checkoutOf(ROOT).clusterPort);
   else if (command === 'database' && base) console.log(checkoutDatabase(base));
   else if (command === 'e2e-ports') {
     const { api, web } = checkoutE2ePorts();
