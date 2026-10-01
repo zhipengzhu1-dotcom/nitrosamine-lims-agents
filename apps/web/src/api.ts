@@ -1,5 +1,5 @@
 import { pathOf, type Route, type RouteInput, type RouteReply, routes } from '@lims/domain';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export class Refused extends Error {
   status: number;
@@ -52,12 +52,14 @@ export async function signOut(): Promise<void> {
   signedOut('');
 }
 
+/** Reads a route for a component. `reload` settles once the page holds the server's new answer, so a commit can wait until what it changed is on screen. */
 export function useApi<R extends Route>(
   route: R,
   ...request: RouteInput<R>
-): { data?: RouteReply<R>; error?: string; reload: () => void } {
+): { data?: RouteReply<R>; error?: string; reload: () => Promise<void> } {
   const [state, setState] = useState<{ data?: RouteReply<R>; error?: string }>({});
   const [version, setVersion] = useState(0);
+  const waiting = useRef<(() => void)[]>([]);
   const path = pathOf(route, request[0]);
   useEffect(() => {
     let live = true;
@@ -69,5 +71,27 @@ export function useApi<R extends Route>(
       live = false;
     };
   }, [route, path, version]);
-  return { ...state, reload: () => setVersion((v) => v + 1) };
+  useEffect(() => {
+    for (const settle of waiting.current.splice(0)) settle();
+  }, [state]);
+  const reload = () =>
+    new Promise<void>((settle) => {
+      waiting.current.push(settle);
+      setVersion((v) => v + 1);
+    });
+  return { ...state, reload };
+}
+
+/** The keys the latest server answer holds that the one before it on this page did not. A first answer holds nothing new. */
+export function useFresh<T>(answer: T | undefined, keys: (answer: T) => string[]): ReadonlySet<string> {
+  const [last, setLast] = useState(answer);
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
+  if (answer !== last) {
+    setLast(answer);
+    if (last !== undefined && answer !== undefined) {
+      const before = new Set(keys(last));
+      setFresh(new Set(keys(answer).filter((k) => !before.has(k))));
+    }
+  }
+  return fresh;
 }

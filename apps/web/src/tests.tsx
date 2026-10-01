@@ -8,7 +8,7 @@ import {
   steps,
   type TestRow,
 } from '@lims/domain';
-import { useApi } from './api.ts';
+import { useApi, useFresh } from './api.ts';
 import { Shell, Status, stepAction } from './rail.tsx';
 
 export const time = (iso: string | null) =>
@@ -18,6 +18,7 @@ const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on
 
 export function Worklist({ me }: { me: ActorContext }) {
   const { data: tests, error, reload } = useApi(routes.tests);
+  const freshTests = useFresh(tests, (rows) => rows.map((t) => t.id));
   const action = me.roles.includes(steps.submit.role)
     ? stepAction('submit', null, ['A new Submission with one Sample and one Test'], reload)
     : null;
@@ -25,7 +26,7 @@ export function Worklist({ me }: { me: ActorContext }) {
     <Shell me={me} active="tests" action={action}>
       <h1>Tests</h1>
       {error && <p className="note--bad">{error}</p>}
-      <table>
+      <table className="stack">
         <thead>
           <tr>
             <th>Sample</th>
@@ -39,20 +40,20 @@ export function Worklist({ me }: { me: ActorContext }) {
         </thead>
         <tbody>
           {tests?.map((t) => (
-            <tr key={t.id}>
-              <td>
+            <tr key={t.id} className={freshTests.has(t.id) ? 'row--fresh' : undefined}>
+              <td data-label="Sample">
                 <a href={`#/tests/${t.id}`}>{t.sampleNumber}</a>
               </td>
-              <td>{t.description}</td>
-              <td>{t.customer}</td>
-              <td>
+              <td data-label="Description">{t.description}</td>
+              <td data-label="Customer">{t.customer}</td>
+              <td data-label="Method">
                 {t.methodCode} v{t.methodVersion}
               </td>
-              <td>
+              <td data-label="State">
                 <Status state={t.state} />
               </td>
-              <td>{t.assignee}</td>
-              <td>{time(t.receivedAt)}</td>
+              <td data-label="Analyst">{t.assignee}</td>
+              <td data-label="Received">{time(t.receivedAt)}</td>
             </tr>
           ))}
         </tbody>
@@ -64,6 +65,8 @@ export function Worklist({ me }: { me: ActorContext }) {
 
 export function TestPage({ me, id }: { me: ActorContext; id: string }) {
   const { data: view, error, reload } = useApi(routes.test, { id });
+  const freshState = useFresh(view, (v) => [v.test.state]);
+  const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
   const action = view?.next
     ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], reload)
     : null;
@@ -77,7 +80,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
   return (
     <Shell me={me} active="tests" action={action}>
       <h1>
-        {test.sampleNumber} <Status state={test.state} />
+        {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
       </h1>
       <dl className="facts">
         <dt>Sample</dt>
@@ -117,7 +120,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         <p className="muted">No Result entered.</p>
       )}
       <h2>Signatures</h2>
-      <Signatures rows={view.signatures} />
+      <Signatures rows={view.signatures} fresh={freshSignatures} />
       {me.person.customerId === null && <AuditTrail entries={view.auditTrail} />}
     </Shell>
   );
@@ -125,10 +128,13 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
 
 const resultLine = (r: Result) => `Result: ${r.analyte} ${r.value} ${r.unit}, performed on ${r.performedOn}`;
 
-export function Signatures({ rows }: { rows: Signature[] }) {
+const signatureKey = (s: Signature) => s.meaning + s.signedAt;
+
+/** Only the rows whose keys are in `fresh`, which the server has just returned on this page, animate in. */
+export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: ReadonlySet<string> }) {
   if (!rows.length) return <p className="muted">No Signatures yet.</p>;
   return (
-    <table>
+    <table className="stack">
       <thead>
         <tr>
           <th>Meaning</th>
@@ -140,12 +146,14 @@ export function Signatures({ rows }: { rows: Signature[] }) {
       </thead>
       <tbody>
         {rows.map((s) => (
-          <tr key={s.meaning + s.signedAt}>
-            <td className="sig">{s.meaning}</td>
-            <td>{s.signer}</td>
-            <td>{time(s.signedAt)}</td>
-            <td>{s.record}</td>
-            <td>
+          <tr key={signatureKey(s)} className={fresh?.has(signatureKey(s)) ? 'row--fresh' : undefined}>
+            <td className="sig" data-label="Meaning">
+              {s.meaning}
+            </td>
+            <td data-label="Signed by">{s.signer}</td>
+            <td data-label="Time">{time(s.signedAt)}</td>
+            <td data-label="Record">{s.record}</td>
+            <td data-label="SHA-256">
               <code className="hash">{s.contentHash}</code>
             </td>
           </tr>
@@ -177,36 +185,38 @@ function AuditTrail({ entries }: { entries: AuditEntry[] }) {
   return (
     <>
       <h2>Audit Trail</h2>
-      <table className="audit">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Time</th>
-            <th>Who</th>
-            <th>Role</th>
-            <th>Reason</th>
-            <th>Record</th>
-            <th>Change</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((e) => (
-            <tr key={e.seq}>
-              <td>{e.seq}</td>
-              <td>{time(e.at)}</td>
-              <td>
-                <code>{e.actor}</code>
-              </td>
-              <td>{e.role}</td>
-              <td>{e.reason}</td>
-              <td>
-                {e.op} {e.table}
-              </td>
-              <td>{changes(e)}</td>
+      <div className="wide">
+        <table className="audit">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Time</th>
+              <th>Who</th>
+              <th>Role</th>
+              <th>Reason</th>
+              <th>Record</th>
+              <th>Change</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {entries.map((e) => (
+              <tr key={e.seq}>
+                <td>{e.seq}</td>
+                <td>{time(e.at)}</td>
+                <td>
+                  <code>{e.actor}</code>
+                </td>
+                <td>{e.role}</td>
+                <td>{e.reason}</td>
+                <td>
+                  {e.op} {e.table}
+                </td>
+                <td>{changes(e)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }

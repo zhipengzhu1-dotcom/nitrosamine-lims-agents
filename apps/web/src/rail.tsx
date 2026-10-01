@@ -8,7 +8,8 @@ import {
   steps,
   type TestState,
 } from '@lims/domain';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { api, signOut, useApi } from './api.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst';
@@ -58,14 +59,15 @@ export const demoSigning = 'Demo: accounts share one password, and a signing re-
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-export function Status({ state }: { state: TestState }) {
+/** `fresh` marks a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them. */
+export function Status({ state, fresh = false }: { state: TestState; fresh?: boolean }) {
   const at = stateOrder.indexOf(state);
   return (
-    <span className={`status ${state === 'Reported' ? 'status--done' : ''}`}>
+    <span className={`status ${state === 'Reported' ? 'status--done' : ''} ${fresh ? 'status--fresh' : ''}`}>
       {words(state)}
       <span className="track" aria-hidden>
         {stateOrder.map((s, i) => (
-          <i key={s} className={i <= at ? 'on' : ''} />
+          <i key={s} className={i < at ? 'on' : i === at ? 'on now' : ''} />
         ))}
       </span>
     </span>
@@ -80,7 +82,12 @@ export interface RailAction {
   run: (input: Record<string, string>, password: string | null) => Promise<string>;
 }
 
-export function stepAction(name: StepName, testId: string | null, what: string[], onDone: () => void): RailAction {
+export function stepAction(
+  name: StepName,
+  testId: string | null,
+  what: string[],
+  onDone: () => Promise<void>,
+): RailAction {
   const step = steps[name];
   const ui = stepUi[name];
   return {
@@ -94,7 +101,7 @@ export function stepAction(name: StepName, testId: string | null, what: string[]
         input,
         ...(password !== null && { signature: { password } }),
       });
-      onDone();
+      await onDone();
       return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
   };
@@ -178,113 +185,202 @@ export function TopBar({ children }: { children?: ReactNode }) {
   );
 }
 
+interface Note {
+  text: string;
+  tone: 'ok' | 'bad';
+  n: number;
+}
+/** The sheet keeps the action it opened for, so its closing frames never show the step that came next. */
+type Sheet = { action: RailAction; closing: boolean } | null;
+
+/** Longer than --dur-sheet-out, so the sheet unmounts even when no transitionend fires. */
+const EXIT_FALLBACK_MS = 400;
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
-  const [open, setOpen] = useState(false);
+  const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ text: string; tone: 'ok' | 'bad' } | null>(null);
-  const actionKey = action && `${action.label} ${action.context}`;
-  useEffect(() => {
-    setOpen(false);
-    setValues({});
-  }, [actionKey]);
+  const [note, setNote] = useState<Note | null>(null);
+  const [refusal, setRefusal] = useState<Note | null>(null);
+  const [instant, setInstant] = useState(false);
+  const inFlight = useRef(false);
+  const count = useRef(0);
+  const returnFocus = useRef(false);
+  const clearOnClose = useRef(false);
+  const fallback = useRef(0);
+  const form = useRef<HTMLFormElement>(null);
+  const commitButton = useRef<HTMLButtonElement>(null);
+  const statusLine = useRef<HTMLDivElement>(null);
+  const opened = sheet !== null && !sheet.closing;
+  const firstField = () => form.current?.querySelector<HTMLElement>('input, select');
 
-  async function commit() {
-    if (!action || busy) return;
+  useEffect(() => {
+    if (!returnFocus.current || opened) return;
+    returnFocus.current = false;
+    (commitButton.current ?? statusLine.current)?.focus();
+  });
+  useEffect(() => {
+    if (sheet || !clearOnClose.current) return;
+    clearOnClose.current = false;
+    setValues({});
+  }, [sheet]);
+  useEffect(() => {
+    if (!opened) return;
+    // A phone keeps its keyboard down on open, so the person reads what they sign before typing.
+    if (!matchMedia('(pointer: coarse)').matches) firstField()?.focus({ preventScroll: true });
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || inFlight.current) return;
+      returnFocus.current = true;
+      flushSync(() => {
+        setInstant(true);
+        setSheet(null);
+      });
+    };
+    addEventListener('keydown', escape);
+    return () => removeEventListener('keydown', escape);
+  }, [opened]);
+  useEffect(() => {
+    if (!refusal) return;
+    const field = form.current?.querySelector<HTMLElement>('input[type=password]') ?? firstField();
+    field?.focus({ preventScroll: true });
+    field?.scrollIntoView({ block: 'nearest' });
+  }, [refusal]);
+
+  function open(a: RailAction) {
+    if (inFlight.current) return;
+    clearTimeout(fallback.current);
+    setRefusal(null);
+    setSheet({ action: a, closing: false });
+  }
+  function close(clear: boolean) {
+    returnFocus.current = true;
+    clearOnClose.current = clear;
+    setInstant(false);
+    if (reducedMotion()) {
+      flushSync(() => setSheet(null));
+      return;
+    }
+    setSheet((s) => s && { ...s, closing: true });
+    fallback.current = window.setTimeout(closed, EXIT_FALLBACK_MS);
+  }
+  const closed = () => setSheet((s) => (s?.closing ? null : s));
+
+  async function commit(a: RailAction) {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
-      const text = await action.run(values, action.signs ? password : null);
-      setNote({ text, tone: 'ok' });
-      setOpen(false);
+      const text = await a.run(values, a.signs ? password : null);
+      setNote({ text, tone: 'ok', n: ++count.current });
+      returnFocus.current = true;
+      if (sheet) close(true);
     } catch (e) {
-      setNote({
-        text: `Refused: ${e instanceof Error ? e.message : String(e)}.${action.signs ? ' Nothing has been signed.' : ''}`,
+      const refused: Note = {
+        text: `Refused: ${e instanceof Error ? e.message : String(e)}.${a.signs ? ' Nothing has been signed.' : ''}`,
         tone: 'bad',
-      });
+        n: ++count.current,
+      };
+      setNote(refused);
+      if (sheet) setRefusal(refused);
     } finally {
+      inFlight.current = false;
       setBusy(false);
       setPassword('');
     }
   }
 
   const direct = action && !action.fields.length && !action.signs;
+  const shown = sheet?.action;
   return (
     <>
-      {open && action && (
+      {shown && (
         <form
+          ref={form}
           className="sheet"
+          data-closing={sheet.closing || undefined}
+          inert={sheet.closing}
+          aria-labelledby="sheet-title"
           onSubmit={(e) => {
             e.preventDefault();
-            void commit();
+            void commit(shown);
           }}
+          onTransitionEnd={(e) => e.target === e.currentTarget && closed()}
         >
-          <h2>
-            {action.signs ? `Sign ${action.signs.meaning}` : action.label}
-            <span className="fict">Fictional data only</span>
-          </h2>
-          <div className="sheet__body">
-            {action.fields.length > 0 && (
-              <fieldset className="card">
-                <legend>{action.context}</legend>
-                {action.fields.map((f) => (
-                  <label key={f.name}>
-                    {f.label}
-                    <FieldInput
-                      field={f}
-                      value={values[f.name] ?? ''}
-                      onChange={(v) => setValues({ ...values, [f.name]: v })}
-                    />
-                  </label>
-                ))}
-              </fieldset>
-            )}
-            {action.signs && (
-              <>
-                <section className="card">
-                  <h3>What you are signing</h3>
-                  {action.signs.what.map((line) => (
-                    <p key={line}>{line}</p>
+          <fieldset className="sheet__set" disabled={busy}>
+            <h2 id="sheet-title">
+              {shown.signs ? `Sign ${shown.signs.meaning}` : shown.label}
+              <span className="fict">Fictional data only</span>
+            </h2>
+            <div className="sheet__body">
+              {shown.fields.length > 0 && (
+                <fieldset className="card">
+                  <legend>{shown.context}</legend>
+                  {shown.fields.map((f) => (
+                    <label key={f.name}>
+                      {f.label}
+                      <FieldInput
+                        field={f}
+                        value={values[f.name] ?? ''}
+                        onChange={(v) => setValues({ ...values, [f.name]: v })}
+                      />
+                    </label>
                   ))}
-                  {action.fields.map((f) => (
-                    <p key={f.name}>
-                      {f.label}: <b>{values[f.name] || '(not entered)'}</b>
+                </fieldset>
+              )}
+              {shown.signs && (
+                <>
+                  <section className="card">
+                    <h3>What you are signing</h3>
+                    {shown.signs.what.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
+                    {shown.fields.map((f) => (
+                      <p key={f.name}>
+                        {f.label}: <b>{values[f.name] || '(not entered)'}</b>
+                      </p>
+                    ))}
+                  </section>
+                  <section className="card">
+                    <h3>Who is signing</h3>
+                    <p className="who__name">{me.person.displayName}</p>
+                    <p className="muted">
+                      <code>{me.person.username}</code> · {me.roles.map(words).join(', ')} · {me.lab.name}
                     </p>
-                  ))}
-                </section>
-                <section className="card">
-                  <h3>Who is signing</h3>
-                  <p className="who__name">{me.person.displayName}</p>
-                  <p className="muted">
-                    <code>{me.person.username}</code> · {me.roles.map(words).join(', ')} · {me.lab.name}
-                  </p>
-                  <div className="meaning">
-                    <b>{action.signs.meaning}</b>
-                    <i>{meaningStatement[action.signs.meaning]}</i>
-                  </div>
-                  <label>
-                    Password (type it again to sign)
-                    <input
-                      type="password"
-                      required
-                      autoComplete="off"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                    />
-                  </label>
-                  <p className="fict">{demoSigning}</p>
-                </section>
-              </>
-            )}
-          </div>
-          <div className="sheet__foot">
-            <button type="button" className="rbtn rbtn--quiet" onClick={() => setOpen(false)}>
-              Cancel
-            </button>
-            <button type="submit" className="rbtn" disabled={busy}>
-              {action.signs ? `Sign as ${action.signs.meaning}` : action.label}
-            </button>
-          </div>
+                    <div className="meaning">
+                      <b>{shown.signs.meaning}</b>
+                      <i>{meaningStatement[shown.signs.meaning]}</i>
+                    </div>
+                    <label>
+                      Password (type it again to sign)
+                      <input
+                        type="password"
+                        required
+                        autoComplete="off"
+                        value={password}
+                        aria-invalid={refusal !== null && !password}
+                        aria-describedby="sheet-line"
+                        onChange={(e) => setPassword(e.target.value)}
+                      />
+                    </label>
+                  </section>
+                </>
+              )}
+            </div>
+            <div className="sheet__foot">
+              <p key={refusal?.n} id="sheet-line" className={`sheet__line ${refusal ? 'refusal' : ''}`}>
+                <span hidden={refusal !== null}>{shown.signs ? demoSigning : shown.context}</span>
+                {refusal && <span>{refusal.text}</span>}
+              </p>
+              <button type="button" className="rbtn rbtn--quiet" onClick={() => close(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="rbtn" aria-busy={busy}>
+                {shown.signs ? `Sign as ${shown.signs.meaning}` : shown.label}
+              </button>
+            </div>
+          </fieldset>
         </form>
       )}
       <footer className="rail">
@@ -294,20 +390,25 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
             {me.roles.map(words).join(', ')} · <code>{me.person.username}</code>
           </span>
         </div>
-        <div className={`rail__context ${note ? `note--${note.tone}` : ''}`} role="status">
-          {note?.text ?? action?.context ?? 'Nothing for you to commit here.'}
+        <div ref={statusLine} className="rail__context" role="status" tabIndex={-1}>
+          <p key={note?.n} className={`note ${note ? `note--${note.tone}` : ''}`}>
+            {note?.text ?? action?.context ?? 'Nothing for you to commit here.'}
+          </p>
         </div>
-        {action && !open && (
+        {action && !opened && (
           <button
+            ref={commitButton}
             type="button"
-            className="rbtn"
+            className="rbtn rbtn--commit"
+            data-instant={instant || undefined}
             disabled={busy}
-            onClick={() => (direct ? void commit() : setOpen(true))}
+            aria-busy={busy}
+            onClick={() => (direct ? void commit(action) : open(action))}
           >
             {action.label}
           </button>
         )}
-        <button type="button" className="rbtn rbtn--quiet" onClick={() => void signOut()}>
+        <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void signOut()}>
           Sign out
         </button>
       </footer>

@@ -24,7 +24,7 @@ export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
       {data && (
         <article className="report">
           <p className="fict">Fictional data only. Not a real Test Report.</p>
-          <button type="button" className="print-hide" onClick={() => window.print()}>
+          <button type="button" className="btn print-hide" onClick={() => window.print()}>
             Print
           </button>
           <h1>Test Report {data.report.number}</h1>
