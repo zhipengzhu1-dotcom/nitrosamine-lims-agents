@@ -101,6 +101,10 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         <dd>{test.assignee ?? 'not assigned'}</dd>
         <dt>Test Report</dt>
         <dd>{report ? <a href={`#/tests/${id}/report`}>{report.number}</a> : 'not released'}</dd>
+        <dt>Record Version</dt>
+        <dd>
+          {view.recordVersion.version} · <code className="hash">{view.recordVersion.contentHash}</code>
+        </dd>
       </dl>
       <h2>Result</h2>
       {result ? (
@@ -129,6 +133,8 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
 const resultLine = (r: Result) => `Result: ${r.analyte} ${r.value} ${r.unit}, performed on ${r.performedOn}`;
 
 const signatureKey = (s: Signature) => s.meaning + s.signedAt;
+const rowClass = (s: Signature, fresh?: ReadonlySet<string>) =>
+  [fresh?.has(signatureKey(s)) ? 'row--fresh' : '', s.unsigned ? 'row--unsigned' : ''].join(' ').trim() || undefined;
 
 /** Only the rows whose keys are in `fresh`, which the server has just returned on this page, animate in. */
 export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: ReadonlySet<string> }) {
@@ -141,18 +147,26 @@ export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: Readonl
           <th>Signed by</th>
           <th>Time</th>
           <th>Record</th>
+          <th>Record Version</th>
           <th>SHA-256 of the signed Record Version</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((s) => (
-          <tr key={signatureKey(s)} className={fresh?.has(signatureKey(s)) ? 'row--fresh' : undefined}>
+          <tr key={signatureKey(s)} className={rowClass(s, fresh)}>
             <td className="sig" data-label="Meaning">
               {s.meaning}
+              {s.unsigned && (
+                <>
+                  {' '}
+                  <span className="unsigned">unsigned</span>
+                </>
+              )}
             </td>
             <td data-label="Signed by">{s.signer}</td>
             <td data-label="Time">{time(s.signedAt)}</td>
             <td data-label="Record">{s.record}</td>
+            <td data-label="Record Version">{s.recordVersion}</td>
             <td data-label="SHA-256">
               <code className="hash">{s.contentHash}</code>
             </td>

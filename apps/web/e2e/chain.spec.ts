@@ -1,6 +1,7 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { expect, type Locator, type Page, test } from '@playwright/test';
-import { DEMO_PASSWORD, SHOTS } from '../playwright.config.ts';
+import { DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {
   if (SHOTS && test.info().project.name === 'desktop')
@@ -24,6 +25,31 @@ const sign = async (page: Page, meaning: string, password = DEMO_PASSWORD) => {
   await page.getByLabel(/Password/).fill(password);
   await page.getByRole('button', { name: `Sign as ${meaning}` }).click();
 };
+
+function changeResult(testId: string, value: string) {
+  execFileSync(
+    '../../scripts/pg.sh',
+    [
+      'psql',
+      '-q',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '--single-transaction',
+      '-d',
+      E2E_DATABASE,
+      '-v',
+      `test=${testId}`,
+      '-v',
+      `value=${value}`,
+    ],
+    {
+      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
+                     set_config('lims.reason', 'Change a signed Result from outside the chain (e2e)', true);
+              update lims.result set value = :'value' where test_id = :'test';`,
+      stdio: ['pipe', 'ignore', 'inherit'],
+    },
+  );
+}
 
 async function box(target: Locator) {
   const b = await target.boundingBox();
@@ -190,4 +216,22 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   );
   await railSays(page, /Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC:/);
   await shot(page, 'test-report');
+
+  const testId = new URL(page.url()).hash.split('/')[2] ?? '';
+  expect(testId).toMatch(/^[0-9a-f-]{36}$/);
+  const signed = page.getByRole('row', { name: /unsigned/ });
+  await expect(signed).toHaveCount(0);
+  changeResult(testId, '0.0380');
+  await page.reload();
+  await expect(page.getByRole('cell', { name: '0.0380', exact: true })).toBeVisible();
+  for (const meaning of ['Performed', 'Reviewed', 'Released'])
+    await expect(page.getByRole('row', { name: new RegExp(`${meaning} unsigned`) })).toBeVisible();
+  await page.getByRole('button', { name: 'Verify Audit Trail' }).click();
+  await railSays(page, 'Lab chain internally consistent, company chain internally consistent');
+
+  await page.goto(`/#/tests/${testId}`);
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Reported');
+  await expect(page.locator('dt:text-is("Record Version") + dd')).toContainText('4 ·');
+  await expect(page.getByRole('row', { name: /unsigned/ })).toHaveCount(3);
+  await shot(page, 'test-unsigned');
 });
