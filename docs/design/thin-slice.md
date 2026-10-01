@@ -61,7 +61,10 @@ Planned 4,400. Stop and raise at 4,500. Generated `packages/db/src/schema.ts`, t
 - Separate Acceptance and rejection, cancellation, Return, reassignment, Amended Reports.
 - Specifications, limits, verdicts and Calculation Versions: the Result is printed as typed, with no pass or fail.
 - Critical Data Changes and corrections: a Result is entered once, at enterResult.
-- Authorisations (a Training Record stands in for the Method Authorisation), Document versions, GxP Class choice (every Test is GMP).
+- Authorisations (a Training Record stands in for the Method Authorisation), Document versions, GxP Class choice (every Test is GMP). There are no Reviewer or QA Authorisations either: the role alone gates review and release.
+- Method Adoption and the Method's compendial basis (map decisions 12 and 36): receive does not re-check an Adoption.
+- The User ID at signing (a signing re-enters the password only), the signer's username and role on Signature rows, and carrying the shown Record Version hash in the signing request.
+- Record export and clock sync (chrony).
 - Release locks, Record Version history and "unsigned after change", the password pepper, Admin screens. Every other module is one placeholder screen.
 - The TOTP second factor, at login and at signing (owner, 2026-09-30: keep login simple for now). Decided for the product in map decisions 7 and 13.
 - The 15-character password rule, lockout at 5 failures and the 15-minute idle limit (owner, 2026-09-30: generous limits for the demo). The slice takes any password of 4 or more characters, locks at 20 failures, ends an idle session after 8 hours, and gives every demo account one password set at seed time.
