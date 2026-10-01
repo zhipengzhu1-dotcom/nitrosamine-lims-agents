@@ -49,6 +49,7 @@ test('the chain walks a submitted Test to Reported with three Signatures and an 
   const reported = await view(id, as.quinn);
   assert.equal(reported.test.state, 'Reported');
   assert.equal(reported.result.value, '0.0300', 'the Result as typed');
+  assert.equal(reported.auditTrail.find((e: any) => e.table === 'result').newRow.value, '0.0300', 'the Audit Trail keeps the Result as typed');
   assert.deepEqual(reported.signatures.map((s: any) => [s.meaning, s.signer]),
     [['Performed', 'Ana Ferreira'], ['Reviewed', 'Rui Tanaka'], ['Released', 'Quinn Adeyemi']]);
   const actors = { submit: cora, receive: samir, assign: lena, enterResult: ana, review: rui, release: quinn };

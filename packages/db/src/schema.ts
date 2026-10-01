@@ -25,8 +25,6 @@ export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "Released" | "Reviewed" | "Verified";
 
-export type Numeric = ColumnType<string, number | string, number | string>;
-
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "QA" | "Reviewer" | "SampleCustodian";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
@@ -92,7 +90,7 @@ export interface Result {
   performed_on: Timestamp;
   test_id: string;
   unit: string;
-  value: Numeric;
+  value: string;
 }
 
 export interface Sample {

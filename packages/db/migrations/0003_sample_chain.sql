@@ -85,7 +85,8 @@ create table lims.result (
   id                     uuid    not null default gen_random_uuid(),
   test_id                uuid    not null,
   analyte                text    not null,
-  value                  numeric not null,
+  -- Text, not numeric: the row image in the Audit Trail is JSON, and a JSON number loses the trailing zeros as typed.
+  value                  text not null check (value ~ '^-?[0-9]+(\.[0-9]+)?$'),
   unit                   text    not null,
   injection_sequence_ref text    not null,
   notebook_ref           text    not null,
