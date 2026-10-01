@@ -385,8 +385,9 @@ export async function loadReview(q: Q, id: string): Promise<ReviewFacts> {
   const values = await valuesUnder(q, r.id as RecordId);
   return {
     id: r.id as RecordId, reviews: r.reviews_record_id as RecordId, reviewsKind: r.kind, checklistVersion: r.checklist_version, reviewer: r.reviewer_id as PersonId,
-    ticked: values.filter((v) => v.field === REVIEW_FIELDS.tick && v.effective.text === 'true').map((v) => v.subject),
-    confirmations: new Map(values.filter((v) => v.field === REVIEW_FIELDS.verdict).map((v) => [v.subject, v.effective.text as 'confirmed' | 'disagreed'])),
+    // Only the reviewer's own ticks and confirmations attest (review fix 4); a version by anyone else is not counted.
+    ticked: values.filter((v) => v.field === REVIEW_FIELDS.tick && v.effective.text === 'true' && v.effective.createdBy === r.reviewer_id).map((v) => v.subject),
+    confirmations: new Map(values.filter((v) => v.field === REVIEW_FIELDS.verdict && v.effective.createdBy === r.reviewer_id).map((v) => [v.subject, v.effective.text as 'confirmed' | 'disagreed'])),
     values,
   };
 }

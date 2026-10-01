@@ -3,13 +3,15 @@
 // drives one Submission through every step as the fictional people, over the doors, with real
 // enrolment and re-authentication; the tests assert on what it left behind and drive the two
 // refusal paths on the Ready Tests it seeded.
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { COMPANY_LEDGER, ledgerOf, verifyChain } from '@lims/db';
+import { COMPANY_LEDGER, ledgerOf, runAudited, seal, verifyChain } from '@lims/db';
+import { canonicalBytes } from '@lims/domain/canonical';
 import { CHAIN } from '../src/chain/index.ts';
 import { readStanding } from '../src/records/standing.ts';
-import { assign, idsOf, PASSING, review, runPerformedAndReviewed, testPerformedAndReviewed, typeRun, verifyAll } from '../src/seed/chain.ts';
-import { RELEASE_CHECKLIST } from '../src/chain/model.ts';
+import { acceptAndReceive, assign, idsOf, PASSING, review, runPerformedAndReviewed, submitOne, testPerformedAndReviewed, typeRun, verifyAll, type Tabs } from '../src/seed/chain.ts';
+import type { Person } from '../src/seed/drive.ts';
+import { RELEASE_CHECKLIST, RUN_CHECKLIST, TEST_CHECKLIST } from '../src/chain/model.ts';
 import { seedCounts, seedDemo, SEED_CAP, type SeedResult } from '../src/seed/index.ts';
 import { signAs, testApi, type TestApi } from '../src/testing/harness.ts';
 
@@ -26,7 +28,46 @@ afterAll(() => api.close());
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
 const refusalOf = (r: { body: any }) => r.body.refusal as { kind: string; message: string; reasons?: { code: string; value?: string }[] };
-const gaps = (feature: string) => api.db.app.selectFrom('spec_gap').select('id').where('feature', '=', feature).execute();
+const gaps = (feature: string) => api.db.app.selectFrom('spec_gap').select(['id', 'record_id']).where('feature', '=', feature).execute();
+
+/** A new Test on the LC-MS/MS Method, accepted, received and assigned to Ann. */
+async function freshTest(lotNumber: string): Promise<string> {
+  const s = await submitOne(seed.tabs.acme, seed.cast.lab.id, seed.reference.products.fic02, lotNumber, [seed.reference.methods.lcms.id]);
+  await acceptAndReceive(seed.tabs, s);
+  const testId = s.samples[0]!.tests[0]!;
+  await assign(seed.tabs, testId, seed.cast.ann);
+  return testId;
+}
+
+/**
+ * A value version written straight through the database doors, as a later module might, so the
+ * gates can be proved to hold without the app's writer rule in front of them.
+ */
+async function plant(person: Person, role: string, parent: string, field: string, subject: string, value: { text: string; unit: string | null; type: 'decimal' | 'boolean' }, existing: string | null = null): Promise<string> {
+  const lab = seed.cast.lab.id;
+  const session = await api.db.app.selectFrom('session').select('id').where('person_id', '=', person.id).where('ended_at', 'is', null).orderBy('started_at', 'desc').executeTakeFirstOrThrow();
+  const out = await runAudited(api.db.app, {
+    person: person.id as never, role, actingLab: lab as never, customer: null, action: 'test.plant', reason: existing ? { kind: 'picklist', code: 'transcription-error' } : { kind: 'first_save' },
+    appRelease: 'test', session: session.id as never, commitKey: randomUUID() as never, ledgers: [ledgerOf(lab as never), COMPANY_LEDGER],
+  }, { kind: 'lab', labId: lab as never }, async (tx) => {
+    const id = existing ?? randomUUID();
+    if (!existing) {
+      await tx.db.insertInto('record').values({ ledger_id: ledgerOf(lab as never), id, kind: 'value', parent_id: parent }).execute();
+      await tx.db.insertInto('recorded_value').values({ ledger_id: ledgerOf(lab as never), record_id: id, parent_id: parent, field, subject, critical: value.type === 'decimal', value_type: value.type, unit: value.unit }).execute();
+    }
+    const canon = value.type === 'decimal' ? { type: 'decimal', value: value.text, unit: value.unit } : { type: 'boolean', value: value.text === 'true' };
+    const v = await seal(tx, id as never, canonicalBytes({ schema: 'value@1', parent, field, subject, value: canon }), 'value@1');
+    await tx.db.insertInto('recorded_value_version').values({ ledger_id: ledgerOf(lab as never), version_id: v.versionId, value_text: value.text, decimals: value.type === 'decimal' ? (value.text.split('.')[1]?.length ?? 0) : null, blob_hash: null }).execute();
+    return { commit: id };
+  });
+  if (!('commit' in out)) throw new Error('plant rolled back');
+  return out.commit;
+}
+
+const notPermitted = (r: { status: number; body: any }, message: RegExp) => {
+  expect(r.status).toBe(403);
+  expect(refusalOf(r).message).toMatch(message);
+};
 
 describe('the seed', () => {
   it('signs everyone in on workstation seed-script, so no seeded session looks like a bench PC or the portal', () => {
@@ -115,11 +156,10 @@ describe('Customer scoping', () => {
 });
 
 describe('the release lock at the API', () => {
-  it('a change to a value behind a Released report is refused, and so is an in-place change to the Test', async () => {
-    const value = await api.db.app.selectFrom('recorded_value').select('record_id').where('parent_id', '=', seed.submissions.released.testId).where('field', '=', 'prep.weight').executeTakeFirstOrThrow();
-    const r = await seed.tabs.bob.command('value.change', { role: 'Reviewer', value: value.record_id, to: { type: 'decimal', value: '100.13', unit: 'mg' }, reason: { code: 'transcription-error' } });
-    expect(r.status).toBe(409);
-    expect(refusalOf(r).message).toMatch(/locked by a Released Test Report/);
+  it('a change to a value behind a Released report is refused by the writer rule, then by the lock when written past it; so is an in-place change to the Test', async () => {
+    const value = await api.db.app.selectFrom('recorded_value').select(['record_id', 'parent_id', 'field', 'subject']).where('parent_id', '=', seed.submissions.released.testId).where('field', '=', 'prep.weight').executeTakeFirstOrThrow();
+    notPermitted(await seed.tabs.ann.command('value.change', { role: 'Analyst', value: value.record_id, to: { type: 'decimal', value: '100.13', unit: 'mg' }, reason: { code: 'transcription-error' } }), /is Reported; its values are recorded while it is In Progress/);
+    await expect(plant(seed.cast.ann, 'Analyst', value.parent_id, value.field, value.subject, { text: '100.13', unit: 'mg', type: 'decimal' }, value.record_id)).rejects.toMatchObject({ code: 'LR001' });
     const reassign = await seed.tabs.lena.command('test.reassign', { testId: seed.submissions.released.testId, analystId: seed.cast.dee.id, reason: { code: 'other', text: 'try' } });
     expect(reassign.status).toBe(409);
   });
@@ -147,43 +187,85 @@ describe('D21: the not-built path', () => {
 });
 
 describe('D20: the UNSIGNED path', () => {
-  it('an approved Critical Data Change on a Run Check unsigns the Run, the Test version citing it, and blocks Test Performed until the Run is signed again', async () => {
+  it('an approved Critical Data Change on a returned Test unsigns its Performed version; the Test is signed again on the next one', async () => {
     const testId = seed.submissions.ready.samples[0]!.tests[1]!;
     await assign(seed.tabs, testId, seed.cast.ann);
     const typed = await typeRun(seed.tabs, seed.reference, testId, PASSING);
     await verifyAll(seed.tabs, seed.cast, [...idsOf(typed.runValues), ...idsOf(typed.values)]);
     await runPerformedAndReviewed(seed.tabs, seed.cast, typed.runId);
-    const runV1 = (await seed.tabs.ann.view('run.detail', { runId: typed.runId })).body.run.version;
-    const prepared = await seed.tabs.ann.must('signing.prepare', { meaning: 'Performed', role: 'Analyst', targets: [testId], attestation: null });
-    const testV1 = prepared.items[0].version;
-    expect(prepared.items[0].body.runs[0]).toMatchObject({ version: runV1.versionId, sha256: runV1.hash });
+    expect((await signAs(seed.tabs.ann, seed.cast.ann, 'Performed', 'Analyst', [testId])).status).toBe(200);
+    const testV1 = await api.db.app.selectFrom('effective_version').select(['id', 'version_no']).where('record_id', '=', testId).executeTakeFirstOrThrow();
+    const standingOf = async (versionId: string) => (await seed.tabs.ann.view('signing.standing', { versionId })).body;
 
-    const recovery = typed.runValues['Check standard recovery']!;
-    const proposed = await seed.tabs.ann.must('value.change', { role: 'Analyst', value: recovery, to: { type: 'decimal', value: '98.6', unit: '%' }, reason: { code: 'transcription-error' } });
+    const returned = await seed.tabs.bob.command('test.return', { testId, reason: { code: 'other', text: 'P1 weight does not match the printout.' } });
+    expect(returned.status).toBe(200);
+    const weight = typed.values['weight P1']!;
+    const proposed = await seed.tabs.ann.must('value.change', { role: 'Analyst', value: weight, to: { type: 'decimal', value: '100.13', unit: 'mg' }, reason: { code: 'transcription-error' } });
     expect(proposed.standing).toBe('pending');
-    expect((await seed.tabs.ann.view('signing.standing', { versionId: runV1.versionId })).body.kind).toBe('signed');
-    const approved = await signAs(seed.tabs.bob, seed.cast.bob, 'Approved', 'Reviewer', [recovery]);
+    expect((await standingOf(testV1.id!)).kind).toBe('signed');
+    const approved = await signAs(seed.tabs.bob, seed.cast.bob, 'Approved', 'Reviewer', [weight]);
     expect(approved.status).toBe(200);
 
-    const runStanding = await seed.tabs.ann.view('signing.standing', { versionId: runV1.versionId });
-    expect(runStanding.body).toMatchObject({ kind: 'changed-after-signature', signed: [{ meaning: 'Performed' }, { meaning: 'Reviewed' }] });
-    const testStanding = await seed.tabs.ann.view('signing.standing', { versionId: testV1.versionId });
-    expect(testStanding.body.kind).toBe('unsigned');
-    const stands = await api.db.app.selectNoFrom((eb) => eb.fn<boolean>('lims.version_stands', [eb.val(testV1.versionId)]).as('s')).executeTakeFirstOrThrow();
+    expect(await standingOf(testV1.id!)).toMatchObject({ kind: 'changed-after-signature', signed: [{ meaning: 'Performed' }] });
+    const stands = await api.db.app.selectNoFrom((eb) => eb.fn<boolean>('lims.version_stands', [eb.val(testV1.id!)]).as('s')).executeTakeFirstOrThrow();
     expect(stands.s).toBe(false);
 
-    const refused = await signAs(seed.tabs.ann, seed.cast.ann, 'Performed', 'Analyst', [testId]);
-    expect(refused.status).toBe(409);
-    expect(refusalOf(refused).reasons!.map((r) => r.code)).toContain('unsigned-dependency');
-
-    await runPerformedAndReviewed(seed.tabs, seed.cast, typed.runId);
-    const runV2 = (await seed.tabs.ann.view('run.detail', { runId: typed.runId })).body.run.version;
-    expect(runV2.versionNo).toBe(runV1.versionNo + 1);
     await testPerformedAndReviewed(seed.tabs, seed.cast, testId);
+    const testV2 = await api.db.app.selectFrom('effective_version').select('version_no').where('record_id', '=', testId).executeTakeFirstOrThrow();
+    expect(testV2.version_no).toBe(testV1.version_no! + 1);
     const detail = await seed.tabs.ann.view('test.detail', { testId });
     expect(detail.body.test.state).toBe('Reviewed');
-    expect(detail.body.runs).toEqual([expect.objectContaining({ state: 'Reviewed', version: runV2 })]);
     expect(detail.body.signatures.map((s: { meaning: string; stands: boolean }) => [s.meaning, s.stands])).toEqual([['Performed', true], ['Reviewed', true]]);
+  });
+});
+
+describe('review fix 4: each field names its writer and the states it is written in', () => {
+  let testId: string;
+  let typed: Awaited<ReturnType<typeof typeRun>>;
+  const decimal = (value: string, unit: string) => ({ type: 'decimal' as const, value, unit });
+  const reason = { code: 'transcription-error' as const };
+
+  beforeAll(async () => {
+    testId = await freshTest('FIC-26-0430');
+    typed = await typeRun(seed.tabs, seed.reference, testId, PASSING);
+  });
+
+  it("a Test's values are written by the assigned Analyst as an Analyst, not by another Analyst or a Reviewer", async () => {
+    notPermitted(await seed.tabs.dee.command('value.record', { role: 'Analyst', parent: testId, field: 'prep.weight', subject: 'P3', value: decimal('1.00', 'mg') }), /assigned to another Analyst/);
+    notPermitted(await seed.tabs.ann.command('value.record', { role: 'Reviewer', parent: testId, field: 'prep.weight', subject: 'P3', value: decimal('1.00', 'mg') }), /recorded as an Analyst/);
+    notPermitted(await seed.tabs.dee.command('value.change', { role: 'Analyst', value: typed.values['weight P1'], to: decimal('100.13', 'mg'), reason }), /assigned to another Analyst/);
+    notPermitted(await seed.tabs.bob.command('value.change', { role: 'Reviewer', value: typed.values['weight P1'], to: decimal('100.13', 'mg'), reason }), /assigned to another Analyst/);
+  });
+
+  it("a Run's values are written by the Analyst who acquired it", async () => {
+    notPermitted(await seed.tabs.dee.command('value.change', { role: 'Analyst', value: typed.runValues['Check standard recovery'], to: decimal('98.5', '%'), reason }), /acquired by another Analyst/);
+  });
+
+  it('a Review is filled by the person who opened it, through value.record as well', async () => {
+    const opened = await seed.tabs.bob.must('review.open', { recordId: typed.runId, role: 'Reviewer' });
+    notPermitted(await seed.tabs.dee.command('value.record', { role: 'Analyst', parent: opened.reviewId, field: 'checklist.item', subject: RUN_CHECKLIST.items[0], value: { type: 'boolean', value: true } }), /opened by another person/);
+  });
+
+  it('once Performed, the acquirer changes nothing on the Run and the assignee nothing on the Test', async () => {
+    await verifyAll(seed.tabs, seed.cast, [...idsOf(typed.runValues), ...idsOf(typed.values)]);
+    await runPerformedAndReviewed(seed.tabs, seed.cast, typed.runId);
+    notPermitted(await seed.tabs.ann.command('value.change', { role: 'Analyst', value: typed.runValues['Check standard recovery'], to: decimal('98.5', '%'), reason }), /is Performed; its values are recorded while it is Open/);
+    expect((await signAs(seed.tabs.ann, seed.cast.ann, 'Performed', 'Analyst', [testId])).status).toBe(200);
+    notPermitted(await seed.tabs.ann.command('value.change', { role: 'Analyst', value: typed.values['weight P1'], to: decimal('100.13', 'mg'), reason }), /is Submitted for Review; its values are recorded while it is In Progress/);
+  });
+
+  it("the Reviewed gate counts only the Reviewer's own ticks, and a Review closes once a signature cites it", async () => {
+    const [first, ...rest] = TEST_CHECKLIST.items;
+    const stranger = (await seed.tabs.bob.must('review.open', { recordId: testId, role: 'Reviewer' })).reviewId as string;
+    await plant(seed.cast.dee, 'Analyst', stranger, 'checklist.item', first!, { text: 'true', unit: null, type: 'boolean' });
+    for (const item of rest) await seed.tabs.bob.must('review.tick', { reviewId: stranger, item, role: 'Reviewer' });
+    const refused = await signAs(seed.tabs.bob, seed.cast.bob, 'Reviewed', 'Reviewer', [testId], stranger);
+    expect(refused.status).toBe(409);
+    expect(refusalOf(refused).reasons!.map((r) => r.code)).toContain('checklist-incomplete');
+
+    const own = await review(seed.tabs.bob, 'Reviewer', testId, TEST_CHECKLIST.items);
+    expect((await signAs(seed.tabs.bob, seed.cast.bob, 'Reviewed', 'Reviewer', [testId], own)).status).toBe(200);
+    notPermitted(await seed.tabs.bob.command('value.record', { role: 'Reviewer', parent: own, field: 'verdict.confirmation', subject: 'late', value: { type: 'text', value: 'confirmed' } }), /A signature cites this Review/);
   });
 });
 
@@ -250,12 +332,12 @@ describe('review fix 2: a release waits for every pending change behind it', () 
     const testId = seed.submissions.ready.samples[0]!.tests[1]!;
     expect((await seed.tabs.ann.view('test.detail', { testId })).body.test.state).toBe('Reviewed');
     const run = await api.db.app.selectFrom('run_test').select('run_id').where('test_id', '=', testId).executeTakeFirstOrThrow();
-    const weight = await api.db.app.selectFrom('recorded_value').select('record_id').where('parent_id', '=', testId).where('field', '=', 'prep.weight').orderBy('subject').executeTakeFirstOrThrow();
-    const recovery = await api.db.app.selectFrom('recorded_value').select('record_id').where('parent_id', '=', run.run_id).where('subject', 'like', '%recovery%').executeTakeFirstOrThrow();
-    const propose = (value: string, to: { value: string; unit: string }) =>
-      seed.tabs.bob.must('value.change', { role: 'Reviewer', value, to: { type: 'decimal', ...to }, reason: { code: 'transcription-error' } });
-    expect((await propose(weight.record_id, { value: '100.31', unit: 'mg' })).standing).toBe('pending');
-    expect((await propose(recovery.record_id, { value: '97.9', unit: '%' })).standing).toBe('pending');
+    const weight = await api.db.app.selectFrom('recorded_value').select(['record_id', 'parent_id', 'field', 'subject']).where('parent_id', '=', testId).where('field', '=', 'prep.weight').orderBy('subject').executeTakeFirstOrThrow();
+    const recovery = await api.db.app.selectFrom('recorded_value').select(['record_id', 'parent_id', 'field', 'subject']).where('parent_id', '=', run.run_id).where('subject', 'like', '%recovery%').executeTakeFirstOrThrow();
+    // Nobody may write these through the app once the Test is Reviewed (fix 4), so the pending changes are planted past it.
+    await plant(seed.cast.bob, 'Reviewer', weight.parent_id, weight.field, weight.subject, { text: '100.31', unit: 'mg', type: 'decimal' }, weight.record_id);
+    await plant(seed.cast.bob, 'Reviewer', recovery.parent_id, recovery.field, recovery.subject, { text: '97.9', unit: '%', type: 'decimal' }, recovery.record_id);
+    expect((await api.db.app.selectFrom('pending_version').select('id').where('record_id', 'in', [weight.record_id, recovery.record_id]).execute()).length).toBe(2);
 
     const drafted = await seed.tabs.bob.must('report.draft', { submissionId: seed.submissions.ready.submissionId, testIds: [testId], role: 'Reviewer' });
     await seed.tabs.bob.must('report.submitToQa', { reportId: drafted.reportId, role: 'Reviewer' });
