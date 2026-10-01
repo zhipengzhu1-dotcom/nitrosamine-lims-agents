@@ -17,7 +17,6 @@ export class Refused extends Error {
   }
 }
 
-/** The Refused a non-2xx answer carries. A body outside the shape (a proxy's page, an empty body) is a `failure` with the status text. */
 function refusedBy(json: unknown, fallback: string): Refused {
   const body: object = typeof json === 'object' && json !== null ? json : {};
   return new Refused(
@@ -31,7 +30,7 @@ export const onSignedOut = (fn: (message: string) => void) => {
   signedOut = fn;
 };
 
-/** Calls a route and gives its reply. A `noSession` refusal returns to sign-in before it is thrown; no second request decides it. */
+/** Calls a route and gives its reply. A `noSession` refusal returns to sign-in before it is thrown. */
 export function api<R extends Route>(route: R, ...request: RouteInput<R>): Promise<RouteReply<R>> {
   const [input] = request;
   return call(route, pathOf(route, input), input);
@@ -47,7 +46,7 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
   const json: unknown = await res.json().catch(() => ({}));
   // oxlint-disable-next-line typescript/consistent-type-assertions -- a wire body has no static type; the API serializes every 2xx through this route's reply schema, and the web does not repeat the check
   if (res.ok) return json as RouteReply<R>;
-  const refused = refusedBy(json, res.statusText);
+  const refused = refusedBy(json, `the LIMS did not answer (${res.status})`);
   if (refused.kind === 'noSession') signedOut(refused.message);
   throw refused;
 }
