@@ -1,11 +1,11 @@
 ---
 name: budget-time
-description: Measure and prove the token use of this LIMS repo's headless Claude Code agents (the part11, iso17025 and usp expert reviews, eval cases, and research runs that must hand each web fetch to its own subagent) by running them through `claude -p` stream-json and reporting cost, turns, per-agent peak context and direct fetches, and check a live session's own context against the 180K budget. Use when asked what a review or research run costs, to prove the one-fetch-per-subagent rule held, or to check a change to an agent or prompt didn't blow up its context. The in-LIMS assistant's own token use is mapped but not built yet.
+description: Measure and prove the token use of this LIMS repo's headless Claude Code agents (the part11, iso17025 and usp expert reviews, eval cases, and research runs that must hand each web fetch to its own subagent) by running them through `claude -p` stream-json and reporting cost, turns, per-agent peak context and direct fetches, and check a live session's own context against the 180K budget. Use when asked what a review or research run costs, to prove the one-fetch-per-subagent rule held, or to check a change to an agent or prompt didn't blow up its context.
 ---
 
 # Budget time: agent token use
 
-The only runnable surface on `main` is the agent tooling: `.claude/agents/*-expert.md`, driven headless by `claude -p` (see `evals/agents/run.py`). There is no LIMS app on `main` yet; when the walking skeleton lands, the assistant-layer feature in `features/` becomes drivable too.
+The only runnable surface on `main` is the agent tooling: `.claude/agents/*-expert.md`, driven headless by `claude -p` (see `evals/agents/run.py`).
 
 Every drive spends real money on the owner's account. Always pass `--budget`; use `--model haiku` for probes, and run an expert on its own model (`opus`, from its frontmatter) only when the measurement is about that expert.
 

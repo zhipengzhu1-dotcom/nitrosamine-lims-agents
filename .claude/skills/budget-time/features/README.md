@@ -7,7 +7,6 @@ The maintained source for measuring what this repo's headless agents spend. Read
 | Cost of one expert eval case | [expert-eval-case.md](expert-eval-case.md) | yes |
 | Cost of an expert review of a branch | [expert-branch-review.md](expert-branch-review.md) | yes |
 | Research run delegates every fetch | [research-fetch-delegation.md](research-fetch-delegation.md) | yes |
-| In-LIMS assistant calls against the hosting estimates | [assistant-layer-calls.md](assistant-layer-calls.md) | **no: not built** |
 
 ## Baseline preconditions
 
