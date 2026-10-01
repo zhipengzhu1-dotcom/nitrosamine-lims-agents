@@ -5,6 +5,7 @@
   "packageManager": "pnpm@12.8.1",
   "engines": { "node": ">=24" },
   "scripts": {
+    "check": "scripts/check.sh",
     "format": "biome format --write .",
     "lint": "oxlint",
     "loc": "scripts/loc.sh",

@@ -8,7 +8,8 @@ git ls-files -co --exclude-standard | while IFS= read -r f; do
   case "$f" in
     *.md | docs/* | evals/* | .claude/* | pnpm-lock.yaml | packages/db/src/schema.ts) continue ;;
   esac
-  [ -f "$f" ] && grep -Iq . "$f" || continue
+  [ -f "$f" ] || continue
+  grep -Iq . "$f" || continue
   case "$f" in
     */e2e/*) area=e2e ;;
     */test/* | *.test.ts | *.test.tsx) area=tests ;;
