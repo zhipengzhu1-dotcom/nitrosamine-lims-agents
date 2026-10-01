@@ -32,8 +32,6 @@
     "typescript/consistent-return": "off",
     "typescript/no-confusing-void-expression": "off",
     "typescript/no-deprecated": "off",
-    "typescript/no-floating-promises": "off",
-    "typescript/no-misused-promises": "off",
     "typescript/no-unnecessary-type-parameters": "off",
     "typescript/no-unsafe-argument": "off",
     "typescript/no-unsafe-assignment": "off",
@@ -51,6 +49,10 @@
     "unicorn/no-array-sort": "off",
     "unicorn/prefer-query-selector": "off",
     "unicorn/prefer-string-replace-all": "off",
+    "typescript/no-floating-promises": [
+      "error",
+      { "allowForKnownSafeCalls": [{ "from": "package", "package": "node:test", "name": ["describe", "it"] }] }
+    ],
     "typescript/ban-ts-comment": [
       "error",
       {

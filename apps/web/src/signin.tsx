@@ -4,12 +4,11 @@ import { TopBar } from './rail.tsx';
 
 export function SignIn({ notice, onIn }: { notice: string; onIn: (me: Me) => void }) {
   const [error, setError] = useState(notice);
-  async function submit(e: FormEvent<HTMLFormElement>) {
+  function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
-    await api<Me>('/api/login', { username: form.get('username'), password: form.get('password') }).then(
-      onIn,
-      (err: Error) => setError(err.message),
+    api<Me>('/api/login', { username: form.get('username'), password: form.get('password') }).then(onIn, (err: Error) =>
+      setError(err.message),
     );
   }
   return (

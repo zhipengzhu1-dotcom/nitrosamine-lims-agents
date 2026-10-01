@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { it } from 'node:test';
 import { audited } from '@lims/db';
 import { type StepName, stepNames, steps } from '@lims/domain';
 import { labScope } from '../src/scope.ts';
@@ -39,7 +39,7 @@ async function take(client: Client, name: StepName, testId: string, input: objec
   return client.post(`/api/steps/${name}`, { testId, input, ...(signature && { signature }) });
 }
 
-async function testIn(state: 'Requested' | 'Ready' | 'Assigned', analyst: Account = ana!): Promise<string> {
+async function submitTestTo(state: 'Requested' | 'Ready' | 'Assigned', analyst: Account = ana!): Promise<string> {
   const submitted = await as.cora!.post('/api/steps/submit', {
     input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
   });
@@ -52,8 +52,8 @@ async function testIn(state: 'Requested' | 'Ready' | 'Assigned', analyst: Accoun
 
 const view = async (id: string, client = as.lena!) => (await client.get(`/api/tests/${id}`)).body;
 
-test('the chain walks a submitted Test to Reported with three Signatures and an audit entry for every step', async () => {
-  const id = await testIn('Assigned');
+it('the chain walks a submitted Test to Reported with three Signatures and an audit entry for every step', async () => {
+  const id = await submitTestTo('Assigned');
   assert.equal((await take(as.ana!, 'enterResult', id, result, ana)).status, 200);
   assert.equal((await take(as.rui!, 'review', id, {}, rui)).status, 200);
   assert.equal(
@@ -115,15 +115,15 @@ test('the chain walks a submitted Test to Reported with three Signatures and an 
   assert.ok(Math.abs(Date.parse(verified.at) - Date.now()) < 60_000, 'the server states when it checked');
 });
 
-test('a step by the wrong role is refused', async () => {
-  const id = await testIn('Requested');
+it('a step by the wrong role is refused', async () => {
+  const id = await submitTestTo('Requested');
   assert.equal((await take(as.cora!, 'receive', id)).status, 403);
   assert.equal((await take(as.ana!, 'receive', id)).status, 403);
   assert.equal((await view(id)).test.state, 'Requested');
 });
 
-test('assigning an Analyst without a Training Record for the Method is refused', async () => {
-  const id = await testIn('Ready');
+it('assigning an Analyst without a Training Record for the Method is refused', async () => {
+  const id = await submitTestTo('Ready');
   const refused = await take(as.lena!, 'assign', id, { assigneeId: theo!.id });
   assert.equal(refused.status, 403);
   assert.match(refused.body.message, /Training Record/);
@@ -131,8 +131,8 @@ test('assigning an Analyst without a Training Record for the Method is refused',
   assert.deepEqual([after.test.state, after.test.assignee_id], ['Ready', null]);
 });
 
-test('the Analyst who signed Performed cannot review, and the Reviewer who reviewed cannot release', async () => {
-  const id = await testIn('Assigned', dana);
+it('the Analyst who signed Performed cannot review, and the Reviewer who reviewed cannot release', async () => {
+  const id = await submitTestTo('Assigned', dana);
   assert.equal((await take(as.dana!, 'enterResult', id, result, dana)).status, 200);
   assert.equal((await view(id, as.dana)).next, null, 'review is not offered to the Analyst who performed it');
   const anySignature = { password: 'unused' };
@@ -148,8 +148,8 @@ test('the Analyst who signed Performed cannot review, and the Reviewer who revie
   assert.equal((await view(id)).test.state, 'Reviewed');
 });
 
-test('a signing with a wrong password is refused and changes nothing', async () => {
-  const id = await testIn('Assigned', wes);
+it('a signing with a wrong password is refused and changes nothing', async () => {
+  const id = await submitTestTo('Assigned', wes);
   const before = await view(id);
   const enter = (password: string) =>
     as.wes!.post('/api/steps/enterResult', { testId: id, input: result, signature: { password } });
@@ -163,15 +163,15 @@ test('a signing with a wrong password is refused and changes nothing', async () 
   assert.equal((await enter(wes.password)).status, 200);
 });
 
-test("a Customer User cannot read another Customer's Test", async () => {
-  const id = await testIn('Requested');
+it("a Customer User cannot read another Customer's Test", async () => {
+  const id = await submitTestTo('Requested');
   assert.ok((await as.cora!.get('/api/tests')).body.some((t: any) => t.id === id));
   assert.equal((await as.olga!.get(`/api/tests/${id}`)).status, 404);
   assert.equal((await as.olga!.get(`/api/tests/${id}/report`)).status, 404);
   assert.ok(!(await as.olga!.get('/api/tests')).body.some((t: any) => t.id === id));
 });
 
-test("a query without the context's Lab fails, and another Lab's Test is out of reach", async () => {
+it("a query without the context's Lab fails, and another Lab's Test is out of reach", async () => {
   const ctx = (await as.lena!.get('/api/me')).body;
   assert.throws(() => labScope(api.db, { ...ctx, lab: { id: '', code: '', name: '' } }), /needs the Lab/);
 
