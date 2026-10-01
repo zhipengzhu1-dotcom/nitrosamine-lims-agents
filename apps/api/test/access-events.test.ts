@@ -178,7 +178,7 @@ it('roles are those in the session Lab after sign-in and in the default Lab befo
   const otherLab = await audited(api.db, SYSTEM, (tx) =>
     tx
       .insertInto('lab')
-      .values({ code: 'ACEV', name: 'Access Event Lab' })
+      .values({ code: 'ACEV', name: 'Access Event Lab', timeZone: 'UTC' })
       .returning('labId')
       .executeTakeFirstOrThrow(),
   );
@@ -259,7 +259,7 @@ it('a person whose Membership moved to another Lab during the session can still 
   await audited(api.db, SYSTEM, async (tx) => {
     const elsewhere = await tx
       .insertInto('lab')
-      .values({ code: 'ACMV', name: 'Lab the Membership moved to' })
+      .values({ code: 'ACMV', name: 'Lab the Membership moved to', timeZone: 'UTC' })
       .returning('labId')
       .executeTakeFirstOrThrow();
     await tx.updateTable('membership').set({ labId: elsewhere.labId }).where('personId', '=', person.id).execute();

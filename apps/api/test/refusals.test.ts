@@ -47,12 +47,15 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
 } = {
   login: entry(routes.login, { username: cora.username, password: 'not-the-password' }),
   verifyAuditTrail: entry(routes.verifyAuditTrail, {}),
-  submit: step('submit', { input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' } }),
-  receive: step('receive', { testId, input: {} }),
-  assign: step('assign', { testId, input: { assigneeId: randomUUID() } }),
-  enterResult: step('enterResult', { testId, input: result, signature }),
-  review: step('review', { testId, input: {}, signature }),
-  release: step('release', { testId, input: {}, signature }),
+  submit: step('submit', {
+    commitKey: randomUUID(),
+    input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
+  }),
+  receive: step('receive', { commitKey: randomUUID(), testId, input: {} }),
+  assign: step('assign', { commitKey: randomUUID(), testId, input: { assigneeId: randomUUID() } }),
+  enterResult: step('enterResult', { commitKey: randomUUID(), testId, input: result, signature }),
+  review: step('review', { commitKey: randomUUID(), testId, input: {}, signature }),
+  release: step('release', { commitKey: randomUUID(), testId, input: {}, signature }),
   logout: entry(routes.logout, {}),
 };
 
@@ -86,11 +89,14 @@ async function counts() {
 async function assignedTo(analyst: Account): Promise<string> {
   const { testId: id } = ok(
     await as.cora.call(stepRoute('submit'), {
+      commitKey: randomUUID(),
       input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
     }),
   );
-  ok(await as.samir.call(stepRoute('receive'), { testId: id, input: {} }));
-  ok(await as.lena.call(stepRoute('assign'), { testId: id, input: { assigneeId: analyst.id } }));
+  ok(await as.samir.call(stepRoute('receive'), { commitKey: randomUUID(), testId: id, input: {} }));
+  ok(
+    await as.lena.call(stepRoute('assign'), { commitKey: randomUUID(), testId: id, input: { assigneeId: analyst.id } }),
+  );
   return id;
 }
 
@@ -125,7 +131,7 @@ it('every route that takes a body refuses a field its schema does not name with 
 });
 
 it('a body with an unknown field and a missing required field is refused for the unknown field', async () => {
-  const refused = await as.cora.send(stepRoute('receive'), { input: {}, extra: 1 });
+  const refused = await as.cora.send(stepRoute('receive'), { commitKey: randomUUID(), input: {}, extra: 1 });
   assert.equal(refusedWith(refused, 'unknownField'), 'the LIMS does not know the field extra');
 });
 
@@ -143,6 +149,7 @@ it('a signing step with the right password and an unknown field in the signature
   const client = await api.login(lou);
   const before = await counts();
   const refused = await client.send(stepRoute('enterResult'), {
+    commitKey: randomUUID(),
     testId: id,
     input: result,
     signature: { password: lou.password, extra: 1 },
@@ -164,7 +171,7 @@ it('unparseable JSON and a missing required field are refused as malformed, an u
   assert.equal(unparseable.status, 400);
   assert.equal(refusalIn(unparseable.body).kind, 'malformed');
 
-  const missing = await as.cora.send(stepRoute('receive'), { input: {} });
+  const missing = await as.cora.send(stepRoute('receive'), { commitKey: randomUUID(), input: {} });
   assert.equal(refusedWith(missing, 'malformed'), "body must have required property 'testId'");
 
   const unknownRoute = await raw('/api/no-such-route', { method: 'GET' });
