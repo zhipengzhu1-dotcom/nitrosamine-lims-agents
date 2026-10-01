@@ -40,8 +40,11 @@ FETCH_TOOLS = {"WebFetch", "WebSearch"}
 
 
 def context_size(usage):
-    return (usage.get("input_tokens", 0) + usage.get("cache_creation_input_tokens", 0)
-            + usage.get("cache_read_input_tokens", 0))
+    return (
+        usage.get("input_tokens", 0)
+        + usage.get("cache_creation_input_tokens", 0)
+        + usage.get("cache_read_input_tokens", 0)
+    )
 
 
 def num(value):
@@ -54,17 +57,28 @@ def read_jsonl(path):
 
 def analyse(stream):
     rows = read_jsonl(stream)
-    labels = {r["tool_use_id"]: f"{r.get('subagent_type') or 'agent'}: {r.get('description', '')}"
-              for r in rows if r.get("type") == "system" and r.get("subtype") == "task_started"}
+    labels = {
+        r["tool_use_id"]: f"{r.get('subagent_type') or 'agent'}: {r.get('description', '')}"
+        for r in rows
+        if r.get("type") == "system" and r.get("subtype") == "task_started"
+    }
     actors, seen = {}, set()
     for r in rows:
         if r.get("type") != "assistant":
             continue
         msg = r["message"]
         parent = r.get("parent_tool_use_id") or "lead"
-        actor = actors.setdefault(parent, {
-            "label": "lead" if parent == "lead" else labels.get(parent, parent),
-            "turns": 0, "first_context": None, "peak_context": 0, "total_tokens": None, "tool_calls": {}})
+        actor = actors.setdefault(
+            parent,
+            {
+                "label": "lead" if parent == "lead" else labels.get(parent, parent),
+                "turns": 0,
+                "first_context": None,
+                "peak_context": 0,
+                "total_tokens": None,
+                "tool_calls": {},
+            },
+        )
         for block in msg.get("content", []):
             if block.get("type") == "tool_use":
                 actor["tool_calls"][block["name"]] = actor["tool_calls"].get(block["name"], 0) + 1
@@ -87,34 +101,48 @@ def analyse(stream):
         "terminal_reason": final.get("terminal_reason"),
         "total_cost_usd": final.get("total_cost_usd"),
         "duration_ms": final.get("duration_ms"),
-        "models": {m: {k: u.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
-                                              "cacheCreationInputTokens", "costUSD")}
-                   for m, u in final.get("modelUsage", {}).items()},
+        "models": {
+            m: {
+                k: u.get(k)
+                for k in ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheCreationInputTokens", "costUSD")
+            }
+            for m, u in final.get("modelUsage", {}).items()
+        },
         "subagents": final.get("subagent_stats", {}).get("spawned", 0),
         "actors": actors,
     }
 
 
 def markdown(rep):
-    lines = [f"# Token report: {rep['stream']}", "",
-             f"- finished: {rep['finished']} ({rep['terminal_reason']})",
-             f"- total cost: ${rep['total_cost_usd'] or 0:.4f} (list price, as Claude Code reports it)",
-             f"- subagents spawned: {rep['subagents']}", "",
-             "Peak context is the largest single turn (input + cache); growth is peak minus the first turn,"
-             " i.e. what the run added on top of the system prompt. Stream events carry"
-             " output counts from the start of each message, so only the model table has true output.", "",
-             "| actor | turns | peak context | growth | subagent total tokens | tool calls |",
-             "|---|---|---|---|---|---|"]
+    lines = [
+        f"# Token report: {rep['stream']}",
+        "",
+        f"- finished: {rep['finished']} ({rep['terminal_reason']})",
+        f"- total cost: ${rep['total_cost_usd'] or 0:.4f} (list price, as Claude Code reports it)",
+        f"- subagents spawned: {rep['subagents']}",
+        "",
+        (
+            "Peak context is the largest single turn (input + cache); growth is peak minus the first turn,"
+            " i.e. what the run added on top of the system prompt. Stream events carry"
+            " output counts from the start of each message, so only the model table has true output."
+        ),
+        "",
+        "| actor | turns | peak context | growth | subagent total tokens | tool calls |",
+        "|---|---|---|---|---|---|",
+    ]
     for a in rep["actors"].values():
         calls = ", ".join(f"{k}×{v}" for k, v in sorted(a["tool_calls"].items())) or "-"
         growth = a["peak_context"] - (a["first_context"] or 0)
-        lines.append(f"| {a['label']} | {a['turns']} | {a['peak_context']:,} | {growth:,} | {num(a['total_tokens'])}"
-                     f" | {calls} |")
+        lines.append(
+            f"| {a['label']} | {a['turns']} | {a['peak_context']:,} | {growth:,} | {num(a['total_tokens'])} | {calls} |"
+        )
     lines += ["", "| model | input | output | cache read | cache write | cost |", "|---|---|---|---|---|---|"]
     for m, u in rep["models"].items():
         cost = "-" if u["costUSD"] is None else f"${u['costUSD']:.4f}"
-        lines.append(f"| {m} | {num(u['inputTokens'])} | {num(u['outputTokens'])} | {num(u['cacheReadInputTokens'])}"
-                     f" | {num(u['cacheCreationInputTokens'])} | {cost} |")
+        lines.append(
+            f"| {m} | {num(u['inputTokens'])} | {num(u['outputTokens'])} | {num(u['cacheReadInputTokens'])}"
+            f" | {num(u['cacheCreationInputTokens'])} | {cost} |"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -146,13 +174,18 @@ def write_report(stream, args):
 
 
 def session_usage(transcript):
-    turns = {r["message"]["id"]: r["message"].get("usage", {}) for r in read_jsonl(transcript)
-             if r.get("type") == "assistant" and not r.get("isSidechain")
-             and r["message"].get("model") != "<synthetic>"}
+    turns = {
+        r["message"]["id"]: r["message"].get("usage", {})
+        for r in read_jsonl(transcript)
+        if r.get("type") == "assistant" and not r.get("isSidechain") and r["message"].get("model") != "<synthetic>"
+    }
     contexts = [context_size(u) for u in turns.values()]
-    return {"turns": len(turns), "current_context": contexts[-1] if contexts else 0,
-            "peak_context": max(contexts, default=0),
-            "output_tokens": sum(u.get("output_tokens", 0) for u in turns.values())}
+    return {
+        "turns": len(turns),
+        "current_context": contexts[-1] if contexts else 0,
+        "peak_context": max(contexts, default=0),
+        "output_tokens": sum(u.get("output_tokens", 0) for u in turns.values()),
+    }
 
 
 def session(args):
@@ -166,8 +199,10 @@ def session(args):
     if not path.is_file():
         sys.exit(f"no transcript at {path}")
     use = session_usage(path)
-    print(f"session: {path}\nturns: {use['turns']}\ncurrent context: {use['current_context']:,}\n"
-          f"peak context: {use['peak_context']:,}\noutput tokens: {use['output_tokens']:,}")
+    print(
+        f"session: {path}\nturns: {use['turns']}\ncurrent context: {use['current_context']:,}\n"
+        f"peak context: {use['peak_context']:,}\noutput tokens: {use['output_tokens']:,}"
+    )
     if use["current_context"] > args.max_context:
         print(f"FAIL: current context {use['current_context']:,} > {args.max_context:,}")
         return 1
@@ -175,8 +210,7 @@ def session(args):
 
 
 def run(args):
-    cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose",
-           "--max-budget-usd", str(args.budget)]
+    cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose", "--max-budget-usd", str(args.budget)]
     if args.case:
         case = next((c for c in json.loads(CASES.read_text()) if c["id"] == args.case), None)
         if case is None:

@@ -10,19 +10,26 @@ from types import SimpleNamespace
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "tokens.py"
 sys.path.insert(0, str(SCRIPT.parent))
-import tokens  # noqa: E402
+import tokens
 
 SUB = "toolu_sub"
 
 
 def usage(context, output=1):
-    return {"input_tokens": 10, "cache_creation_input_tokens": context - 110,
-            "cache_read_input_tokens": 100, "output_tokens": output}
+    return {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": context - 110,
+        "cache_read_input_tokens": 100,
+        "output_tokens": output,
+    }
 
 
 def assistant(msg_id, context, blocks=(), parent=None):
-    return {"type": "assistant", "parent_tool_use_id": parent,
-            "message": {"id": msg_id, "usage": usage(context), "content": list(blocks)}}
+    return {
+        "type": "assistant",
+        "parent_tool_use_id": parent,
+        "message": {"id": msg_id, "usage": usage(context), "content": list(blocks)},
+    }
 
 
 def tool(name):
@@ -30,14 +37,24 @@ def tool(name):
 
 
 def result(cost=0.5, models=None, is_error=False):
-    return {"type": "result", "is_error": is_error, "terminal_reason": "completed", "total_cost_usd": cost,
-            "modelUsage": models or {}, "subagent_stats": {"spawned": 1}}
+    return {
+        "type": "result",
+        "is_error": is_error,
+        "terminal_reason": "completed",
+        "total_cost_usd": cost,
+        "modelUsage": models or {},
+        "subagent_stats": {"spawned": 1},
+    }
 
 
-TASK_STARTED = {"type": "system", "subtype": "task_started", "tool_use_id": SUB,
-                "subagent_type": "general-purpose", "description": "Fetch one page"}
-TASK_DONE = {"type": "system", "subtype": "task_notification", "tool_use_id": SUB,
-             "usage": {"total_tokens": 19288}}
+TASK_STARTED = {
+    "type": "system",
+    "subtype": "task_started",
+    "tool_use_id": SUB,
+    "subagent_type": "general-purpose",
+    "description": "Fetch one page",
+}
+TASK_DONE = {"type": "system", "subtype": "task_notification", "tool_use_id": SUB, "usage": {"total_tokens": 19288}}
 
 
 def delegating_run():
@@ -105,39 +122,57 @@ class AnalyseTest(Case):
 
 
 def checks(**overrides):
-    return SimpleNamespace(**{"no_lead_fetch": False, "max_lead_context": None, "max_lead_growth": None,
-                              **overrides})
+    return SimpleNamespace(**{"no_lead_fetch": False, "max_lead_context": None, "max_lead_growth": None, **overrides})
 
 
 class CheckTest(Case):
     def test_a_clean_delegating_run_passes_every_check(self):
         rep = self.analyse(delegating_run())
-        self.assertEqual(tokens.check(rep, checks(no_lead_fetch=True, max_lead_context=3000,
-                                                  max_lead_growth=2000)), [])
+        self.assertEqual(tokens.check(rep, checks(no_lead_fetch=True, max_lead_context=3000, max_lead_growth=2000)), [])
 
     def test_a_lead_fetch_fails_no_lead_fetch(self):
         rows = delegating_run()
         rows.insert(0, assistant("m0", 900, [tool("WebFetch")]))
-        self.assertEqual(tokens.check(self.analyse(rows), checks(no_lead_fetch=True)),
-                         ["lead fetched directly: {'WebFetch': 1}"])
+        self.assertEqual(
+            tokens.check(self.analyse(rows), checks(no_lead_fetch=True)), ["lead fetched directly: {'WebFetch': 1}"]
+        )
 
     def test_a_lead_peak_above_the_ceiling_fails_max_lead_context(self):
-        self.assertEqual(tokens.check(self.analyse(delegating_run()), checks(max_lead_context=2999)),
-                         ["lead peak context 3,000 > 2,999"])
+        self.assertEqual(
+            tokens.check(self.analyse(delegating_run()), checks(max_lead_context=2999)),
+            ["lead peak context 3,000 > 2,999"],
+        )
 
     def test_lead_growth_above_the_ceiling_fails_max_lead_growth(self):
-        self.assertEqual(tokens.check(self.analyse(delegating_run()), checks(max_lead_growth=1999)),
-                         ["lead context grew 2,000 > 1,999"])
+        self.assertEqual(
+            tokens.check(self.analyse(delegating_run()), checks(max_lead_growth=1999)),
+            ["lead context grew 2,000 > 1,999"],
+        )
 
 
 def turn(msg_id, context, output, model="claude-opus-5-5", sidechain=False):
-    return {"type": "assistant", "isSidechain": sidechain,
-            "message": {"id": msg_id, "model": model, "usage": usage(context, output)}}
+    return {
+        "type": "assistant",
+        "isSidechain": sidechain,
+        "message": {"id": msg_id, "model": model, "usage": usage(context, output)},
+    }
 
 
-SYNTHETIC = {"type": "assistant", "isSidechain": False, "isApiErrorMessage": True,
-             "message": {"id": "e1", "model": "<synthetic>", "usage": {"input_tokens": 0, "cache_creation_input_tokens": 0,
-                                                                "cache_read_input_tokens": 0, "output_tokens": 0}}}
+SYNTHETIC = {
+    "type": "assistant",
+    "isSidechain": False,
+    "isApiErrorMessage": True,
+    "message": {
+        "id": "e1",
+        "model": "<synthetic>",
+        "usage": {
+            "input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 0,
+        },
+    },
+}
 
 
 def transcript():
@@ -155,14 +190,21 @@ def transcript():
 
 class SessionTest(Case):
     def test_reports_the_main_threads_last_turn_its_peak_and_output_once_per_message(self):
-        self.assertEqual(tokens.session_usage(self.stream(transcript())),
-                         {"turns": 3, "current_context": 60000, "peak_context": 90000, "output_tokens": 1000})
+        self.assertEqual(
+            tokens.session_usage(self.stream(transcript())),
+            {"turns": 3, "current_context": 60000, "peak_context": 90000, "output_tokens": 1000},
+        )
 
 
 class CliTest(Case):
     def cli(self, *argv, env=None):
-        return subprocess.run([sys.executable, str(SCRIPT), *argv], capture_output=True, text=True,
-                              env={**os.environ, **(env or {})})
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), *argv],
+            capture_output=True,
+            text=True,
+            env={**os.environ, **(env or {})},
+            check=False,
+        )
 
     def test_session_fails_when_current_context_is_over_the_ceiling(self):
         proc = self.cli("session", str(self.stream(transcript())), "--max-context", "59999")

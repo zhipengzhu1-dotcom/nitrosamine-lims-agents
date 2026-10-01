@@ -21,7 +21,7 @@ OUT = HERE / "out"
 ALLOWED_TOOLS = "Read Grep Glob Bash(git show:*) Bash(git diff:*) Bash(git log:*) Bash(gh issue view:*)"
 PROMPT = "Review this proposed design for the LIMS. It is given inline; there is no diff.\n\n{artifact}"
 
-VERDICT_LINE = re.compile(r"^\s*[-*]?\s*(met|gap|procedural|unclear|n/a)\s*:\s*(.+?)\s*$", re.I)
+VERDICT_LINE = re.compile(r"^\s*[-*]?\s*(met|gap|procedural|unclear|n/a)\s*:\s*(.+?)\s*$", re.IGNORECASE)
 PART11_CITATION = re.compile(r"^(§?11\.\d|a11|di|ci|sa|pics|cs|rd|gmp|jirei|ch4|esl|62fr)")
 ISO_CITATION = re.compile(r"^\d\.\d")
 USP_CITATION = re.compile(r"^(<\d{1,4}(\.\d+)?>|gn\d)")
@@ -33,7 +33,7 @@ def normalize(citation):
 
 
 def parse_verdicts(report):
-    blocks = re.findall(r"```verdicts\n(.*?)```", report, re.S)
+    blocks = re.findall(r"```verdicts\n(.*?)```", report, re.DOTALL)
     if not blocks:
         return None
     verdicts = []
@@ -78,7 +78,12 @@ def run(case):
     prompt = PROMPT.format(artifact=case["artifact"])
     proc = subprocess.run(
         ["claude", "-p", "--agent", case["agent"], "--allowedTools", ALLOWED_TOOLS],
-        input=prompt, cwd=REPO, capture_output=True, text=True, timeout=900,
+        input=prompt,
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=900,
+        check=False,
     )
     report = proc.stdout
     (OUT / f"{case['id']}.md").write_text(report)
