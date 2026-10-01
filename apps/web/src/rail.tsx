@@ -10,7 +10,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, signOut, useApi } from './api.ts';
+import { api, Refused, signOut, useApi } from './api.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst';
 export interface Field<N extends string = string> {
@@ -277,8 +277,13 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
       returnFocus.current = true;
       if (sheet) close(true);
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
       const refused: Note = {
-        text: `Refused: ${e instanceof Error ? e.message : String(e)}.${a.signs ? ' Nothing has been signed.' : ''}`,
+        // A failure is not a refusal: the note claims nothing about what was saved, and the message names the reference.
+        text:
+          e instanceof Refused && e.kind === 'failure'
+            ? `Not finished: ${message}.`
+            : `Refused: ${message}.${a.signs ? ' Nothing has been signed.' : ''}`,
         tone: 'bad',
         n: ++count.current,
       };
