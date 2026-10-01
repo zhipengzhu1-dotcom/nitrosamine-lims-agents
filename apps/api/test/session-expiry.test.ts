@@ -155,6 +155,17 @@ it('with the decided login the idle limit is 15 minutes, with the demo login 8 h
   }
 });
 
+it('the sweep refuses limits other than the decided or demo ones, so no caller ends a session early', async () => {
+  const person = await api.addPerson('expiry.early', ['Analyst']);
+  const client = await api.login(person);
+  await assert.rejects(
+    endExpiredSessions(api.db, { idleMs: 1, absoluteMs: absoluteMs }),
+    (err: { code?: string }) => err.code === 'LA003',
+  );
+  assert.deepEqual(await expiriesOf(person), []);
+  ok(await client.call(routes.me));
+});
+
 it('the API runs the sweep by itself on its schedule', async () => {
   const sweeping = await api.startAnotherApi({ sweepEveryMs: 20 });
   const person = await api.addPerson('expiry.scheduled', ['Analyst']);

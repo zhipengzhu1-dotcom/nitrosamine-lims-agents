@@ -39,7 +39,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 - Return a refusal from domain code as a value. Domain code never throws, so that the API and the web can both ask "may this person do this?" without a `try`.
 - Turn a refusal into an HTTP error only in the API, and only through `refuse`, so that every status code is chosen in one place.
-- Do not swallow an unexpected failure, because a hidden failure on a write path is a lost record. A `catch` adds context and rethrows with `cause`, or it does not exist.
+- Do not swallow an unexpected failure, because a hidden failure on a write path is a lost record. A `catch` adds context and rethrows with `cause`, or it does not exist. The one exception is a job on a timer, such as the expiry sweep, whose next run writes the same record: its `catch` logs the failure and leaves the retry to that run, because a throw there would stop the API.
 - Write a refusal message as a sentence for the person at the bench, in glossary terms, because the web shows it as written.
 
 ## Values keep their digits and time comes from the database

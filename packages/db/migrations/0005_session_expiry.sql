@@ -26,11 +26,17 @@ $$;
 -- Ends every session past its end and writes its expiry Access Event at that end, not at the time the sweep runs.
 -- Only a session not yet ended is ended, so a second sweep, or one racing a sign-out, writes nothing more.
 -- Security definer because lims_app may not choose an Access Event's time; the caller sets the audit context.
+-- It takes only the decided limits (15 minutes idle) or the demo login's (8 hours idle), each with 12 hours absolute,
+-- so no caller can end a session early or stamp its expiry at an instant of its choosing.
 create function lims.end_expired_sessions(idle interval, absolute interval) returns integer
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
   ended integer;
 begin
+  if idle is null or idle not in (interval '15 minutes', interval '8 hours') or absolute is distinct from interval '12 hours' then
+    raise exception 'the session limits must be the decided or the demo ones, not % idle and % absolute', idle, absolute
+      using errcode = 'LA003';
+  end if;
   with expired as (
     update session s
        set ended_at = session_end(s.last_seen_at, s.created_at, idle, absolute)
