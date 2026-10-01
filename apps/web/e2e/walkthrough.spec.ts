@@ -156,6 +156,7 @@ test('the whole sample chain through the real UI, with a refusal on screen and a
   await saveValue(ann, 'Run Check Check standard recovery', '98.4');
   const preps: [string, string, string][] = [['100.12', '10.0', '1.234'], ['99.87', '10.0', '1.201']];
   for (const [i, [w, d, c]] of preps.entries()) {
+    await ann.getByRole('region', { name: 'Preparations' }).getByLabel('Balance').selectOption({ label: /^BAL-01/ });
     await ann.getByRole('button', { name: `Add Preparation P${i + 1}` }).click();
     await expect(ann.getByLabel(`P${i + 1} weight`, { exact: true })).toBeVisible();
     await saveValue(ann, `P${i + 1} weight`, w);
@@ -189,7 +190,7 @@ test('the whole sample chain through the real UI, with a refusal on screen and a
   // 5. Dee, a second Analyst, signs every value of the first Test and its Run Verified in one group.
   const dee = await atPc(browser, 'dee', 'Bench PC RD-102-03');
   await dee.goto(testUrl);
-  await sign(dee, 'dee', 'Sign 11 values as Verified', async (sheet) => {
+  await sign(dee, 'dee', 'Sign 13 values as Verified', async (sheet) => {
     await expect(sheet.getByRole('region', { name: 'What you are signing' }).getByText('P1 weight on').first()).toBeVisible();
     await shoot(dee, 'verified-prompt-second-analyst');
   });
