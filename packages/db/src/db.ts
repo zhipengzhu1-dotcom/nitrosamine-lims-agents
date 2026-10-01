@@ -3,7 +3,7 @@ import pg from 'pg';
 import type { DB } from './schema.ts';
 
 export type { DB };
-export type { Meaning, Role, TestState } from './schema.ts';
+export type { Json, Meaning, Role, TestState } from './schema.ts';
 
 export function databaseUrl(database = process.env.LIMS_DB ?? 'lims', user?: string): string {
   const url = new URL(process.env.LIMS_PG ?? 'postgres://postgres@localhost:54339');

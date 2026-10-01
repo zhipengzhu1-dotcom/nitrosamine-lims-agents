@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
-import { type StepName, stepNames, steps } from '@lims/domain';
+import { routes, type StepName, stepNames, steps } from '@lims/domain';
 import { labScope } from '../src/scope.ts';
 import { type Account, type Client, startApi } from './harness.ts';
 
@@ -128,7 +128,7 @@ it('assigning an Analyst without a Training Record for the Method is refused', a
   assert.equal(refused.status, 403);
   assert.match(refused.body.message, /Training Record/);
   const after = await view(id);
-  assert.deepEqual([after.test.state, after.test.assignee_id], ['Ready', null]);
+  assert.deepEqual([after.test.state, after.test.assignee], ['Ready', null]);
 });
 
 it('the Analyst who signed Performed cannot review, and the Reviewer who reviewed cannot release', async () => {
@@ -206,4 +206,12 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
   assert.equal((await as.lena!.get(`/api/tests/${otherTest}`)).status, 404);
   assert.equal((await take(as.samir!, 'receive', otherTest)).status, 404);
   assert.ok(!(await as.lena!.get('/api/tests')).body.some((t: any) => t.id === otherTest));
+});
+
+it('a Test leaves the API with only the fields a Test row declares', async () => {
+  const id = await submitTestTo('Assigned');
+  const declared = Object.keys(routes.tests.schema.response[200].items.properties).sort();
+  const listed = (await as.lena!.get('/api/tests')).body.find((t: any) => t.id === id);
+  assert.deepEqual(Object.keys(listed).sort(), declared, 'GET /api/tests');
+  assert.deepEqual(Object.keys((await view(id)).test).sort(), declared, 'GET /api/tests/:id');
 });

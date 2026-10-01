@@ -1,4 +1,5 @@
-import { audited, type DB, type Role } from '@lims/db';
+import { audited, type DB } from '@lims/db';
+import type { ActorContext, Role } from '@lims/domain';
 import {
   type Insertable,
   type Kysely,
@@ -7,12 +8,6 @@ import {
   type UpdateQueryBuilder,
   type UpdateResult,
 } from 'kysely';
-
-export interface ActorContext {
-  person: { id: string; username: string; displayName: string; customerId: string | null };
-  lab: { id: string; code: string; name: string };
-  roles: Role[];
-}
 
 type CompanyTable = 'customer' | 'person' | 'method' | 'submission' | 'lab';
 type LabTable = Exclude<keyof DB, CompanyTable | 'audit_entry' | 'session'>;
@@ -47,10 +42,10 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     auditTrail: () => db.selectFrom('audit_entry').where('chain', '=', labId),
     verifyChain: async (chain: 'lab' | 'company') =>
       (
-        await sql<{
-          broken: string | null;
-        }>`select lims.verify_chain(${chain === 'lab' ? labId : 'company'}) as broken`.execute(db)
-      ).rows[0]!.broken,
+        await db
+          .selectNoFrom(sql<string | null>`lims.verify_chain(${chain === 'lab' ? labId : 'company'})`.as('broken'))
+          .executeTakeFirstOrThrow()
+      ).broken,
     write: <R>(reason: string, role: Role, fn: (q: LabQueries) => Promise<R>) =>
       audited(db, { actor: `person:${ctx.person.username}`, role, reason }, (tx) => fn(inLab(tx, labId))),
   };
