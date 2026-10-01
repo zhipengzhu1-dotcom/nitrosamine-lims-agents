@@ -1,16 +1,30 @@
-import { type StepName, steps, type TestState } from '@lims/domain';
+import {
+  type ActorContext,
+  decimalPattern,
+  routes,
+  type StepInput,
+  type StepName,
+  stepRoute,
+  steps,
+  type TestState,
+} from '@lims/domain';
 import { type ReactNode, useEffect, useState } from 'react';
-import { api, type Lookups, type Me, signOut, useApi } from './api.ts';
+import { api, signOut, useApi } from './api.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst';
-export interface Field {
-  name: string;
+export interface Field<N extends string = string> {
+  name: N;
   label: string;
   kind: FieldKind;
 }
 
-/** The web's only per-step table: what each step asks for. Role, states and Signature Meaning come from the registry. */
-export const stepUi: Record<StepName, { label: string; fields: Field[]; record?: string }> = {
+/**
+ * The web's only per-step table: what each step asks for, keyed by the step's input so a renamed input fails to compile.
+ * Role, states and Signature Meaning come from the registry.
+ */
+export const stepUi: {
+  [K in StepName]: { label: string; fields: readonly Field<Extract<keyof StepInput<K>, string>>[]; record?: string };
+} = {
   submit: {
     label: 'Submit',
     fields: [
@@ -78,7 +92,7 @@ export function stepAction(name: StepName, testId: string | null, what: string[]
     fields: ui.fields,
     signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
     async run(input, password) {
-      await api(`/api/steps/${name}`, {
+      await api(stepRoute(name), {
         ...(testId && { testId }),
         input,
         ...(password !== null && { signature: { password } }),
@@ -124,7 +138,8 @@ export const modules = [
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
 ] as const;
-export type ModuleKey = (typeof modules)[number]['key'];
+export type Module = (typeof modules)[number];
+type ModuleKey = Module['key'];
 
 export function Shell({
   me,
@@ -132,7 +147,7 @@ export function Shell({
   action,
   children,
 }: {
-  me: Me;
+  me: ActorContext;
   active: ModuleKey;
   action: RailAction | null;
   children: ReactNode;
@@ -166,7 +181,7 @@ export function TopBar({ children }: { children?: ReactNode }) {
   );
 }
 
-function Rail({ me, action }: { me: Me; action: RailAction | null }) {
+function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
   const [open, setOpen] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [password, setPassword] = useState('');
@@ -187,7 +202,7 @@ function Rail({ me, action }: { me: Me; action: RailAction | null }) {
       setOpen(false);
     } catch (e) {
       setNote({
-        text: `Refused: ${(e as Error).message}.${action.signs ? ' Nothing has been signed.' : ''}`,
+        text: `Refused: ${e instanceof Error ? e.message : String(e)}.${action.signs ? ' Nothing has been signed.' : ''}`,
         tone: 'bad',
       });
     } finally {
@@ -309,7 +324,7 @@ function FieldInput({ field, value, onChange }: { field: Field; value: string; o
     return <LookupSelect field={field} value={value} onChange={change} />;
   const props = { required: true, value, onChange: change };
   if (field.kind === 'date') return <input type="date" {...props} />;
-  if (field.kind === 'decimal') return <input inputMode="decimal" pattern="-?[0-9]+(\.[0-9]+)?" {...props} />;
+  if (field.kind === 'decimal') return <input inputMode="decimal" pattern={decimalPattern} {...props} />;
   return <input {...props} />;
 }
 
@@ -322,7 +337,7 @@ function LookupSelect({
   value: string;
   onChange: (e: { target: { value: string } }) => void;
 }) {
-  const { data } = useApi<Lookups>('/api/lookups');
+  const { data } = useApi(routes.lookups);
   const options =
     field.kind === 'method'
       ? data?.methods.map((m) => ({ id: m.id, text: `${m.code} v${m.version} ${m.title}` }))

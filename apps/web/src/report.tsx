@@ -1,4 +1,5 @@
-import { api, type Me, type TestReport, useApi } from './api.ts';
+import { type ActorContext, routes } from '@lims/domain';
+import { api, useApi } from './api.ts';
 import { demoSigning, type RailAction, Shell } from './rail.tsx';
 import { Signatures, time } from './tests.tsx';
 
@@ -8,18 +9,15 @@ const verifyAction: RailAction = {
   fields: [],
   signs: null,
   async run() {
-    const { at, lab, company } = await api<{ at: string; lab: string | null; company: string | null }>(
-      '/api/audit/verify',
-      {},
-    );
+    const { at, lab, company } = await api(routes.verifyAuditTrail);
     const chain = (name: string, broken: string | null) =>
       broken === null ? `${name} chain internally consistent` : `${name} chain BROKEN at entry ${broken}`;
     return `Recomputed at ${time(at)}: ${chain('Lab', lab)}, ${chain('company', company)}. Not anchored off-server (demo).`;
   },
 };
 
-export function ReportPage({ me, id }: { me: Me; id: string }) {
-  const { data, error } = useApi<TestReport>(`/api/tests/${id}/report`);
+export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
+  const { data, error } = useApi(routes.report, { id });
   return (
     <Shell me={me} active="tests" action={me.roles.includes('QA') ? verifyAction : null}>
       {error && <p className="note--bad">{error}</p>}

@@ -1,13 +1,22 @@
-import { steps } from '@lims/domain';
-import { type AuditEntry, type Me, type Row, type Signature, type TestRow, type TestView, useApi } from './api.ts';
+import {
+  type ActorContext,
+  type AuditEntry,
+  type Result,
+  type RowSnapshot,
+  routes,
+  type Signature,
+  steps,
+  type TestRow,
+} from '@lims/domain';
+import { useApi } from './api.ts';
 import { Shell, Status, stepAction } from './rail.tsx';
 
 export const time = (iso: string | null) =>
   iso ? `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')} UTC` : '';
 const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on Sample ${t.sampleNumber}`;
 
-export function Worklist({ me }: { me: Me }) {
-  const { data: tests, error, reload } = useApi<TestRow[]>('/api/tests');
+export function Worklist({ me }: { me: ActorContext }) {
+  const { data: tests, error, reload } = useApi(routes.tests);
   const action = me.roles.includes(steps.submit.role)
     ? stepAction('submit', null, ['A new Submission with one Sample and one Test'], reload)
     : null;
@@ -52,10 +61,11 @@ export function Worklist({ me }: { me: Me }) {
   );
 }
 
-export function TestPage({ me, id }: { me: Me; id: string }) {
-  const { data: view, error, reload } = useApi<TestView>(`/api/tests/${id}`);
-  const what = view && [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])];
-  const action = view?.next ? stepAction(view.next, id, what!, reload) : null;
+export function TestPage({ me, id }: { me: ActorContext; id: string }) {
+  const { data: view, error, reload } = useApi(routes.test, { id });
+  const action = view?.next
+    ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], reload)
+    : null;
   if (!view)
     return (
       <Shell me={me} active="tests" action={null}>
@@ -112,8 +122,7 @@ export function TestPage({ me, id }: { me: Me; id: string }) {
   );
 }
 
-const resultLine = (r: NonNullable<TestView['result']>) =>
-  `Result: ${r.analyte} ${r.value} ${r.unit}, performed on ${r.performedOn}`;
+const resultLine = (r: Result) => `Result: ${r.analyte} ${r.value} ${r.unit}, performed on ${r.performedOn}`;
 
 export function Signatures({ rows }: { rows: Signature[] }) {
   if (!rows.length) return <p className="muted">No Signatures yet.</p>;
@@ -151,8 +160,8 @@ const shown = (v: unknown) => {
 };
 
 function changes(e: AuditEntry): string {
-  const before: Row = e.oldRow ?? {};
-  const after: Row = e.newRow ?? {};
+  const before: RowSnapshot = e.oldRow ?? {};
+  const after: RowSnapshot = e.newRow ?? {};
   return Object.keys({ ...before, ...after })
     .filter((k) => k !== 'lab_id' && JSON.stringify(before[k]) !== JSON.stringify(after[k]))
     .map((k) =>
