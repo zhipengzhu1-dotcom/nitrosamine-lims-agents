@@ -200,7 +200,7 @@ const tables = {
 type Table = keyof typeof tables;
 const tableNames = Object.keys(tables).filter((key): key is Table => Object.hasOwn(tables, key));
 
-const audited: Table[] = [
+const auditedTables: Table[] = [
   'lims.customer',
   'lims.person',
   'lims.method',
@@ -227,7 +227,6 @@ function insert(table: string, row: Row): [string, unknown[]] {
 const AUDIT_CONTEXT = `select set_config('lims.actor', 'svc:test', true), set_config('lims.role', 'system', true),
                               set_config('lims.reason', 'Probe a refusal', true)`;
 
-/** Runs one statement in a transaction that always rolls back, and returns the database's refusal of it. */
 async function refusalOf(statement: string, values: unknown[] = [], context = true): Promise<pg.DatabaseError> {
   await client.query('begin');
   try {
@@ -285,7 +284,7 @@ describe('the database refuses an empty required field', () => {
   for (const table of tableNames) {
     const { noun, notNull } = tables[table];
     for (const column of notNull) covered.add(`${table}.${bare(table)}_${column}_not_null`);
-    it(`every required field of a ${noun} refuses a null`, async () => {
+    it(`every required field of ${/^[AEIOU]/.test(noun) ? 'an' : 'a'} ${noun} refuses a null`, async () => {
       for (const column of notNull) {
         const error = await refusalOfRow(table, { [column]: null });
         assert.deepEqual([error.code, error.table, error.column], ['23502', bare(table), column], error.message);
@@ -558,9 +557,9 @@ describe('the database refuses a value outside its allowed set', () => {
 });
 
 describe('an audited write without an actor, a role and a reason is refused', () => {
-  for (const table of audited) {
+  for (const table of auditedTables) {
     covered.add(`${table}.capture`);
-    it(`a new ${tables[table].noun} written without them is refused`, async () => {
+    it(`a new ${tables[table].noun} without an actor, a role and a reason is refused`, async () => {
       const error = await refusalOfRow(table, {}, false);
       assert.deepEqual([error.code, error.message], ['LA001', 'an audited write needs an actor, a role and a reason']);
       assert.match(error.where ?? '', /^PL\/pgSQL function capture\(\)/);
