@@ -830,10 +830,13 @@ select {
   .changes dd {
     margin-bottom: 4px;
   }
-  .trail__tools label,
-  .trail__tools input[type="search"] {
+  .trail__tools label {
     flex: 1 1 100%;
     min-width: 0;
+  }
+  .trail__tools input[type="search"] {
+    min-width: 0;
+    width: 100%;
   }
   .stack,
   .stack tbody,

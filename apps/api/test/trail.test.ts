@@ -73,7 +73,7 @@ it("the Test's trail lists the Test's, its Result's and Signatures' entries with
   const id = await submitTestTo('Reported');
   const { entries, record, labZone } = await trailOf(id);
 
-  assert.deepEqual(record, { table: 'test', id, kind: 'Test', label: `Test on ${entries[1]?.record.label}` });
+  assert.deepEqual(record, { table: 'test', id, kind: 'Test', label: entries[1]?.record.label });
   assert.equal(labZone, 'America/New_York');
   const tables = new Set(entries.map((e) => e.record.table));
   assert.deepEqual([...tables].sort(), ['result', 'sample', 'signature', 'submission', 'test', 'test_report']);
@@ -162,13 +162,13 @@ it("after a person's printed name or a record's label changes, an earlier entry 
     entries.find((e) => e.changes.some((c) => c.field === 'assignee_id')) ?? assert.fail('the assign entry');
   const performed = entries.find((e) => e.reason === 'enterResult' && e.record.table === 'signature');
   assert.equal(assign.changes[0]?.new?.text, 'Ana Ferreira', 'the assignee as named when assigned');
-  assert.equal(assign.record.label, `Test on ${sample.label}`, 'the Test labelled by its Sample number at the time');
+  assert.equal(assign.record.label, sample.label, 'the Test labelled by its Sample number at the time');
   assert.deepEqual(
     [performed?.actor.label, performed?.changes.find((c) => c.field === 'person_id')?.new?.text],
     ['Ana Ferreira-Souza', 'Ana Ferreira-Souza'],
     'the signer as named when signing',
   );
-  assert.equal(record.label, `Test on ${sample.label}-R`, 'the Test as it is labelled now');
+  assert.equal(record.label, `${sample.label}-R`, 'the Test as it is labelled now');
 });
 
 it("a cited record's own trail holds only that record's entries, and a record out of reach is not found", async () => {

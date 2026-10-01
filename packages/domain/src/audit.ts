@@ -78,7 +78,8 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
   test: {
     kind: 'Test',
     chain: 'lab',
-    label: (row, labelOf) => `Test on ${labelOf('sample', row.sample_id)}`,
+    // A Test is named by its Sample, as the Test page's heading names it.
+    label: (row, labelOf) => labelOf('sample', row.sample_id),
     fields: {
       state: { label: 'State', workflow: true },
       gxp_class: { label: 'GxP Class' },

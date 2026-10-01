@@ -161,7 +161,7 @@ describe('an entry reads in glossary words with labels as they stood at its time
       [
         [
           { label: 'Lena Varga', role: 'LabManager' },
-          { table: 'test', id: 't1', kind: 'Test', label: 'Test on RD-S00001' },
+          { table: 'test', id: 't1', kind: 'Test', label: 'RD-S00001' },
         ],
         [{ label: 'Ana Ferreira-Souza', role: 'Analyst' }, 'NDMA 0.0300 ppm', 'Ana Ferreira-Souza'],
         ['svc:seed', 'Submission from c1', 2],

@@ -27,7 +27,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 3 | Record Type Register | |
 | 3 | Calculation Versions | |
 | 3 | Review Checklists | |
-| 3 | Readable Audit Trail panel | |
+| 3 | Readable Audit Trail panel | [#111](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/111) |
 | 3 | QA audit export | |
 | 4 | Document vault | |
 | 4 | Training Records | |

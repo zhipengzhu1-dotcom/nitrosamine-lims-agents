@@ -171,6 +171,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await page.getByRole('button', { name: 'Release' }).click();
   await sign(page, 'Released');
   await railSays(page, 'now Reported');
+  await page.getByRole('button', { name: 'Verify chain' }).click();
+  await expect(page.locator('.verdict')).toHaveText(
+    /^Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC: Lab chain intact through entry \d+; Company chain intact through entry \d+\. Not anchored off-server \(demo\)\.$/,
+  );
   const reportLink = page.getByRole('link', { name: /^RD-R\d{5}$/ });
   await atLeast(reportLink, 44, 44);
   await reportLink.click();
@@ -183,11 +187,5 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   ]) {
     await expect(page.getByRole('row', { name: new RegExp(`${meaning}.*${signer}`) })).toBeVisible();
   }
-  await page.getByRole('button', { name: 'Verify Audit Trail' }).click();
-  await railSays(
-    page,
-    'Lab chain internally consistent, company chain internally consistent. Not anchored off-server (demo).',
-  );
-  await railSays(page, /Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC:/);
   await shot(page, 'test-report');
 });

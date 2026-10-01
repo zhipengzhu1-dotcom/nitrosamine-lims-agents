@@ -1,17 +1,22 @@
 # Test Audit Trail
 
-Every Test page that a Lab person opens ends with its Audit Trail, one row for each change to the Test, its Sample, Result, Test Report and Signatures. A Customer sees no Audit Trail. Each row shows the sequence number, the database time in UTC, who made the change (`person:<username>`), their role, the reason (the step name), the record and the change (`field: before → after` for an update, `field=value` for an insert). The rows are written by database triggers, so every step through the UI must leave them.
+Every Test page that a Lab person opens ends with its Audit Trail: one time-ordered list of every change to the Test, its Sample, Result, Test Report and Signatures, with the Submission's entry from the company chain. A Customer sees no Audit Trail. Each entry shows its chain (`Lab chain` or `Company chain`), its sequence number, the database time in UTC and, on the Lab chain, in the Lab's zone, who made the change by their printed name and role, what they created or changed, the reason (the step name), and each field by its glossary name with the old and new value. A referenced record (a person, a Method, a Sample) shows by its label as it stood at the entry's time and links to its own trail at `#/trails/<table>/<id>`. A long value is collapsed and expands in place. `Raw entry N` opens the stored entry with its hashes. The list is searchable and sortable, and an entry that changed a saved value after first save is tinted red. QA has `Verify chain` in the panel.
 
 ## Sub-features
 
-- `trail-rows` adds the step's rows to the table after each step.
-- `trail-attribution` names the person who signed in and their role, never a service.
-- `trail-change` shows the state change, such as `state: Requested → Ready`, and the Sample's `received_at: null → <time>` for `receive`.
-- `trail-customer-hidden` shows a Customer the Test without the Audit Trail.
+- `trail-entries` adds the step's entries to the list after each step, on the right chain.
+- `trail-attribution` names the person who signed in by their printed name and role, never a service, and keeps the name they had at the time.
+- `trail-change` shows `State` with `<old> → <new>`, and for `receive` the Sample's `Received` with the stored time.
+- `trail-search-sort` filters the list by any shown word and orders it oldest or newest first.
+- `trail-long-values` collapses a value longer than 48 characters, such as the signed Record Version, behind a summary that expands in place.
+- `trail-raw` opens the stored entry (`Raw entry N`) in a dialog with its `old_row`, `new_row`, `prev_hash` and `hash`.
+- `trail-record-link` opens a cited record's own trail from a link in an entry.
+- `trail-verify` lets QA recompute both chains and reads `intact through entry N` for each.
+- `trail-customer-hidden` shows a Customer the Test without the Audit Trail, and `/api/tests/<id>/trail` refuses a Customer with 403 `role`.
 
 ## How to get to it (user POV)
 
-- Open any Test from the worklist as a Lab person and scroll to the `Audit Trail` heading.
+- Open any Test from the worklist as a Lab person and scroll to the `Audit Trail` heading. The panel is `getByRole('region', { name: 'Audit Trail' })` and each entry a `listitem` named `entry <seq>`.
 
 ## Driving it with drive.ts
 
@@ -20,14 +25,18 @@ Preconditions:
 - doctor.sh is all `ok:`.
 - A Test in any state: `node .claude/skills/verify/scripts/chain.ts <State>`.
 
-- **Before.** Open the Test as the role that takes its next step. Screenshot the `Audit Trail` table, and count `page.locator('table.audit tbody tr')`.
+- **Before.** Open the Test as the role that takes its next step. Screenshot the panel and count `trail.getByRole('listitem')`.
 - **Act.** Take the step from the rail, and wait for the status line to read `now <State>`.
-- **After.** The table has new rows. The last ones name `person:<username>`, the role and the step as the reason. One of them shows `state: <old> → <new>`. For `receive` there are two: `test` with `state: Requested → Ready` and `sample` with `received_at: null → <time>`.
-- **Customer.** Sign in as `cora.customer` and open the Test. `getByRole('heading', { name: 'Audit Trail' })` has a count of 0.
-- **Proof.** Run `select chain, seq, at, actor, role, reason, table_name, op from lims.audit_entry order by at desc limit 5`, and compare it with the table. `chain.ts` saves the Test's whole trail as `audit-trail.tsv`.
+- **After.** The panel has new entries. The last ones name the person's printed name, their role in words (`Lab Manager`) and the step as the reason. One of them shows `State` with `<old> → <new>`. For `receive` there are two: the Test with `State Requested → Ready` and the Sample with `Received`.
+- **Search.** Fill `Search the trail` with a printed name and count the entries; clear it and the count returns. Choose `Newest first` in `Order` and the first entry is the latest.
+- **Long value and raw.** On a Test past Enter Result, the Signature entry holds `details.long`; click its `summary` and the signed Record Version shows in full. Press `Raw entry N`; the `dialog` shows the stored entry with a 64-hex `hash`. `Close` it.
+- **Verify.** As `quinn.qa`, press `Verify chain` in the panel. `steps.log` shows `POST /api/audit/verify -> 200`, and `.verdict` reads `Recomputed at <YYYY-MM-DD hh:mm:ss> UTC: Lab chain intact through entry N; Company chain intact through entry M. Not anchored off-server (demo).` N equals `select max(seq) from lims.audit_entry where chain = (select lab_id::text from lims.lab)`.
+- **Customer.** Sign in as `cora.customer` and open the Test. `getByRole('region', { name: 'Audit Trail' })` has a count of 0.
+- **Proof.** Run `select chain, seq, at, actor, role, reason, table_name, op from lims.audit_entry order by at desc limit 5`, and compare it with the raw entries. `chain.ts` saves the Test's whole trail as `audit-trail.tsv`.
 
 ## Gotchas
 
-- The page shows only the Lab chain. The company chain (such as the `submission` insert) numbers its own `seq` and never appears here. Gaps in `#` are other Tests' and Samples' entries in the Lab chain.
-- The `at` column comes from the database clock. Do not compare it with the browser's or the scenario's clock.
-- `table.audit` is the one CSS handle in this map. The table has no accessible name; use the `Audit Trail` heading to scroll to it.
+- The company chain numbers its own `seq`, so `#` is unique only within a chain. Gaps in `#` are other Tests' and Samples' entries.
+- `assign` writes two Test entries in one transaction: `State Ready → Assigned`, then `Analyst none → <name>`.
+- The `at` column comes from the database clock. Do not compare it with the browser's or the scenario's clock. The Lab-zone time is the same instant in `America/New_York` (the seeded Lab's zone).
+- The hash in the dialog is over the stored bytes, so a renamed person still shows their old name in old entries; that is the record, not a bug.
