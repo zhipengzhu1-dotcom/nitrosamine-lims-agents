@@ -5,6 +5,16 @@
 
 import type { ColumnType } from "kysely";
 
+export type AccessEventKind = "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
+
+export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
+  ? U[]
+  : ArrayTypeImpl<T>;
+
+export type ArrayTypeImpl<T> = T extends ColumnType<infer S, infer I, infer U>
+  ? ColumnType<S[], I[], U[]>
+  : T[];
+
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
@@ -27,9 +37,26 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "QA" | "Reviewer" | "SampleCustodian";
 
+export type SignInFailure = "AccountLocked" | "NoLab" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
+
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
+
+export interface AccessEvent {
+  at: Generated<Timestamp>;
+  failureReason: SignInFailure | null;
+  id: Generated<string>;
+  kind: AccessEventKind;
+  roles: ArrayType<Role>;
+  sessionId: string | null;
+  sessionLabId: string | null;
+  sourceAddress: string;
+  subjectId: string | null;
+  typedUserIdHmac: Buffer | null;
+  typedUserIdLength: number | null;
+  workstationId: string | null;
+}
 
 export interface AuditEntry {
   actor: string;
@@ -154,6 +181,7 @@ export interface TrainingRecord {
 }
 
 export interface DB {
+  accessEvent: AccessEvent;
   auditEntry: AuditEntry;
   customer: Customer;
   lab: Lab;
