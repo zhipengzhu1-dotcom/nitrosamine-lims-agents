@@ -154,8 +154,8 @@ it('a step without a Commit Key is refused as malformed and writes nothing', asy
 it("the same Commit Key from another session is refused and does not answer the first session's receipt", async () => {
   const key = randomUUID();
   ok(await post(as.cora, 'submit', { commitKey: key, ...submission }));
-  const before = await totals();
   const otherSession = await api.login(cora);
+  const before = await totals();
   const refused = await post(otherSession, 'submit', { commitKey: key, ...submission });
   assert.equal(
     refusedWith(refused, 'keyReused'),

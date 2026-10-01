@@ -192,7 +192,8 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
   const effect: Effect<StepInput<K>> = effects[name];
   const route = stepRoute(name);
   app.post<{ Body: StepBody<K>; Reply: RouteReply<typeof route> }>(route.url, { schema: route.schema }, async (req) => {
-    const { actor, body, sessionId } = req;
+    const { actor, body } = req;
+    const sessionId = req.sessionKey.id;
     const scope = labScope(db, actor);
     const requestHash = createHash('sha256')
       .update(JSON.stringify({ step: name, testId: body.testId ?? null, input: body.input }))
@@ -216,7 +217,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
     }
     if (step.signs) {
       const { password } = body.signature ?? refuse('malformed', `${name} needs the signer's password`);
-      await reauthenticate(db, actor, password, name);
+      await reauthenticate(db, { actor, session: req.sessionKey }, password, name, step.role, req.ip);
     }
 
     const claim = { testId: test?.id ?? randomUUID(), state: step.to };
