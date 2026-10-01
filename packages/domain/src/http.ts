@@ -127,8 +127,29 @@ const auditTrailVerification = Type.Object({
   company: nullable(Type.String()),
 });
 const stepTaken = Type.Object({ testId: uuid, state: testState });
-/** The body Fastify writes for every refusal `refuse()` throws and every request that fails validation. */
-const refusalBody = Type.Object({ statusCode: Type.Integer(), error: Type.String(), message: Type.String() });
+/**
+ * Why the LIMS did not do what was asked, as one closed list the API, the web and the tests share, so that the web
+ * branches on the kind and never on the sentence. The API chooses each kind's status. `failure` is not a refusal but
+ * an unexpected failure; it is listed so that every non-2xx body has the one shape below.
+ */
+export const refusalKinds = [
+  'unknownField', // the body names a field the route's closed schema does not
+  'malformed', // any other way a request fails its schema, unparseable JSON, or a wrong media type
+  'badCredentials', // the username and password together do not prove the person, at sign-in or at signing
+  'noSession', // none was presented, or the one presented has ended
+  'accountLocked', // the password was right and the account is locked
+  'role', // the person lacks the role or the Membership the action needs
+  'guard', // a step registry guard refused
+  'state', // the step does not start from the Test's state
+  'stale', // what the caller saw has moved on; reload before acting
+  'notFound', // no such record in this Lab, or no such route
+  'failure', // the LIMS could not finish; the message carries the Admin reference
+] as const;
+export type RefusalKind = (typeof refusalKinds)[number];
+export const isRefusalKind = (value: unknown): value is RefusalKind => refusalKinds.some((k) => k === value);
+/** The body of every non-2xx reply the API writes: a refusal `refuse()` threw, a request Fastify refused, or the 500. */
+export const refusalBody = Type.Object({ kind: Type.Enum(refusalKinds), message: Type.String() });
+export type RefusalBody = Static<typeof refusalBody>;
 
 const credentials = Type.Object({ username: text, password: text }, closed);
 const byId = Type.Object({ id: uuid });
@@ -159,7 +180,7 @@ export type StepBody<K extends StepName> = Static<typeof stepEnvelope> & { input
 interface RouteSchema {
   params?: TObject;
   body?: TObject;
-  response: { 200: TSchema; '4xx': typeof refusalBody };
+  response: { 200: TSchema; '4xx': typeof refusalBody; '5xx': typeof refusalBody };
 }
 export interface Route {
   method: 'GET' | 'POST';
@@ -173,7 +194,7 @@ function route<
   const S extends Omit<RouteSchema, 'response'>,
   R extends TSchema,
 >(method: M, url: U, request: S, reply: R) {
-  return { method, url, schema: { ...request, response: { 200: reply, '4xx': refusalBody } } };
+  return { method, url, schema: { ...request, response: { 200: reply, '4xx': refusalBody, '5xx': refusalBody } } };
 }
 
 /** Every route the API serves besides the steps. */
@@ -204,7 +225,7 @@ export type RouteInput<R extends Route> = R['schema'] extends { params: infer P 
 export type RouteReply<R extends Route> = Static<R['schema']['response'][200]>;
 export type Reply<R extends Route> =
   | { kind: 'reply'; status: number; body: RouteReply<R> }
-  | { kind: 'refused'; status: number; message: string }
+  | { kind: 'refused'; status: number; body: RefusalBody }
   | { kind: 'breach'; status: number; problem: string };
 
 /** The path to request: the route's URL with each `:name` replaced by that param, encoded. */
@@ -225,7 +246,7 @@ export function readReply<R extends Route>(route: R, status: number, json: unkno
       ? { kind: 'reply', status, body: json }
       : breach(route, status, reply, json);
   return Value.Check(refusalBody, json)
-    ? { kind: 'refused', status, message: json.message }
+    ? { kind: 'refused', status, body: json }
     : breach(route, status, refusalBody, json);
 }
 
