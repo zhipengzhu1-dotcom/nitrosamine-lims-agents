@@ -1,5 +1,6 @@
 import type { DB, Json } from '@lims/db';
 import {
+  type ActorContext,
   actorUsername,
   type AuditedTable,
   auditedRecords,
@@ -285,14 +286,17 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
   });
 }
 
+/** A chain as the database recomputed it, before QA reads it. */
+export type RecomputedChain = Awaited<ReturnType<Scope['verifyAuditTrail']>>['chains'][number];
+
 /**
  * Reads each recomputed chain as QA sees it; a break opens its System Incident, or answers the one already open, so
- * no break is shown without a record. `db` must be able to write while the caller's read stays open.
+ * no break is shown without a record.
  */
 export async function chainVerifications(
   db: Kysely<DB>,
-  requester: Scope['ctx'],
-  chains: Awaited<ReturnType<Scope['verifyAuditTrail']>>['chains'],
+  requester: ActorContext,
+  chains: RecomputedChain[],
 ): Promise<ChainVerification[]> {
   const verified = [];
   for (const { chain, chainId, lastEntry, firstFailure } of chains) {

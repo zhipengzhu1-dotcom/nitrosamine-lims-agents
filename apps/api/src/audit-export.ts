@@ -18,7 +18,7 @@ import type { App } from './app.ts';
 import { PDF_COLUMNS, textPdf } from './pdf.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { chainVerifications, imagesFor, rawEntries, storedInstantsIn } from './trail.ts';
+import { chainVerifications, imagesFor, type RecomputedChain, rawEntries, storedInstantsIn } from './trail.ts';
 
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
 
@@ -234,10 +234,13 @@ const fileStem = (name: string, asOf: Instant) =>
   }-${asOf.slice(0, 10)}`;
 
 /**
- * One Customer's Audit Export as one snapshot of the database holds it, other Customers' identifiers redacted; a
- * chain break it finds opens its System Incident through `incidents`, outside the snapshot.
+ * One Customer's Audit Export as one snapshot of the database holds it, other Customers' identifiers redacted, with
+ * the chains as that snapshot recomputes them.
  */
-async function exportData(scope: Scope, customerId: string, incidents: Kysely<DB>): Promise<AuditExportData> {
+async function exportData(
+  scope: Scope,
+  customerId: string,
+): Promise<Omit<AuditExportData, 'chains'> & { recomputed: RecomputedChain[] }> {
   const customer =
     (await customersSeen(scope).where('id', '=', customerId).executeTakeFirst()) ??
     refuse('notFound', 'no such Customer in this Lab');
@@ -283,15 +286,14 @@ async function exportData(scope: Scope, customerId: string, incidents: Kysely<DB
   const instants = await storedInstantsIn(scope, lab.timeZone, storedInstants(entries));
   const described = describeTrail(entries, images, labId, instants);
   const redact = redactionFor(mine.identifiers, others, referencedIds(described));
-  const data: AuditExportData = {
+  return {
     customer,
     lab: { code: lab.code, name: lab.name, zone: lab.timeZone },
     asOf,
     generatedBy: { label: scope.ctx.person.displayName, username: scope.ctx.person.username, role: 'QA' },
-    chains: await chainVerifications(incidents, scope.ctx, verified.chains),
+    recomputed: verified.chains,
     entries: described.map((e) => redact(e)),
   };
-  return data;
 }
 
 /** Only QA in this Lab lists Customers or exports, and every Audit Export is recorded on the Lab chain with its files' hashes. */
@@ -306,11 +308,16 @@ export function auditExportRoutes(app: App, db: Kysely<DB>): void {
     handler: async (req) => {
       const scope = qaScope(db, req);
       const { customerId, format } = req.body;
-      const data = await db
+      const { recomputed, entries, ...head } = await db
         .transaction()
         .setIsolationLevel('repeatable read')
         .setAccessMode('read only')
-        .execute((tx) => exportData(labScope(tx, req.actor), customerId, db));
+        .execute((tx) => exportData(labScope(tx, req.actor), customerId));
+      const data: AuditExportData = {
+        ...head,
+        chains: await chainVerifications(db, req.actor, recomputed),
+        entries,
+      };
       const { customer, asOf } = data;
       const stem = fileStem(customer.name, asOf);
       const formats: Record<AuditExportFormat, { name: string; mediaType: string; bytes: Buffer }> = {
