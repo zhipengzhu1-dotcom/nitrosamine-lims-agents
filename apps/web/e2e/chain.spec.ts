@@ -88,7 +88,7 @@ async function atLeast(target: Locator, width: number, height: number) {
 }
 
 const PHONE = { width: 390, height: 844 };
-const LANDSCAPE = { width: 844, height: 390 };
+const SIDEWAYS = { width: 844, height: 390 };
 const DESKTOP = { width: 1360, height: 900 };
 
 const uncovered = (target: Locator) =>
@@ -127,7 +127,7 @@ async function typeWhileTheSheetIsStillSlidingIn(page: Page, type: () => Promise
 
 async function wholeOnScreenAtEverySize(page: Page, whole: Locator, commit: Locator) {
   const projectSize = page.viewportSize() ?? DESKTOP;
-  for (const size of [projectSize, PHONE, LANDSCAPE, DESKTOP]) {
+  for (const size of [projectSize, PHONE, SIDEWAYS, DESKTOP]) {
     const at = `at ${size.width}x${size.height}`;
     await page.setViewportSize(size);
     await whole.scrollIntoViewIfNeeded();
@@ -141,8 +141,8 @@ async function wholeOnScreenAtEverySize(page: Page, whole: Locator, commit: Loca
       top: document.querySelector('.top')?.getBoundingClientRect().top,
       rail: document.querySelector('footer.rail')?.getBoundingClientRect().bottom,
     }));
-    expect(bars.top, `the top bar keeps the head of the screen ${at}`).toBe(0);
-    expect(bars.rail, `the rail keeps the foot of the screen ${at}`).toBeCloseTo(size.height, 0);
+    expect(bars.top, `the top bar holds the first row ${at}`).toBe(0);
+    expect(bars.rail, `the rail holds the last row ${at}`).toBeCloseTo(size.height, 0);
   }
   await page.setViewportSize(projectSize);
 }
