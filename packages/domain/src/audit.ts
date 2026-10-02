@@ -13,7 +13,6 @@ import type {
 
 type LabelOf = (table: AuditedTable, id: unknown) => string;
 
-/** How a stored value reads: bytes as UTF-8 text, bytes as hex, a table name as its glossary noun, or an instant. */
 type Shows = 'utf8' | 'hex' | 'recordKind' | 'instant';
 
 interface FieldSpec {

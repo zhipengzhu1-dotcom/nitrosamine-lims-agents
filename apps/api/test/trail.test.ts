@@ -116,7 +116,6 @@ it("the Test's trail lists the Test's, its Result's and Signatures' entries with
   assert.ok(!entries.some((e) => otherTrail.entries.some((o) => o.raw.chain === e.raw.chain && o.seq === e.seq)));
 });
 
-/** `at` (UTC to the microsecond) on the Lab's wall clock as Intl renders it, independent of the database's rendering. */
 function onLabClock(at: string): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'America/New_York',

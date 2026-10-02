@@ -61,7 +61,6 @@ export const demoSigning = 'Demo: accounts share one password, and a signing re-
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-/** How a recomputed Audit Trail chain stands: intact through its last entry, or broken. */
 export type ChainVerdict = 'Intact' | 'Broken';
 const verdictLook = {
   Intact: { tone: 'ok', glyph: 'M3 8.5l3.5 3.5L13 4.5' },

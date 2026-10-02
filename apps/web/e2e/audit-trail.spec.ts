@@ -190,8 +190,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
 const INTACT_COLOUR = 'rgb(23, 114, 74)';
 const TICK = 'M3 8.5l3.5 3.5L13 4.5';
 
-/** Gives quinn.qa QA in the QC Lab and alters the QC chain's first entry behind the chain. Repeating it changes nothing more. */
-function breakTheQcChain() {
+function giveQaTheQcLabAndAlterItsChain() {
   execFileSync(
     '../../scripts/pg.sh',
     ['psql', '-q', '-v', 'ON_ERROR_STOP=1', '--single-transaction', '-d', E2E_DATABASE],
@@ -213,7 +212,7 @@ function breakTheQcChain() {
 test('QA verifying a broken chain sees Broken beside that chain, in its own glyph and colour, and Intact beside the other', async ({
   page,
 }) => {
-  breakTheQcChain();
+  giveQaTheQcLabAndAlterItsChain();
   await page.goto('/');
   await signIn(page, 'quinn.qa', /QC Laboratory/);
   const { methods } = await (await page.request.get('/api/lookups')).json();

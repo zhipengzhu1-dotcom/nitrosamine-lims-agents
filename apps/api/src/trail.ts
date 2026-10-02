@@ -46,7 +46,6 @@ function opOf(op: string): TimedEntry['op'] {
 
 const inUtc = (at: RawBuilder<unknown>) =>
   sql<Instant>`to_char(${at} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-/** `at` on the wall clock of the IANA zone `zone`, ISO 8601 with its offset, rendered by the database. */
 const onWallClock = (at: RawBuilder<unknown>, zone: RawBuilder<unknown>) => sql<Instant>`
   to_char(${at} at time zone ${zone}, 'YYYY-MM-DD"T"HH24:MI:SS.US')
     || case when (${at} at time zone ${zone}) < (${at} at time zone 'UTC') then '-' else '+' end
@@ -55,7 +54,6 @@ const onWallClock = (at: RawBuilder<unknown>, zone: RawBuilder<unknown>) => sql<
 const entryAt = sql.ref('audit_entry.at');
 /** Selected as text, not a Date: the driver's Date keeps milliseconds, and order and labels compare `at` to the microsecond, as the hash renders it. */
 const atText = inUtc(entryAt);
-/** The same instant on the owning Lab's wall clock; null on the company chain. */
 const atLabText = sql<Instant | null>`(
   select ${onWallClock(entryAt, sql.ref('l.time_zone'))}
     from lims.lab l where l.lab_id::text = audit_entry.chain)`;
