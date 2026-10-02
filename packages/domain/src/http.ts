@@ -112,6 +112,8 @@ export type RecordVersionRef = Static<typeof recordVersionRef>;
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
+  username: Type.String(),
+  role: role,
   signedAt: instant,
   record: Type.String(),
   recordVersion: recordVersionRef,
@@ -134,6 +136,7 @@ export const auditedTable = Type.Enum({
   record_version: 'record_version',
   signature: 'signature',
   signature_statement: 'signature_statement',
+  signing_role: 'signing_role',
   reauthentication: 'reauthentication',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;

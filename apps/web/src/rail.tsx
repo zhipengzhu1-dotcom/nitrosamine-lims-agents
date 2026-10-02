@@ -122,8 +122,10 @@ export function stepAction(
               statementVersion: signing.statement.version,
             },
           }),
-      }).catch((e: unknown) => {
+      }).catch(async (e: unknown) => {
         if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(press);
+        // The record or the statement moved on: the page reads it again, so the next sheet shows what is current.
+        if (e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) await onDone();
         throw e;
       });
       sessionStorage.removeItem(press);
@@ -328,7 +330,8 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
         action: a.label,
       };
       setNote(unanswered);
-      if (sheet) setRefusal(unanswered);
+      if (sheet && e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) close(false);
+      else if (sheet) setRefusal(unanswered);
     } finally {
       inFlight.current = false;
       setBusy(false);

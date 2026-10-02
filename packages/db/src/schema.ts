@@ -234,6 +234,11 @@ export interface SignatureStatement {
   version: number;
 }
 
+export interface SigningRole {
+  meaning: Meaning;
+  role: Role;
+}
+
 export interface Submission {
   customerId: string;
   id: Generated<string>;
@@ -311,6 +316,7 @@ export interface DB {
   session: Session;
   signature: Signature;
   signatureStatement: SignatureStatement;
+  signingRole: SigningRole;
   submission: Submission;
   systemIncident: SystemIncident;
   test: Test;

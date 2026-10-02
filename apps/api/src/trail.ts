@@ -168,6 +168,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
   switch (table) {
     case 'method':
     case 'signature_statement':
+    case 'signing_role':
       return true;
     case 'person':
       return Boolean(await scope.from('membership').select('personId').where('personId', '=', id).executeTakeFirst());

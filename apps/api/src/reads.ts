@@ -72,6 +72,8 @@ async function testView(scope: Scope, id: string) {
           .select([
             'signature.meaning',
             'signature.printedName as signer',
+            'signature.username',
+            'signature.role',
             'signature.signedAt',
             'recordVersion.recordTable as record',
             'recordVersion.version',

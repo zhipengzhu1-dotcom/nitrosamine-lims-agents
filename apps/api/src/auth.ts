@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from '@lims/db/credentials';
-import { type ActorContext, routes, SESSION_ENDED, type SessionClock, type TypedCredentials } from '@lims/domain';
+import { type ActorContext, routes, SESSION_ENDED, type SessionClock } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
 import { openJobIncident } from './incident.ts';
@@ -219,7 +219,7 @@ export function sourceAddressOf(req: {
 export async function reauthenticate(
   db: Kysely<DB>,
   { actor, session }: Pick<SignedIn, 'actor' | 'session'>,
-  typed: Pick<TypedCredentials, 'password'> & Partial<TypedCredentials>,
+  typed: { password: string; username?: string },
   purpose: string,
   role: Role | typeof NEEDS_NO_ROLE,
   sourceAddress: string,

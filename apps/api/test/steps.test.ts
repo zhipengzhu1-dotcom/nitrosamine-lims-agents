@@ -535,6 +535,15 @@ it(`every Signature of the chain is written by the signing function and records 
     signed('Reviewed', rui, 'Reviewer', 'test', 3),
     signed('Released', quinn, 'QA', 'test_report', 1),
   ]);
+  assert.deepEqual(
+    (await view(id, as.quinn)).signatures.map((s) => [s.meaning, s.username, s.role]),
+    [
+      ['Performed', ana.username, 'Analyst'],
+      ['Reviewed', rui.username, 'Reviewer'],
+      ['Released', quinn.username, 'QA'],
+    ],
+    'every screen can show the username and role at signing',
+  );
 });
 
 it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and writes a lockout Access Event with the session and the step's role`, async () => {

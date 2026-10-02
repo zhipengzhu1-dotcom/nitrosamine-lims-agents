@@ -248,13 +248,19 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
     }
     let signing: Signing | null = null;
     if (step.signs) {
+      // A retry whose first press committed between the registry check and here replays, as it does on a refusal.
+      const first = await kept(scope).executeTakeFirst();
+      if (first) {
+        req.log.info({ step: name, testId: first.testId }, 'step replayed');
+        return receiptOf(first, sessionId, requestHash);
+      }
       const signature = body.signature ?? refuse('malformed', `${name} needs the signer's credentials`);
       const testId = test?.id ?? refuse('malformed', `${name} signs a Test`);
       const seen = await seenVersion(scope, testId, signature);
       await reauthenticate(
         db,
         { actor, session: req.sessionKey },
-        signature,
+        { username: signature.username, password: signature.password },
         `Re-authenticate to sign ${name}`,
         step.role,
         sourceAddressOf(req),

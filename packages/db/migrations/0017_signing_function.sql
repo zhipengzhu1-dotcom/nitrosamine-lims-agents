@@ -25,11 +25,19 @@ create table lims.reauthentication (
   constraint reauthentication_facts_key unique (lab_id, id, session_id, person_id, meaning, authenticator)
 );
 
+-- The Signature Meaning each role gives, as the step registry decides it today; the Authorisation record (#116)
+-- takes this over when it arrives.
+create table lims.signing_role (
+  role    lims.role    not null,
+  meaning lims.meaning not null,
+  primary key (role, meaning)
+);
+
 do $$
 declare
   t text;
 begin
-  foreach t in array array['signature_statement', 'reauthentication'] loop
+  foreach t in array array['signature_statement', 'reauthentication', 'signing_role'] loop
     execute format('create trigger capture after insert or update or delete on lims.%I
                     for each row execute function lims.capture()', t);
     execute format('create trigger refuse_change before update or delete on lims.%I
@@ -57,7 +65,6 @@ alter table lims.signature
   add constraint signature_record_version_fkey foreign key (lab_id, record_version_id, content_hash, canonical_form)
     references lims.record_version (lab_id, id, content_hash, canonical_form),
   add foreign key (statement_version, statement_hash) references lims.signature_statement (version, statement_hash),
-  add foreign key (lab_id, session_id, person_id) references lims.session (lab_id, id, person_id),
   add constraint signature_reauthentication_fkey
     foreign key (lab_id, reauthentication_id, session_id, person_id, meaning, authenticator)
     references lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator);
@@ -71,9 +78,10 @@ end $$;
 insert into lims.signature_statement (version, statement) values (1, convert_to(
   'I sign this record with the Signature Meaning shown, as the person named here. This Electronic Signature is the '
   'legally binding equivalent of my handwritten signature, and I cannot withdraw it.', 'UTF8'));
+insert into lims.signing_role (role, meaning) values ('Analyst', 'Performed'), ('Reviewer', 'Reviewed'), ('QA', 'Released');
 
--- The thin slice's Signatures take the role on the Audit Trail entry that wrote each, or the step registry's role for
--- the meaning where a service wrote it. The statement, the authenticator, the session, the release and the
+-- The thin slice's Signatures take the role on the Audit Trail entry that wrote each; where a service wrote the entry,
+-- the role is inferred from the step registry's role for the meaning. The statement, the authenticator, the session, the release and the
 -- re-authentication record did not exist then and stay null on those rows; the not-valid check requires them on every
 -- Signature written from now on.
 alter table lims.signature disable trigger refuse_change;
@@ -133,6 +141,7 @@ declare
   seen         record_version;
   signed       record_version;
   shown        signature_statement;
+  proof_xmin   xid;
   signature_id uuid := gen_random_uuid();
 begin
   if num_nulls(p_reauthentication_id, p_session_id, p_record_table, p_record_id, p_seen_version, p_seen_hash,
@@ -155,10 +164,11 @@ begin
   end if;
 
   select * into proof from reauthentication where id = p_reauthentication_id;
+  select xmin into proof_xmin from reauthentication where id = p_reauthentication_id;
   if proof.id is null then
     raise exception 'no re-authentication record: the signer has not re-entered their credentials' using errcode = 'LA010';
   end if;
-  if not written_here(proof.xmin) then
+  if not written_here(proof_xmin) then
     raise exception 'the re-authentication record was written by an earlier transaction' using errcode = 'LA010';
   end if;
   if proof.person_id <> signer.id then
@@ -180,6 +190,9 @@ begin
     where lab_id = proof.lab_id and person_id = signer.id and role::text = acting_as;
   if held.role is null then
     raise exception 'the signer does not hold the role % in this Lab', coalesce(acting_as, 'none') using errcode = 'LA010';
+  end if;
+  if not exists (select from signing_role where role = held.role and meaning = p_meaning) then
+    raise exception 'the role % does not give the Signature Meaning %', held.role, p_meaning using errcode = 'LA010';
   end if;
 
   select * into seen from record_version where lab_id = proof.lab_id and id = p_seen_version;
@@ -209,7 +222,8 @@ begin
     if not exists (select from test_report r
                     where r.lab_id = signed.lab_id and r.id = signed.record_id and signed.record_table = 'test_report'
                       and seen.record_table = 'test' and r.test_id = seen.record_id) then
-      raise exception 'the % signed is not built on the Test shown', p_record_table using errcode = 'LA010';
+      raise exception 'the % signed is not built on the Test shown',
+        case p_record_table when 'test_report' then 'Test Report' else p_record_table end using errcode = 'LA010';
     end if;
   end if;
 
@@ -315,5 +329,5 @@ create trigger open_incident after insert on lims.access_event
   execute function lims.open_sign_in_incident();
 
 revoke insert (lab_id, id, person_id, meaning, record_version_id) on lims.signature from lims_app;
-grant select on lims.signature_statement, lims.reauthentication to lims_app;
+grant select on lims.signature_statement, lims.reauthentication, lims.signing_role to lims_app;
 grant insert (lab_id, session_id, person_id, meaning, authenticator) on lims.reauthentication to lims_app;

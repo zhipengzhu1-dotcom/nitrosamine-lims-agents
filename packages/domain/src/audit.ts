@@ -140,6 +140,12 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       signed_at: { label: 'Signed at' },
     },
   },
+  signing_role: {
+    kind: 'Signing role',
+    chain: 'company',
+    label: (row) => `${text(row.role)} signs ${text(row.meaning)}`,
+    fields: { role: { label: 'Role' }, meaning: { label: 'Meaning' } },
+  },
   signature_statement: {
     kind: 'Signature statement',
     chain: 'company',

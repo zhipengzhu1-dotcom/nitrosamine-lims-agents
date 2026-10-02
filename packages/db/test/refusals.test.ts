@@ -420,6 +420,11 @@ const tables = {
     row: { version: 2, statement: Buffer.from('A second statement (fictional).') },
     notNull: ['version', 'statement', 'approved_at'],
   },
+  'lims.signing_role': {
+    noun: 'signing role',
+    row: { role: 'Reviewer', meaning: 'Performed' },
+    notNull: ['role', 'meaning'],
+  },
   'lims.reauthentication': {
     noun: 're-authentication record',
     row: {
@@ -535,6 +540,7 @@ const auditedTables: Table[] = [
   'lims.record_version',
   'lims.signature',
   'lims.signature_statement',
+  'lims.signing_role',
   'lims.reauthentication',
   'lims.system_incident',
   'lims.access_event',
@@ -666,6 +672,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.record_version': { id: id.laterRecordVersion },
     'lims.signature': { id: id.signature },
     'lims.signature_statement': { version: 1 },
+    'lims.signing_role': { role: 'Analyst', meaning: 'Performed' },
     'lims.reauthentication': { id: id.reauthentication },
     'lims.session': { id: id.session },
     'lims.system_incident': { id: id.systemIncident },
@@ -1021,18 +1028,6 @@ describe('the database refuses a reference to a row that does not exist', () => 
       table: 'lims.signature',
       change: { session_id: id.secondSession },
       constraint: 'signature_reauthentication_fkey',
-    },
-    {
-      name: 'a Signature on a session that does not exist is refused',
-      table: 'lims.signature',
-      change: { session_id: missing },
-      constraint: 'signature_lab_id_session_id_person_id_fkey',
-    },
-    {
-      name: "a Signature on another person's session is refused",
-      table: 'lims.signature',
-      change: { session_id: id.otherPersonSession },
-      constraint: 'signature_lab_id_session_id_person_id_fkey',
     },
     noLab('lims.reauthentication', 're-authentication record'),
     {
@@ -1676,6 +1671,24 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       statement: 'truncate lims.signature_statement, lims.signature',
     },
     {
+      name: 'updating a signing role is refused',
+      table: 'lims.signing_role',
+      trigger: 'refuse_change',
+      statement: `update lims.signing_role set meaning = 'Released'`,
+    },
+    {
+      name: 'deleting a signing role is refused',
+      table: 'lims.signing_role',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.signing_role',
+    },
+    {
+      name: 'truncating the signing roles is refused',
+      table: 'lims.signing_role',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.signing_role',
+    },
+    {
       name: 'updating a re-authentication record is refused',
       table: 'lims.reauthentication',
       trigger: 'refuse_change',
@@ -2274,6 +2287,11 @@ describe('a Signature is written only by the signing function, which refuses eve
       message: "the re-authentication record's session has ended",
     },
     {
+      name: 'signing a Meaning the held role does not give is refused',
+      statements: [asPerson('Analyst'), reauthenticate('Reviewed'), sign({ meaning: 'Reviewed' })],
+      message: 'the role Analyst does not give the Signature Meaning Reviewed',
+    },
+    {
       name: 'signing in a role the person does not hold in the Lab is refused',
       statements: [asPerson('QA'), reauthenticate(), sign()],
       message: 'the signer does not hold the role QA in this Lab',
@@ -2307,7 +2325,7 @@ describe('a Signature is written only by the signing function, which refuses eve
         `insert into lims.test_report (lab_id, id, test_id, number) values ('${id.lab}', '${id.probeReport}', '${id.untested}', 'RF-R-2026-000008')`,
         sign({ table: 'test_report', recordId: id.probeReport, meaning: 'Released' }),
       ],
-      message: 'the test_report signed is not built on the Test shown',
+      message: 'the Test Report signed is not built on the Test shown',
     },
     {
       name: 'signing with a null argument is refused rather than skipping the check it feeds',
