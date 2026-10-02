@@ -20,6 +20,15 @@ async function sampleNumberOf(page: Page, testId: string) {
   return view.test.sampleNumber;
 }
 
+async function signIn(page: Page, username: string) {
+  await page.reload();
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
+  await page.getByLabel('Username').fill(username);
+  await page.getByLabel('Password').fill(DEMO_PASSWORD);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
+}
+
 const sidewaysScroll = (box: Locator) => box.evaluate((e) => e.scrollWidth - e.clientWidth);
 
 async function atLeast44(control: Locator, what: string) {
@@ -39,12 +48,7 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
   await requestedTest(page, requested);
   const sampleNumber = await sampleNumberOf(page, testId);
 
-  await page.reload();
-  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
-  await page.getByLabel('Username').fill('lena.manager');
-  await page.getByLabel('Password').fill(DEMO_PASSWORD);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
+  await signIn(page, 'lena.manager');
   const worklist = page.locator('table.stack').first();
   const list = worklist.locator('tbody tr');
   await expect(page.getByRole('row', { name: requested })).toBeVisible();
@@ -115,4 +119,57 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
   await page.goto(`/#/tests/${testId}`);
   await expect(record).toContainText(sampleNumber);
   await expect(page.getByRole('heading', { name: 'Tests' }), 'the Test link still opens the Test alone').toHaveCount(0);
+});
+
+test('beside the Worklist, a step keeps its Test open until the answer, and its success motion stays with it', async ({
+  page,
+}) => {
+  test.skip(test.info().project.name !== 'desktop', 'the Worklist stays beside the Test only on a desktop');
+  const tag = randomUUID();
+  const firstDescription = `Metformin HCl 500 mg tablets, lot NW-0053 (fictional, ${tag})`;
+  const secondDescription = `Metformin HCl 500 mg tablets, lot NW-0054 (fictional, ${tag})`;
+  await page.goto('/');
+  await requestedTest(page, firstDescription);
+  await requestedTest(page, secondDescription);
+  await signIn(page, 'samir.custodian');
+  await page.getByRole('searchbox', { name: 'Search Tests' }).fill(tag);
+  // Beside a Test the list shows no description, so each Test is found by its Sample number.
+  const linkOf = async (description: string) => {
+    const sampleNumber = await page.getByRole('row', { name: description }).getByRole('link').textContent();
+    return page
+      .locator('table.stack')
+      .first()
+      .getByRole('link', { name: sampleNumber ?? '', exact: true });
+  };
+  const first = await linkOf(firstDescription);
+  const second = await linkOf(secondDescription);
+  const record = page.getByRole('heading', { level: 1 });
+
+  await first.click();
+  await expect(record).toContainText('Requested');
+  const firstOpen = page.url();
+  const held = Promise.withResolvers<void>();
+  await page.route('**/api/steps/receive', async (route) => {
+    await held.promise;
+    await route.continue();
+  });
+  const sent = page.waitForRequest('**/api/steps/receive');
+  await page.getByRole('button', { name: 'Receive' }).click();
+  await sent;
+  const other = await second.boundingBox();
+  await page.mouse.click((other?.x ?? 0) + (other?.width ?? 0) / 2, (other?.y ?? 0) + (other?.height ?? 0) / 2);
+  held.resolve();
+  await expect(page.getByRole('status'), 'the rail shows the answer for the Test the step was taken on').toContainText(
+    'now Ready',
+  );
+  expect(page.url(), 'no other Test opens while a step waits for its answer').toBe(firstOpen);
+
+  await second.click();
+  await expect(record).toContainText('Requested');
+  await first.click();
+  await expect(record).toContainText('Ready');
+  await expect(
+    page.locator('.split__record').locator('.status--fresh, .row--fresh'),
+    'returning to a Test plays no success motion for a step it took earlier',
+  ).toHaveCount(0);
 });

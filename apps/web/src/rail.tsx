@@ -240,7 +240,8 @@ type ModuleKey = Module['key'];
 
 /**
  * `notice` is what the rail says when the person has no step to take here, such as which Signatures are unsigned.
- * A new `railKey` starts the rail afresh, so a sheet or answer for one record never stays on for the next.
+ * A new `railKey` starts the rail afresh, so a sheet or answer for one record never stays on for the next. The plane
+ * takes no press while a commit waits for its answer, so the answer is shown beside the record it was taken on.
  */
 export function Shell({
   me,
@@ -257,6 +258,7 @@ export function Shell({
   railKey?: string;
   children: ReactNode;
 }) {
+  const [committing, setCommitting] = useState(false);
   return (
     <div className="frame">
       <TopBar lab={me.lab}>
@@ -271,8 +273,10 @@ export function Shell({
             ))}
         </nav>
       </TopBar>
-      <main className="plane">{children}</main>
-      <Rail key={railKey} me={me} action={action} notice={notice} />
+      <main className="plane" inert={committing}>
+        {children}
+      </main>
+      <Rail key={railKey} me={me} action={action} notice={notice} onCommitting={setCommitting} />
     </div>
   );
 }
@@ -307,7 +311,17 @@ function unansweredText(e: unknown, signs: boolean): string {
   return `Refused: ${e.message}${signs ? ' Nothing has been signed.' : ''}`;
 }
 
-function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | null; notice?: string | undefined }) {
+function Rail({
+  me,
+  action,
+  notice,
+  onCommitting,
+}: {
+  me: ActorContext;
+  action: RailAction | null;
+  notice?: string | undefined;
+  onCommitting: (committing: boolean) => void;
+}) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [username, setUsername] = useState('');
@@ -384,6 +398,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
+    onCommitting(true);
     setRefusal(null);
     try {
       const text = await a.run(values, a.signs ? { username, password } : null);
@@ -404,6 +419,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     } finally {
       inFlight.current = false;
       setBusy(false);
+      onCommitting(false);
       setPassword('');
     }
   }
