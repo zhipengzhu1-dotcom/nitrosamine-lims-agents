@@ -1,5 +1,6 @@
-import { type FormEvent, useId, useState } from 'react';
-import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
+import { type FormEvent, type ReactNode, useId, useState } from 'react';
+import { type ActorContext, type Lab, type RouteInput, type RouteReply, routes } from '@lims/domain';
+import { encode } from 'uqr';
 import {
   api,
   failureText,
@@ -13,7 +14,7 @@ import {
   useApi,
 } from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
-import { field, useCommit } from './form.tsx';
+import { CodeField, field, useCommit, useSecondFactor } from './form.tsx';
 
 type Credentials = RouteInput<typeof routes.switchLab>[0];
 
@@ -24,6 +25,7 @@ function CredentialsForm({
   except,
   commit,
   notice = '',
+  children,
   onSubmit,
 }: {
   title: string;
@@ -32,6 +34,7 @@ function CredentialsForm({
   except?: string;
   commit: string;
   notice?: string;
+  children?: ReactNode;
   onSubmit: (credentials: Credentials) => Promise<unknown>;
 }) {
   const [error, setError] = useState(notice);
@@ -39,6 +42,7 @@ function CredentialsForm({
   const noOtherLab = offered?.length === 0;
   const reasonId = useId();
   const [busy, setBusy] = useState(false);
+  const secondFactor = useSecondFactor();
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (busy) return;
@@ -48,7 +52,12 @@ function CredentialsForm({
       return typeof value === 'string' ? value : '';
     };
     setBusy(true);
-    onSubmit({ username: field('username'), password: field('password'), labId: field('labId') })
+    onSubmit({
+      username: field('username'),
+      password: field('password'),
+      labId: field('labId'),
+      ...(secondFactor && { code: field('code') }),
+    })
       .catch((err: unknown) => setError(failureText(err)))
       .finally(() => setBusy(false));
   }
@@ -79,6 +88,7 @@ function CredentialsForm({
           Password
           <input name="password" type="password" required autoComplete="current-password" />
         </label>
+        {secondFactor && <CodeField />}
         {error && (
           <p className="note--bad" role="alert">
             {error}
@@ -98,6 +108,7 @@ function CredentialsForm({
         >
           {commit}
         </button>
+        {children}
       </fieldset>
     </form>
   );
@@ -105,6 +116,7 @@ function CredentialsForm({
 
 export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorContext) => void }) {
   const labs = useApi(routes.labs);
+  const secondFactor = useSecondFactor();
   return (
     <div className="frame frame--bare">
       <TopBar />
@@ -115,7 +127,13 @@ export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorConte
           commit="Sign in"
           notice={notice}
           onSubmit={(c) => signIn(c).then(onIn)}
-        />
+        >
+          {secondFactor && (
+            <a className="signin__link" href="#/authenticator">
+              Set up your authenticator
+            </a>
+          )}
+        </CredentialsForm>
       </main>
     </div>
   );
@@ -194,14 +212,15 @@ export function LockScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const labs = useApi(routes.labs);
+  const secondFactor = useSecondFactor();
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (busy) return;
-    const password = new FormData(e.currentTarget).get('password');
+    const form = new FormData(e.currentTarget);
     setBusy(true);
     setError('');
-    unlock(typeof password === 'string' ? password : '')
+    unlock({ password: field(form, 'password'), ...(secondFactor && { code: field(form, 'code') }) })
       .then(onIn)
       .catch((err: unknown) => {
         setError(failureText(err));
@@ -247,6 +266,7 @@ export function LockScreen({
                 Password
                 <input name="password" type="password" required autoComplete="current-password" />
               </label>
+              {secondFactor && <CodeField />}
               {error && (
                 <p className="note--bad" role="alert">
                   {error}
@@ -267,6 +287,7 @@ export function LockScreen({
 /** Where a person opens their one-time link and chooses their own password. Needs no session. */
 export function WelcomePage({ token }: { token: string }) {
   const { busy, commit, shown } = useCommit();
+  const secondFactor = useSecondFactor();
   const [username, setUsername] = useState<string | null>(null);
   return (
     <div className="frame frame--bare">
@@ -278,9 +299,15 @@ export function WelcomePage({ token }: { token: string }) {
             <p role="status">
               Your password is set for <code>{username}</code>. This link no longer works.
             </p>
-            <a className="btn" href="/">
-              Sign in
-            </a>
+            {secondFactor ? (
+              <a className="btn" href="#/authenticator">
+                Set up your authenticator
+              </a>
+            ) : (
+              <a className="btn" href="/">
+                Sign in
+              </a>
+            )}
           </section>
         ) : (
           <form
@@ -309,6 +336,72 @@ export function WelcomePage({ token }: { token: string }) {
             {shown}
             <button type="submit" className="rbtn" disabled={busy}>
               Set my password
+            </button>
+          </form>
+        )}
+      </main>
+    </div>
+  );
+}
+
+/** The key as a QR code, dark modules on white whatever the theme, because a scanner reads only that contrast. */
+function QrCode({ text }: { text: string }) {
+  const { data, size } = encode(text, { ecc: 'M', border: 4 });
+  const modules = data.flatMap((row, y) => row.flatMap((dark, x) => (dark ? [`M${x} ${y}h1v1h-1z`] : [])));
+  return (
+    <svg className="qr" viewBox={`0 0 ${size} ${size}`} shapeRendering="crispEdges" role="img" aria-label="QR code">
+      <rect width={size} height={size} fill="#fff" />
+      <path d={modules.join('')} fill="#000" />
+    </svg>
+  );
+}
+
+/** Enrols the person's authenticator: their username and password show its key once, as a QR code and as text to type. */
+export function AuthenticatorPage() {
+  const { busy, commit, shown } = useCommit();
+  const [enrolled, setEnrolled] = useState<RouteReply<typeof routes.enrolAuthenticator> | null>(null);
+  return (
+    <div className="frame frame--bare">
+      <TopBar />
+      <main className="plane">
+        {enrolled ? (
+          <section className="signin card">
+            <h1>Add this key to your authenticator</h1>
+            <p className="muted">Scan the QR code with your authenticator app, or type the key into it.</p>
+            <QrCode text={enrolled.otpauth} />
+            <p>
+              Key <code className="secret">{enrolled.secret.replace(/(.{4})(?=.)/g, '$1 ')}</code>
+            </p>
+            <p role="status">The LIMS shows this key once. Sign in with your password and a code from the app.</p>
+            <a className="btn" href="/">
+              Sign in
+            </a>
+          </section>
+        ) : (
+          <form
+            className="signin card"
+            onSubmit={(e) =>
+              commit(e, async (form) => {
+                const credentials = { username: field(form, 'username'), password: field(form, 'password') };
+                setEnrolled(await api(routes.enrolAuthenticator, credentials));
+                history.replaceState(null, '', location.pathname);
+                return '';
+              })
+            }
+          >
+            <h1>Set up your authenticator</h1>
+            <p className="muted">Your username and password show your authenticator key once.</p>
+            <label>
+              Username
+              <input name="username" required autoComplete="username" />
+            </label>
+            <label>
+              Password
+              <input name="password" type="password" required autoComplete="current-password" />
+            </label>
+            {shown}
+            <button type="submit" className="rbtn" disabled={busy}>
+              Show my key
             </button>
           </form>
         )}

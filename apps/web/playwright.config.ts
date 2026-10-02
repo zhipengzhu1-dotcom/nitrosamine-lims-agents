@@ -8,9 +8,12 @@ export const SHOTS = Boolean(process.env.SHOTS);
 // The web imports only @lims/domain, so ask the checkout CLI for the ports, as scripts/dev.sh does.
 const checkout = fileURLToPath(new URL('../../packages/db/src/checkout.ts', import.meta.url));
 const printed = execFileSync(process.execPath, [checkout, 'e2e-ports'], { encoding: 'utf8' }).trim();
-const [apiPort, webPort] = printed.split(' ');
-if (!apiPort || !webPort) throw new Error(`checkout.ts e2e-ports printed "${printed}", not an API and a web port`);
+const [apiPort, webPort, decidedApiPort, decidedWebPort] = printed.split(' ');
+if (!apiPort || !webPort || !decidedApiPort || !decidedWebPort)
+  throw new Error(`checkout.ts e2e-ports printed "${printed}", not two API and web port pairs`);
 const webURL = `http://localhost:${webPort}`;
+/** A second LIMS under the decided login, with its own database, for the walks that need an authenticator code. */
+export const DECIDED_URL = `http://localhost:${decidedWebPort}`;
 const E2E_DB = 'lims_e2e';
 export const E2E_DATABASE = execFileSync(process.execPath, [checkout, 'database', E2E_DB], { encoding: 'utf8' }).trim();
 export const API_LOG = fileURLToPath(new URL('api-log/api.log', import.meta.url));
@@ -23,10 +26,25 @@ export default defineConfig({
     { name: 'iphone', use: devices['iPhone 16'] },
     { name: 'pixel', use: devices['Pixel 9'] },
   ],
-  webServer: {
-    command: '../../scripts/dev.sh --scratch',
-    url: `${webURL}/api/me`,
-    env: { LIMS_DB: E2E_DB, LIMS_LOG_FILE: API_LOG, PORT: apiPort, WEB_PORT: webPort, DEMO_PASSWORD },
-    stdout: 'ignore',
-  },
+  webServer: [
+    {
+      command: '../../scripts/dev.sh --scratch',
+      url: `${webURL}/api/me`,
+      env: { LIMS_DB: E2E_DB, LIMS_LOG_FILE: API_LOG, PORT: apiPort, WEB_PORT: webPort, DEMO_PASSWORD },
+      stdout: 'ignore',
+    },
+    {
+      command: '../../scripts/dev.sh --scratch',
+      url: `${DECIDED_URL}/api/me`,
+      env: {
+        LIMS_DB: 'lims_e2e_decided',
+        LIMS_LOGIN: 'decided',
+        LIMS_LOG_FILE: fileURLToPath(new URL('api-log/decided.log', import.meta.url)),
+        PORT: decidedApiPort,
+        WEB_PORT: decidedWebPort,
+        DEMO_PASSWORD,
+      },
+      stdout: 'ignore',
+    },
+  ],
 });

@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { type LockMode, onActorChanged, onLocked, onSignedOut, resume } from './api.ts';
 import { Placeholder } from './placeholder.tsx';
 import { ReportPage } from './report.tsx';
-import { LabSwitchPage, LockScreen, PreferencesPage, SignIn, WelcomePage } from './signin.tsx';
+import { AuthenticatorPage, LabSwitchPage, LockScreen, PreferencesPage, SignIn, WelcomePage } from './signin.tsx';
 import { TestPage, Worklist } from './tests.tsx';
 import { AuditExportPage, TrailPage } from './trail.tsx';
 import { type Module, modules } from './rail.tsx';
@@ -17,6 +17,7 @@ type Route =
   | { page: 'switchLab' }
   | { page: 'preferences' }
   | { page: 'welcome'; token: string }
+  | { page: 'authenticator' }
   | { page: 'trail'; table: AuditedTable; id: string }
   | { page: 'auditExport' }
   /** A rail module; `accessEventsOf` names the person whose Access Events the Staff module shows, or null for the module itself. */
@@ -29,6 +30,7 @@ function parse(hash: string): Route {
   if (a === 'switch-lab') return { page: 'switchLab' };
   if (a === 'preferences') return { page: 'preferences' };
   if (a === 'welcome' && id) return { page: 'welcome', token: id };
+  if (a === 'authenticator') return { page: 'authenticator' };
   if (a === 'trails' && isAuditedTable(id) && b) return { page: 'trail', table: id, id: b };
   if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
@@ -63,6 +65,7 @@ function App() {
   }, []);
 
   if (route.page === 'welcome') return <WelcomePage token={route.token} />;
+  if (route.page === 'authenticator') return <AuthenticatorPage />;
   if (locked)
     return (
       <LockScreen
@@ -99,6 +102,8 @@ function page(route: Route, me: ActorContext) {
       return <AuditExportPage me={me} />;
     case 'welcome':
       return <WelcomePage token={route.token} />;
+    case 'authenticator':
+      return <AuthenticatorPage />;
     case 'module':
       return (
         <Placeholder

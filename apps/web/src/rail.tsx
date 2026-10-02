@@ -21,6 +21,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
+import { CodeField, useSecondFactor } from './form.tsx';
 import { reducedMotion } from './motion.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room';
@@ -60,8 +61,11 @@ export const stepUi: {
 
 type SignedMeaning = NonNullable<(typeof steps)[StepName]['signs']>;
 
-export const demoSigning =
-  'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
+/** What the signature sheet and the Test Report say a signing re-enters, under this login. */
+export const signingNote = (secondFactor: boolean) =>
+  secondFactor
+    ? 'A signing re-enters the user ID, the password and a fresh code from the authenticator.'
+    : 'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
 
 export interface SigningView {
   recordVersion: RecordVersionRef;
@@ -326,6 +330,8 @@ function Rail({
   const [values, setValues] = useState<Record<string, string>>({});
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const secondFactor = useSecondFactor();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
   const [refusal, setRefusal] = useState<Note | null>(null);
@@ -411,7 +417,7 @@ function Rail({
     onCommitting(true);
     setRefusal(null);
     try {
-      const text = await a.run(values, a.signs ? { username, password } : null);
+      const text = await a.run(values, a.signs ? { username, password, ...(secondFactor && { code }) } : null);
       setNote({ text, tone: 'ok', n: ++count.current, action: a.label });
       setUsername('');
       returnFocus.current = true;
@@ -431,6 +437,7 @@ function Rail({
       setBusy(false);
       if (mounted.current) onCommitting(false);
       setPassword('');
+      setCode('');
     }
   }
 
@@ -565,13 +572,21 @@ function Rail({
                         onChange={(e) => setPassword(e.target.value)}
                       />
                     </label>
+                    {secondFactor && (
+                      <CodeField
+                        value={code}
+                        aria-invalid={refusal !== null && !code}
+                        aria-describedby="sheet-line"
+                        onChange={(e) => setCode(e.target.value)}
+                      />
+                    )}
                   </section>
                 </>
               )}
             </div>
             <div className="sheet__foot">
               <p key={refusal?.n} id="sheet-line" className={`sheet__line ${refusal ? 'refusal' : ''}`}>
-                <span hidden={refusal !== null}>{shown.signs ? demoSigning : shown.context}</span>
+                <span hidden={refusal !== null}>{shown.signs ? signingNote(secondFactor) : shown.context}</span>
                 {refusal && <span>{refusal.text}</span>}
               </p>
               <button type="button" className="rbtn rbtn--quiet" onClick={() => close(false)}>
