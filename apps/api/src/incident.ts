@@ -1,6 +1,6 @@
 import { audited, type DB, postgresFault } from '@lims/db';
 import { routes, stepNames, stepRoute } from '@lims/domain';
-import type { FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { type Insertable, type Kysely, sql } from 'kysely';
 
 const INCIDENT_SERVICE = { actor: 'svc:incident', role: 'system', reason: 'Open a System Incident' };
@@ -27,26 +27,47 @@ function recordIdOf(req: FastifyRequest): string | null {
   return null;
 }
 
-/** Opens a System Incident for an unexpected failure under the reference the person is shown; when the database cannot write it, the log line holds it instead. */
-export async function openSystemIncident(db: Kysely<DB>, req: FastifyRequest, error: Error): Promise<void> {
+type Incident = Insertable<DB['systemIncident']>;
+
+function factsOf(error: Error) {
   const fault = postgresFault(error);
-  const incident = {
+  return {
     kind: 'UnexpectedFailure',
-    reference: req.id,
-    requestedBy: req.requester?.person.id ?? null,
-    sessionLabId: req.requester?.lab.id ?? null,
-    step: stepOf(req),
-    recordId: recordIdOf(req),
     errorClass: error.constructor.name,
     sqlstate: fault?.sqlstate ?? null,
     constraintName: fault?.constraint ?? null,
-  } satisfies Insertable<DB['systemIncident']>;
+  } as const;
+}
+
+async function write(db: Kysely<DB>, log: FastifyBaseLogger, incident: Incident): Promise<void> {
   try {
     await audited(db, INCIDENT_SERVICE, async (tx) => {
       await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
       await tx.insertInto('systemIncident').values(incident).execute();
     });
   } catch (unwritten) {
-    req.log.error({ err: unwritten, unwrittenSystemIncident: incident }, 'unwritten System Incident');
+    log.error({ err: unwritten, unwrittenSystemIncident: incident }, 'unwritten System Incident');
   }
+}
+
+/** Opens a System Incident for an unexpected failure under the reference the person is shown; when the database cannot write it, the log line holds it instead. */
+export async function openSystemIncident(db: Kysely<DB>, req: FastifyRequest, error: Error): Promise<void> {
+  await write(db, req.log, {
+    ...factsOf(error),
+    reference: req.id,
+    requestedBy: req.requester?.person.id ?? null,
+    sessionLabId: req.requester?.lab.id ?? null,
+    step: stepOf(req),
+    recordId: recordIdOf(req),
+  });
+}
+
+/** Opens a System Incident for a failure of a job that no request started, such as the expiry sweep; when the database cannot write it, the log line holds it instead. */
+export async function openJobIncident(
+  db: Kysely<DB>,
+  log: FastifyBaseLogger,
+  job: { reference: string; step: string },
+  error: Error,
+): Promise<void> {
+  await write(db, log, { ...factsOf(error), ...job });
 }

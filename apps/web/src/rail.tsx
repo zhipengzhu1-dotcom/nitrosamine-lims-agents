@@ -10,7 +10,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, Refused, signOut, useApi } from './api.ts';
+import { api, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst';
 export interface Field<N extends string = string> {
@@ -404,6 +404,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
           <span>
             {me.roles.map(words).join(', ')} · <code>{me.person.username}</code>
           </span>
+          <SessionCountdown />
         </div>
         <div ref={statusLine} className="rail__context" role="status" tabIndex={-1}>
           <p key={note?.n} className={`note ${note ? `note--${note.tone}` : ''}`}>
@@ -428,6 +429,19 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
         </button>
       </footer>
     </>
+  );
+}
+
+const twoDigits = (n: number) => String(n).padStart(2, '0');
+
+function SessionCountdown() {
+  const left = useSecondsLeft();
+  if (left === null) return null;
+  const [h, m, s] = [Math.floor(left / 3600), Math.floor(left / 60) % 60, left % 60];
+  return (
+    <span className="who__clock">
+      Session ends in <time>{h > 0 ? `${h}:${twoDigits(m)}:${twoDigits(s)}` : `${m}:${twoDigits(s)}`}</time>
+    </span>
   );
 }
 

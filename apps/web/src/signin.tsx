@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
-import { type ActorContext, routes } from '@lims/domain';
-import { api } from './api.ts';
+import type { ActorContext } from '@lims/domain';
+import { signIn } from './api.ts';
 import { TopBar } from './rail.tsx';
 
 export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorContext) => void }) {
@@ -12,9 +12,7 @@ export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorConte
       const value = form.get(name);
       return typeof value === 'string' ? value : '';
     };
-    api(routes.login, { username: field('username'), password: field('password') }).then(onIn, (err: Error) =>
-      setError(err.message),
-    );
+    signIn(field('username'), field('password')).then(onIn, (err: Error) => setError(err.message));
   }
   return (
     <div className="frame frame--bare">

@@ -93,9 +93,25 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
 
 const accessEventKey = randomBytes(32);
 
-async function listen(db: Kysely<DB>, { secureCookie = false, log }: { secureCookie?: boolean; log?: LogSink } = {}) {
+interface ListenOptions {
+  secureCookie?: boolean;
+  log?: LogSink;
+  login?: AppOptions['login'];
+  sweepEveryMs?: number | null;
+}
+
+async function listen(
+  db: Kysely<DB>,
+  { secureCookie = false, log, login = 'decided', sweepEveryMs = null }: ListenOptions = {},
+) {
   const lines: string[] = [];
-  const app = buildApp(db, { log: log ?? { write: (line) => lines.push(line) }, secureCookie, accessEventKey });
+  const app = buildApp(db, {
+    log: log ?? { write: (line) => lines.push(line) },
+    secureCookie,
+    accessEventKey,
+    login,
+    sweepEveryMs,
+  });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(() => app.close());
   return {
@@ -106,7 +122,10 @@ async function listen(db: Kysely<DB>, { secureCookie = false, log }: { secureCoo
   };
 }
 
-/** A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API that keeps its log lines, torn down after the file's tests. */
+/**
+ * A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API with the decided
+ * login and no sweep of its own, that keeps its log lines, torn down after the file's tests.
+ */
 export async function startApi(name: string) {
   const database = checkoutDatabase(name);
   const admin = createDb(databaseUrl(server, 'postgres'));
@@ -132,7 +151,17 @@ export async function startApi(name: string) {
     accessEventKey,
     log,
     logLines,
-    startAnotherApi: (options: { secureCookie?: boolean; log?: LogSink } = {}) => listen(db, options),
+    startAnotherApi: (options: ListenOptions = {}) => listen(db, options),
+    /** The clock seam: moves a person's open sessions `ms` into the past, as a clock advanced by `ms` would leave them. */
+    async advanceClock(account: Account, ms: number): Promise<void> {
+      const by = sql`${ms} * interval '1 millisecond'`;
+      await superuser
+        .updateTable('session')
+        .set({ createdAt: sql`created_at - ${by}`, lastSeenAt: sql`last_seen_at - ${by}` })
+        .where('personId', '=', account.id)
+        .where('endedAt', 'is', null)
+        .execute();
+    },
     labId,
     methodId,
     person(name: SeededName): Account {

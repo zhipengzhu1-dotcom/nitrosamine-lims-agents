@@ -474,6 +474,9 @@ td a,
   font-size: 13px;
   color: var(--on-bench-2);
 }
+.who__clock time {
+  font-variant-numeric: tabular-nums;
+}
 .who > * {
   overflow: hidden;
   text-overflow: ellipsis;
