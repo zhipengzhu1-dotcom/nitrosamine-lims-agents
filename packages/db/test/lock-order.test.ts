@@ -23,9 +23,10 @@ interface Session {
   username: string;
 }
 
-const audited = (actor: string) =>
-  `select set_config('lims.actor', '${actor}', true), set_config('lims.role', 'system', true),
-          set_config('lims.reason', 'Race a Lock against a Lockout', true)`;
+/** The actor, role and reason the Audit Trail captures; `actor` binds to $1. */
+const AUDIT_CONTEXT = `select set_config('lims.actor', $1, true), set_config('lims.role', 'system', true),
+                              set_config('lims.reason', 'Race a Lock against a Lockout', true)`;
+const SERVICE = ['svc:test'];
 
 before(async () => {
   const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
@@ -38,7 +39,7 @@ before(async () => {
   await migrate(server, DATABASE);
   for (const client of clients) await client.connect();
   await locking.query('begin');
-  await locking.query(audited('svc:test'));
+  await locking.query(AUDIT_CONTEXT, SERVICE);
   await locking.query(
     `insert into lims.lab (lab_id, code, name, time_zone) values ($1, 'LO', 'Lock Order Lab', 'UTC')`,
     [labId],
@@ -52,7 +53,7 @@ after(() => Promise.all(clients.map((client) => client.end())));
 async function openSession(username: string): Promise<Session> {
   const session = { personId: randomUUID(), id: randomUUID(), username };
   await locking.query('begin');
-  await locking.query(audited('svc:test'));
+  await locking.query(AUDIT_CONTEXT, SERVICE);
   await locking.query(
     `insert into lims.person (id, username, display_name, password_hash) values ($1, $2, 'Lock Order Person', 'not-a-real-hash')`,
     [session.personId, username],
@@ -86,7 +87,7 @@ async function untilWaitingOnLocks(count: number): Promise<void> {
 
 /** Locks `session` on `locking`, which the transaction's actor, the session's person, may do. */
 async function pressLock(session: Session): Promise<boolean | null> {
-  await locking.query(`select set_config('lims.actor', 'person:${session.username}', true)`);
+  await locking.query(`select set_config('lims.actor', $1, true)`, [`person:${session.username}`]);
   const { rows } = await locking.query<{ changed: boolean | null }>(
     `select lims.lock_session($1, $2, ${LIMITS}, '192.0.2.1') as changed`,
     [labId, session.id],
@@ -97,6 +98,7 @@ async function pressLock(session: Session): Promise<boolean | null> {
 
 /** Lands the lock on the person and records its Lockout, as the API does under the app role after the fifth failure. */
 async function lockOut(session: Session): Promise<void> {
+  await lockingOut.query('set local role lims_app');
   await lockingOut.query(`update lims.person set locked_at = clock_timestamp() where id = $1`, [session.personId]);
   await lockingOut.query(
     `insert into lims.access_event (kind, subject_id, source_address, roles) values ('Lockout', $1, '192.0.2.2', '{Analyst}')`,
@@ -117,11 +119,10 @@ describe('a Lock and a Lockout on the same person land in the order they took th
     const session = await openSession('lock.order.first');
 
     await locking.query('begin');
-    await locking.query(audited('svc:test'));
+    await locking.query(AUDIT_CONTEXT, SERVICE);
     await locking.query(`select from lims.audit_chain where chain = 'company' for update`);
     await lockingOut.query('begin');
-    await lockingOut.query(audited('svc:test'));
-    await lockingOut.query('set local role lims_app');
+    await lockingOut.query(AUDIT_CONTEXT, SERVICE);
     const lockout = lockOut(session);
     await untilWaitingOnLocks(1);
     const locked = await pressLock(session);
@@ -143,13 +144,12 @@ describe('a Lock and a Lockout on the same person land in the order they took th
     const session = await openSession('lock.order.second');
 
     await lockingOut.query('begin');
-    await lockingOut.query(audited('svc:test'));
+    await lockingOut.query(AUDIT_CONTEXT, SERVICE);
     await lockingOut.query(`select from lims.audit_chain where chain = 'company' for update`);
     await locking.query('begin');
-    await locking.query(audited('svc:test'));
+    await locking.query(AUDIT_CONTEXT, SERVICE);
     const lock = pressLock(session);
     await untilWaitingOnLocks(1);
-    await lockingOut.query('set local role lims_app');
     await lockOut(session);
     await lockingOut.query('commit');
     const locked = await lock;
