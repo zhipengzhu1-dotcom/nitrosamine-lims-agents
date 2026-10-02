@@ -47,6 +47,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       identity_verification_id: { label: 'Identity Verification' },
       failed_logins: { label: 'Failed sign-ins', movedByStep: true },
       locked_at: { label: 'Locked at', shows: 'instant', movedByStep: true },
+      reduced_motion: { label: 'Reduce motion' },
     },
   },
   method: {
