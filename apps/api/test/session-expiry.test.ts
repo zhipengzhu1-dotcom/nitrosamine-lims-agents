@@ -166,9 +166,7 @@ for (const [limit, kind, activeFor, thenIdleFor] of [
   });
 
 it('a request racing the sweep for the same lapsed session leaves one expiry Access Event', async () => {
-  const people = await Promise.all(
-    Array.from({ length: 5 }, (_, i) => api.addPerson(`expiry.race-${i}`, ['Analyst'])),
-  );
+  const people = await Promise.all(Array.from({ length: 5 }, (_, i) => api.addPerson(`expiry.race-${i}`, ['Analyst'])));
   const clients = await Promise.all(people.map((person) => api.login(person)));
   for (const person of people) await api.advanceClock(person, idleMs + MINUTE_MS);
 

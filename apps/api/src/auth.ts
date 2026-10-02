@@ -359,13 +359,10 @@ export async function endLapsedSessions(
   limits: SessionLimits,
   key?: Pick<SessionKey, 'labId' | 'id'>,
 ): Promise<void> {
-  await audited(
-    db,
-    SWEEP_SERVICE,
-    (tx) =>
-      sql`select lims.end_lapsed_sessions(${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}, ${key?.labId ?? null}::uuid, ${key?.id ?? null}::uuid)`.execute(
-        tx,
-      ),
+  await audited(db, SWEEP_SERVICE, (tx) =>
+    sql`select lims.end_lapsed_sessions(${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}, ${key?.labId ?? null}::uuid, ${key?.id ?? null}::uuid)`.execute(
+      tx,
+    ),
   );
 }
 

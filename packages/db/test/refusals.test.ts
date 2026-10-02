@@ -1224,9 +1224,9 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint: 'access_event_lab_switch_check',
     },
     {
-      name: 'a lockout Access Event with a failure reason is refused',
+      name: 'a sign-out Access Event with a failure reason is refused',
       table: 'lims.access_event',
-      change: { kind: 'Lockout' },
+      change: { kind: 'SignOut' },
       constraint: 'access_event_failure_check',
     },
     {
