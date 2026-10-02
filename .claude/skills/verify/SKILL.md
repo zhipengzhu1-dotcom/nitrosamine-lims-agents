@@ -70,7 +70,8 @@ It writes the new Sample number (`RD-S-YYYY-00000n`) to `steps.log` and saves it
 Stable handles, all from the shipped UI (`apps/web/src`):
 
 - Sign in: the fields `Username` and `Password`, and the button `Sign in`. A refusal shows in `role=alert`.
-- The worklist has the heading `Tests`. Each Test is a link named by its Sample number, which matches `/^RD-S-\d{4}-\d{6}$/`.
+- The worklist has the heading `Tests`. Each Test is a link named by its Sample number, which matches `/^RD-S-\d{4}-\d{6}$/`. The link opens `#/tests/<id>/beside`: at desktop width the Test opens beside the list, which keeps Sample, State and Received and turns its heading into an `h2`; narrower, the Test takes the screen. The link `Close` returns to the list. `#/tests/<id>` still opens the Test alone.
+- Above the worklist, the radio group `Filter by Test state` holds `All <n>` and one radio per state with Tests, such as `Submitted For Review 2`, and the search box `Search Tests` matches Sample number, description, Customer and Method. The counts follow the search.
 - On a Test page, the `h1` holds the Sample number and the state in words, such as `Submitted For Review`. On a phone it sticks to the top of the record as it scrolls.
 - At phone width the rail folds its session block: one row holds a button with the person's name and `Session ends in`, then `Switch user` and `Lock`. The button (`.rail__toggle`, `aria-expanded`) opens the block, which shows the person's Lab, roles, username and Workstation, the preferences link, `Switch Lab` (on an Unregistered device only) and `Sign out`. `v.signOut()` opens it first.
 - The rail's person name is the link `<name>, your preferences` to `#/preferences`, the page `Your preferences` with the box `Reduce motion wherever I sign in` and the button `Save preferences`.

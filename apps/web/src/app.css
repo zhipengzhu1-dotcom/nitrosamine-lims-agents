@@ -311,6 +311,92 @@ th {
 .trail__tools input[type="search"] {
   min-width: 220px;
 }
+
+.worklist__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+.worklist__tools > label {
+  flex: 1 1 220px;
+  max-width: 360px;
+  margin: 0;
+}
+.pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pipeline .pipe {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--sheet);
+  font-size: 13px;
+  cursor: pointer;
+}
+.pipe input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+.pipe b {
+  font-variant-numeric: tabular-nums;
+}
+.pipe:has(input:checked) {
+  border-color: var(--act);
+  box-shadow: inset 0 0 0 1px var(--act);
+  background: color-mix(in srgb, var(--act) 8%, var(--sheet));
+}
+.row--open td {
+  background: color-mix(in srgb, var(--act) 8%, var(--sheet));
+}
+.row--open a {
+  font-weight: 700;
+}
+.split__list td a {
+  white-space: nowrap;
+}
+
+.split__close {
+  margin-bottom: 8px;
+}
+.split__list {
+  display: none;
+}
+/* At desktop width each side scrolls on its own, so choosing another record keeps the list where it was. */
+@media (min-width: 901px) {
+  .plane:has(> .split) {
+    padding: 0;
+    overflow: hidden;
+  }
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    height: 100%;
+  }
+  .split__list {
+    display: block;
+  }
+  .split > section {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 16px 24px;
+  }
+  .split__record {
+    border-left: 1px solid var(--line);
+  }
+}
 .verify {
   display: flex;
   flex-wrap: wrap;

@@ -67,7 +67,7 @@ export interface SigningView {
   recordVersion: RecordVersionRef;
   statement: SignatureStatement;
 }
-const stateOrder = Object.values(steps).map((s) => s.to);
+export const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
 const unsignedLook = {
@@ -238,20 +238,27 @@ export const modules = [
 export type Module = (typeof modules)[number];
 type ModuleKey = Module['key'];
 
-/** `notice` is what the rail says when the person has no step to take here, such as which Signatures are unsigned. */
+/**
+ * `notice` is what the rail says when the person has no step to take here, such as which Signatures are unsigned.
+ * A new `railKey` starts the rail afresh, so a sheet or answer for one record never stays on for the next. The plane
+ * takes no press while a commit waits for its answer, so the answer is shown beside the record it was taken on.
+ */
 export function Shell({
   me,
   active,
   action,
   notice,
+  railKey,
   children,
 }: {
   me: ActorContext;
   active: ModuleKey | null;
   action: RailAction | null;
   notice?: string | undefined;
+  railKey?: string;
   children: ReactNode;
 }) {
+  const [committing, setCommitting] = useState(false);
   return (
     <div className="frame">
       <TopBar lab={me.lab}>
@@ -266,8 +273,10 @@ export function Shell({
             ))}
         </nav>
       </TopBar>
-      <main className="plane">{children}</main>
-      <Rail me={me} action={action} notice={notice} />
+      <main className="plane" inert={committing}>
+        {children}
+      </main>
+      <Rail key={railKey} me={me} action={action} notice={notice} onCommitting={setCommitting} />
     </div>
   );
 }
@@ -302,7 +311,17 @@ function unansweredText(e: unknown, signs: boolean): string {
   return `Refused: ${e.message}${signs ? ' Nothing has been signed.' : ''}`;
 }
 
-function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | null; notice?: string | undefined }) {
+function Rail({
+  me,
+  action,
+  notice,
+  onCommitting,
+}: {
+  me: ActorContext;
+  action: RailAction | null;
+  notice?: string | undefined;
+  onCommitting: (committing: boolean) => void;
+}) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [username, setUsername] = useState('');
@@ -323,7 +342,16 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
   const statusLine = useRef<HTMLDivElement>(null);
   const opened = sheet !== null && !sheet.closing;
   const firstField = () => form.current?.querySelector<HTMLElement>('input, select');
+  const mounted = useRef(false);
 
+  // A rail left mid-commit, by Back or a new record, frees the plane, and its late answer cannot free the next rail's.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      onCommitting(false);
+    };
+  }, [onCommitting]);
   useEffect(() => {
     if (!returnFocus.current || opened) return;
     returnFocus.current = false;
@@ -380,6 +408,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
+    onCommitting(true);
     setRefusal(null);
     try {
       const text = await a.run(values, a.signs ? { username, password } : null);
@@ -400,6 +429,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     } finally {
       inFlight.current = false;
       setBusy(false);
+      if (mounted.current) onCommitting(false);
       setPassword('');
     }
   }
