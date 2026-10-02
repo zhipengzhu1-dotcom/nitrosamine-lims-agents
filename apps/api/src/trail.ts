@@ -21,6 +21,7 @@ import {
 import { type ExpressionBuilder, type ExpressionWrapper, type Kysely, type SqlBool, sql } from 'kysely';
 import { Value } from 'typebox/value';
 import type { App } from './app.ts';
+import { openChainIncident } from './incident.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 
@@ -245,10 +246,15 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
     handler: async (req) => {
       if (!req.actor.roles.includes('QA')) refuse('role', 'verifying the Audit Trail is a QA action');
       const { at, chains } = await labScope(db, req.actor).verifyAuditTrail();
-      return {
-        at,
-        chains: chains.map((c) => chainVerification(c.chain, c.lastEntry, c.firstFailure)),
-      };
+      const verified = [];
+      for (const { chain, name, lastEntry, firstFailure } of chains) {
+        const broken =
+          firstFailure === null
+            ? null
+            : { firstFailure, incident: await openChainIncident(db, req.actor, name, firstFailure) };
+        verified.push(chainVerification(chain, lastEntry, broken));
+      }
+      return { at, chains: verified };
     },
   });
 }

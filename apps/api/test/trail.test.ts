@@ -306,6 +306,7 @@ it("QA's Verify chain on an untouched chain replies intact through entry N, with
       lastEntry: labLast,
       intactThrough: labLast,
       firstFailure: null,
+      incident: null,
       report: `intact through entry ${labLast}`,
     },
     {
@@ -313,6 +314,7 @@ it("QA's Verify chain on an untouched chain replies intact through entry N, with
       lastEntry: companyLast,
       intactThrough: companyLast,
       firstFailure: null,
+      incident: null,
       report: `intact through entry ${companyLast}`,
     },
   ]);
@@ -353,7 +355,14 @@ it('the raw entry under each readable entry keeps the stored values and hashes',
   assert.equal(JSON.parse(content?.new?.text ?? '').analyte, 'NDMA', 'the signed bytes read as the Record Version');
 });
 
-it('after an entry is altered by the database owner, Verify chain names it as the first failure and reports intact only through the entry before it', async () => {
+const chainIncidents = () =>
+  api.db
+    .selectFrom('systemIncident')
+    .select(['reference', 'chain', 'firstFailure'])
+    .where('kind', '=', 'ChainVerifyFailure')
+    .execute();
+
+it('after an entry is altered by the database owner, Verify chain names it as the first failure, reports intact only through the entry before it, and opens one System Incident naming the chain and that entry, requested by the QA', async () => {
   await submitTestTo('Ready');
   const last = BigInt(await lastEntryOf(api.labId));
   const altered = last - 2n;
@@ -364,16 +373,57 @@ it('after an entry is altered by the database owner, Verify chain names it as th
     );
   });
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
+  const incident = verified.chains[0]?.incident ?? assert.fail('the break names a System Incident');
   assert.deepEqual(verified.chains[0], {
     chain: 'lab',
     lastEntry: String(last),
     intactThrough: String(altered - 1n),
     firstFailure: String(altered),
-    report: `entry ${altered} fails to verify; intact through entry ${altered - 1n}`,
+    incident,
+    report: `entry ${altered} fails to verify; intact through entry ${altered - 1n}; recorded as System Incident ${incident}`,
   });
   assert.equal(verified.chains[1]?.firstFailure, null, 'the company chain is untouched');
+  assert.equal(verified.chains[1]?.incident, null, 'an intact chain opens no System Incident');
+
+  assert.partialDeepStrictEqual(ok(await as.quinn.call(routes.incident, { reference: incident })), {
+    reference: incident,
+    kind: 'ChainVerifyFailure',
+    state: 'Open',
+    chain: api.labId,
+    firstFailure: String(altered),
+    requestedBy: quinn.id,
+    sessionLabId: api.labId,
+    step: null,
+    errorClass: null,
+  });
+  assert.deepEqual(await chainIncidents(), [{ reference: incident, chain: api.labId, firstFailure: String(altered) }]);
+  const written = await api.db
+    .selectFrom('auditEntry')
+    .select(['chain', 'actor'])
+    .where('tableName', '=', 'system_incident')
+    .where(sql<string>`new_row->>'reference'`, '=', incident)
+    .executeTakeFirstOrThrow();
+  assert.deepEqual(written, { chain: 'company', actor: 'svc:incident' }, 'the incident is a company record');
+
   const entry: TrailEntry | undefined = (
     await trailOf((await api.db.selectFrom('test').select('id').executeTakeFirstOrThrow()).id)
   ).entries[0];
   assert.ok(entry, 'the trail still reads after a break; the break is reported by Verify chain');
+});
+
+it('a second verification of the same unrepaired break, by the same QA or another, opens no other System Incident', async () => {
+  const [before] = await chainIncidents();
+  const opened = before ?? assert.fail('the break above opened a System Incident');
+  const other = await api.login(await api.addPerson('chain.verifier', ['QA']));
+  for (const qa of [as.quinn, other, as.quinn]) {
+    const verified = ok(await qa.call(routes.verifyAuditTrail));
+    assert.equal(verified.chains[0]?.firstFailure, opened.firstFailure);
+    assert.equal(verified.chains[0]?.incident, opened.reference);
+  }
+  const concurrent = await Promise.all([as.quinn, other].map((qa) => qa.call(routes.verifyAuditTrail)));
+  assert.deepEqual(
+    concurrent.map((answer) => ok(answer).chains[0]?.incident),
+    [opened.reference, opened.reference],
+  );
+  assert.deepEqual(await chainIncidents(), [opened]);
 });

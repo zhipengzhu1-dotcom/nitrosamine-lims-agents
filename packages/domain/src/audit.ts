@@ -295,24 +295,35 @@ export function describeTrail(
   });
 }
 
-/** How QA reads a recomputed chain: intact through its last entry, or through the entry before the first that fails. */
-export function chainVerification(chain: ChainKind, lastEntry: string, firstFailure: string | null): ChainVerification {
-  if (firstFailure === null)
-    return { chain, lastEntry, intactThrough: lastEntry, firstFailure, report: `intact through entry ${lastEntry}` };
-  if (bySeq(firstFailure, lastEntry) > 0)
+/**
+ * How QA reads a recomputed chain: intact through its last entry, or through the entry before the first that fails,
+ * with the System Incident that records the break.
+ */
+export function chainVerification(
+  chain: ChainKind,
+  lastEntry: string,
+  broken: { firstFailure: string; incident: string } | null,
+): ChainVerification {
+  if (broken === null)
     return {
       chain,
       lastEntry,
       intactThrough: lastEntry,
-      firstFailure,
-      report: `the chain head does not match entry ${lastEntry}; intact through entry ${lastEntry}`,
+      firstFailure: null,
+      incident: null,
+      report: `intact through entry ${lastEntry}`,
     };
-  const intactThrough = String(Number(firstFailure) - 1);
+  const { firstFailure, incident } = broken;
+  const [intactThrough, failure] =
+    bySeq(firstFailure, lastEntry) > 0
+      ? [lastEntry, `the chain head does not match entry ${lastEntry}`]
+      : [String(Number(firstFailure) - 1), `entry ${firstFailure} fails to verify`];
   return {
     chain,
     lastEntry,
     intactThrough,
     firstFailure,
-    report: `entry ${firstFailure} fails to verify; intact through entry ${intactThrough}`,
+    incident,
+    report: `${failure}; intact through entry ${intactThrough}; recorded as System Incident ${incident}`,
   };
 }

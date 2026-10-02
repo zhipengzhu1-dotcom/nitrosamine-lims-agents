@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { audited, type DB, postgresFault } from '@lims/db';
-import { referencePattern, routes, stepNames, stepRoute } from '@lims/domain';
+import { type ActorContext, referencePattern, routes, stepNames, stepRoute } from '@lims/domain';
 import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { type Insertable, type InsertObject, type Kysely, sql } from 'kysely';
 import { type Static, type TSchema, Type } from 'typebox';
@@ -105,6 +105,40 @@ export async function openJobIncident(
   error: Error,
 ): Promise<void> {
   await write(db, log, { ...factsOf(error), ...job });
+}
+
+/**
+ * Opens one System Incident for a break that chain verification found, naming the chain as the Audit Trail does and
+ * its first failing entry, with the verifying QA as the requesting person; a later verification of the same break
+ * answers that incident's reference and opens no other.
+ */
+export async function openChainIncident(
+  db: Kysely<DB>,
+  requester: ActorContext,
+  chain: string,
+  firstFailure: string,
+): Promise<string> {
+  return audited(db, INCIDENT_SERVICE, async (tx) => {
+    await tx
+      .insertInto('systemIncident')
+      .values({
+        kind: 'ChainVerifyFailure',
+        reference: referenceOf(randomBytes(8)),
+        requestedBy: requester.person.id,
+        sessionLabId: requester.lab.id,
+        chain,
+        firstFailure,
+      })
+      .onConflict((conflict) => conflict.columns(['chain', 'firstFailure']).doNothing())
+      .execute();
+    const { reference } = await tx
+      .selectFrom('systemIncident')
+      .select('reference')
+      .where('chain', '=', chain)
+      .where('firstFailure', '=', firstFailure)
+      .executeTakeFirstOrThrow();
+    return reference;
+  });
 }
 
 function unwrittenOn(line: string): Static<typeof unwrittenLine> | 'unreadable' | null {

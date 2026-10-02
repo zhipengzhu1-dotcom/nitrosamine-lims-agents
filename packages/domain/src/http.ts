@@ -252,6 +252,8 @@ const chainVerification = Type.Object({
   lastEntry: seq,
   intactThrough: seq,
   firstFailure: nullable(seq),
+  /** The System Incident a break opened, the same on every verification that finds the same first failing entry. */
+  incident: nullable(Type.String({ pattern: `^${referencePattern}$` })),
   report: Type.String(),
 });
 export type ChainVerification = Static<typeof chainVerification>;
@@ -266,6 +268,7 @@ const systemIncident = Type.Object({
     SignInBurstFromAddress: 'SignInBurstFromAddress',
     SignInBurstOnUnknownUserId: 'SignInBurstOnUnknownUserId',
     RepeatedSignInOnLockedAccount: 'RepeatedSignInOnLockedAccount',
+    ChainVerifyFailure: 'ChainVerifyFailure',
   } as const satisfies { [K in db.IncidentKind]: K }),
   state: Type.Enum({ Open: 'Open' } as const satisfies { [K in db.IncidentState]: K }),
   /** The failing step and error class of a failure of the LIMS; null for a sign-in incident. */
@@ -278,6 +281,9 @@ const systemIncident = Type.Object({
   subjectId: nullable(uuid),
   sourceAddress: nullable(Type.String()),
   typedUserIdHmac: nullable(sha256Hex),
+  /** What a chain-verify failure names: the chain as the Audit Trail names it ('company' or the Lab's ID), and its first failing entry. */
+  chain: nullable(Type.String()),
+  firstFailure: nullable(seq),
   sqlstate: nullable(Type.String()),
   constraintName: nullable(Type.String()),
   /** The database's insert time. */
