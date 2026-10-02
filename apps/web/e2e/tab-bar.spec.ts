@@ -1,7 +1,5 @@
-import { DESKTOP, expect, type Locator, PHONE, type Page, signInByApi, test } from './walk.ts';
+import { DESKTOP, expect, type Locator, PHONE, type Page, signInByApi, TABLET, test, type Viewport } from './walk.ts';
 
-const TABLET = { width: 820, height: 1180 };
-type Viewport = typeof TABLET;
 type Position = 'start' | 'middle' | 'end';
 /** Which edges fade with the bar scrolled to each position: the edges that more tabs lie beyond. */
 const FADED_AT = { start: 'right', middle: 'both', end: 'left' } as const;
@@ -110,5 +108,20 @@ test.describe('at tablet width', () => {
       await page.setViewportSize(DESKTOP);
       await expectNoFade(nav, `a bar resized to fit from its ${at} fades no tab`);
     }
+  });
+});
+
+test.describe('on an iPad', () => {
+  // oxlint-disable-next-line no-empty-pattern -- Playwright reads a fixture's dependencies from this pattern; empty means none.
+  test.beforeEach(({}, info) => {
+    test.skip(info.project.name !== 'ipad', 'an iPad walk');
+  });
+
+  test('the tabs are 44 px touch targets, and a bar resized to fit fades no tab', async ({ page }) => {
+    const nav = await tabBar(page, page.viewportSize() ?? TABLET);
+    await expectTouchTargets(nav);
+    await nav.evaluate((n) => n.scrollTo({ left: n.scrollWidth }));
+    await page.setViewportSize(DESKTOP);
+    await expectNoFade(nav, 'a bar resized to fit fades no tab');
   });
 });

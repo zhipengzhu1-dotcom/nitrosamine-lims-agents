@@ -24,6 +24,8 @@ export const test = playwright.extend<{ apiLog: void }>({
 
 export const PHONE = { width: 390, height: 844 };
 export const DESKTOP = { width: 1360, height: 900 };
+export const TABLET = { width: 820, height: 1180 };
+export type Viewport = typeof DESKTOP;
 
 /** Ends any session of the page's browser and signs `username` in to the R&D Lab through the API. */
 export async function signInByApi(page: Page, username: string) {

@@ -146,6 +146,7 @@ p {
   align-self: stretch;
   --tab-gap: 16px;
   --tab-inset: 0px;
+  --tab-fade: 72px;
   gap: var(--tab-gap);
   min-width: 0;
   overflow-x: auto;
@@ -157,18 +158,18 @@ p {
   content: "";
   position: sticky;
   flex: none;
-  width: 72px;
+  width: var(--tab-fade);
   pointer-events: none;
   opacity: 0;
 }
 .top nav::before {
   left: calc(-1 * var(--tab-inset));
-  margin-right: calc(-72px - var(--tab-gap));
+  margin-right: calc(-1 * var(--tab-fade) - var(--tab-gap));
   background: linear-gradient(to right, var(--sheet), transparent);
 }
 .top nav::after {
   right: calc(-1 * var(--tab-inset));
-  margin-left: calc(-72px - var(--tab-gap));
+  margin-left: calc(-1 * var(--tab-fade) - var(--tab-gap));
   background: linear-gradient(to left, var(--sheet), transparent);
 }
 @supports (container-type: scroll-state) {
