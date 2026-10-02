@@ -427,6 +427,28 @@ it('a sign-out that meets a Lockout not yet committed ends its session at the Lo
   assert.ok(!events.some((e) => e.kind === 'SignOut'), 'no sign-out is recorded for a session the Lockout ended');
 });
 
+it('a Lock waits for the company chain before it holds its session, the order a sign-out takes, so the two cannot deadlock', async () => {
+  const person = await api.addPerson('access.lock-order', ['Analyst']);
+  const client = await api.login(person);
+  const [session] = await sessionsOf(person);
+  assert.ok(session);
+  let locking: Promise<unknown> = Promise.resolve();
+  let sessionHeld = false;
+  await audited(api.db, SYSTEM, async (tx) => {
+    await sql`select lims.lock_chains('company')`.execute(tx);
+    locking = client.call(routes.lock).then((answer) => ok(answer));
+    await blockedOrSettled(locking);
+    try {
+      await sql`select from lims.session where id = ${session.id} for update nowait`.execute(api.superuser);
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === '55P03')) throw error;
+      sessionHeld = true;
+    }
+  });
+  await locking;
+  assert.equal(sessionHeld, false, 'the Lock did not hold the session while it waited for the chain');
+});
+
 it("the Lab scope reads no other Lab's Access Events or sessions, and no session's token hash", async () => {
   const person = await api.addPerson('access.scope', ['Analyst']);
   await audited(api.superuser, SYSTEM, (tx) =>

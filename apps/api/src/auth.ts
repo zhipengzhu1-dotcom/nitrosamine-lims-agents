@@ -686,7 +686,10 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
   });
 
   // Postgres 18's old.locked_at tells whether this very update changed the lock, so a repeat writes no second event.
+  // The company chain, which the Access Event below needs, is taken before the session row, the order end_session takes,
+  // so a Lock and a sign-out on one session cannot each hold what the other waits for.
   const setLocked = async (tx: Transaction<DB>, session: SessionKey, locked: boolean) => {
+    await sql`select lims.lock_chains('company')`.execute(tx);
     const row = await tx
       .updateTable('session')
       .set({ lockedAt: locked ? sql`coalesce(locked_at, now())` : null })
