@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
+export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -41,7 +41,7 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoLab" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
+export type SignInFailure = "AccountLocked" | "NoLab" | "NoLabChosen" | "NoMembership" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -52,6 +52,8 @@ export interface AccessEvent {
   failureReason: SignInFailure | null;
   id: Generated<string>;
   kind: AccessEventKind;
+  previousSessionId: string | null;
+  previousSessionLabId: string | null;
   roles: ArrayType<Role>;
   sessionId: string | null;
   sessionLabId: string | null;

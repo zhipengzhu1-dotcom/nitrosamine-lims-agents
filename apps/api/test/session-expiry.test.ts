@@ -156,7 +156,9 @@ it('with the decided login the idle limit is 15 minutes, with the demo login 8 h
   ] as const) {
     const person = await api.addPerson(`expiry.${login}`, ['Analyst']);
     const client = new Client(base);
-    const { session } = ok(await client.call(routes.login, { username: person.username, password: person.password }));
+    const { session } = ok(
+      await client.call(routes.login, { username: person.username, password: person.password, labId: api.labId }),
+    );
     assert.equal(session.idleLimitMs, idle, `the ${login} idle limit`);
     assert.ok(
       session.absoluteLeftMs <= 12 * 60 * MINUTE_MS && session.absoluteLeftMs > 12 * 60 * MINUTE_MS - MINUTE_MS,
@@ -168,7 +170,7 @@ it('with the decided login the idle limit is 15 minutes, with the demo login 8 h
     ok(await client.call(routes.logout));
 
     const again = new Client(base);
-    ok(await again.call(routes.login, { username: person.username, password: person.password }));
+    ok(await again.call(routes.login, { username: person.username, password: person.password, labId: api.labId }));
     await api.advanceClock(person, idle + MINUTE_MS);
     assert.equal(refusedWith(await again.call(routes.me), 'noSession'), SESSION_ENDED, `${login}: idle past its limit`);
   }

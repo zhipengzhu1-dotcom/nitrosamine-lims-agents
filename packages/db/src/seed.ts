@@ -23,11 +23,16 @@ export interface SeededAccount {
   password: string;
 }
 
-/** Seeds one Lab, one Customer, one Method and the demo people, who all share one password, into an empty database. */
+// A second Lab, so that a person with Memberships in both picks the Lab at sign-in and can switch Lab.
+const secondLab = { code: 'QC', name: 'QC Laboratory (fictional)', members: ['lena.manager', 'rui.reviewer'] } as const;
+
+const SEED = { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' };
+
+/** Seeds two Labs, one Customer, one Method and the demo people, who all share one password, into an empty database. */
 export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('base64url')): Promise<SeededAccount[]> {
   if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
-  return audited(db, { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' }, async (tx) => {
+  const accounts = await audited(db, SEED, async (tx) => {
     const customer = await tx
       .insertInto('customer')
       .values({ name: 'Northwind Generics (fictional)' })
@@ -63,6 +68,17 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
     }
     return out;
   });
+  // Its own transaction: the new Lab is a company row, and the company chain is locked before any Lab's.
+  await audited(db, SEED, async (tx) => {
+    const { labId } = await tx
+      .insertInto('lab')
+      .values({ code: secondLab.code, name: secondLab.name, timeZone: 'America/New_York' })
+      .returning('labId')
+      .executeTakeFirstOrThrow();
+    for (const a of accounts.filter((a) => secondLab.members.some((m) => m === a.username)))
+      await tx.insertInto('membership').values({ labId, personId: a.id, role: a.role }).execute();
+  });
+  return accounts;
 }
 
 if (import.meta.main) {

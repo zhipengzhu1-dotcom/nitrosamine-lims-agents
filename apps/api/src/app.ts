@@ -14,11 +14,11 @@ import {
   actorFor,
   type Login,
   loginRoutes,
-  logoutRoute,
   scheduleExpirySweep,
   SESSION_COOKIE,
   SESSION_LIMITS,
   type SessionKey,
+  sessionRoutes,
 } from './auth.ts';
 import { apiLogger, checkLogVolume, type LogSink, type LogVolume } from './log.ts';
 import { readRoutes } from './reads.ts';
@@ -90,7 +90,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
       } = await actorFor(db, req.cookies[SESSION_COOKIE], limits));
       req.requester = req.actor;
     });
-    logoutRoute(signedIn, db, limits);
+    sessionRoutes(signedIn, db, limits);
     readRoutes(signedIn, db);
     stepRoutes(signedIn, db);
   });

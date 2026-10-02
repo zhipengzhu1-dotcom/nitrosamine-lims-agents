@@ -1,6 +1,7 @@
 import {
   type ActorContext,
   decimalPattern,
+  type Lab,
   routes,
   type StepInput,
   type StepName,
@@ -163,14 +164,14 @@ export function Shell({
   children,
 }: {
   me: ActorContext;
-  active: ModuleKey;
+  active: ModuleKey | null;
   action: RailAction | null;
   notice?: string | undefined;
   children: ReactNode;
 }) {
   return (
     <div className="frame">
-      <TopBar>
+      <TopBar lab={me.lab}>
         <nav>
           {modules.map((m) => (
             <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
@@ -185,12 +186,10 @@ export function Shell({
   );
 }
 
-export function TopBar({ children }: { children?: ReactNode }) {
+export function TopBar({ lab, children }: { lab?: Lab; children?: ReactNode }) {
   return (
     <header className="top">
-      <span className="brand">
-        <b>RD</b>Nitrosamine LIMS
-      </span>
+      <span className="brand">{lab && <b title={lab.name}>{lab.code}</b>}Nitrosamine LIMS</span>
       {children}
       <span className="fict">Fictional data only</span>
     </header>
@@ -402,7 +401,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
         <div className="who">
           <b>{me.person.displayName}</b>
           <span>
-            {me.roles.map(words).join(', ')} · <code>{me.person.username}</code>
+            {me.lab.code} · {me.roles.map(words).join(', ')} · <code>{me.person.username}</code>
           </span>
           <SessionCountdown />
         </div>
@@ -424,6 +423,15 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
             {action.label}
           </button>
         )}
+        <button
+          type="button"
+          className="rbtn rbtn--quiet rail__out"
+          onClick={() => {
+            location.hash = '#/switch-lab';
+          }}
+        >
+          Switch Lab
+        </button>
         <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void signOut()}>
           Sign out
         </button>

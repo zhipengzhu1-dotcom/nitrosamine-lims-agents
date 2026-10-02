@@ -53,9 +53,11 @@ export const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' })
 const nullable = <S extends TSchema>(schema: S) => Type.Union([schema, Type.Null()]);
 const closed = { additionalProperties: false } as const;
 
+const lab = Type.Object({ id: uuid, code: Type.String(), name: Type.String() });
+export type Lab = Static<typeof lab>;
 const actorContext = Type.Object({
   person: Type.Object({ id: uuid, username: Type.String(), displayName: Type.String(), customerId: nullable(uuid) }),
-  lab: Type.Object({ id: uuid, code: Type.String(), name: Type.String() }),
+  lab,
   roles: Type.Array(role),
 });
 export type ActorContext = Static<typeof actorContext>;
@@ -255,8 +257,9 @@ export type StepTaken = Static<typeof stepTaken>;
  * a body with a field its closed schema does not name, whatever else is wrong with it; `malformed` is any other
  * request Fastify refuses before the handler runs (a schema fault, unparseable JSON, a wrong media type, too large).
  * `badCredentials` is the one answer to every sign-in failure;
- * `accountLocked`, and `role` for an account with no Lab, come only after the right password. `noSession` covers no session presented and a session that
- * has ended. `stale` asks the person to reload; `state` says the step does not apply. `keyReused` is a Commit Key sent again
+ * `accountLocked`, `labNotChosen` for a sign-in that names no Lab, and `role` for a Lab where the person holds no
+ * Membership, come only after the right password. `noSession` covers no session presented and a session that
+ * has ended. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
  * with a different step or input, or from another session. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
@@ -265,6 +268,7 @@ export const refusalKinds = [
   'unknownField',
   'malformed',
   'badCredentials',
+  'labNotChosen',
   'noSession',
   'accountLocked',
   'role',
@@ -282,7 +286,9 @@ export const isRefusalKind = (value: unknown): value is RefusalKind => refusalKi
 export const refusalBody = Type.Object({ kind: Type.Enum(refusalKinds), message: Type.String() });
 export type RefusalBody = Static<typeof refusalBody>;
 
-const credentials = Type.Object({ username: text, password: text }, closed);
+/** A sign-in names its Lab; the schema lets it out so that the API can answer `labNotChosen` after the password. */
+const signIn = Type.Object({ username: text, password: text, labId: Type.Optional(uuid) }, closed);
+const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, closed);
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
@@ -336,7 +342,9 @@ function route<
 
 /** Every route the API serves besides the steps. */
 export const routes = {
-  login: route('POST', '/api/login', { body: credentials }, signedIn),
+  labs: route('GET', '/api/labs', {}, Type.Array(lab)),
+  login: route('POST', '/api/login', { body: signIn }, signedIn),
+  switchLab: route('POST', '/api/lab-switch', { body: labSwitch }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
   me: route('GET', '/api/me', {}, signedIn),
   /** Reads how long the session has left without counting as activity, for the web's countdown. */

@@ -15,12 +15,12 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 1 | Transaction IDs | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
 | 2 | Signing function and Signature fields | |
 | 2 | Record Versions | [#94](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/94) |
-| 2 | Lab at sign-in | |
+| 2 | Lab at sign-in | [#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98) |
 | 2 | Workstations | |
 | 2 | Identity Verification | |
 | 2 | Unlock | |
 | 2 | Admin constraint | |
-| 2 | Decided login (TOTP, password rules, lockout 5, pepper) behind the data class | |
+| 2 | Decided login (TOTP, password rules, lockout 5, pepper) behind the data class; TOTP covers sign-in, signing and the Lab switch, which until then re-authenticates with user ID and password only ([#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98)) | |
 | 2 | Release Log, service identities, real-data gate and banner | |
 | 3 | Critical Data Change | |
 | 3 | Return | |

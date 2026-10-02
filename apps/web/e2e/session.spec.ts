@@ -36,6 +36,7 @@ test('the Bench Rail counts down to the idle end, and returns to sign-in only wh
 }) => {
   await page.clock.install();
   await page.goto('/');
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill('quinn.qa');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();

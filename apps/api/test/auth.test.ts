@@ -100,7 +100,11 @@ for (const secureCookie of [true, false]) {
     const rui = api.person('rui');
     const expected = ['HttpOnly', 'Path=/', 'SameSite=Strict', ...(secureCookie ? ['Secure'] : [])].sort();
 
-    const issued = await sessionCookieFrom(base, routes.login, { username: rui.username, password: rui.password });
+    const issued = await sessionCookieFrom(base, routes.login, {
+      username: rui.username,
+      password: rui.password,
+      labId: api.labId,
+    });
     assert.deepEqual(attributesOf(issued), expected, 'the sign-in Set-Cookie');
 
     const cleared = await sessionCookieFrom(base, routes.logout, {}, issued.split(';')[0]);

@@ -1,4 +1,5 @@
 import {
+  type ActorContext,
   isRefusalKind,
   pathOf,
   type RefusalKind,
@@ -116,8 +117,8 @@ async function startSession(request: () => Promise<SignedInView>): Promise<Signe
 addEventListener('visibilitychange', tick);
 
 /** Signs in and starts the session's countdown. */
-export const signIn = (username: string, password: string) =>
-  startSession(() => api(routes.login, { username, password }));
+export const signIn = (credentials: RouteInput<typeof routes.login>[0]) =>
+  startSession(() => api(routes.login, credentials));
 
 /** Reads who is signed in, if anyone, and starts the session's countdown. */
 export const resume = () => startSession(() => api(routes.me));
@@ -157,6 +158,19 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
     session.idleEndsAt = Math.max(session.idleEndsAt, sentAt + session.idleLimitMs);
   // oxlint-disable-next-line typescript/consistent-type-assertions -- a wire body has no static type; the API serializes every 2xx through this route's reply schema, and the web does not repeat the check
   return json as RouteReply<R>;
+}
+
+let actorChanged = (_me: ActorContext) => {};
+/** Registers the one listener that shows the person the session the server answered with after a Lab switch. */
+export const onActorChanged = (fn: (me: ActorContext) => void) => {
+  actorChanged = fn;
+};
+
+/** Moves the session to another Lab, then shows the worklist of the Lab the server answered with. */
+export async function switchLab(body: RouteInput<typeof routes.switchLab>[0]): Promise<void> {
+  const me = await startSession(() => api(routes.switchLab, body));
+  location.hash = '';
+  actorChanged(me);
 }
 
 export async function signOut(): Promise<void> {
