@@ -26,6 +26,6 @@ if kill -0 "$PGID" 2>/dev/null; then
   done
   kill -KILL "${pids[@]}" 2>/dev/null || true
 fi
-PGOPTIONS=--client-min-messages=warning scripts/pg.sh psql -qc "drop database if exists \"$DB\" with (force)"
+PGOPTIONS=--client-min-messages=warning scripts/pg.sh psql -q -v ON_ERROR_STOP=1 -v db="$DB" <<<'drop database if exists :"db" with (force)'
 rm -rf "$STATE"
 echo "stopped the instance under process $PGID and dropped $DB; evidence stays in $ROOT/.verify/evidence"

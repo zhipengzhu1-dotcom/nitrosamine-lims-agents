@@ -137,19 +137,28 @@ async function chooseLab(
   return { refused: 'NoMembership', roles: rolesOf(first.labId), labName: named?.name };
 }
 
+/** Counts a wrong credential; `locksOut` says this one reaches the lockout, which `lockOut` applies once the failure is recorded. */
 async function countFailure(tx: Transaction<DB>, personId: string) {
   return tx
     .updateTable('person')
-    .set({
-      failedLogins: sql`failed_logins + 1`,
-      lockedAt: sql`coalesce(locked_at, case when failed_logins + 1 >= ${LOCKOUT_AFTER_FAILURES} then clock_timestamp() end)`,
-    })
+    .set({ failedLogins: sql`failed_logins + 1` })
     .where('id', '=', personId)
     .returning([
-      sql<boolean>`old.locked_at is not null`.as('wasLocked'),
-      sql<boolean>`old.locked_at is null and new.locked_at is not null`.as('lockedNow'),
+      sql<boolean>`locked_at is not null`.as('wasLocked'),
+      sql<boolean>`locked_at is null and failed_logins >= ${LOCKOUT_AFTER_FAILURES}`.as('locksOut'),
     ])
     .executeTakeFirstOrThrow();
+}
+
+/** Locks the person out and records the Lockout, which the database stamps at the instant the lock landed. */
+async function lockOut(tx: Transaction<DB>, event: Omit<AccessEvent, 'kind'> & { subjectId: string }) {
+  await tx
+    .updateTable('person')
+    .set({ lockedAt: sql`clock_timestamp()` })
+    .where('id', '=', event.subjectId)
+    .where('lockedAt', 'is', null)
+    .execute();
+  await record(tx, { ...event, kind: 'Lockout' });
 }
 
 /** Counts a wrong credential toward the lockout and records it, with any Lockout it applies, in the caller's transaction. */
@@ -159,10 +168,10 @@ async function recordWrongCredential(
   event: Omit<AccessEvent, 'kind' | 'failureReason'> & { subjectId: string },
   wrong: 'WrongPassword' | 'OtherUserId',
 ): Promise<SignInFailure> {
-  const { wasLocked, lockedNow } = await countFailure(tx, event.subjectId);
+  const { wasLocked, locksOut } = await countFailure(tx, event.subjectId);
   const reason = wrong === 'WrongPassword' && wasLocked ? 'WrongPasswordOnLockedAccount' : wrong;
   await record(tx, { ...event, kind, failureReason: reason });
-  if (lockedNow) await record(tx, { ...event, kind: 'Lockout' });
+  if (locksOut) await lockOut(tx, event);
   return reason;
 }
 
@@ -234,7 +243,7 @@ export async function reauthenticate(
     return;
   }
   await audited(db, as('Failed authentication'), async (tx) => {
-    const { lockedNow } = await countFailure(tx, person.id);
+    const { locksOut } = await countFailure(tx, person.id);
     const event = {
       subjectId: person.id,
       roles: actor.roles,
@@ -244,7 +253,7 @@ export async function reauthenticate(
       workstationId: session.workstationId,
     };
     if (failureEvent) await record(tx, { kind: failureEvent, ...event });
-    if (lockedNow) await record(tx, { kind: 'Lockout', ...event });
+    if (locksOut) await lockOut(tx, event);
   });
   notValid();
 }

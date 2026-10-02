@@ -123,18 +123,18 @@ const lockOut = async (account: Account) => {
   return lockout?.at ?? assert.fail('a Lockout Access Event');
 };
 
-for (const [limit, kind, lastFor] of [
-  ['idle', 'IdleExpiry', 0],
-  ['absolute', 'AbsoluteExpiry', absoluteMs - MINUTE_MS],
+for (const [limit, kind, activeFor, thenIdleFor] of [
+  ['idle', 'IdleExpiry', 0, idleMs + MINUTE_MS],
+  ['absolute', 'AbsoluteExpiry', absoluteMs - 10 * MINUTE_MS, 11 * MINUTE_MS],
 ] as const)
   it(`a request on a session past its ${limit} limit ends it with one ${kind} Access Event at the computed instant, and neither the sweep nor a second request writes another`, async () => {
     const person = await api.addPerson(`expiry.request-${limit}`, ['Analyst']);
     const client = await api.login(person);
-    for (let elapsed = 0; elapsed < lastFor; elapsed += 10 * MINUTE_MS) {
+    for (let elapsed = 0; elapsed < activeFor; elapsed += 10 * MINUTE_MS) {
       await api.advanceClock(person, 10 * MINUTE_MS);
       ok(await client.call(routes.me));
     }
-    await api.advanceClock(person, idleMs + MINUTE_MS);
+    await api.advanceClock(person, thenIdleFor);
     const { createdAt, lastSeenAt } = await sessionOf(person);
     const end = Math.min(lastSeenAt.getTime() + idleMs, createdAt.getTime() + absoluteMs);
 
@@ -172,8 +172,8 @@ it('a request racing the sweep for the same lapsed session leaves one expiry Acc
   const clients = await Promise.all(people.map((person) => api.login(person)));
   for (const person of people) await api.advanceClock(person, idleMs + MINUTE_MS);
 
-  const answers = await Promise.all([...clients.map((client) => client.call(routes.me)), sweep()]);
-  for (const answer of answers.slice(0, -1)) refusedWith(answer as Awaited<ReturnType<Client['call']>>, 'noSession');
+  const [answers] = await Promise.all([Promise.all(clients.map((client) => client.call(routes.me))), sweep()]);
+  for (const answer of answers) refusedWith(answer, 'noSession');
   for (const person of people)
     assert.deepEqual(
       (await expiriesOf(person)).map((e) => e.kind),
@@ -215,6 +215,27 @@ it("the sweep ends a locked-out person's session at the Lockout's instant, befor
   await sweep();
   assert.equal((await sessionOf(person)).endedAt?.getTime(), lockedOutAt.getTime());
   assert.deepEqual(await expiriesOf(person), []);
+});
+
+it('a Lockout Access Event is stamped at the lock instant, and one for a person who is not locked is refused', async () => {
+  const person = await api.addPerson('expiry.lockout-stamp', ['Analyst']);
+  await assert.rejects(
+    audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Record a Lockout' }, (tx) =>
+      tx
+        .insertInto('accessEvent')
+        .values({ kind: 'Lockout', subjectId: person.id, roles: [], sourceAddress: '192.0.2.1' })
+        .execute(),
+    ),
+    (err: { code?: string; message?: string }) =>
+      err.code === '23514' && err.message === 'a Lockout Access Event needs its person locked',
+  );
+  const lockedOutAt = await lockOut(person);
+  const { lockedAt } = await api.superuser
+    .selectFrom('person')
+    .select('lockedAt')
+    .where('id', '=', person.id)
+    .executeTakeFirstOrThrow();
+  assert.equal(lockedOutAt.getTime(), lockedAt?.getTime());
 });
 
 it("a locked person's session that lapsed before the lock ends at its own end, with its expiry Access Event", async () => {
@@ -314,18 +335,17 @@ it('a sweep that fails opens a System Incident, and the next sweep records the e
       .select(['step', 'sqlstate', 'requestedBy'])
       .where('step', '=', 'expirySweep')
       .execute();
-  const sweepAs = (grant: 'grant' | 'revoke') =>
-    sql`${sql.raw(grant)} execute on function lims.end_lapsed_sessions(interval, interval, uuid, uuid) ${sql.raw(grant === 'grant' ? 'to' : 'from')} lims_app`.execute(
-      api.superuser,
-    );
-
-  await sweepAs('revoke');
+  await sql`revoke execute on function lims.end_lapsed_sessions(interval, interval, uuid, uuid) from lims_app`.execute(
+    api.superuser,
+  );
   try {
     const sweeping = await api.startAnotherApi({ sweepEveryMs: 20 });
     for (let wait = 0; wait < 250 && (await incidents()).length === 0; wait++) await sleep(20);
     await sweeping.app.close();
   } finally {
-    await sweepAs('grant');
+    await sql`grant execute on function lims.end_lapsed_sessions(interval, interval, uuid, uuid) to lims_app`.execute(
+      api.superuser,
+    );
   }
 
   const [incident] = await incidents();

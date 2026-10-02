@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { after, before, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
-import { checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
+import { checkoutDatabase, databaseUrl, dbServer } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 const DATABASE = checkoutDatabase('lims_counters_test');
 const BEFORE_COUNTERS = '0005_counters_and_transaction_ids.sql';
 
@@ -42,7 +42,7 @@ before(async () => {
     await cp(new URL(name, repo), join(folder, name));
   const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
-  await admin.query(`drop database if exists ${DATABASE} with (force)`);
+  await admin.query(`drop database if exists ${pg.escapeIdentifier(DATABASE)} with (force)`);
   await admin.end();
   await migrate(server, DATABASE, pathToFileURL(`${folder}/`));
   await client.connect();

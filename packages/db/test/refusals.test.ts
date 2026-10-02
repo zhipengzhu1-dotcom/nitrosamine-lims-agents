@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import pg from 'pg';
-import { checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
+import { checkoutDatabase, databaseUrl, dbServer } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 
 const DATABASE = checkoutDatabase('lims_refusals_test');
 const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
@@ -489,7 +489,7 @@ before(async () => {
   const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   try {
-    await admin.query(`drop database if exists ${DATABASE} with (force)`);
+    await admin.query(`drop database if exists ${pg.escapeIdentifier(DATABASE)} with (force)`);
   } finally {
     await admin.end();
   }
@@ -1759,6 +1759,7 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
   const elsewhere = new Map([
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
     ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
+    ['lims.access_event.stamp_lockout', 'session-expiry.test.ts'],
     ['public.schema_migration.refuse_change', 'migrate.test.ts'],
     ['public.schema_migration.refuse_truncate', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_not_null', 'migrate.test.ts'],

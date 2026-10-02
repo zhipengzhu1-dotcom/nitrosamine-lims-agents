@@ -8,7 +8,7 @@ const UNREACHABLE = 'postgres://nobody@127.0.0.1:1';
 
 function start(env: Record<string, string>) {
   return spawnSync(process.execPath, [api], {
-    env: { LIMS_PG: UNREACHABLE, ...env },
+    env: { LIMS_PG: UNREACHABLE, LIMS_DB: 'lims_unreachable', ...env },
     encoding: 'utf8',
     timeout: 10_000,
   });
@@ -29,6 +29,13 @@ it('a LIMS_ variable the API does not read stops it at start and names the close
     started.stderr.includes('LIMS_PGDATA is not a LIMS setting; did you mean LIMS_PG?'),
     `stderr was: ${started.stderr}`,
   );
+});
+
+it('an empty LIMS_DB stops the API at start and names LIMS_DB', () => {
+  const started = start({ LIMS_DB: '' });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.notEqual(started.status, 0);
+  assert.ok(started.stderr.includes('LIMS_DB is not set'), `stderr was: ${started.stderr}`);
 });
 
 it('in production the API will not start without a log', () => {

@@ -6,10 +6,10 @@ import { after, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { CamelCasePlugin } from 'kysely';
 import pg from 'pg';
-import { camelCaseOptions, checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
+import { camelCaseOptions, checkoutDatabase, databaseUrl, dbServer } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 
 const DATABASE = checkoutDatabase('lims_schema_test');
 const SCRATCH = checkoutDatabase('lims_schema_scratch_test');
