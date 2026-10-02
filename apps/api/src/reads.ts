@@ -1,5 +1,5 @@
 import type { DB } from '@lims/db';
-import { nextStep, routes } from '@lims/domain';
+import { nextStep, recordKind, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
@@ -7,6 +7,7 @@ import { labScope, type Scope } from './scope.ts';
 import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
 import { staffRoutes } from './staff.ts';
 import { trailRoutes } from './trail.ts';
+import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -90,8 +91,9 @@ async function testView(scope: Scope, id: string) {
           .orderBy('signature.signedAt')
           .execute()
           .then((rows) =>
-            rows.map(({ version, canonicalForm, contentHash, ...signature }) => ({
+            rows.map(({ record, version, canonicalForm, contentHash, ...signature }) => ({
               ...signature,
+              record: recordKind(record),
               recordVersion: { version, canonicalForm, contentHash },
             })),
           ),
@@ -103,6 +105,7 @@ async function testView(scope: Scope, id: string) {
 
 export function readRoutes(app: App, db: Kysely<DB>): void {
   trailRoutes(app, db);
+  auditExportRoutes(app, db);
   staffRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => ({ ...req.actor, session: req.sessionClock }) });
 
@@ -137,10 +140,11 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
   app.route({
     ...routes.report,
     handler: async (req) => {
-      const { report, test, result, signatures } = await testView(labScope(db, req.actor), req.params.id);
-      return report
-        ? { report, test, result, signatures }
-        : refuse('notFound', 'this Test has no released Test Report');
+      const scope = labScope(db, req.actor);
+      const { report, test, result, signatures } = await testView(scope, req.params.id);
+      if (!report) return refuse('notFound', 'this Test has no released Test Report');
+      const { version, canonicalForm, contentHash } = await latestVersion(scope, 'test_report', report.id);
+      return { report, recordVersion: { version, canonicalForm, contentHash }, test, result, signatures };
     },
   });
 

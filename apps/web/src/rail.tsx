@@ -1,6 +1,7 @@
 import {
   type ActorContext,
   decimalPattern,
+  mayTake,
   type Lab,
   type RecordVersionRef,
   type Role,
@@ -66,8 +67,40 @@ export interface SigningView {
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-/** `fresh` marks a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them. */
-export function Status({ state, fresh = false }: { state: TestState; fresh?: boolean }) {
+const unsignedLook = {
+  tone: 'bad',
+  glyph: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 5v3.5M8 11h0" />
+    </>
+  ),
+} as const;
+const markLook = {
+  Intact: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
+  Broken: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
+  Unsigned: unsignedLook,
+  'Signatures unsigned': unsignedLook,
+} as const;
+
+/**
+ * A Test state with its track, or a mark with its glyph: a chain verdict, an unsigned Signature, or a record with an
+ * unsigned Signature. `fresh` marks a state the server has just confirmed on this page: the word and glyph are final,
+ * and an accent plays around them.
+ */
+export function Status(props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook }) {
+  if ('mark' in props) {
+    const { tone, glyph } = markLook[props.mark];
+    return (
+      <span className={`status status--${tone}`}>
+        {props.mark}
+        <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
+          {glyph}
+        </svg>
+      </span>
+    );
+  }
+  const { state, fresh = false } = props;
   const at = stateOrder.indexOf(state);
   return (
     <span className={`status ${state === 'Reported' ? 'status--done' : ''} ${fresh ? 'status--fresh' : ''}`}>
@@ -137,7 +170,7 @@ export function stepAction(
       });
       sessionStorage.removeItem(slot);
       await onDone();
-      return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
+      return `${step.signs ? `${step.signs} Signature` : ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
   };
 }
@@ -176,6 +209,7 @@ export const modules = [
   },
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
+  { key: 'audit-export', name: 'Audit Export', holds: '', takes: 'generateAuditExport' },
   { key: 'workstations', name: 'Workstations', holds: '' },
   { key: 'staff', name: 'Staff', holds: '' },
 ] as const;
@@ -202,6 +236,7 @@ export function Shell({
         <nav>
           {modules
             .filter((m) => m.key !== 'staff' || staffRefusal(me.roles) === null)
+            .filter((m) => !('takes' in m) || mayTake(m.takes, me.roles))
             .map((m) => (
               <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
                 {m.name}

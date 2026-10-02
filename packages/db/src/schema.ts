@@ -15,6 +15,8 @@ export type ArrayTypeImpl<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S[], I[], U[]>
   : T[];
 
+export type AuditExportFormat = "CSV" | "JSON";
+
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
@@ -79,6 +81,19 @@ export interface AuditEntry {
   seq: Int8;
   tableName: string;
   transactionId: string | null;
+}
+
+export interface AuditExport {
+  customerId: string;
+  dataSha256: Buffer;
+  entryCount: number;
+  format: AuditExportFormat;
+  generatedAt: Generated<Timestamp>;
+  id: Generated<string>;
+  labId: string;
+  pdfSha256: Buffer;
+  requestedBy: string;
+  requestedRole: Generated<Role>;
 }
 
 export interface CommitKey {
@@ -300,6 +315,7 @@ export interface Workstation {
 export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
+  auditExport: AuditExport;
   commitKey: CommitKey;
   credentialLink: CredentialLink;
   customer: Customer;

@@ -6,6 +6,7 @@ Releasing a Test creates its Test Report, `RD-R-YYYY-00000n`. The report shows t
 
 - `report-open` opens the report from the Test page's `RD-R-YYYY-00000n` link.
 - `report-content` shows the Result exactly as written (`0.0300`, not `0.03`) and the rows `Performed Ana Ferreira`, `Reviewed Rui Tanaka` and `Released Quinn Adeyemi`.
+- `report-version` shows the Test Report's current `Record Version` in the report facts, as `1 · ` and the content hash, and `2 · ` after the report changes.
 - `report-rail-idle` shows the report with only `Sign out` in the rail, and the status line `Nothing for you to commit here.`, for every role.
 
 ## How to get to it (user POV)
@@ -22,6 +23,7 @@ Preconditions:
 
 - **Open.** Sign in as `quinn.qa`, open the Test and click `getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ })`. The heading `Test Report RD-R-YYYY-00000n` is visible.
 - **Content.** `getByRole('cell', { name: '0.0300', exact: true })` is visible, and for each Signature `getByRole('row', { name: /^Performed Ana Ferreira/ })` is visible (and the same for Reviewed and Released).
+- **Version.** `locator('dl.facts dt:text-is("Record Version") + dd')` starts with `1 · `, and the hash after it matches the `Released` Signature's Record Version.
 - **Not QA.** Sign in as `rui.reviewer` and open the same report. The rail holds only `Sign out`, and the status line reads `Nothing for you to commit here.`
 - **Proof.** Screenshot the report and the status line. Run `select number from lims.test_report`, and `select s.meaning, v.record_table, v.version from lims.signature s join lims.record_version v on v.id = s.record_version_id order by s.signed_at desc limit 3`: `Released` is on `test_report` version 1, `Reviewed` and `Performed` on `test` version 3.
 

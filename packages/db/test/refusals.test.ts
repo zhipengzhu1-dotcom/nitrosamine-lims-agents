@@ -33,6 +33,7 @@ const id = {
   transaction: randomUUID(),
   accessEvent: randomUUID(),
   otherPerson: randomUUID(),
+  auditExport: randomUUID(),
   otherPersonSession: randomUUID(),
   reauthentication: randomUUID(),
   secondReauthentication: randomUUID(),
@@ -79,6 +80,7 @@ const fixture: [string, Row][] = [
   ['lims.counter', { lab_id: null, kind: 'Submission' }],
   ['lims.counter', { lab_id: id.lab, kind: 'Sample' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.person, role: 'Analyst' }],
+  ['lims.membership', { lab_id: id.lab, person_id: id.otherPerson, role: 'QA' }],
   ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
   [
@@ -237,6 +239,19 @@ const fixture: [string, Row][] = [
       session_lab_id: id.lab,
       session_id: id.session,
       roles: '{Analyst}',
+    },
+  ],
+  [
+    'lims.audit_export',
+    {
+      lab_id: id.lab,
+      id: id.auditExport,
+      customer_id: id.customer,
+      requested_by: id.otherPerson,
+      format: 'JSON',
+      entry_count: 12,
+      data_sha256: Buffer.alloc(32, 5),
+      pdf_sha256: Buffer.alloc(32, 6),
     },
   ],
   [
@@ -494,6 +509,30 @@ const tables = {
     },
     notNull: ['id', 'kind', 'roles', 'at'],
   },
+  'lims.audit_export': {
+    noun: 'Audit Export',
+    row: {
+      lab_id: id.lab,
+      customer_id: id.customer,
+      requested_by: id.otherPerson,
+      format: 'CSV',
+      entry_count: 0,
+      data_sha256: Buffer.alloc(32, 7),
+      pdf_sha256: Buffer.alloc(32, 8),
+    },
+    notNull: [
+      'lab_id',
+      'id',
+      'customer_id',
+      'requested_by',
+      'requested_role',
+      'format',
+      'entry_count',
+      'data_sha256',
+      'pdf_sha256',
+      'generated_at',
+    ],
+  },
   'lims.audit_chain': {
     noun: 'Audit Trail chain head',
     row: { chain: 'refusal-probe' },
@@ -544,6 +583,7 @@ const auditedTables: Table[] = [
   'lims.reauthentication',
   'lims.system_incident',
   'lims.access_event',
+  'lims.audit_export',
   'lims.identity_verification',
   'lims.credential_link',
   'lims.room',
@@ -678,6 +718,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.system_incident': { id: id.systemIncident },
     'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
+    'lims.audit_export': { id: id.auditExport },
     'lims.room': { id: id.room },
     'lims.workstation': { id: id.workstation },
     'lims.audit_chain': { chain: 'company' },
@@ -908,6 +949,19 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'submission_submitted_by_fkey',
     },
     noLab('lims.membership', 'Lab membership'),
+    noLab('lims.audit_export', 'Audit Export'),
+    {
+      name: 'an Audit Export for a Customer that does not exist is refused',
+      table: 'lims.audit_export',
+      change: { customer_id: missing },
+      constraint: 'audit_export_customer_id_fkey',
+    },
+    {
+      name: 'an Audit Export requested by a person who is not QA in its Lab is refused',
+      table: 'lims.audit_export',
+      change: { requested_by: id.person },
+      constraint: 'audit_export_lab_id_requested_by_requested_role_fkey',
+    },
     {
       name: 'a Lab membership of a person who does not exist is refused',
       table: 'lims.membership',
@@ -1166,6 +1220,32 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint,
     }));
   refusesEach('23514', [
+    {
+      name: 'an Audit Export requested under any role but QA is refused',
+      table: 'lims.audit_export',
+      change: { requested_role: 'Analyst' },
+      constraint: 'audit_export_requested_role_check',
+    },
+    {
+      name: 'an Audit Export with fewer than no entries is refused',
+      table: 'lims.audit_export',
+      change: { entry_count: -1 },
+      constraint: 'audit_export_entry_count_check',
+    },
+    ...each(
+      'an Audit Export whose data file hash is not 32 bytes is refused',
+      'lims.audit_export',
+      'data_sha256',
+      [Buffer.alloc(31), Buffer.alloc(33)],
+      'audit_export_data_sha256_check',
+    ),
+    ...each(
+      'an Audit Export whose PDF hash is not 32 bytes is refused',
+      'lims.audit_export',
+      'pdf_sha256',
+      [Buffer.alloc(31), Buffer.alloc(33)],
+      'audit_export_pdf_sha256_check',
+    ),
     ...each(
       'a signature statement version below 1 is refused',
       'lims.signature_statement',
@@ -1650,8 +1730,26 @@ describe('an audited write without an actor, a role and a reason is refused', ()
   }
 });
 
-describe('a Signature, a Record Version, a signature statement, a re-authentication record, an Access Event, an Audit Trail entry, a Commit Key or a System Incident is never changed or removed, even by the superuser', () => {
+describe('a Signature, a Record Version, a signature statement, a re-authentication record, an Access Event, an Audit Trail entry, a Commit Key, a System Incident or an Audit Export is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
+    {
+      name: 'updating an Audit Export is refused',
+      table: 'lims.audit_export',
+      trigger: 'refuse_change',
+      statement: 'update lims.audit_export set entry_count = entry_count + 1',
+    },
+    {
+      name: 'deleting an Audit Export is refused',
+      table: 'lims.audit_export',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.audit_export',
+    },
+    {
+      name: 'truncating the Audit Exports is refused',
+      table: 'lims.audit_export',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.audit_export',
+    },
     {
       name: 'updating a signature statement is refused',
       table: 'lims.signature_statement',
