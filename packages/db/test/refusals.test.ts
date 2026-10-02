@@ -9,6 +9,8 @@ const server = dbServer();
 
 const DATABASE = checkoutDatabase('lims_refusals_test');
 const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+/** The app role, for the one refusal the superuser is exempt from: a service identity outside its scope. */
+const app = new pg.Client({ connectionString: databaseUrl(server, DATABASE, 'lims_app') });
 
 type Row = Record<string, unknown>;
 
@@ -49,6 +51,9 @@ const id = {
   otherLabRoom: randomUUID(),
   workstation: randomUUID(),
   lockedOut: randomUUID(),
+  entry: randomUUID(),
+  probeEntry: randomUUID(),
+  operatorSession: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -77,7 +82,10 @@ const fixture: [string, Row][] = [
     { id: id.otherPerson, username: 'refusal.other', display_name: 'Other Person', password_hash: 'not-a-real-hash' },
   ],
   ['lims.person', { id: id.admin, username: 'refusal.admin', display_name: 'Refusal Admin' }],
-  ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
+  [
+    'lims.person',
+    { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator', password_hash: 'not-a-real-hash' },
+  ],
   [
     'lims.person',
     {
@@ -177,6 +185,7 @@ const fixture: [string, Row][] = [
     { lab_id: id.lab, id: id.otherPersonSession, person_id: id.otherPerson, token_hash: Buffer.alloc(32, 5) },
   ],
   ['lims.session', { lab_id: id.lab, id: id.secondSession, person_id: id.person, token_hash: Buffer.alloc(32, 6) }],
+  ['lims.session', { lab_id: id.lab, id: id.operatorSession, person_id: id.operator, token_hash: Buffer.alloc(32, 8) }],
   [
     'lims.reauthentication',
     {
@@ -326,6 +335,14 @@ const takeover: Row = {
   taken_by_id: id.otherPerson,
 };
 
+interface TableSpec {
+  noun: string;
+  row: Row;
+  notNull: string[];
+  /** Statements the row needs in its own transaction before it is written. */
+  prelude?: string[];
+}
+
 const tables = {
   'lims.customer': {
     noun: 'Customer',
@@ -428,7 +445,7 @@ const tables = {
       canonical_form: 1,
       content: Buffer.from('{"id":"third"}'),
     },
-    notNull: ['lab_id', 'id', 'record_table', 'record_id', 'version', 'canonical_form', 'content', 'saved_at'],
+    notNull: ['id', 'record_table', 'record_id', 'version', 'canonical_form', 'content', 'saved_at'],
   },
   'lims.signature': {
     noun: 'Signature',
@@ -566,6 +583,21 @@ const tables = {
       'generated_at',
     ],
   },
+  'lims.release_log_entry': {
+    noun: 'Release Log entry',
+    row: { kind: 'ConfigurationChange', title: 'Probe entry', summary: 'An entry a refusal probe writes' },
+    notNull: ['id', 'kind', 'title', 'summary', 'records_exceptions', 'lapses_exceptions', 'recorded_at'],
+  },
+  'lims.service_identity': {
+    noun: 'service identity',
+    row: { name: 'svc:probe', scope: ['customer:INSERT'], created_by_entry_id: id.probeEntry },
+    notNull: ['name', 'scope'],
+    // The identity's entry must be written in the same transaction, so each probe writes one first.
+    prelude: [
+      `insert into lims.release_log_entry (id, kind, title, summary)
+       values ('${id.probeEntry}', 'ConfigurationChange', 'Probe entry', 'Declares a probe identity')`,
+    ],
+  },
   'lims.audit_chain': {
     noun: 'Audit Trail chain head',
     row: { chain: 'refusal-probe' },
@@ -593,8 +625,9 @@ const tables = {
     row: { name: '9999_probe.sql', sha256: zeros },
     notNull: ['name', 'applied_at', 'hashed_at'],
   },
-} satisfies Record<string, { noun: string; row: Row; notNull: string[] }>;
+} satisfies Record<string, TableSpec>;
 type Table = keyof typeof tables;
+const spec = (table: Table): TableSpec => tables[table];
 const tableNames = Object.keys(tables).filter((key): key is Table => Object.hasOwn(tables, key));
 
 const auditedTables: Table[] = [
@@ -621,6 +654,8 @@ const auditedTables: Table[] = [
   'lims.credential_link',
   'lims.room',
   'lims.workstation',
+  'lims.release_log_entry',
+  'lims.service_identity',
 ];
 
 const bare = (table: string) => table.slice(table.indexOf('.') + 1);
@@ -648,11 +683,13 @@ async function refusalOf(
   values: unknown[] = [],
   context = true,
   row: Row = {},
+  prelude: string[] = [],
 ): Promise<pg.DatabaseError> {
   await client.query('begin');
   try {
     if (context) await client.query(AUDIT_CONTEXT);
     await signingStamp(row);
+    for (const first of prelude) await client.query(first);
     await client.query(statement, values);
   } catch (error) {
     if (error instanceof pg.DatabaseError) return error;
@@ -665,10 +702,10 @@ async function refusalOf(
 
 function refusalOfRow(table: Table, change: Row = {}, context = true) {
   const row = { ...tables[table].row, ...change };
-  return refusalOf(...insert(table, row), context, row);
+  return refusalOf(...insert(table, row), context, row, spec(table).prelude);
 }
 
-function assertConstraint(error: pg.DatabaseError, code: string, table: Table, constraint: string): void {
+function assertConstraint(error: pg.DatabaseError, code: string, table: string, constraint: string): void {
   assert.deepEqual([error.code, error.table, error.constraint], [code, bare(table), constraint], error.message);
 }
 
@@ -697,9 +734,41 @@ before(async () => {
     await client.query(...insert(table, row));
     await client.query('commit');
   }
+  // A service identity is declared by the entry written with it, so the two go in one transaction.
+  await client.query('begin');
+  await client.query(AUDIT_CONTEXT);
+  await client.query(
+    ...insert('lims.release_log_entry', {
+      id: id.entry,
+      kind: 'ConfigurationChange',
+      title: 'Refusal entry',
+      summary: 'Declares the refusal service identity',
+    }),
+  );
+  await client.query(
+    ...insert('lims.service_identity', { name: 'svc:refusal', scope: ['customer:INSERT'], created_by_entry_id: id.entry }),
+  );
+  await client.query('commit');
+  await app.connect();
 });
 
-after(() => client.end());
+after(async () => {
+  await client.end();
+  await app.end();
+});
+
+async function attempt(...statements: string[]): Promise<pg.DatabaseError | null> {
+  await client.query('begin');
+  try {
+    for (const statement of statements) await client.query(statement);
+    return null;
+  } catch (error) {
+    if (error instanceof pg.DatabaseError) return error;
+    throw error;
+  } finally {
+    await client.query('rollback');
+  }
+}
 
 it('the base row of every table is accepted, so each refusal below comes from the one change it makes', async () => {
   for (const table of tableNames) {
@@ -707,6 +776,7 @@ it('the base row of every table is accepted, so each refusal below comes from th
     try {
       await client.query(AUDIT_CONTEXT);
       await signingStamp(tables[table].row);
+      for (const first of spec(table).prelude ?? []) await client.query(first);
       await client.query(...insert(table, tables[table].row));
     } finally {
       await client.query('rollback');
@@ -716,7 +786,9 @@ it('the base row of every table is accepted, so each refusal below comes from th
 
 describe('the database refuses an empty required field', () => {
   for (const table of tableNames) {
-    const { noun, notNull } = tables[table];
+    const { noun } = tables[table];
+    // Every captured table holds the data class its record was created under.
+    const notNull = auditedTables.includes(table) ? [...tables[table].notNull, 'data_class'] : tables[table].notNull;
     for (const column of notNull) covered.add(`${table}.${bare(table)}_${column}_not_null`);
     it(`every required field of ${/^[AEIOU]/.test(noun) ? 'an' : 'a'} ${noun} refuses a null`, async () => {
       for (const column of notNull) {
@@ -754,6 +826,8 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.audit_export': { id: id.auditExport },
     'lims.room': { id: id.room },
     'lims.workstation': { id: id.workstation },
+    'lims.release_log_entry': { id: id.entry },
+    'lims.service_identity': { name: 'svc:refusal' },
     'lims.audit_chain': { chain: 'company' },
     'lims.audit_entry': { seq: 1 },
     'public.schema_migration': { name: '0001_roles.sql' },
@@ -1078,12 +1152,6 @@ describe('the database refuses a reference to a row that does not exist', () => 
       name: 'a Signature on a Record Version that does not exist is refused',
       table: 'lims.signature',
       change: { record_version_id: missing },
-      constraint: 'signature_record_version_fkey',
-    },
-    {
-      name: 'a Signature on a Record Version in another Lab is refused',
-      table: 'lims.signature',
-      change: { lab_id: id.otherLab },
       constraint: 'signature_record_version_fkey',
     },
     {
@@ -1865,7 +1933,7 @@ describe('an audited write without an actor, a role and a reason is refused', ()
 });
 
 describe('a Signature, a Record Version, a signature statement, a re-authentication record, an Access Event, an Audit Trail entry, a Commit Key, a System Incident or an Audit Export is never changed or removed, even by the superuser', () => {
-  const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
+  const cases: { name: string; table: Table | 'lims.deployment'; trigger: string; statement: string }[] = [
     {
       name: 'updating an Audit Export is refused',
       table: 'lims.audit_export',
@@ -2052,6 +2120,42 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       table: 'lims.credential_link',
       trigger: 'refuse_truncate',
       statement: 'truncate lims.credential_link',
+    },
+    {
+      name: 'updating a Release Log entry is refused',
+      table: 'lims.release_log_entry',
+      trigger: 'refuse_change',
+      statement: `update lims.release_log_entry set title = 'changed'`,
+    },
+    {
+      name: 'deleting a Release Log entry is refused',
+      table: 'lims.release_log_entry',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.release_log_entry',
+    },
+    {
+      name: 'truncating the Release Log is refused',
+      table: 'lims.release_log_entry',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.release_log_entry cascade',
+    },
+    {
+      name: 'truncating the service identities is refused',
+      table: 'lims.service_identity',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.service_identity',
+    },
+    {
+      name: 'deleting the deployment is refused',
+      table: 'lims.deployment',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.deployment',
+    },
+    {
+      name: 'truncating the deployment is refused',
+      table: 'lims.deployment',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.deployment',
     },
   ];
   for (const c of cases) {
@@ -2377,18 +2481,6 @@ describe('a Signature is written only by the signing function, which refuses eve
     `select lims.sign('${reauthentication}', '${session}', '${table}', '${recordId}', ${seen}, ${hash},
                       ${statementVersion}, '${meaning}', '${release}')`;
 
-  async function attempt(...statements: string[]): Promise<pg.DatabaseError | null> {
-    await client.query('begin');
-    try {
-      for (const statement of statements) await client.query(statement);
-      return null;
-    } catch (error) {
-      if (error instanceof pg.DatabaseError) return error;
-      throw error;
-    } finally {
-      await client.query('rollback');
-    }
-  }
   async function refused(...statements: string[]): Promise<string> {
     const error = await attempt(...statements);
     assert.ok(error, `the database accepted ${statements.at(-1)}`);
@@ -2765,6 +2857,263 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
   });
 });
 
+describe('a Release Log entry takes effect only once it is signed Approved, and the data class and the service identities change only through one', () => {
+  const latestVersion = (column: 'id' | 'content_hash') =>
+    `(select ${column} from lims.record_version where record_table = 'release_log_entry' and record_id = '${id.entry}'
+       order by version desc limit 1)`;
+  const asSigner = (username: string, role: string) =>
+    `select set_config('lims.actor', 'person:${username}', true), set_config('lims.role', '${role}', true),
+            set_config('lims.reason', 'Approve a Release Log entry', true)`;
+  const approve = (person: string, session: string) => `do $$
+    declare proof uuid;
+    begin
+      insert into lims.reauthentication (lab_id, session_id, person_id, meaning, authenticator)
+      values ('${id.lab}', '${session}', '${person}', 'Approved', 'Password') returning id into proof;
+      perform lims.sign(proof, '${session}', 'release_log_entry', '${id.entry}',
+                        ${latestVersion('id')}, ${latestVersion('content_hash')}, 1, 'Approved', 'test');
+    end $$`;
+  const stamp = (entry: string) => `select lims.set_this_transaction('lims.release_log', '${entry}')`;
+  const probeEntry = `insert into lims.release_log_entry (id, kind, title, summary)
+                      values ('${id.probeEntry}', 'ConfigurationChange', 'Probe entry', 'Retires an identity')`;
+
+  async function refusedWith(code: string, ...statements: string[]): Promise<string> {
+    const error = await attempt(...statements);
+    assert.ok(error, `the database accepted ${statements.at(-1)}`);
+    assert.equal(error.code, code, error.message);
+    return error.message;
+  }
+
+  refusesEach('23514', [
+    {
+      name: 'a Release Log entry with an empty title is refused',
+      table: 'lims.release_log_entry',
+      change: { title: '' },
+      constraint: 'release_log_entry_title_check',
+    },
+    {
+      name: 'a Release Log entry with an empty summary is refused',
+      table: 'lims.release_log_entry',
+      change: { summary: '' },
+      constraint: 'release_log_entry_summary_check',
+    },
+    {
+      name: 'a Release Log entry naming an empty release is refused',
+      table: 'lims.release_log_entry',
+      change: { kind: 'Release', release: '' },
+      constraint: 'release_log_entry_release_check',
+    },
+    {
+      name: 'a Release Log entry for a release that names none is refused',
+      table: 'lims.release_log_entry',
+      change: { kind: 'Release' },
+      constraint: 'release_log_entry_kind_release_check',
+    },
+    {
+      name: 'a Release Log entry with a signature statement version below 1 is refused',
+      table: 'lims.release_log_entry',
+      change: { statement_version: 0, statement: Buffer.from('A statement') },
+      constraint: 'release_log_entry_statement_version_check',
+    },
+    {
+      name: 'a Release Log entry with a signature statement version but no statement is refused',
+      table: 'lims.release_log_entry',
+      change: { statement_version: 2 },
+      constraint: 'release_log_entry_statement_pair_check',
+    },
+    {
+      name: 'a Release Log entry that sets the data class without recording the FileVault personal key is refused',
+      table: 'lims.release_log_entry',
+      change: { sets_data_class: 'real' },
+      constraint: 'release_log_entry_file_vault_check',
+    },
+    {
+      name: 'a service identity whose name is not svc: and a name is refused',
+      table: 'lims.service_identity',
+      change: { name: 'svc:' },
+      constraint: 'service_identity_name_check',
+    },
+    {
+      name: 'a service identity with no scope is refused',
+      table: 'lims.service_identity',
+      change: { scope: [] },
+      constraint: 'service_identity_scope_check',
+    },
+    {
+      name: 'a Record Version of a Lab record without its Lab is refused',
+      table: 'lims.record_version',
+      change: { lab_id: null },
+      constraint: 'record_version_company_check',
+    },
+    {
+      name: 'a Record Version of a Release Log entry with a Lab is refused',
+      table: 'lims.record_version',
+      change: { record_table: 'release_log_entry', record_id: id.entry },
+      constraint: 'record_version_company_check',
+    },
+  ]);
+
+  covered.add('lims.deployment.deployment_pkey');
+  covered.add('lims.deployment.deployment_single_check');
+  covered.add('lims.deployment.deployment_single_not_null');
+  covered.add('lims.deployment.deployment_data_class_not_null');
+  it('there is one deployment row, and no statement adds a second', async () => {
+    const second = await refusalOf('insert into lims.deployment default values');
+    assertConstraint(second, '23505', 'lims.deployment', 'deployment_pkey');
+    const other = await refusalOf('insert into lims.deployment (single) values (false)');
+    assertConstraint(other, '23514', 'lims.deployment', 'deployment_single_check');
+    for (const column of ['single', 'data_class']) {
+      const error = await refusalOf(`insert into lims.deployment (${column}) values (null)`);
+      assert.deepEqual([error.code, error.column], ['23502', column], error.message);
+    }
+  });
+
+  covered.add('lims.deployment.data_class_through_release_log');
+  it('the data class changes only in the transaction that approves the entry setting it', async () => {
+    assert.equal(
+      await refusedWith('LA011', AUDIT_CONTEXT, `update lims.deployment set data_class = 'real'`),
+      'the data class changes only when a Release Log entry setting it is signed Approved',
+    );
+  });
+  it('the data class never becomes real while a fictional record is held, and the refusal names the tables', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        stamp(id.entry),
+        `update lims.deployment set data_class = 'real', set_by_entry_id = '${id.entry}'`,
+      ),
+      'the database holds records created under fictional: audit_export, customer, method, result, sample, submission, system_incident, test, test_report, training_record',
+    );
+  });
+
+  covered.add('lims.deployment.deployment_set_by_entry_id_fkey');
+  it('the deployment cannot cite a Release Log entry that does not exist', async () => {
+    const error = await refusalOf(`update lims.deployment set set_by_entry_id = '${missing}'`, [], true, {}, [
+      stamp(missing),
+    ]);
+    assertConstraint(error, '23503', 'lims.deployment', 'deployment_set_by_entry_id_fkey');
+  });
+
+  covered.add('lims.deployment.capture');
+  it('a change to the deployment without an actor, a role and a reason is refused', async () => {
+    const error = await refusalOf(`update lims.deployment set set_by_entry_id = '${id.entry}'`, [], false, {}, [
+      stamp(id.entry),
+    ]);
+    assert.deepEqual([error.code, error.message], ['LA001', 'an audited write needs an actor, a role and a reason']);
+  });
+
+  covered.add('lims.service_identity.service_identity_through_release_log');
+  it('a service identity is declared only by a Release Log entry written in the same transaction', async () => {
+    const error = await refusalOf(
+      ...insert('lims.service_identity', { name: 'svc:late', scope: ['customer:INSERT'], created_by_entry_id: id.entry }),
+    );
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA011', 'a service identity is created or retired only by the Release Log entry written with it'],
+    );
+  });
+  it('a service identity is retired only by a Release Log entry written in the same transaction, and once', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `update lims.service_identity set retired_by_entry_id = '${id.entry}' where name = 'svc:refusal'`,
+      ),
+      'a service identity is created or retired only by the Release Log entry written with it',
+    );
+    const retire = (entry: string) =>
+      `update lims.service_identity set retired_by_entry_id = '${entry}' where name = 'svc:refusal'`;
+    assert.equal(await attempt(AUDIT_CONTEXT, probeEntry, retire(id.probeEntry)), null);
+    const again = randomUUID();
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        probeEntry,
+        retire(id.probeEntry),
+        `insert into lims.release_log_entry (id, kind, title, summary)
+         values ('${again}', 'ConfigurationChange', 'Second retirement', 'Retires an identity again')`,
+        retire(again),
+      ),
+      'a service identity changes only by being retired, once, by a Release Log entry',
+    );
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        probeEntry,
+        `update lims.service_identity set scope = '{person:UPDATE}' where name = 'svc:refusal'`,
+      ),
+      'a service identity changes only by being retired, once, by a Release Log entry',
+    );
+  });
+
+  covered.add('lims.signature.apply_release_log_entry');
+  it('a Release Log entry of the system is approved by the Platform Operator, not QA, and is approved once', async () => {
+    assert.equal(
+      await refusedWith('LA011', asSigner('refusal.other', 'QA'), approve(id.otherPerson, id.otherPersonSession)),
+      'a Release Log entry of the system is approved by PlatformOperator, not QA',
+    );
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        asSigner('refusal.operator', 'PlatformOperator'),
+        approve(id.operator, id.operatorSession),
+        approve(id.operator, id.operatorSession),
+      ),
+      'the Release Log entry is already approved',
+    );
+  });
+
+  it('a record keeps the data class it was created under', async () => {
+    assert.equal(
+      await refusedWith('LA011', AUDIT_CONTEXT, `update lims.customer set data_class = 'real' where id = '${id.customer}'`),
+      'a record keeps the data class it was created under',
+    );
+  });
+
+  it('a service identity writes only inside the scope its approved Release Log entry declares', async () => {
+    const asService = (name: string) =>
+      `select set_config('lims.actor', '${name}', true), set_config('lims.role', 'system', true),
+              set_config('lims.reason', 'Probe the scope', true)`;
+    const write = `insert into lims.customer (name) values ('Scoped Customer (fictional)')`;
+    const refusal = (name: string) => (error: unknown) =>
+      error instanceof pg.DatabaseError &&
+      error.code === 'LA011' &&
+      error.message ===
+        `the service identity ${name} is not declared to insert customer, or its Release Log entry is not approved`;
+    await app.query('begin');
+    try {
+      await app.query(asService('svc:nobody'));
+      await assert.rejects(app.query(write), refusal('svc:nobody'));
+    } finally {
+      await app.query('rollback');
+    }
+    await app.query('begin');
+    try {
+      await app.query(asService('svc:refusal'));
+      await assert.rejects(app.query(write), refusal('svc:refusal'));
+    } finally {
+      await app.query('rollback');
+    }
+    await app.query('begin');
+    try {
+      await app.query(asSigner('refusal.operator', 'PlatformOperator'));
+      await app.query(`select lims.lock_chains('company', '${id.lab}')`);
+      await app.query(approve(id.operator, id.operatorSession));
+      await app.query(asService('svc:refusal'));
+      assert.equal((await app.query(write)).rowCount, 1, 'the approved entry opens the scope');
+      await assert.rejects(
+        app.query(`update lims.customer set name = 'Renamed (fictional)' where id = '${id.customer}'`),
+        (error: unknown) => error instanceof pg.DatabaseError && error.code === 'LA011',
+        'the scope holds the identity to the declared operation',
+      );
+    } finally {
+      await app.query('rollback');
+    }
+  });
+});
+
 it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
@@ -2780,9 +3129,20 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
       'unreachable: generated from content, which is not null',
     ],
     ['lims.session.session_lab_id_id_person_id_key', 'unreachable: (lab_id, id) is already the key'],
+    ['lims.record_version.record_version_id_content_hash_canonical_form_key', 'unreachable: id is already the key'],
+    ['lims.release_log_entry.version_record', 'release-log.test.ts'],
+    ['lims.service_identity.version_record', 'release-log.test.ts'],
     [
-      'lims.record_version.record_version_lab_id_id_content_hash_canonical_form_key',
-      'unreachable: (lab_id, id) is already the key',
+      'lims.service_identity.service_identity_created_by_entry_id_not_null',
+      'unreachable: service_identity_through_release_log looks the entry up first',
+    ],
+    [
+      'lims.service_identity.service_identity_created_by_entry_id_fkey',
+      'unreachable: service_identity_through_release_log looks the entry up first',
+    ],
+    [
+      'lims.service_identity.service_identity_retired_by_entry_id_fkey',
+      'unreachable: service_identity_through_release_log looks the entry up first',
     ],
     [
       'lims.signature_statement.signature_statement_version_statement_hash_key',

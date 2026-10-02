@@ -60,7 +60,7 @@ async function advanceClock(ms: number): Promise<void> {
 }
 
 async function lock(account: Account): Promise<void> {
-  await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Lock an account for a test' }, (tx) =>
+  await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Lock an account for a test' }, (tx) =>
     tx.updateTable('person').set({ lockedAt: sql`now()` }).where('id', '=', account.id).execute(),
   );
 }

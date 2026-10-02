@@ -79,7 +79,7 @@ const lastEntryOf = async (chain: string) =>
   ).last;
 
 const rename = (table: 'person' | 'customer', id: string, change: Record<string, string>, reason: string) =>
-  audited(api.db, { actor: 'svc:test', role: 'system', reason }, (tx) =>
+  audited(api.superuser, { actor: 'svc:test', role: 'system', reason }, (tx) =>
     tx.updateTable(table).set(change).where('id', '=', id).execute(),
   );
 
@@ -383,7 +383,7 @@ it('a stored instant carries its UTC and Lab-zone renderings, a Record kind read
 it("a Test's Signatures and Received carry UTC and its Lab's wall clock on the Worklist, the Test and its Test Report, as the trail renders the same stored instant", async () => {
   const setZone = (timeZone: string) =>
     audited(
-      api.db,
+      api.superuser,
       { actor: 'svc:test', role: 'system', reason: 'Show the Lab clock in a zone no other Lab has' },
       (tx) => tx.updateTable('lab').set({ timeZone }).where('labId', '=', api.labId).execute(),
     );

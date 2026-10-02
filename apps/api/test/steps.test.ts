@@ -22,7 +22,7 @@ const customerId =
   (await api.db.selectFrom('person').select('customerId').where('id', '=', cora.id).executeTakeFirstOrThrow())
     .customerId ?? assert.fail('Cora is a Customer User');
 const otherCustomer = await audited(
-  api.db,
+  api.superuser,
   { actor: 'svc:test', role: 'system', reason: 'Add a second Customer' },
   (tx) =>
     tx.insertInto('customer').values({ name: 'Second Customer (fictional)' }).returning('id').executeTakeFirstOrThrow(),
@@ -686,7 +686,7 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
   assert.throws(() => labScope(api.db, { ...ctx, lab: { id: '', code: '', name: '' } }), /needs the Lab/);
 
   const otherTest = await audited(
-    api.db,
+    api.superuser,
     { actor: 'svc:test', role: 'system', reason: 'Add a second Lab' },
     async (tx) => {
       // The Submission comes before the Lab: a transaction locks the company chain before any Lab's.

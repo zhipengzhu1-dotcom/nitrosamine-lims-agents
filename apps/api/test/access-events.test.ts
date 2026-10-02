@@ -43,7 +43,7 @@ const dbNow = async () =>
   (await sql<{ now: Date }>`select clock_timestamp() as now`.execute(api.superuser)).rows[0]?.now;
 
 async function lock(account: Account): Promise<void> {
-  await audited(api.db, SYSTEM, (tx) =>
+  await audited(api.superuser, SYSTEM, (tx) =>
     tx.updateTable('person').set({ lockedAt: sql`now()` }).where('id', '=', account.id).execute(),
   );
 }
@@ -181,7 +181,7 @@ it('an unknown user ID is kept only as its keyed HMAC and its length, never as t
 });
 
 it('roles are those held in the Lab the sign-in names, none for an unknown ID, never authentication', async () => {
-  const otherLab = await audited(api.db, SYSTEM, (tx) =>
+  const otherLab = await audited(api.superuser, SYSTEM, (tx) =>
     tx
       .insertInto('lab')
       .values({ code: 'ACEV', name: 'Access Event Lab', timeZone: 'UTC' })
@@ -394,7 +394,7 @@ it('a sign-out that meets a Lockout not yet committed ends its session at the Lo
   const person = await api.addPerson('access.signout-race', ['Analyst']);
   const client = await api.login(person);
   let signingOut: Promise<unknown> = Promise.resolve();
-  await audited(api.db, SYSTEM, async (tx) => {
+  await audited(api.superuser, SYSTEM, async (tx) => {
     await tx
       .updateTable('person')
       .set({ failedLogins: LOCKOUT_AFTER_FAILURES, lockedAt: sql`clock_timestamp()` })
@@ -434,7 +434,7 @@ it('a Lock waits for the company chain before it holds its session, the order a 
   assert.ok(session);
   let locking: Promise<unknown> = Promise.resolve();
   let sessionHeld = false;
-  await audited(api.db, SYSTEM, async (tx) => {
+  await audited(api.superuser, SYSTEM, async (tx) => {
     await sql`select lims.lock_chains('company')`.execute(tx);
     locking = client.call(routes.lock).then((answer) => ok(answer));
     await blockedOrSettled(locking);
