@@ -1,5 +1,6 @@
 import {
   type ActorContext,
+  forcesYes,
   type IncidentRow,
   type IncidentStepName,
   incidentStepRoute,
@@ -59,7 +60,10 @@ function incidentAction(name: IncidentStepName, view: SystemIncident, onDone: ()
   return {
     label: ui.label,
     context: what[0] ?? '',
-    fields: ui.fields,
+    fields:
+      name === 'answerImpact' && forcesYes(view.kind)
+        ? ui.fields.map((field) => ({ ...field, options: ['Yes'] }))
+        : ui.fields,
     signs: step.signs
       ? { meaning: step.signs, what, role: step.role, recordVersion: view.recordVersion, statement: view.statement }
       : null,
@@ -187,7 +191,7 @@ function IncidentRecord({
       <h2>Impact and actions</h2>
       <p className="muted">QA answers whether this could have affected results or records.</p>
       <dl className="facts">
-        <dt>Impact</dt>
+        <dt>QA&apos;s answer</dt>
         <Recorded record={view.impact} />
         <dt>Immediate action</dt>
         <Recorded record={view.immediateAction} />

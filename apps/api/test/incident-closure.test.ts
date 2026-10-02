@@ -227,8 +227,8 @@ it('closing is refused, each with a kind, while either action, QA’s answer or 
   );
   ok(await answer(as.quinn, reference, 'No'));
   assert.equal(
-    refusedWith(await close(as.ada, reference), 'state'),
-    'The close step needs a System Incident in Acknowledged state, not Open.',
+    refusedWith(await close(as.ada, reference), 'guard'),
+    'The Acknowledged signing is not on this System Incident.',
   );
   assert.equal((await view(as.ada, reference)).state, 'Open');
 });

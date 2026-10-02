@@ -25,19 +25,33 @@ export type IncidentStepName =
   | 'acknowledge'
   | 'close';
 
+/** The roles that read System Incidents and see the Incidents module: the API refuses and the web hides by this list. */
+export const incidentReaders: readonly Role[] = ['Admin', 'QA'];
+export const mayReadIncidents = (roles: readonly Role[]): boolean =>
+  roles.some((role) => incidentReaders.includes(role));
+
 export interface IncidentStep<K extends IncidentStepName = IncidentStepName> {
   from: IncidentState;
   to: IncidentState;
   role: Role;
   signs: Meaning | null;
-  guard?: (f: IncidentFacts, input: IncidentStepInputs[K]) => Sentence | null;
+  /** Without `input` the guard says whether the step is open at all, which is what the web asks. */
+  guard?: (f: IncidentFacts, input?: IncidentStepInputs[K]) => Sentence | null;
 }
 
-/** The first of the three records a close needs that is missing, named for the person at the bench. */
-function missingForClose(f: IncidentFacts): Sentence | null {
+/** The first of the three records an Acknowledged signing needs that is missing, named for the person at the bench. */
+function missingForAcknowledge(f: IncidentFacts): Sentence | null {
   if (f.immediateAction === null) return 'The immediate action is not recorded on this System Incident.';
   if (f.correctiveAction === null) return 'The corrective action is not recorded on this System Incident.';
   if (f.impact === null) return "QA's answer is not recorded on this System Incident.";
+  return null;
+}
+
+/** What a close still lacks: one of the three records, or the Acknowledged signing over them. */
+function missingForClose(f: IncidentFacts): Sentence | null {
+  const missing = missingForAcknowledge(f);
+  if (missing) return missing;
+  if (f.state === 'Open') return 'The Acknowledged signing is not on this System Incident.';
   return null;
 }
 
@@ -54,7 +68,7 @@ export const incidentSteps: { [K in IncidentStepName]: IncidentStep<K> } = {
     signs: null,
     guard: (f, input) => {
       if (f.impact) return "QA's answer is already recorded on this System Incident.";
-      if (input.answer === 'No' && forcesYes(f.kind))
+      if (input?.answer === 'No' && forcesYes(f.kind))
         return 'A broken or unanchored audit chain, or a clock step, could have affected results or records: the answer is Yes.';
       return null;
     },
@@ -73,7 +87,13 @@ export const incidentSteps: { [K in IncidentStepName]: IncidentStep<K> } = {
     signs: null,
     guard: (f) => (f.correctiveAction ? 'The corrective action is already recorded.' : null),
   },
-  acknowledge: { from: 'Open', to: 'Acknowledged', role: 'Admin', signs: 'Acknowledged', guard: missingForClose },
+  acknowledge: {
+    from: 'Open',
+    to: 'Acknowledged',
+    role: 'Admin',
+    signs: 'Acknowledged',
+    guard: missingForAcknowledge,
+  },
   close: { from: 'Acknowledged', to: 'Closed', role: 'Admin', signs: null, guard: missingForClose },
 };
 export const incidentStepNames = Object.keys(incidentSteps).filter((key): key is IncidentStepName =>
@@ -89,7 +109,7 @@ export function incidentRefusal<K extends IncidentStepName>(
   name: K,
   facts: IncidentFacts,
   roles: readonly Role[],
-  input: IncidentStepInputs[K],
+  input?: IncidentStepInputs[K],
 ): Refusal | null {
   const step: IncidentStep<K> = incidentSteps[name];
   if (!roles.includes(step.role))
@@ -106,13 +126,5 @@ export function incidentRefusal<K extends IncidentStepName>(
 
 /** The steps someone holding `roles` may take on the incident now, in registry order; the web offers these. */
 export function openIncidentSteps(facts: IncidentFacts, roles: readonly Role[]): IncidentStepName[] {
-  return incidentStepNames.filter((name) => {
-    const input =
-      name === 'answerImpact'
-        ? { answer: 'Yes' as const }
-        : name === 'close' || name === 'acknowledge'
-          ? {}
-          : { text: ' ' };
-    return incidentRefusal(name, facts, roles, input) === null;
-  });
+  return incidentStepNames.filter((name) => incidentRefusal(name, facts, roles) === null);
 }

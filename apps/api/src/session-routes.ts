@@ -3,6 +3,7 @@ import type { Kysely } from 'kysely';
 import type { App } from './app.ts';
 import { actorFor, labSwitchRoute, lockScreenRoutes, SESSION_COOKIE, type SessionLimits } from './auth.ts';
 import { preferenceRoutes } from './preferences.ts';
+import { incidentRoutes } from './incident-steps.ts';
 import { readRoutes } from './reads.ts';
 import { staffRoutes } from './staff.ts';
 import { stepRoutes } from './steps.ts';
@@ -32,6 +33,7 @@ export function sessionRoutes(app: App, db: Kysely<DB>, limits: SessionLimits, r
     readRoutes(signedIn, db);
     staffRoutes(signedIn, db, limits);
     stepRoutes(signedIn, db, release);
+    incidentRoutes(signedIn, db, release);
     workstationRoutes(signedIn, db);
   });
 }

@@ -8,6 +8,7 @@ import {
   incidentStepNames,
   incidentStepRoute,
   incidentSteps,
+  mayReadIncidents,
   routes,
 } from '@lims/domain';
 import { type Kysely, sql, type UpdateObject } from 'kysely';
@@ -20,8 +21,7 @@ import { onWallClock } from './trail.ts';
 
 /** System Incidents are company records (map #1, lab-scope-incidents): Admin and QA of any Lab read and act on them. */
 function readableBy(actor: ActorContext): void {
-  if (!actor.roles.some((role) => role === 'Admin' || role === 'QA'))
-    refuse('role', 'Reading a System Incident is an Admin or QA action.');
+  if (!mayReadIncidents(actor.roles)) refuse('role', 'Reading a System Incident is an Admin or QA action.');
 }
 
 const contentHash = sql<string>`encode(lims.incident_content_hash(i.id), 'hex')`;
@@ -173,7 +173,7 @@ function movedOn(error: unknown): never {
   const fault = postgresFault(error);
   if (fault?.sqlstate === 'LA014' && error instanceof Error)
     refuse('stale', `The System Incident has moved on: ${error.message}. Reload it.`);
-  throw error;
+  throw new Error('the System Incident step failed in the database', { cause: error });
 }
 
 function registerIncidentStep<K extends IncidentStepName>(app: App, db: Kysely<DB>, name: K, release: string): void {

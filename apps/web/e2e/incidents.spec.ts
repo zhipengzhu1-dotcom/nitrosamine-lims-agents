@@ -76,7 +76,7 @@ test('QA answers an incident from the list, then the Admin records the actions, 
   await page.locator('form.sheet').getByRole('button', { name: 'Answer impact' }).click();
   await railSays(page, "QA's answer is recorded in the Audit Trail.");
   await sheetGone(page);
-  await expect(page.locator('dl.facts dt:text-is("Impact") + dd')).toContainText('No');
+  await expect(page.locator(`dl.facts dt:text-is("QA's answer") + dd`)).toContainText('No');
   await expect(page.locator('.rbtn--commit'), 'QA has no further step on the incident').toHaveCount(0);
   await signOutFromRail(page);
 

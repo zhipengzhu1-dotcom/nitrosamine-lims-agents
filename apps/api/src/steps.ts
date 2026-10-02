@@ -21,7 +21,6 @@ import {
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
 import { type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
-import { incidentRoutes } from './incident-steps.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
 import { type Seen, type Signable, signRecord, statementInForce } from './signing.ts';
@@ -290,8 +289,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
   });
 }
 
-/** `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema, and the System Incident steps. */
+/** `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema. */
 export function stepRoutes(app: App, db: Kysely<DB>, release: string): void {
   for (const name of stepNames) registerStep(app, db, name, release);
-  incidentRoutes(app, db, release);
 }

@@ -13,6 +13,7 @@ import {
   type SignatureStatement,
   type StepInput,
   type StepName,
+  incidentReaders,
   staffRefusal,
   stepRoute,
   steps,
@@ -235,7 +236,7 @@ export const modules = [
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
   { key: 'audit-export', name: 'Audit Export', holds: '', takes: 'generateAuditExport' },
-  { key: 'incidents', name: 'Incidents', holds: '', roles: ['Admin', 'QA'] },
+  { key: 'incidents', name: 'Incidents', holds: '', roles: incidentReaders },
   { key: 'workstations', name: 'Workstations', holds: '' },
   { key: 'staff', name: 'Staff', holds: '' },
 ] as const;
