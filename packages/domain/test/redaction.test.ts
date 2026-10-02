@@ -17,7 +17,9 @@ function entryNaming(text: string): TrailEntry {
     reason: `Note ${text}`,
     op: 'UPDATE',
     record: { table: 'method', id: 'm-1', kind: 'Method', label: text },
-    changes: [{ field: 'title', label: 'Title', old: null, new: { text, ref: { table: 'sample', id: text } } }],
+    changes: [
+      { field: 'title', label: 'Title', old: null, new: { text, ref: { table: 'sample', id: text }, instant: null } },
+    ],
     afterFirstSave: true,
     raw: {
       chain: 'company',

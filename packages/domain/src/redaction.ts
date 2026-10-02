@@ -72,7 +72,7 @@ export function redactionFor(
     const row = (snapshot: RowSnapshot | null): RowSnapshot | null =>
       snapshot && Object.fromEntries(Object.entries(snapshot).map(([k, v]) => [k, deep(v)]));
     const value = (v: ShownValue | null): ShownValue | null =>
-      v && { text: text(v.text), ref: v.ref && { table: v.ref.table, id: text(v.ref.id) } };
+      v && { text: text(v.text), ref: v.ref && { table: v.ref.table, id: text(v.ref.id) }, instant: v.instant };
     const out: TrailEntry = {
       ...entry,
       actor: { label: text(entry.actor.label), role: entry.actor.role },

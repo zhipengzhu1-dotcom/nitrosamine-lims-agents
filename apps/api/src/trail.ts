@@ -151,7 +151,12 @@ export async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<Ro
   return images;
 }
 
-async function storedInstantsIn(scope: Scope, zone: string, stored: string[]): Promise<Map<string, StoredInstant>> {
+/** Each stored instant as the database renders it, in UTC and on the Lab's wall clock, so that no host clock formats one. */
+export async function storedInstantsIn(
+  scope: Scope,
+  zone: string,
+  stored: string[],
+): Promise<Map<string, StoredInstant>> {
   const value = sql.ref('v.stored');
   const { rows } = await sql<StoredInstant & { stored: string }>`
     select v.stored, ${inUtc(sql`${value}::timestamptz`)} as at,

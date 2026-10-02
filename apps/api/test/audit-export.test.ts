@@ -169,7 +169,7 @@ it("an entry on a shared record that names another Customer's Sample shows it re
     assert.ok(update, 'the shared Method update is in the export');
     const shown = others.reduce((t: string, other) => t.replace(other, REDACTED), title);
     for (const kept of own) assert.ok(shown.includes(kept));
-    assert.deepEqual(update.changes.find((c) => c.field === 'title')?.new, { text: shown, ref: null });
+    assert.deepEqual(update.changes.find((c) => c.field === 'title')?.new, { text: shown, ref: null, instant: null });
     assert.equal(update.raw.newRow?.title, shown);
     assert.equal(update.redacted, true);
     for (const other of others)
@@ -213,14 +213,18 @@ it('the export comes as JSON or CSV with a PDF, each entry carrying its chain, e
         {
           field: 'state',
           label: 'State',
-          old: { text: 'Assigned', ref: null },
-          new: { text: 'SubmittedForReview', ref: null },
+          old: { text: 'Assigned', ref: null, instant: null },
+          new: { text: 'SubmittedForReview', ref: null, instant: null },
         },
       ],
       hasTimes: true,
       seq: true,
     },
   );
+  const received = dataOf(json)
+    .entries.flatMap((e) => (e.record.table === 'sample' ? e.changes : []))
+    .find((c) => c.field === 'received_at' && c.new !== null);
+  assert.ok(received?.new?.instant?.at && received.new.instant.atLab, 'a stored instant carries its UTC and Lab time');
 
   const [header, ...rows] = fileText(csv.files[0])
     .trimEnd()

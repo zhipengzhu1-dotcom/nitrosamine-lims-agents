@@ -12,13 +12,14 @@ import {
   referencedIds,
   routes,
   type ShownValue,
+  storedInstants,
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { PDF_COLUMNS, textPdf } from './pdf.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { imagesFor, rawEntries } from './trail.ts';
+import { imagesFor, rawEntries, storedInstantsIn } from './trail.ts';
 
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
 
@@ -274,7 +275,8 @@ async function exportData(scope: Scope, customerId: string): Promise<AuditExport
       .where('labId', '=', labId)
       .executeTakeFirstOrThrow(),
   ]);
-  const described = describeTrail(entries, images, labId);
+  const instants = await storedInstantsIn(scope, lab.timeZone, storedInstants(entries));
+  const described = describeTrail(entries, images, labId, instants);
   const redact = redactionFor(mine.identifiers, others, referencedIds(described));
   const data: AuditExportData = {
     customer,
