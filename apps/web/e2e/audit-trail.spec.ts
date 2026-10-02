@@ -99,7 +99,9 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     'App release',
     'Re-authentication',
     'Signed at',
+    'Signed in time zone',
   ]);
+  await expect(signed.locator('dt:text-is("Signed in time zone") + dd')).toHaveText('America/New_York');
   await expect(signed.locator('dt:text-is("Signature statement hash") + dd summary')).toHaveText(/^[0-9a-f]{48}…$/);
   await expect(signed.locator('dt:text-is("Signed at") + dd')).toHaveText(
     /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d -0[45]:00$/,
@@ -114,6 +116,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     receipt.locator('dt:text-is("Received") + dd'),
     "the trail's Received is the one the Test page shows",
   ).toHaveText(`none → ${received}`);
+  await expect(receipt.locator('dt:text-is("Received in time zone") + dd')).toHaveText('none → America/New_York');
   // The Signature entry above it also has long values (its copied hashes), so the Record Version is found by its content.
   const versioned = entries.filter({ has: page.locator('details.long', { hasText: '"analyte"' }) }).first();
   await expect(versioned).toContainText('Record Version');
