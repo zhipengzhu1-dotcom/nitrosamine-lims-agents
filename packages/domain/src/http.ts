@@ -112,6 +112,7 @@ const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
   signedAt: instant,
+  /** The signed record's glossary noun, such as "Test Report". */
   record: Type.String(),
   recordVersion: recordVersionRef,
   /** True once the record has a Record Version later than the one this Signature was given on. */
@@ -159,10 +160,15 @@ const rawEntry = Type.Object({
 export type RawEntry = Static<typeof rawEntry>;
 const recordRef = Type.Object({ table: Type.String(), id: Type.String(), kind: Type.String(), label: Type.String() });
 export type RecordRef = Static<typeof recordRef>;
-/** A value as the panel shows it: a reference reads as the record's label at the entry's time and links to its trail. */
+/**
+ * A value as the panel shows it: a reference reads as the record's label at the entry's time and links to its trail;
+ * a stored instant carries the database's renderings, UTC and, on the Lab chain, the Lab's wall clock, as an entry's
+ * `at` and `atLab` do, and `text` keeps it as stored.
+ */
 const shownValue = Type.Object({
   text: Type.String(),
   ref: nullable(Type.Object({ table: auditedTable, id: Type.String() })),
+  instant: nullable(Type.Object({ at: instant, atLab: nullable(instant) })),
 });
 export type ShownValue = Static<typeof shownValue>;
 const trailChange = Type.Object({

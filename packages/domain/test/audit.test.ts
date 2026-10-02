@@ -9,6 +9,7 @@ import {
   instant,
   type RowImage,
   referencedRecords,
+  storedInstants,
   type TimedEntry,
 } from '../src/index.ts';
 
@@ -122,7 +123,7 @@ describe('an entry reads in glossary words with labels as they stood at its time
     op: 'INSERT',
     newRow: { id: 'sub1', customer_id: 'c1', submitted_by: 'p1' },
   });
-  const [first, second, third] = describeTrail([later, assign, submission], images, LAB);
+  const [first, second, third] = describeTrail([later, assign, submission], images, LAB, new Map());
 
   it('orders by time across chains, marks each chain, and keeps the Lab-zone instant only on the Lab chain', () =>
     assert.deepEqual(
@@ -136,12 +137,17 @@ describe('an entry reads in glossary words with labels as they stood at its time
 
   it('names the field, the old and the new value, and the referenced record by its label at the time', () =>
     assert.deepEqual(second?.changes, [
-      { field: 'state', label: 'State', old: { text: 'Ready', ref: null }, new: { text: 'Assigned', ref: null } },
+      {
+        field: 'state',
+        label: 'State',
+        old: { text: 'Ready', ref: null, instant: null },
+        new: { text: 'Assigned', ref: null, instant: null },
+      },
       {
         field: 'assignee_id',
         label: 'Analyst',
         old: null,
-        new: { text: 'Ana Ferreira', ref: { table: 'person', id: 'p2' } },
+        new: { text: 'Ana Ferreira', ref: { table: 'person', id: 'p2' }, instant: null },
       },
     ]));
 
@@ -173,7 +179,7 @@ describe('an entry reads in glossary words with labels as they stood at its time
       currentLabel(
         [
           ...images,
-          ...describeTrail([assign], [], LAB).map((e) => ({
+          ...describeTrail([assign], [], LAB, new Map()).map((e) => ({
             table: 'test' as const,
             at: e.at,
             row: e.raw.newRow ?? {},
@@ -201,7 +207,7 @@ describe('an entry reads in glossary words with labels as they stood at its time
       newRow: { id: 'p2', display_name: 'Ana Ferreira', failed_logins: 0 },
     });
     assert.deepEqual(
-      describeTrail([assign, renamed, signedIn, later], images, LAB).map((e) => e.afterFirstSave),
+      describeTrail([assign, renamed, signedIn, later], images, LAB, new Map()).map((e) => e.afterFirstSave),
       [false, true, false, false],
     );
   });
@@ -217,4 +223,48 @@ describe('an entry reads in glossary words with labels as they stood at its time
         .sort(),
       ['customer: c1', 'person: p1 p2', 'result: r1', 'sample: s1', 'submission: sub1', 'test: t1'],
     ));
+});
+
+describe('a stored value reads in glossary words, not as the database stores it', () => {
+  const signedAt = '2026-10-01T23:50:10.383672+00:00';
+  const rendered = { at: at('2026-10-01T23:50:10.383672Z'), atLab: at('2026-10-01T19:50:10.383672-04:00') };
+  const version = entry({
+    table: 'record_version',
+    op: 'INSERT',
+    newRow: {
+      id: 'v1',
+      record_table: 'test_report',
+      record_id: 'tr1',
+      content: '\\x7b2261223a20317d',
+      content_hash: `\\x${'ab'.repeat(32)}`,
+      saved_at: signedAt,
+    },
+  });
+  const locked = entry({
+    chain: 'company',
+    atLab: null,
+    table: 'person',
+    oldRow: { id: 'p2', locked_at: null },
+    newRow: { id: 'p2', locked_at: signedAt },
+  });
+  const [shown, companyShown] = describeTrail([version, locked], [], LAB, new Map([[signedAt, rendered]])).map(
+    (e) => new Map(e.changes.map((c) => [c.field, c.new])),
+  );
+
+  it('a Record kind reads as its glossary noun', () =>
+    assert.deepEqual(shown?.get('record_table'), { text: 'Test Report', ref: null, instant: null }));
+
+  it('a hash reads as hex, without the bytea prefix', () =>
+    assert.deepEqual(shown?.get('content_hash'), { text: 'ab'.repeat(32), ref: null, instant: null }));
+
+  it('signed content reads as its UTF-8 text', () => assert.equal(shown?.get('content')?.text, '{"a": 1}'));
+
+  it('a stored instant carries its UTC and Lab-zone renderings on the Lab chain, and only UTC on the company chain', () =>
+    assert.deepEqual(
+      [shown?.get('saved_at')?.instant, companyShown?.get('locked_at')?.instant],
+      [rendered, { at: rendered.at, atLab: null }],
+    ));
+
+  it('collects each stored instant once, from old and new rows', () =>
+    assert.deepEqual(storedInstants([version, locked]), [signedAt]));
 });

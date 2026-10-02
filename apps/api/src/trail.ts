@@ -15,10 +15,19 @@ import {
   type RowImage,
   type RowSnapshot,
   routes,
+  type StoredInstant,
+  storedInstants,
   type TimedEntry,
   type Trail,
 } from '@lims/domain';
-import { type ExpressionBuilder, type ExpressionWrapper, type Kysely, type SqlBool, sql } from 'kysely';
+import {
+  type ExpressionBuilder,
+  type ExpressionWrapper,
+  type Kysely,
+  type RawBuilder,
+  type SqlBool,
+  sql,
+} from 'kysely';
 import { Value } from 'typebox/value';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
@@ -35,14 +44,20 @@ function opOf(op: string): TimedEntry['op'] {
   throw new Error(`an Audit Trail entry has the op ${op}`);
 }
 
+const inUtc = (at: RawBuilder<unknown>) =>
+  sql<Instant>`to_char(${at} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+/** `at` on the wall clock of the IANA zone `zone`, ISO 8601 with its offset, rendered by the database. */
+const onWallClock = (at: RawBuilder<unknown>, zone: RawBuilder<unknown>) => sql<Instant>`
+  to_char(${at} at time zone ${zone}, 'YYYY-MM-DD"T"HH24:MI:SS.US')
+    || case when (${at} at time zone ${zone}) < (${at} at time zone 'UTC') then '-' else '+' end
+    || to_char(greatest((${at} at time zone ${zone}) - (${at} at time zone 'UTC'),
+                        (${at} at time zone 'UTC') - (${at} at time zone ${zone})), 'HH24:MI')`;
+const entryAt = sql.ref('audit_entry.at');
 /** Selected as text, not a Date: the driver's Date keeps milliseconds, and order and labels compare `at` to the microsecond, as the hash renders it. */
-const atText = sql<Instant>`to_char(at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-/** The same instant on the owning Lab's wall clock, rendered by the database from the Lab's zone; null on the company chain. */
+const atText = inUtc(entryAt);
+/** The same instant on the owning Lab's wall clock; null on the company chain. */
 const atLabText = sql<Instant | null>`(
-  select to_char(audit_entry.at at time zone l.time_zone, 'YYYY-MM-DD"T"HH24:MI:SS.US')
-      || case when (audit_entry.at at time zone l.time_zone) < (audit_entry.at at time zone 'UTC') then '-' else '+' end
-      || to_char(greatest((audit_entry.at at time zone l.time_zone) - (audit_entry.at at time zone 'UTC'),
-                          (audit_entry.at at time zone 'UTC') - (audit_entry.at at time zone l.time_zone)), 'HH24:MI')
+  select ${onWallClock(entryAt, sql.ref('l.time_zone'))}
     from lims.lab l where l.lab_id::text = audit_entry.chain)`;
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
 const newId = sql<string>`new_row->>'id'`;
@@ -137,6 +152,15 @@ async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<RowImage[
   return images;
 }
 
+async function storedInstantsIn(scope: Scope, zone: string, stored: string[]): Promise<Map<string, StoredInstant>> {
+  const value = sql.ref('v.stored');
+  const { rows } = await sql<StoredInstant & { stored: string }>`
+    select v.stored, ${inUtc(sql`${value}::timestamptz`)} as at,
+           ${onWallClock(sql`${value}::timestamptz`, sql`${zone}::text`)} as at_lab
+      from unnest(${stored}::text[]) as v(stored)`.execute(scope.company);
+  return new Map(rows.map(({ stored: key, ...rendered }) => [key, rendered]));
+}
+
 async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, where: Where): Promise<Trail> {
   const entries = await rawEntries(scope, where);
   if (entries.length === 0) refuse('notFound', `no such ${auditedRecords[root.table].kind} in this Lab`);
@@ -146,6 +170,7 @@ async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, 
     .where('labId', '=', scope.ctx.lab.id)
     .executeTakeFirstOrThrow();
   const images = await imagesFor(scope, entries);
+  const instants = await storedInstantsIn(scope, timeZone, storedInstants(entries));
   return {
     record: {
       table: root.table,
@@ -154,7 +179,7 @@ async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, 
       label: currentLabel([...images, ...imagesOf(entries)], root.table, root.id),
     },
     labZone: timeZone,
-    entries: describeTrail(entries, images, scope.ctx.lab.id),
+    entries: describeTrail(entries, images, scope.ctx.lab.id, instants),
   };
 }
 

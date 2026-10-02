@@ -235,8 +235,16 @@ th {
   flex-basis: 100%;
 }
 .verdict {
-  margin: 0;
   flex: 1 1 320px;
+}
+.verdict p {
+  margin: 0;
+}
+.chains {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  animation: rise var(--dur-enter) var(--ease-out) both;
 }
 .entries {
   list-style: none;
@@ -399,6 +407,21 @@ td a,
 }
 .status--done {
   --accent: var(--ink);
+}
+.status--ok {
+  color: var(--ok);
+}
+.status--bad {
+  color: var(--bad);
+}
+.glyph {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .track i.on {
   background: var(--accent);
@@ -826,7 +849,8 @@ a.btn {
       opacity: 0;
     }
   }
-  .note--ok {
+  .note--ok,
+  .chains {
     animation-name: fade;
     animation-duration: var(--dur-fade);
   }

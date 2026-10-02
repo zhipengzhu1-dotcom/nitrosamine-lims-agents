@@ -135,9 +135,9 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   assert.deepEqual(
     reported.signatures.map((s) => [s.meaning, s.signer, s.record, s.recordVersion.version, s.unsigned]),
     [
-      ['Performed', 'Ana Ferreira', 'test', 3, false],
-      ['Reviewed', 'Rui Tanaka', 'test', 3, false],
-      ['Released', 'Quinn Adeyemi', 'test_report', 1, false],
+      ['Performed', 'Ana Ferreira', 'Test', 3, false],
+      ['Reviewed', 'Rui Tanaka', 'Test', 3, false],
+      ['Released', 'Quinn Adeyemi', 'Test Report', 1, false],
     ],
     'Performed and Reviewed bind to the Record Version the Result made; Released to the Test Report',
   );
