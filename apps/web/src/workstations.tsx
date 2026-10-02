@@ -1,7 +1,8 @@
 import { type ActorContext, routes, type Workstation } from '@lims/domain';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api, useApi, useFresh } from './api.ts';
 import { type RailAction, Shell } from './rail.tsx';
+import { type Column, StackTable } from './stack.tsx';
 
 const reason = { name: 'reason', label: 'Reason', kind: 'text' } as const;
 
@@ -53,6 +54,28 @@ function enrolment(workstation: Workstation, onDone: () => Promise<void>): RailA
   };
 }
 
+function workstationColumns(
+  chosen: Workstation | 'room' | null,
+  setChosen: (next: Workstation | null) => void,
+): Column<Workstation>[] {
+  const picked = (w: Workstation) => typeof chosen === 'object' && chosen?.id === w.id;
+  return [
+    { head: 'Workstation', cell: (w) => w.name },
+    { head: 'Room', cell: (w) => w.room },
+    { head: 'Browser policy', label: 'Policy', cell: (w) => w.browserPolicy },
+    { head: 'Browser', cell: (w) => (w.enrolled ? 'Enrolled' : 'Not enrolled') },
+    {
+      head: 'Enrol',
+      label: '',
+      cell: (w) => (
+        <button type="button" className="btn" aria-pressed={picked(w)} onClick={() => setChosen(picked(w) ? null : w)}>
+          {picked(w) ? 'Chosen to enrol' : 'Choose to enrol'}
+        </button>
+      ),
+    },
+  ];
+}
+
 export function WorkstationsPage({ me }: { me: ActorContext }) {
   const { data, error, reload } = useApi(routes.workstations);
   const [chosen, setChosen] = useState<Workstation | 'room' | null>(null);
@@ -66,7 +89,7 @@ export function WorkstationsPage({ me }: { me: ActorContext }) {
     return chosen ? enrolment(chosen, done) : registration(reload);
   };
   const action = data ? pick() : null;
-  const isChosen = (w: Workstation) => typeof chosen === 'object' && chosen?.id === w.id;
+  const columns = useMemo(() => workstationColumns(chosen, setChosen), [chosen]);
   return (
     <Shell me={me} active="workstations" action={action}>
       <h1>Workstations</h1>
@@ -103,37 +126,12 @@ export function WorkstationsPage({ me }: { me: ActorContext }) {
         </p>
       )}
       {data && (
-        <table className="stack">
-          <thead>
-            <tr>
-              <th>Workstation</th>
-              <th>Room</th>
-              <th>Browser policy</th>
-              <th>Browser</th>
-              <th>Enrol</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.workstations.map((w) => (
-              <tr key={w.id} className={fresh.has(`${w.id}:${w.enrolled}`) ? 'row--fresh' : undefined}>
-                <td data-label="Workstation">{w.name}</td>
-                <td data-label="Room">{w.room}</td>
-                <td data-label="Policy">{w.browserPolicy}</td>
-                <td data-label="Browser">{w.enrolled ? 'Enrolled' : 'Not enrolled'}</td>
-                <td data-label="">
-                  <button
-                    type="button"
-                    className="btn"
-                    aria-pressed={isChosen(w)}
-                    onClick={() => setChosen(isChosen(w) ? null : w)}
-                  >
-                    {isChosen(w) ? 'Chosen to enrol' : 'Choose to enrol'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <StackTable
+          columns={columns}
+          rows={data.workstations}
+          rowKey={(w) => w.id}
+          rowClass={(w) => (fresh.has(`${w.id}:${w.enrolled}`) ? 'row--fresh' : undefined)}
+        />
       )}
       {data?.workstations.length === 0 && <p className="muted">No Workstations registered yet.</p>}
     </Shell>

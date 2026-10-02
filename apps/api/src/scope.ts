@@ -84,8 +84,13 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
       return {
         at: found.at,
         chains: [
-          { chain: 'lab' as const, lastEntry: found.labLast, firstFailure: found.labFailure },
-          { chain: 'company' as const, lastEntry: found.companyLast, firstFailure: found.companyFailure },
+          { chain: 'lab' as const, chainId: labId, lastEntry: found.labLast, firstFailure: found.labFailure },
+          {
+            chain: 'company' as const,
+            chainId: 'company',
+            lastEntry: found.companyLast,
+            firstFailure: found.companyFailure,
+          },
         ],
       };
     },

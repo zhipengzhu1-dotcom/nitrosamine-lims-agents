@@ -77,7 +77,10 @@ const sessionClock = Type.Object({
 export type SessionClock = Static<typeof sessionClock>;
 /** What a person is told when the API refuses a session that has ended; the web shows it as the API sends it. */
 export const SESSION_ENDED = 'Your session has ended. Sign in again.';
-const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock });
+/** The person's own settings for the web. `reducedMotion` only ever reduces motion: the device's own setting still applies when it is off. */
+const preferences = Type.Object({ reducedMotion: Type.Boolean() }, closed);
+export type Preferences = Static<typeof preferences>;
+const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock, preferences });
 export type SignedInView = Static<typeof signedIn>;
 const testRow = Type.Object({
   id: uuid,
@@ -281,6 +284,8 @@ const chainVerification = Type.Object({
   lastEntry: seq,
   intactThrough: seq,
   firstFailure: nullable(seq),
+  /** The System Incident a break opened, the same on every verification that finds the same first failing entry. */
+  incident: nullable(Type.String({ pattern: `^${referencePattern}$` })),
   report: Type.String(),
 });
 export type ChainVerification = Static<typeof chainVerification>;
@@ -326,6 +331,7 @@ const systemIncident = Type.Object({
     SignInBurstFromAddress: 'SignInBurstFromAddress',
     SignInBurstOnUnknownUserId: 'SignInBurstOnUnknownUserId',
     RepeatedSignInOnLockedAccount: 'RepeatedSignInOnLockedAccount',
+    ChainVerifyFailure: 'ChainVerifyFailure',
   } as const satisfies { [K in db.IncidentKind]: K }),
   state: Type.Enum({ Open: 'Open' } as const satisfies { [K in db.IncidentState]: K }),
   /** The failing step and error class of a failure of the LIMS; null for a sign-in incident. */
@@ -338,6 +344,9 @@ const systemIncident = Type.Object({
   subjectId: nullable(uuid),
   sourceAddress: nullable(Type.String()),
   typedUserIdHmac: nullable(sha256Hex),
+  /** What a chain-verify failure names: the chain as the Audit Trail names it ('company' or the Lab's ID), and its first failing entry. */
+  chain: nullable(Type.Union([Type.Literal('company'), uuid])),
+  firstFailure: nullable(seq),
   sqlstate: nullable(Type.String()),
   constraintName: nullable(Type.String()),
   /** The database's insert time. */
@@ -448,9 +457,10 @@ const stepInputs = {
   release: Type.Object({}, closed),
 } satisfies { [K in StepName]: TObject };
 export type StepInput<K extends StepName> = Static<(typeof stepInputs)[K]>;
-/** A press's step, record and entries as one text, the same in whatever order the entries were typed, so the API and the web agree on which presses are one press. */
+/** A press's step, record and entries as one text, the same in whatever order the entries were typed and with a cleared entry read as absent, so the API and the web agree on which presses are one press. */
 export function pressText(step: StepName, testId: string | null, input: object): string {
-  return JSON.stringify([step, testId, Object.entries(input).sort(([a], [b]) => (a < b ? -1 : 1))]);
+  const entries = Object.entries(input).filter(([, value]) => value !== '');
+  return JSON.stringify([step, testId, entries.sort(([a], [b]) => (a < b ? -1 : 1))]);
 }
 /** A step's body for any K. Its type keeps testId and signature optional; the wire schema requires them where the registry does. */
 export type StepBody<K extends StepName> = Static<typeof stepEnvelope> & { input: StepInput<K> };
@@ -493,6 +503,7 @@ export const routes = {
   registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
   enrolWorkstation: route('POST', '/api/workstations/enrol', { body: enrolment }, workstation),
   me: route('GET', '/api/me', {}, signedIn),
+  setPreferences: route('POST', '/api/me/preferences', { body: preferences }, preferences),
   /** Reads how long the session has left without counting as activity, for the web's countdown. */
   session: route('GET', '/api/session', {}, sessionClock),
   lookups: route('GET', '/api/lookups', {}, lookups),

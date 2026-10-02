@@ -21,7 +21,7 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
-export type IncidentKind = "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure" | "UnraisableLogLine";
+export type IncidentKind = "ChainVerifyFailure" | "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure" | "UnraisableLogLine";
 
 export type IncidentState = "Open";
 
@@ -157,6 +157,7 @@ export interface Person {
   identityVerificationId: string | null;
   lockedAt: Timestamp | null;
   passwordHash: string | null;
+  reducedMotion: Generated<boolean>;
   username: string;
 }
 
@@ -262,8 +263,10 @@ export interface Submission {
 }
 
 export interface SystemIncident {
+  chain: string | null;
   constraintName: string | null;
   errorClass: string | null;
+  firstFailure: Int8 | null;
   id: Generated<string>;
   kind: IncidentKind;
   loggedAt: Timestamp | null;

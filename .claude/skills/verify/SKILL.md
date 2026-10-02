@@ -53,7 +53,11 @@ try {
 }
 ```
 
-`v` also has `signOut()`, `sign(meaning, password?)` for the signature sheet, `note(line)` and `password`. `expect` is Playwright's. The page opens at 1360 × 900. Sign-in and signing are designed for a phone (`docs/coding-standards.md`), so prove a change to either at phone width as well, with `await page.setViewportSize({ width: 390, height: 844 })`.
+`v` also has `signOut()`, `sign(meaning, password?)` for the signature sheet, `note(line)` and `password`. `expect` is Playwright's. The page opens at 1360 × 900. `open(slug, 'phone')` opens it as a 390 × 844 touch phone instead.
+
+## Phone width on every UI pull request
+
+A pull request that changes what a screen shows gets a drive at phone width as part of UI review, because some defects show only on a phone. Drive each flow the pull request changes with `open(slug, 'phone')`, and again with `open(slug)` for desktop. Take `v.shot(name, false)` before the commit and after the rail shows the server's answer, plus one for each refusal the pull request adds. `false` keeps the shot to the screen a person sees, with the rail and any sheet in place; a full-page shot unrolls the fixed rail. List the screenshots in the pull request. This drive is emulation; the owner's check on a real device stays a separate step.
 
 To get a Test into a given state, run the chain helper. It takes a new Test through the UI as each role, up to the state you name:
 
@@ -67,7 +71,8 @@ Stable handles, all from the shipped UI (`apps/web/src`):
 
 - Sign in: the fields `Username` and `Password`, and the button `Sign in`. A refusal shows in `role=alert`.
 - The worklist has the heading `Tests`. Each Test is a link named by its Sample number, which matches `/^RD-S-\d{4}-\d{6}$/`.
-- On a Test page, the `h1` holds the Sample number and the state in words, such as `Submitted For Review`.
+- On a Test page, the `h1` holds the Sample number and the state in words, such as `Submitted For Review`. On a phone it sticks to the top of the record as it scrolls.
+- The rail's person name is the link `<name>, your preferences` to `#/preferences`, the page `Your preferences` with the box `Reduce motion wherever I sign in` and the button `Save preferences`.
 - The rail is `role=contentinfo`. Its status line is `role=status`. It offers only the step the signed-in person may take next, as one button: `Submit`, `Receive`, `Assign`, `Enter Result`, `Review` or `Release`. `Switch user`, `Lock` and `Sign out` are always there, and the rail names the Workstation or `Unregistered device`. At phone width an open sheet covers the rail and hides those three buttons until it closes.
 - The step form fields are `Method`, `Sample description`, `Analyst`, `Analyte`, `Result as written`, `Unit`, `Injection sequence`, `Notebook reference` and `Performed on`. Use `{ exact: true }` for these labels.
 - The signature sheet shows, in order, `What you are signing`, `Meaning` (the signature statement and its version, `Eligibility`, `Record Version` and the full `SHA-256`), then `Who is signing` with the fields matching `/User ID/` and `/Password/`, and the button `Sign as Performed|Reviewed|Released`. `v.sign` types the signed-in person's own user ID.
@@ -83,9 +88,9 @@ The feature recipes are in [features/README.md](features/README.md). Read the ma
 
 Each `open()` writes `.verify/evidence/<UTC stamp>-<slug>/`, and `close()` prints the path:
 
-- `instance.txt`: the URL, the database, and the commit with `-dirty` if apps or packages had changes.
+- `instance.txt`: the URL, the database, the commit with `-dirty` if apps or packages had changes, and the screen.
 - `steps.log`: each action, and every `/api/*` call with its status code.
-- `NN-<name>.png`: full-page screenshots, numbered in order.
+- `NN-<name>.png`: screenshots, numbered in order: full page, or the screen alone with `v.shot(name, false)`.
 - `trace.zip`: the Playwright trace, with DOM snapshots before and after each action. Open it with `pnpm --filter @lims/web exec playwright show-trace <path>`.
 - `<name>.tsv`: the output of each `v.sql()` query.
 

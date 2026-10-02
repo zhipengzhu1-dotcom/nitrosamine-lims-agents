@@ -219,6 +219,17 @@ const fixture: [string, Row][] = [
     },
   ],
   [
+    'lims.system_incident',
+    {
+      kind: 'ChainVerifyFailure',
+      reference: 'RF000003',
+      requested_by: id.person,
+      session_lab_id: id.lab,
+      chain: id.lab,
+      first_failure: 7,
+    },
+  ],
+  [
     'lims.commit_key',
     {
       lab_id: id.lab,
@@ -302,7 +313,7 @@ const tables = {
   'lims.person': {
     noun: 'person',
     row: { username: 'refusal.second', display_name: 'Second Person', password_hash: 'not-a-real-hash' },
-    notNull: ['id', 'username', 'display_name', 'failed_logins'],
+    notNull: ['id', 'username', 'display_name', 'failed_logins', 'reduced_motion'],
   },
   'lims.identity_verification': {
     noun: 'Identity Verification',
@@ -884,6 +895,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       constraint: 'system_incident_reference_key',
     },
     {
+      name: 'a second chain-verify System Incident for the same chain and first failing entry is refused',
+      table: 'lims.system_incident',
+      change: { kind: 'ChainVerifyFailure', step: null, error_class: null, chain: id.lab, first_failure: 7 },
+      constraint: 'system_incident_chain_first_failure_key',
+    },
+    {
       name: 'a second Commit Key with the same key in one Lab is refused, from the same session or another, so a press commits once',
       table: 'lims.commit_key',
       change: { key: id.commitKey, session_id: id.session },
@@ -1382,6 +1399,47 @@ describe('the database refuses a value outside its allowed set', () => {
       step: null,
       error_class: null,
     }),
+    incidentFacts('an unexpected-failure System Incident that names a chain', { chain: id.lab, first_failure: 7 }),
+    incidentFacts('a chain-verify System Incident that names no chain', {
+      kind: 'ChainVerifyFailure',
+      step: null,
+      error_class: null,
+    }),
+    incidentFacts('a chain-verify System Incident with a failing step', {
+      kind: 'ChainVerifyFailure',
+      chain: 'company',
+      first_failure: 3,
+    }),
+    incidentFacts('a chain-verify System Incident that names no first failing entry', {
+      kind: 'ChainVerifyFailure',
+      step: null,
+      error_class: null,
+      chain: 'company',
+    }),
+    incidentFacts('a chain-verify System Incident with no requesting person', {
+      kind: 'ChainVerifyFailure',
+      step: null,
+      error_class: null,
+      requested_by: null,
+      chain: 'company',
+      first_failure: 3,
+    }),
+    ...[
+      ...['Company', 'lab', 'A4D6A9D1-0000-4000-8000-000000000001', 'a4d6a9d1-0000-4000-8000-00000000000'].map(
+        (chain) =>
+          ['a System Incident chain that is neither the company chain nor a Lab ID', 'chain', chain, 1] as const,
+      ),
+      ...[0, -1].map(
+        (entry) => ['a System Incident first failing entry below 1', 'first_failure', 'company', entry] as const,
+      ),
+    ].map(
+      ([what, column, chain, entry]): Case => ({
+        name: `${what} is refused: ${JSON.stringify(column === 'chain' ? chain : entry)}`,
+        table: 'lims.system_incident',
+        change: { kind: 'ChainVerifyFailure', step: null, error_class: null, chain, first_failure: entry },
+        constraint: `system_incident_${column}_check`,
+      }),
+    ),
     incidentFacts('a locked-account System Incident that also names an address', {
       kind: 'RepeatedSignInOnLockedAccount',
       subject_id: id.person,
@@ -1944,6 +2002,8 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       subject_id: id.person,
       source_address: '192.0.2.9',
       typed_user_id_hmac: Buffer.alloc(32, 9),
+      chain: 'company',
+      first_failure: 1,
     };
     for (const [column, value] of Object.entries(changes)) {
       const error = await refusalOf(

@@ -16,7 +16,12 @@ import {
 const at = (s: string) => Value.Decode(instant, s);
 
 describe('a recomputed chain reads as how far it is intact', () => {
-  const cases: { name: string; last: string; failure: string | null; expected: Omit<ChainVerification, 'chain'> }[] = [
+  const cases: {
+    name: string;
+    last: string;
+    failure: string | null;
+    expected: Omit<ChainVerification, 'chain' | 'incident'>;
+  }[] = [
     {
       name: 'an untouched chain is intact through its last entry',
       last: '12',
@@ -50,7 +55,7 @@ describe('a recomputed chain reads as how far it is intact', () => {
         lastEntry: '12',
         intactThrough: '4',
         firstFailure: '5',
-        report: 'entry 5 fails to verify; intact through entry 4',
+        report: 'entry 5 fails to verify; intact through entry 4; recorded as System Incident RF000001',
       },
     },
     {
@@ -62,12 +67,17 @@ describe('a recomputed chain reads as how far it is intact', () => {
         lastEntry: '12',
         intactThrough: '12',
         firstFailure: '13',
-        report: 'the chain head does not match entry 12; intact through entry 12',
+        report: 'the chain head does not match entry 12; intact through entry 12; recorded as System Incident RF000001',
       },
     },
   ];
-  for (const c of cases)
-    it(c.name, () => assert.deepEqual(chainVerification('lab', c.last, c.failure), { chain: 'lab', ...c.expected }));
+  for (const c of cases) {
+    const incident = c.failure === null ? null : 'RF000001';
+    const broken = c.failure === null ? null : { firstFailure: c.failure, incident: 'RF000001' as const };
+    it(c.name, () =>
+      assert.deepEqual(chainVerification('lab', c.last, broken), { chain: 'lab', incident, ...c.expected }),
+    );
+  }
 });
 
 const LAB = 'a4d6a9d1-0000-4000-8000-000000000001';
@@ -223,6 +233,21 @@ describe('an entry reads in glossary words with labels as they stood at its time
     assert.deepEqual(
       describeTrail([assign, renamed, signedIn, later], images, LAB, new Map()).map((e) => e.afterFirstSave),
       [false, true, false, false],
+    );
+  });
+
+  it("reads a person's reduced-motion save as Reduce motion, not as a change after first save", () => {
+    const saved = entry({
+      table: 'person',
+      chain: 'company',
+      atLab: null,
+      oldRow: { id: 'p2', display_name: 'Ana Ferreira', reduced_motion: false },
+      newRow: { id: 'p2', display_name: 'Ana Ferreira', reduced_motion: true },
+    });
+    const [described] = describeTrail([saved], images, LAB, new Map());
+    assert.deepEqual(
+      [described?.afterFirstSave, described?.changes.map((c) => [c.label, c.old?.text, c.new?.text])],
+      [false, [['Reduce motion', 'false', 'true']]],
     );
   });
 
