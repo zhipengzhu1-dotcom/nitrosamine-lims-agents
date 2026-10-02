@@ -11,9 +11,10 @@ case "${1:-}" in
   build) docker build --pull --platform linux/arm64 -t lims-runner "$ROOT/ci/runner" ;;
   slot)
     SLOT=${2:?usage: scripts/ci-runner.sh slot check|e2e}
-    docker image inspect lims-runner >/dev/null # no image: stop before registering a runner that cannot start
     while true; do
       docker rm -f "lims-runner-$SLOT" >/dev/null 2>&1 || true
+      # Docker stopped or no image: wait here, so no runner registers that cannot start.
+      docker image inspect lims-runner >/dev/null || { sleep 30; continue; }
       # runner_group_id 1 is the repo's Default runner group.
       CONFIG=$(gh api -X POST "repos/$REPO/actions/runners/generate-jitconfig" -f name="lims-runner-$SLOT-$(date +%s)" \
         -F runner_group_id=1 -f 'labels[]=self-hosted' -f 'labels[]=Linux' -f 'labels[]=ARM64' -f "labels[]=lims-$SLOT" \
@@ -22,6 +23,8 @@ case "${1:-}" in
     done
     ;;
   start)
+    # A second loop for a slot would remove the first loop's container mid-job.
+    if pgrep -f 'ci-runner.sh slot' >/dev/null; then echo "The slots are already running. Run stop first." >&2; exit 1; fi
     mkdir -p "$HOME/Library/Logs/lims-runner"
     for n in "${SLOTS[@]}"; do
       nohup "$0" slot "$n" >>"$HOME/Library/Logs/lims-runner/$n.log" 2>&1 &

@@ -1,6 +1,6 @@
 # CI runners
 
-CI's `check` and `e2e` jobs run on self-hosted GitHub Actions runners in Docker on the owner's Mac, never on GitHub-hosted runners. `.github/workflows/ci.yml` sends the `check` job to the runner labels `self-hosted` and `lims-check`, and the `e2e` job to `self-hosted` and `lims-e2e`. While no runner is online, a job waits in the queue.
+CI's `check` and `e2e` jobs run on self-hosted GitHub Actions runners in Docker on the owner's Mac, never on GitHub-hosted runners. `.github/workflows/ci.yml` sends the `check` job to the runner labels `self-hosted` and `lims-check`, and the `e2e` job to `self-hosted` and `lims-e2e`. `pnpm check` refuses a workflow whose `runs-on` does not start with `[self-hosted, `. While no runner is online, a job waits in the queue.
 
 ## How it works
 
@@ -13,7 +13,7 @@ CI's `check` and `e2e` jobs run on self-hosted GitHub Actions runners in Docker 
 
 The loop is the restart policy. A Docker restart policy restarts the same container, which keeps the last job's files and holds a registration that GitHub has already deleted.
 
-The image (`Dockerfile`) is GitHub's `ghcr.io/actions/actions-runner`, pinned by digest for linux/arm64, with PostgreSQL 18.6 from the PGDG packages, pinned by package version. CI's service container used to pin the `postgres:18.6` image by digest, but that image is Debian trixie (glibc 2.41), so its server binaries are built against a newer C library than this Ubuntu 24.04 image has (glibc 2.39). PGDG builds the same release for both. The jobs use no Docker of their own, so the image has no Docker socket and no service containers. A service container would publish its port on the Docker VM, where the runner container's `localhost` cannot reach it, and the socket would give every job control of the Mac's Docker.
+The image (`Dockerfile`) is GitHub's `ghcr.io/actions/actions-runner`, pinned by digest for linux/arm64, with PostgreSQL 18.6 from the PGDG packages, pinned by package version. CI's service container used to pin the `postgres:18.6` image by digest, but that image is Debian trixie (glibc 2.41), so its server binaries are built against a newer C library than this Ubuntu 24.04 image has (glibc 2.39). PGDG builds the same release for both. A `postgres:18.6` container beside each runner container, sharing its network, would keep the image digest, but the slot loop would then start, wait for and remove a second container for each job, and CI would no longer start PostgreSQL with `scripts/pg.sh start` as a checkout does. The jobs use no Docker of their own, so the image has no Docker socket and no service containers. A service container would publish its port on the Docker VM, where the runner container's `localhost` cannot reach it, and the socket would give every job control of the Mac's Docker.
 
 ## Before the first start
 
@@ -22,7 +22,9 @@ You need:
 - Docker Desktop running.
 - The GitHub CLI signed in as an admin of `zhipengzhu1-dotcom/09-28-2026-LIMS`. Check with `gh auth status`.
 
-The registration comes from `gh api` at each pass of the loop and passes to the container as an argument. Nothing writes it to the repo or to a file on the Mac. While its container runs, Docker holds it in the container's configuration, `ps` and `docker inspect` show it, and the job can read it. That exposure is accepted because the registration admits one runner for one job, and the container's removal deletes it.
+The registration comes from `gh api` at each pass of the loop and passes to the container as an argument. The script writes it to no file, and the runner masks it in the slot log. While its container runs, `ps` on the Mac and `docker inspect` show it, Docker keeps it in the container's configuration inside its VM disk, and the job can read it. That exposure is accepted because the registration admits one runner for one job, and the container's removal deletes it.
+
+A job runs the pull request's code and its packages on the Mac. Its container cannot see another job's container, but it can reach services on the Mac through `host.docker.internal`, such as the trust-auth PostgreSQL clusters that `scripts/pg.sh` starts for each checkout. That exposure is accepted because the repo is private, every pull request comes from the owner or the owner's agents, and those clusters hold only fictional data.
 
 ## Build the image
 
@@ -38,7 +40,7 @@ scripts/ci-runner.sh build
 scripts/ci-runner.sh start
 ```
 
-Each slot registers its runner and starts its container. The slots keep running after you close the terminal. They stop when the Mac restarts, so run `start` again after a restart.
+Each slot registers its runner and starts its container. The slots keep running after you close the terminal. They stop when the Mac restarts, so run `start` again after a restart. `start` refuses while the slots are still running, because a second loop would remove the first loop's container mid-job. While Docker Desktop is stopped, each slot waits and registers no runner.
 
 ## Check the runners
 

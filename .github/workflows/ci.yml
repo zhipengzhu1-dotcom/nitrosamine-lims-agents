@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# A pull request's newer push cancels its older run. Each push to main gets a group of its own, because a shared
+# group keeps one pending run and cancels the one before it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 # Each job runs in a fresh lims-runner container on the owner's Mac (ci/runner/README.md) and starts the
 # PostgreSQL 18.6 inside it, so a job's cluster and workspace go when its container does. Each job has its own
