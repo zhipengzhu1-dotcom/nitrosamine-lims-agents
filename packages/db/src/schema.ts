@@ -123,6 +123,18 @@ export interface Person {
   username: string;
 }
 
+export interface RecordVersion {
+  canonicalForm: number;
+  content: Buffer;
+  contentHash: Generated<Buffer>;
+  id: Generated<string>;
+  labId: string;
+  recordId: string;
+  recordTable: string;
+  savedAt: Generated<Timestamp>;
+  version: number;
+}
+
 export interface Result {
   analyte: string;
   enteredBy: string;
@@ -156,14 +168,11 @@ export interface Session {
 }
 
 export interface Signature {
-  content: Buffer;
-  contentHash: Generated<Buffer>;
   id: Generated<string>;
   labId: string;
   meaning: Meaning;
   personId: string;
-  recordId: string;
-  recordTable: string;
+  recordVersionId: string;
   signedAt: Generated<Timestamp>;
 }
 
@@ -221,6 +230,7 @@ export interface DB {
   membership: Membership;
   method: Method;
   person: Person;
+  recordVersion: RecordVersion;
   result: Result;
   sample: Sample;
   session: Session;

@@ -154,15 +154,18 @@ export const modules = [
 export type Module = (typeof modules)[number];
 type ModuleKey = Module['key'];
 
+/** `notice` is what the rail says when the person has no step to take here, such as which Signatures are unsigned. */
 export function Shell({
   me,
   active,
   action,
+  notice,
   children,
 }: {
   me: ActorContext;
   active: ModuleKey;
   action: RailAction | null;
+  notice?: string | undefined;
   children: ReactNode;
 }) {
   return (
@@ -177,7 +180,7 @@ export function Shell({
         </nav>
       </TopBar>
       <main className="plane">{children}</main>
-      <Rail me={me} action={action} />
+      <Rail me={me} action={action} notice={notice} />
     </div>
   );
 }
@@ -213,7 +216,7 @@ function unansweredText(e: unknown, signs: boolean): string {
   return `Refused: ${e.message}.${signs ? ' Nothing has been signed.' : ''}`;
 }
 
-function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
+function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | null; notice?: string | undefined }) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [password, setPassword] = useState('');
@@ -405,7 +408,7 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
         </div>
         <div ref={statusLine} className="rail__context" role="status" tabIndex={-1}>
           <p key={note?.n} className={`note ${note ? `note--${note.tone}` : ''}`}>
-            {note?.text ?? action?.context ?? 'Nothing for you to commit here.'}
+            {note?.text ?? action?.context ?? notice ?? 'Nothing for you to commit here.'}
           </p>
         </div>
         {action && !opened && (

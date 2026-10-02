@@ -11,6 +11,8 @@ const printed = execFileSync(process.execPath, [checkout, 'e2e-ports'], { encodi
 const [apiPort, webPort] = printed.split(' ');
 if (!apiPort || !webPort) throw new Error(`checkout.ts e2e-ports printed "${printed}", not an API and a web port`);
 const webURL = `http://localhost:${webPort}`;
+const E2E_DB = 'lims_e2e';
+export const E2E_DATABASE = execFileSync(process.execPath, [checkout, 'database', E2E_DB], { encoding: 'utf8' }).trim();
 
 export default defineConfig({
   testDir: 'e2e',
@@ -24,7 +26,7 @@ export default defineConfig({
   webServer: {
     command: '../../scripts/dev.sh --scratch',
     url: `${webURL}/api/me`,
-    env: { LIMS_DB: 'lims_e2e', PORT: apiPort, WEB_PORT: webPort, DEMO_PASSWORD },
+    env: { LIMS_DB: E2E_DB, PORT: apiPort, WEB_PORT: webPort, DEMO_PASSWORD },
     stdout: 'ignore',
   },
 });

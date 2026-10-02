@@ -1,10 +1,11 @@
-import type { DB, Json } from '@lims/db';
-import { nextStep, type RowSnapshot, routes } from '@lims/domain';
+import type { DB } from '@lims/db';
+import { nextStep, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { factsFor } from './steps.ts';
+import { factsFor, latestVersion, signedVersions } from './steps.ts';
+import { trailRoutes } from './trail.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -34,12 +35,6 @@ function visibleTests(scope: Scope) {
   return customerId === null ? tests : tests.where('submission.customerId', '=', customerId);
 }
 
-function snapshot(row: Json | null): RowSnapshot | null {
-  if (row === null) return null;
-  if (typeof row !== 'object' || Array.isArray(row)) throw new Error('an Audit Trail row snapshot is not an object');
-  return row;
-}
-
 async function testView(scope: Scope, id: string) {
   const test =
     (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ?? refuse('notFound', 'no such Test');
@@ -47,9 +42,15 @@ async function testView(scope: Scope, id: string) {
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
   const visibleToActor = !isCustomer || test.state === 'Reported';
+  const latest = visibleToActor ? await latestVersion(scope, 'test', id) : null;
   return {
     test,
-    report: report ? { number: report.number } : null,
+    recordVersion: latest && {
+      version: latest.version,
+      canonicalForm: latest.canonicalForm,
+      contentHash: latest.contentHash,
+    },
+    report: report ? { id: report.id, number: report.number } : null,
     result: visibleToActor
       ? ((await scope
           .from('result')
@@ -65,35 +66,38 @@ async function testView(scope: Scope, id: string) {
           .executeTakeFirst()) ?? null)
       : null,
     signatures: visibleToActor
-      ? await scope
-          .from('signature')
+      ? await signedVersions(scope)
           .innerJoin('person', 'person.id', 'signature.personId')
           .select([
             'signature.meaning',
             'person.displayName as signer',
             'signature.signedAt',
-            'signature.recordTable as record',
-            sql<string>`encode(signature.content_hash, 'hex')`.as('contentHash'),
+            'recordVersion.recordTable as record',
+            'recordVersion.version',
+            'recordVersion.canonicalForm',
+            sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
+            sql<boolean>`exists (select from lims.record_version later
+              where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
+                and later.record_id = record_version.record_id and later.version > record_version.version)`.as(
+              'unsigned',
+            ),
           ])
-          .where('signature.recordId', 'in', ids)
+          .where('recordVersion.recordId', 'in', ids)
           .orderBy('signature.signedAt')
           .execute()
+          .then((rows) =>
+            rows.map(({ version, canonicalForm, contentHash, ...signature }) => ({
+              ...signature,
+              recordVersion: { version, canonicalForm, contentHash },
+            })),
+          )
       : [],
-    auditTrail: isCustomer
-      ? []
-      : await scope
-          .auditTrail()
-          .select(['seq', 'at', 'actor', 'role', 'reason', 'tableName as table', 'op', 'oldRow', 'newRow'])
-          .where(sql<boolean>`coalesce(new_row, old_row)->>'id' = any(${ids}) or coalesce(new_row, old_row)->>'test_id' = ${id}
-        or coalesce(new_row, old_row)->>'record_id' = any(${ids})`)
-          .orderBy('seq')
-          .execute()
-          .then((entries) => entries.map((e) => ({ ...e, oldRow: snapshot(e.oldRow), newRow: snapshot(e.newRow) }))),
     next: nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test)),
   };
 }
 
 export function readRoutes(app: App, db: Kysely<DB>): void {
+  trailRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => ({ ...req.actor, session: req.sessionClock }) });
 
   app.route({
@@ -131,14 +135,6 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
       return report
         ? { report, test, result, signatures }
         : refuse('notFound', 'this Test has no released Test Report');
-    },
-  });
-
-  app.route({
-    ...routes.verifyAuditTrail,
-    handler: async (req) => {
-      if (!req.actor.roles.includes('QA')) refuse('role', 'verifying the Audit Trail is a QA action');
-      return labScope(db, req.actor).verifyAuditTrail();
     },
   });
 }

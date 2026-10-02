@@ -1,6 +1,7 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { expect, type Locator, type Page, test } from '@playwright/test';
-import { DEMO_PASSWORD, SHOTS } from '../playwright.config.ts';
+import { DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {
   if (SHOTS && test.info().project.name === 'desktop')
@@ -24,6 +25,31 @@ const sign = async (page: Page, meaning: string, password = DEMO_PASSWORD) => {
   await page.getByLabel(/Password/).fill(password);
   await page.getByRole('button', { name: `Sign as ${meaning}` }).click();
 };
+
+function changeResult(testId: string, value: string) {
+  execFileSync(
+    '../../scripts/pg.sh',
+    [
+      'psql',
+      '-q',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '--single-transaction',
+      '-d',
+      E2E_DATABASE,
+      '-v',
+      `test=${testId}`,
+      '-v',
+      `value=${value}`,
+    ],
+    {
+      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
+                     set_config('lims.reason', 'Change a signed Result from outside the chain (e2e)', true);
+              update lims.result set value = :'value' where test_id = :'test';`,
+      stdio: ['pipe', 'ignore', 'inherit'],
+    },
+  );
+}
 
 async function box(target: Locator) {
   const b = await target.boundingBox();
@@ -132,7 +158,8 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(password).toBeFocused();
   const [field, foot] = [await box(password), await box(sheet.locator('.sheet__foot'))];
   expect(field.y + field.height, 'the password field is clear of the sheet foot').toBeLessThanOrEqual(foot.y);
-  expect((await box(sheet)).height, 'the sheet keeps its height').toBe(height);
+  // A box at a fractional position measures a few ten-thousandths of a pixel differently between runs.
+  expect((await box(sheet)).height, 'the sheet keeps its height').toBeCloseTo(height, 2);
 
   await page.request.post('/api/logout', { data: {} });
   const whoAmI: string[] = [];
@@ -188,13 +215,17 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   );
   await sign(page, 'Released');
   await railSays(page, 'now Reported');
+  await page.getByRole('button', { name: 'Verify chain' }).click();
+  await expect(page.locator('.verdict')).toHaveText(
+    /^Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC: Lab chain intact through entry \d+; Company chain intact through entry \d+\. Not anchored off-server \(demo\)\.$/,
+  );
   const [releaseKey, retryKey] = commitKeys.slice(-2);
   expect(retryKey, 'the press whose reply was dropped is resent with its Commit Key').toBe(releaseKey);
   const presses = new Set(commitKeys);
   expect(presses.size, 'every other press sent a fresh Commit Key').toBe(commitKeys.length - 1);
   for (const key of presses)
     expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  const reportLink = page.getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ });
+  const reportLink = page.locator('.facts').getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ });
   await atLeast(reportLink, 44, 44);
   await reportLink.click();
   await expect(page.getByRole('heading', { name: /Test Report RD-R-\d{4}-\d{6}/ })).toBeVisible();
@@ -206,13 +237,28 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   ]) {
     await expect(page.getByRole('row', { name: new RegExp(`${meaning}.*${signer}`) })).toBeVisible();
   }
-  await page.getByRole('button', { name: 'Verify Audit Trail' }).click();
-  await railSays(
-    page,
-    'Lab chain internally consistent, company chain internally consistent. Not anchored off-server (demo).',
-  );
-  await railSays(page, /Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC:/);
   await shot(page, 'test-report');
+
+  const testId = new URL(page.url()).hash.split('/')[2] ?? '';
+  expect(testId).toMatch(/^[0-9a-f-]{36}$/);
+  const signed = page.getByRole('row', { name: /unsigned/ });
+  await expect(signed).toHaveCount(0);
+  changeResult(testId, '0.0380');
+  await page.reload();
+  await expect(page.getByRole('cell', { name: '0.0380', exact: true })).toBeVisible();
+  for (const meaning of ['Performed', 'Reviewed', 'Released'])
+    await expect(page.getByRole('row', { name: new RegExp(`${meaning} unsigned`) })).toBeVisible();
+
+  await page.goto(`/#/tests/${testId}`);
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Reported');
+  await expect(page.locator('dl.facts').first().locator('dt:text-is("Record Version") + dd')).toContainText('4 ·');
+  await expect(page.getByRole('row', { name: /unsigned/ })).toHaveCount(3);
+  await railSays(page, 'Unsigned: Performed, Reviewed, Released. The record changed after signing.');
+  await shot(page, 'test-unsigned');
+  await page.getByRole('button', { name: 'Verify chain' }).click();
+  await expect(page.locator('.verdict')).toHaveText(
+    /Lab chain intact through entry \d+; Company chain intact through entry \d+/,
+  );
 });
 
 test('a wrong password and an unknown user ID show the same failure message', async ({ page }) => {

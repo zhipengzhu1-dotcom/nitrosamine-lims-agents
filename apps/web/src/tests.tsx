@@ -1,19 +1,9 @@
-import {
-  type ActorContext,
-  type AuditEntry,
-  type Result,
-  type RowSnapshot,
-  routes,
-  type Signature,
-  steps,
-  type TestRow,
-} from '@lims/domain';
+import { type ActorContext, type Result, routes, type Signature, steps, type TestRow } from '@lims/domain';
+import { useCallback, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
 import { Shell, Status, stepAction } from './rail.tsx';
-
-export const time = (iso: string | null) =>
-  // oxlint-disable-next-line no-restricted-globals -- the web's one display function; it reads no clock, and it puts any instant the date-time format admits, offsets included, into UTC
-  iso ? `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')} UTC` : '';
+import { time } from './time.ts';
+import { TestTrail } from './trail.tsx';
 const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on Sample ${t.sampleNumber}`;
 
 export function Worklist({ me }: { me: ActorContext }) {
@@ -65,10 +55,14 @@ export function Worklist({ me }: { me: ActorContext }) {
 
 export function TestPage({ me, id }: { me: ActorContext; id: string }) {
   const { data: view, error, reload } = useApi(routes.test, { id });
+  const [reloadTrail, setReloadTrail] = useState<() => Promise<void>>(() => async () => {});
+  const onTrailReload = useCallback((fn: () => Promise<void>) => setReloadTrail(() => fn), []);
   const freshState = useFresh(view, (v) => [v.test.state]);
   const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
   const action = view?.next
-    ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], reload)
+    ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], async () => {
+        await Promise.all([reload(), reloadTrail()]);
+      })
     : null;
   if (!view)
     return (
@@ -78,7 +72,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
     );
   const { test, result, report } = view;
   return (
-    <Shell me={me} active="tests" action={action}>
+    <Shell me={me} active="tests" action={action} notice={unsignedNotice(view.signatures)}>
       <h1>
         {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
       </h1>
@@ -101,6 +95,14 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         <dd>{test.assignee ?? 'not assigned'}</dd>
         <dt>Test Report</dt>
         <dd>{report ? <a href={`#/tests/${id}/report`}>{report.number}</a> : 'not released'}</dd>
+        {view.recordVersion && (
+          <>
+            <dt>Record Version</dt>
+            <dd>
+              {view.recordVersion.version} · <code className="hash">{view.recordVersion.contentHash}</code>
+            </dd>
+          </>
+        )}
       </dl>
       <h2>Result</h2>
       {result ? (
@@ -121,7 +123,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
       )}
       <h2>Signatures</h2>
       <Signatures rows={view.signatures} fresh={freshSignatures} />
-      {me.person.customerId === null && <AuditTrail entries={view.auditTrail} />}
+      {me.person.customerId === null && <TestTrail me={me} id={id} onReload={onTrailReload} />}
     </Shell>
   );
 }
@@ -129,6 +131,14 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
 const resultLine = (r: Result) => `Result: ${r.analyte} ${r.value} ${r.unit}, performed on ${r.performedOn}`;
 
 const signatureKey = (s: Signature) => s.meaning + s.signedAt;
+
+/** The rail's line for a record with Signatures the server returns as unsigned, or nothing to say. */
+export function unsignedNotice(rows: Signature[]): string | undefined {
+  const unsigned = rows.filter((s) => s.unsigned).map((s) => s.meaning);
+  return unsigned.length ? `Unsigned: ${unsigned.join(', ')}. The record changed after signing.` : undefined;
+}
+const rowClass = (s: Signature, fresh?: ReadonlySet<string>) =>
+  [fresh?.has(signatureKey(s)) ? 'row--fresh' : '', s.unsigned ? 'row--unsigned' : ''].join(' ').trim() || undefined;
 
 /** Only the rows whose keys are in `fresh`, which the server has just returned on this page, animate in. */
 export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: ReadonlySet<string> }) {
@@ -141,82 +151,32 @@ export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: Readonl
           <th>Signed by</th>
           <th>Time</th>
           <th>Record</th>
+          <th>Record Version</th>
           <th>SHA-256 of the signed Record Version</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((s) => (
-          <tr key={signatureKey(s)} className={fresh?.has(signatureKey(s)) ? 'row--fresh' : undefined}>
+          <tr key={signatureKey(s)} className={rowClass(s, fresh)}>
             <td className="sig" data-label="Meaning">
               {s.meaning}
+              {s.unsigned && (
+                <>
+                  {' '}
+                  <span className="unsigned">unsigned</span>
+                </>
+              )}
             </td>
             <td data-label="Signed by">{s.signer}</td>
             <td data-label="Time">{time(s.signedAt)}</td>
             <td data-label="Record">{s.record}</td>
+            <td data-label="Record Version">{s.recordVersion.version}</td>
             <td data-label="SHA-256">
-              <code className="hash">{s.contentHash}</code>
+              <code className="hash">{s.recordVersion.contentHash}</code>
             </td>
           </tr>
         ))}
       </tbody>
     </table>
-  );
-}
-
-const shown = (v: unknown) => {
-  const text = typeof v === 'string' ? v : (JSON.stringify(v) ?? 'none');
-  return text.length > 40 ? `${text.slice(0, 40)}…` : text;
-};
-
-function changes(e: AuditEntry): string {
-  const before: RowSnapshot = e.oldRow ?? {};
-  const after: RowSnapshot = e.newRow ?? {};
-  return Object.keys({ ...before, ...after })
-    .filter((k) => k !== 'lab_id' && JSON.stringify(before[k]) !== JSON.stringify(after[k]))
-    .map((k) =>
-      e.oldRow && e.newRow
-        ? `${k}: ${shown(before[k])} → ${shown(after[k])}`
-        : `${k}=${shown(e.newRow ? after[k] : before[k])}`,
-    )
-    .join('; ');
-}
-
-function AuditTrail({ entries }: { entries: AuditEntry[] }) {
-  return (
-    <>
-      <h2>Audit Trail</h2>
-      <div className="wide">
-        <table className="audit">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Time</th>
-              <th>Who</th>
-              <th>Role</th>
-              <th>Reason</th>
-              <th>Record</th>
-              <th>Change</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((e) => (
-              <tr key={e.seq}>
-                <td>{e.seq}</td>
-                <td>{time(e.at)}</td>
-                <td>
-                  <code>{e.actor}</code>
-                </td>
-                <td>{e.role}</td>
-                <td>{e.reason}</td>
-                <td>
-                  {e.op} {e.table}
-                </td>
-                <td>{changes(e)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
   );
 }
