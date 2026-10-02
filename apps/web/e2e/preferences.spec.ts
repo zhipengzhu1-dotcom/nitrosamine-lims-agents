@@ -58,6 +58,7 @@ async function setReducedMotion(page: Page, on: boolean) {
   await expect(
     page.getByText(on ? 'Motion is reduced wherever you sign in' : 'Motion follows each device'),
   ).toBeVisible();
+  await expect(box, 'the saved setting stays shown after the save').toBeChecked({ checked: on });
 }
 
 test('on a shared iPad the reduced-motion preference follows each person through Switch user, without a reload', async ({
@@ -91,6 +92,14 @@ test('a device set to reduce motion keeps motion reduced for a person whose pref
   await openPreferences(page, 'Rui Tanaka');
   await expect(page.getByLabel('Reduce motion wherever I sign in')).not.toBeChecked();
   expect(await pressedTransform(page), 'full motion while the device asks for it').toBe(PRESSED);
+  const hit = await page
+    .locator('label.check', { has: page.getByLabel('Reduce motion wherever I sign in') })
+    .boundingBox();
+  test.info().annotations.push({ type: 'checkbox hit area', description: `${hit?.width} x ${hit?.height} px` });
+  expect(hit?.width, 'the label row that toggles the checkbox is wide enough for a gloved hand').toBeGreaterThanOrEqual(
+    44,
+  );
+  expect(hit?.height, 'and tall enough').toBeGreaterThanOrEqual(44);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   // A page hears of a media change in its next rendering step.
   await page.evaluate(
@@ -180,6 +189,37 @@ test('on a phone a closing signature sheet leaves the accessibility tree, and th
     heading: 0,
     field: 0,
   });
+  await expect(closing).toHaveCount(0);
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.locator('html')).toHaveAttribute('data-reduce-motion');
+  const entry = await page.evaluate(async () => {
+    const press = document.querySelector<HTMLButtonElement>('.rail button.rbtn--commit');
+    press?.click();
+    const transforms: string[] = [];
+    const started = performance.now();
+    while (performance.now() - started < 500) {
+      const sheet = document.querySelector('form.sheet');
+      if (sheet) transforms.push(getComputedStyle(sheet).transform);
+      await new Promise((next) => {
+        requestAnimationFrame(next);
+      });
+    }
+    const sheet = document.querySelector('form.sheet');
+    const style = sheet && getComputedStyle(sheet);
+    return {
+      framesSeen: transforms.length > 0,
+      moved: transforms.filter((t) => t !== 'none'),
+      property: style?.transitionProperty,
+      seconds: Number(style?.transitionDuration.replace(/s$/, '') ?? Number.NaN),
+      opacity: style?.opacity,
+    };
+  });
+  expect(entry.framesSeen, 'the sheet opened').toBe(true);
+  expect(entry.moved, 'with motion reduced the sheet never moves').toEqual([]);
+  expect(entry.property, 'only its opacity is animated').toBe('opacity');
+  expect(entry.seconds, 'the fade is short').toBeLessThanOrEqual(0.15);
+  expect(entry.opacity, 'and it settles fully opaque').toBe('1');
 });
 
 test('the rail with nothing on its second line renders no empty second line', async ({ page }) => {

@@ -114,7 +114,7 @@ export function LabSwitchPage({ me }: { me: ActorContext }) {
 
 /** The person's own preferences, as the server holds them. A change applies once the server has saved it. */
 export function PreferencesPage({ me }: { me: ActorContext }) {
-  const { data, error } = useApi(routes.me);
+  const { data, error, reload } = useApi(routes.me);
   const { busy, commit, shown } = useCommit();
   return (
     <Shell me={me} active={null} action={null}>
@@ -126,6 +126,8 @@ export function PreferencesPage({ me }: { me: ActorContext }) {
           onSubmit={(e) =>
             commit(e, async (form) => {
               const { reducedMotion } = await setPreferences({ reducedMotion: form.has('reducedMotion') });
+              // The form resets after a commit, so it must first hold the saved value as its default.
+              await reload();
               return reducedMotion
                 ? 'Saved. Motion is reduced wherever you sign in.'
                 : 'Saved. Motion follows each device’s own setting.';

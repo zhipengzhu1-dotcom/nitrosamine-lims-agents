@@ -89,6 +89,17 @@ export async function open(slug: string, screen: Screen = 'desktop'): Promise<Pr
     railSays,
     shot: async (name, fullPage = true) => {
       shots += 1;
+      // A shot shows the settled screen: every answer in, and no sheet, note or row caught mid-fade.
+      await page.waitForLoadState('networkidle');
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getAnimations()
+            // A scroll-driven animation (the tab bar's more-tabs hint) never finishes, so only timed ones are awaited.
+            .filter((a) => a.timeline === document.timeline && a.effect?.getComputedTiming().endTime !== Infinity)
+            .map((a) => a.finished.catch(() => null)),
+        ),
+      );
       await page.screenshot({ path: `${dir}/${String(shots).padStart(2, '0')}-${name}.png`, fullPage });
     },
     sql: (name, query, vars = {}) => {
