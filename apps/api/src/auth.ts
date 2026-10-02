@@ -646,12 +646,6 @@ export function loginRoutes(
   });
 }
 
-type OwnSessionRequest = { actor: ActorContext; sessionKey: SessionKey } & Parameters<typeof sourceAddressOf>[0];
-
-/** The Audit Trail context for a step a person takes on their own session. */
-const onOwnSession = (req: OwnSessionRequest, reason: 'Sign out' | 'Lock' | 'Unlock') =>
-  asOwnAccount(req.actor.person.username, reason);
-
 /**
  * The routes a locked session still reaches: sign-out, lock and unlock. Lock hides the session behind sessionLocked;
  * only the same person's password unlocks it, and a wrong one is an UnlockFailed Access Event that counts toward
@@ -662,7 +656,7 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
     ...routes.logout,
     handler: async (req, reply) => {
       const { actor, sessionKey: session } = req;
-      await audited(db, onOwnSession(req, 'Sign out'), async (tx) => {
+      await audited(db, asOwnAccount(actor.person.username, 'Sign out'), async (tx) => {
         if (!(await endSession(tx, session, limits))) return;
         await record(tx, {
           kind: 'SignOut',
@@ -684,26 +678,25 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
    * Event when the call changed the lock; a session it finds not live, or ended by a Lockout, is refused and nothing
    * is kept, since the sweep or the next request ends it at the same lapse.
    */
-  const setLocked = async (tx: Transaction<DB>, req: OwnSessionRequest, locked: boolean) => {
+  const setLocked = async (
+    tx: Transaction<DB>,
+    req: { sessionKey: SessionKey } & Parameters<typeof sourceAddressOf>[0],
+    locked: boolean,
+  ) => {
     const { labId, id } = req.sessionKey;
-    const idle = interval(limits.idleMs);
-    const absolute = interval(limits.absoluteMs);
-    const from = sourceAddressOf(req);
-    const { rows } = await (locked
-      ? sql<{
-          changed: boolean | null;
-        }>`select lims.lock_session(${labId}, ${id}, ${idle}, ${absolute}, ${from}) as changed`
-      : sql<{
-          changed: boolean | null;
-        }>`select lims.unlock_session(${labId}, ${id}, ${idle}, ${absolute}, ${from}) as changed`
-    ).execute(tx);
+    const change = locked ? sql`lims.lock_session` : sql`lims.unlock_session`;
+    const { rows } = await sql<{
+      changed: boolean | null;
+    }>`select ${change}(${labId}, ${id}, ${interval(limits.idleMs)},
+      ${interval(limits.absoluteMs)}, ${sourceAddressOf(req)}) as changed`.execute(tx);
     if (typeof rows[0]?.changed !== 'boolean') refuse('noSession', SESSION_ENDED);
   };
 
   app.route({
     ...routes.lock,
     handler: async (req) => {
-      await audited(db, onOwnSession(req, 'Lock'), (tx) => setLocked(tx, req, true));
+      const ctx = asOwnAccount(req.actor.person.username, 'Lock');
+      await audited(db, ctx, (tx) => setLocked(tx, req, true));
       return { locked: true, message: lockedMessage(req.actor.person.displayName) } as const;
     },
   });
@@ -720,9 +713,8 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
         sourceAddressOf(req),
         'UnlockFailed',
       );
-      await auditedAfterReauthentication(db, onOwnSession(req, 'Unlock'), reauthenticated, (tx) =>
-        setLocked(tx, req, false),
-      );
+      const ctx = asOwnAccount(req.actor.person.username, 'Unlock');
+      await auditedAfterReauthentication(db, ctx, reauthenticated, (tx) => setLocked(tx, req, false));
       return (await actorFor(db, req.cookies[SESSION_COOKIE], limits)).view;
     },
   });

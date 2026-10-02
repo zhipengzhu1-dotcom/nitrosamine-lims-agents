@@ -235,7 +235,8 @@ export async function startApi(name: string) {
      * Signature table held in one open transaction, so a signing that never waits on the person row reads it unlocked
      * and waits at its Signature insert instead, inside the window between that read and its commit. An unlock takes no
      * Signature, so code that never holds the person row waits only on its failure-count reset: the unlock case enters a
-     * wrong password first, leaving `failedLogins` at 1, so that such code waits too. Sets `locked_at` alone, with no
+     * wrong password first, leaving `failedLogins` at 1, so that such code waits too. A Lock holds no person row and
+     * waits on the company chain, which the person update's Audit Trail capture takes. Sets `locked_at` alone, with no
      * Lockout Access Event.
      */
     async lockOutWhile<T>(account: Account, press: () => Promise<T>): Promise<T> {

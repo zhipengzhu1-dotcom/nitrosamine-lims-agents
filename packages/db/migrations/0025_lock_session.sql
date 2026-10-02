@@ -1,8 +1,9 @@
 set local role lims_owner;
 
 -- A session is locked and unlocked only by the two functions below, which stamp the transaction with the session they
--- change, as lims.sign stamps the Signature it writes. So neither lims_app nor the superuser can backdate a lock, lock an
--- ended session or clear a lock by a statement.
+-- change, as lims.sign stamps the Signature it writes. So neither lims_app nor the superuser can open a session already
+-- locked, backdate a lock, lock an ended session or clear a lock by a statement. Like every trigger, it holds until a
+-- superuser disables triggers.
 create function lims.refuse_lock_by_statement() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 begin
@@ -15,15 +16,17 @@ end $$;
 
 create trigger lock_through_function before update of locked_at on lims.session
   for each row when (new.locked_at is distinct from old.locked_at) execute function lims.refuse_lock_by_statement();
+create trigger open_unlocked before insert on lims.session
+  for each row when (new.locked_at is not null) execute function lims.refuse_lock_by_statement();
 
 -- The one body behind lock_session and unlock_session. The company chain comes first, the order of end_session, so a
 -- lock that meets a Lockout not yet committed waits for it, then finds the session ended at the Lockout's instant and
 -- answers null: no Lock lands after a Lockout. A lapsed session is ended at its lapse, with its expiry Access Event,
--- never locked. Only the session's own person, the transaction's actor, may change it. The lock is stamped at now(),
--- the database clock, and the Lock or Unlock Access Event is written here, in the same transaction, when and only
--- when this call changed the lock: true then, false when the session was already so (a repeated press records no
--- second event), null when the session is not live. Not granted to lims_app: it is reached through the two entry
--- points below.
+-- never locked. Only the session's own person, the transaction's actor, may change it. The lock is stamped once the
+-- chain is held, at the database clock's instant, and the Lock or Unlock Access Event is written here at that same
+-- instant, in the same transaction, when and only when this call changed the lock: true then, false when the session
+-- was already so (a repeated press records no second event), null when the session is not live at that instant. Not
+-- granted to lims_app: it is reached through the two entry points below.
 create function lims.set_session_lock(p_lab_id uuid, p_id uuid, p_locked boolean, idle interval, absolute interval,
                                       p_source_address inet)
 returns boolean
@@ -32,6 +35,7 @@ declare
   actor   text := current_setting('lims.actor', true);
   changed boolean;
   s       record;
+  stamped timestamptz;
 begin
   perform lock_chain('company');
   perform end_lapsed_sessions(idle, absolute, p_lab_id, p_id);
@@ -43,18 +47,19 @@ begin
       using errcode = 'LA012';
   end if;
   perform set_this_transaction('lims.locking', p_id::text);
+  stamped := clock_timestamp();
   update session s3
-     set locked_at = case when p_locked then coalesce(s3.locked_at, now()) end
+     set locked_at = case when p_locked then coalesce(s3.locked_at, stamped) end
    where s3.lab_id = p_lab_id and s3.id = p_id and s3.ended_at is null
-     and session_end(s3.last_seen_at, s3.created_at, idle, absolute) > now()
+     and session_end(s3.last_seen_at, s3.created_at, idle, absolute) > stamped
   returning (old.locked_at is null) = p_locked into changed;
   perform set_this_transaction('lims.locking', '');
   if changed then
-    insert into access_event (kind, subject_id, session_lab_id, session_id, workstation_id, roles, source_address)
+    insert into access_event (kind, subject_id, session_lab_id, session_id, workstation_id, roles, source_address, at)
     values (case when p_locked then 'Lock' else 'Unlock' end::access_event_kind, s.person_id, p_lab_id, p_id,
             s.workstation_id,
             array(select m.role from membership m where m.lab_id = p_lab_id and m.person_id = s.person_id order by m.role),
-            p_source_address);
+            p_source_address, stamped);
   end if;
   return changed;
 end $$;
@@ -70,8 +75,9 @@ end $$;
 
 -- Unlocks a session and writes its Unlock Access Event, only in a transaction stamped with the session's person
 -- re-authenticated, which auditedAfterReauthentication in the API sets once the password was proved and the person's
--- row is held. So a Lockout lands wholly before this, which then finds the session ended at it, or wholly after, and
--- a code path that never proved the credential is refused by the database.
+-- row is held, so a Lockout lands wholly before the unlock, which the API then refuses as accountLocked, or wholly
+-- after it. A code path that never proved the credential is refused by the database. Like LA012's actor, the stamp is
+-- a setting the API writes: both guard against an API bug, not against a caller that holds lims_app's password.
 create function lims.unlock_session(p_lab_id uuid, p_id uuid, idle interval, absolute interval, p_source_address inet)
 returns boolean
 language plpgsql security definer set search_path = lims, pg_temp as $$

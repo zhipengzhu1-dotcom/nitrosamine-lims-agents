@@ -2616,6 +2616,7 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
   const message = 'a session is locked and unlocked only by lims.lock_session and lims.unlock_session';
 
   covered.add('lims.session.lock_through_function');
+  covered.add('lims.session.open_unlocked');
   it('a session locked by a statement, not through the function, is refused even for the superuser', async () => {
     const error = await refusalOf('update lims.session set locked_at = clock_timestamp() where id = $1', [id.session]);
     assert.deepEqual([error.code, error.message], ['LA011', message]);
@@ -2624,6 +2625,70 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
   it('a locked session unlocked by a statement, not through the function, is refused even for the superuser', async () => {
     const error = await refusalOf(`${lock}; update lims.session set locked_at = null where id = '${id.session}'`);
     assert.deepEqual([error.code, error.message], ['LA011', message]);
+  });
+
+  it('a session opened already locked by a statement, not through the function, is refused even for the superuser', async () => {
+    const error = await refusalOf(
+      'insert into lims.session (lab_id, id, person_id, token_hash, locked_at) values ($1, $2, $3, $4, clock_timestamp())',
+      [id.lab, randomUUID(), id.person, Buffer.alloc(32, 7)],
+    );
+    assert.deepEqual([error.code, error.message], ['LA011', message]);
+  });
+
+  it('a lock lands at one instant: the session is locked at the instant its Lock Access Event records', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(asOwner);
+      await client.query(`select pg_sleep(0.01)`);
+      await client.query(`select lims.lock_session(${args})`);
+      const { rows } = await client.query<{ same: boolean }>(
+        `select s.locked_at = e.at as same from lims.session s
+           join lims.access_event e on e.session_id = s.id and e.kind = 'Lock'
+          where s.id = $1`,
+        [id.session],
+      );
+      assert.deepEqual(rows, [{ same: true }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  it('a lock on a session that lapsed ends it at its lapse with its expiry Access Event and writes no Lock', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(asOwner);
+      await client.query(
+        `update lims.session set created_at = created_at - interval '1 hour', last_seen_at = last_seen_at - interval '1 hour'
+          where id = $1`,
+        [id.session],
+      );
+      const { rows: first } = await client.query<{ changed: boolean | null }>(
+        `select lims.lock_session(${args}) as changed`,
+      );
+      const { rows: again } = await client.query<{ changed: boolean | null }>(
+        `select lims.lock_session(${args}) as changed`,
+      );
+      const { rows: session } = await client.query<{ atLapse: boolean; unlocked: boolean }>(
+        `select ended_at = last_seen_at + interval '15 minutes' as "atLapse", locked_at is null as unlocked
+           from lims.session where id = $1`,
+        [id.session],
+      );
+      const { rows: events } = await client.query<{ kind: string }>(
+        `select kind from lims.access_event
+          where session_id = $1 and kind in ('Lock', 'IdleExpiry', 'AbsoluteExpiry') order by at`,
+        [id.session],
+      );
+      assert.deepEqual([first[0]?.changed, again[0]?.changed], [null, null], 'a session not live answers null');
+      assert.deepEqual(session, [{ atLapse: true, unlocked: true }]);
+      assert.deepEqual(
+        events.map((event) => event.kind),
+        ['IdleExpiry'],
+      );
+    } finally {
+      await client.query('rollback');
+    }
   });
 
   it("a lock or an unlock by anyone but the session's person is refused", async () => {
