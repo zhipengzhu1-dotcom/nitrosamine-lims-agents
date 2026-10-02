@@ -2607,6 +2607,44 @@ describe('a Signature is written only by the signing function, which refuses eve
     });
 });
 
+describe('a session is locked and unlocked only by lims.lock_session and lims.unlock_session', () => {
+  const limits = `interval '15 minutes', interval '12 hours'`;
+  const lock = `select lims.lock_session('${id.lab}', '${id.session}', ${limits})`;
+  const message = 'a session is locked and unlocked only by lims.lock_session and lims.unlock_session';
+
+  covered.add('lims.session.lock_through_function');
+  it('a session locked by a statement, not through the function, is refused even for the superuser', async () => {
+    const error = await refusalOf(`update lims.session set locked_at = clock_timestamp() where id = '${id.session}'`);
+    assert.deepEqual([error.code, error.message], ['LA011', message]);
+  });
+
+  it('a locked session unlocked by a statement, not through the function, is refused even for the superuser', async () => {
+    const error = await refusalOf(`${lock}; update lims.session set locked_at = null where id = '${id.session}'`);
+    assert.deepEqual([error.code, error.message], ['LA011', message]);
+  });
+
+  it('the app role holds no update on locked_at, so a lock or an unlock by a statement is refused before any trigger', async () => {
+    for (const value of ['clock_timestamp()', 'null']) {
+      const error = await refusalOf(
+        `set local role lims_app; update lims.session set locked_at = ${value} where id = '${id.session}'`,
+      );
+      assert.equal(error.code, '42501', error.message);
+    }
+  });
+
+  it('the app role writes a session only by opening it: it inserts the identity columns and changes nothing', async () => {
+    const { rows } = await client.query<{ privilege: string }>(
+      `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
+        where grantee = 'lims_app' and table_schema = 'lims' and table_name = 'session' and privilege_type <> 'SELECT'
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.privilege),
+      ['INSERT lab_id', 'INSERT person_id', 'INSERT token_hash', 'INSERT workstation_id'],
+    );
+  });
+});
+
 it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],

@@ -645,29 +645,38 @@ export function loginRoutes(
 
 /**
  * Writes the person's own Access Event on their session when `change` applied, under no role of the Lab; a change a
- * re-authentication enables holds that person's row before anything else.
+ * re-authentication enables holds that person's row before anything else. A `change` that answers null found the
+ * session no longer live: what it wrote (the session's lapse) is kept, and the request is refused after the commit.
  */
-function onOwnSession(
+async function onOwnSession(
   db: Kysely<DB>,
   req: { actor: ActorContext; sessionKey: SessionKey } & Parameters<typeof sourceAddressOf>[0],
   kind: 'SignOut' | 'Lock' | 'Unlock',
-  change: (tx: Transaction<DB>) => Promise<boolean>,
+  change: (tx: Transaction<DB>) => Promise<boolean | null>,
   reauthenticated?: Reauthenticated,
-) {
+): Promise<void> {
   const { actor, sessionKey: session } = req;
   const reason = kind === 'SignOut' ? 'Sign out' : kind;
-  return auditedAfterReauthentication(db, asOwnAccount(actor.person.username, reason), reauthenticated, async (tx) => {
-    if (!(await change(tx))) return;
-    await record(tx, {
-      kind,
-      subjectId: actor.person.id,
-      roles: actor.roles,
-      sourceAddress: sourceAddressOf(req),
-      sessionLabId: session.labId,
-      sessionId: session.id,
-      workstationId: session.workstationId,
-    });
-  });
+  const changed = await auditedAfterReauthentication(
+    db,
+    asOwnAccount(actor.person.username, reason),
+    reauthenticated,
+    async (tx) => {
+      const applied = await change(tx);
+      if (applied)
+        await record(tx, {
+          kind,
+          subjectId: actor.person.id,
+          roles: actor.roles,
+          sourceAddress: sourceAddressOf(req),
+          sessionLabId: session.labId,
+          sessionId: session.id,
+          workstationId: session.workstationId,
+        });
+      return applied;
+    },
+  );
+  if (changed === null) refuse('noSession', SESSION_ENDED);
 }
 
 /**
@@ -685,23 +694,18 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
     },
   });
 
-  // Postgres 18's old.locked_at tells whether this very update changed the lock, so a repeat writes no second event.
-  // The company chain, which the Access Event below needs, is taken before the session row, the order end_session takes,
-  // so a Lock and a sign-out on one session cannot each hold what the other waits for.
-  const setLocked = async (tx: Transaction<DB>, session: SessionKey, locked: boolean) => {
-    await sql`select lims.lock_chains('company')`.execute(tx);
-    const row = await tx
-      .updateTable('session')
-      .set({ lockedAt: locked ? sql`coalesce(locked_at, now())` : null })
-      .where('labId', '=', session.labId)
-      .where('id', '=', session.id)
-      .where('endedAt', 'is', null)
-      .where(
-        sql<boolean>`lims.session_end(last_seen_at, created_at, ${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}) > now()`,
-      )
-      .returning(sql<boolean>`(old.locked_at is null) <> (new.locked_at is null)`.as('changed'))
-      .executeTakeFirst();
-    return row ? row.changed : refuse('noSession', SESSION_ENDED);
+  /**
+   * Locks or unlocks the session through the database function that alone may, and says whether this call changed it,
+   * so a repeat writes no second event; null means the function found the session not live, or ended by a Lockout.
+   */
+  const setLocked = async (tx: Transaction<DB>, { labId, id }: SessionKey, locked: boolean) => {
+    const idle = interval(limits.idleMs);
+    const absolute = interval(limits.absoluteMs);
+    const { rows } = await (locked
+      ? sql<{ changed: boolean | null }>`select lims.lock_session(${labId}, ${id}, ${idle}, ${absolute}) as changed`
+      : sql<{ changed: boolean | null }>`select lims.unlock_session(${labId}, ${id}, ${idle}, ${absolute}) as changed`
+    ).execute(tx);
+    return rows[0]?.changed ?? null;
   };
 
   app.route({
