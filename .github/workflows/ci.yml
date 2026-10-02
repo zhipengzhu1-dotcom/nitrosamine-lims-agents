@@ -59,3 +59,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @lims/web exec playwright install --with-deps chromium webkit
       - run: pnpm e2e
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-api-log-and-results
+          path: |
+            apps/web/api-log/
+            apps/web/test-results/

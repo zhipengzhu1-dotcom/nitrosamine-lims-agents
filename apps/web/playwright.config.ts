@@ -13,6 +13,7 @@ if (!apiPort || !webPort) throw new Error(`checkout.ts e2e-ports printed "${prin
 const webURL = `http://localhost:${webPort}`;
 const E2E_DB = 'lims_e2e';
 export const E2E_DATABASE = execFileSync(process.execPath, [checkout, 'database', E2E_DB], { encoding: 'utf8' }).trim();
+export const API_LOG = fileURLToPath(new URL('api-log/api.log', import.meta.url));
 
 export default defineConfig({
   testDir: 'e2e',
@@ -26,7 +27,7 @@ export default defineConfig({
   webServer: {
     command: '../../scripts/dev.sh --scratch',
     url: `${webURL}/api/me`,
-    env: { LIMS_DB: E2E_DB, PORT: apiPort, WEB_PORT: webPort, DEMO_PASSWORD },
+    env: { LIMS_DB: E2E_DB, LIMS_LOG_FILE: API_LOG, PORT: apiPort, WEB_PORT: webPort, DEMO_PASSWORD },
     stdout: 'ignore',
   },
 });
