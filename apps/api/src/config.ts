@@ -7,9 +7,10 @@ export interface ApiConfig {
   logFile: string | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
+  trustedProxies: string[];
 }
 
-const API_SETTINGS = ['LIMS_LOG', 'LIMS_LOG_FILE', 'LIMS_ACCESS_EVENT_KEY'];
+const API_SETTINGS = ['LIMS_LOG', 'LIMS_LOG_FILE', 'LIMS_ACCESS_EVENT_KEY', 'LIMS_TRUSTED_PROXIES'];
 
 function port(value: string | undefined): number {
   if (value === undefined) return 3000;
@@ -45,5 +46,6 @@ export function apiConfig(): ApiConfig {
     logFile,
     secureCookie,
     accessEventKey: accessEventKey(env.LIMS_ACCESS_EVENT_KEY),
+    trustedProxies: env.LIMS_TRUSTED_PROXIES ? env.LIMS_TRUSTED_PROXIES.split(',').map((proxy) => proxy.trim()) : [],
   };
 }

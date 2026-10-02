@@ -8,4 +8,5 @@ await buildApp(createDb(config.databaseUrl), {
   log: config.logFile ? logFile(config.logFile) : config.log ? process.stdout : null,
   secureCookie: config.secureCookie,
   accessEventKey: config.accessEventKey,
+  trustedProxies: config.trustedProxies,
 }).listen(config.listen);

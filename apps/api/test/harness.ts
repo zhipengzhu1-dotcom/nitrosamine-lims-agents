@@ -18,8 +18,6 @@ import {
 import { type Kysely, sql } from 'kysely';
 import { type AppOptions, buildApp } from '../src/app.ts';
 
-type LogSink = NonNullable<AppOptions['log']>;
-
 const { server } = dbConfig();
 
 /** The status each kind answers with, as the tests expect it; every refused answer is checked against this table. */
@@ -50,8 +48,11 @@ export type Answer<R extends Route> = Exclude<Reply<R>, { kind: 'breach' }>;
 export class Client {
   cookie = '';
   base: string;
-  constructor(base: string) {
+  /** The source address the test's proxy forwards, or none for the socket's own address. */
+  from: string | null;
+  constructor(base: string, from: string | null = null) {
     this.base = base;
+    this.from = from;
   }
 
   call<R extends Route>(route: R, ...request: RouteInput<R>): Promise<Answer<R>> {
@@ -62,7 +63,11 @@ export class Client {
     const post = route.method === 'POST';
     const res = await fetch(this.base + pathOf(route, request), {
       method: route.method,
-      headers: { cookie: this.cookie, ...(post ? { 'content-type': 'application/json' } : {}) },
+      headers: {
+        cookie: this.cookie,
+        ...(post ? { 'content-type': 'application/json' } : {}),
+        ...(this.from ? { 'x-forwarded-for': this.from } : {}),
+      },
       ...(post ? { body: JSON.stringify(request ?? {}) } : {}),
     });
     for (const header of res.headers.getSetCookie()) {
@@ -93,9 +98,20 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
 
 const accessEventKey = randomBytes(32);
 
-async function listen(db: Kysely<DB>, { secureCookie = false, log }: { secureCookie?: boolean; log?: LogSink } = {}) {
+type ListenOptions = Partial<Pick<AppOptions, 'secureCookie' | 'log' | 'trustedProxies'>>;
+
+/** Listens on 127.0.0.1, which the API trusts as a proxy by default, so a Client's `from` sets the source address. */
+async function listen(
+  db: Kysely<DB>,
+  { secureCookie = false, log, trustedProxies = ['127.0.0.1'] }: ListenOptions = {},
+) {
   const lines: string[] = [];
-  const app = buildApp(db, { log: log ?? { write: (line) => lines.push(line) }, secureCookie, accessEventKey });
+  const app = buildApp(db, {
+    log: log ?? { write: (line) => lines.push(line) },
+    secureCookie,
+    accessEventKey,
+    trustedProxies,
+  });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(() => app.close());
   return {
@@ -132,7 +148,7 @@ export async function startApi(name: string) {
     accessEventKey,
     log,
     logLines,
-    startAnotherApi: (options: { secureCookie?: boolean; log?: LogSink } = {}) => listen(db, options),
+    startAnotherApi: (options: ListenOptions = {}) => listen(db, options),
     labId,
     methodId,
     person(name: SeededName): Account {

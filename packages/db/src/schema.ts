@@ -19,7 +19,7 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
-export type IncidentKind = "UnexpectedFailure";
+export type IncidentKind = "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure";
 
 export type IncidentState = "Open";
 
@@ -176,7 +176,7 @@ export interface Submission {
 
 export interface SystemIncident {
   constraintName: string | null;
-  errorClass: string;
+  errorClass: string | null;
   id: Generated<string>;
   kind: IncidentKind;
   openedAt: Generated<Timestamp>;
@@ -184,9 +184,12 @@ export interface SystemIncident {
   reference: string;
   requestedBy: string | null;
   sessionLabId: string | null;
+  sourceAddress: string | null;
   sqlstate: string | null;
   state: Generated<IncidentState>;
-  step: string;
+  step: string | null;
+  subjectId: string | null;
+  typedUserIdHmac: Buffer | null;
 }
 
 export interface Test {

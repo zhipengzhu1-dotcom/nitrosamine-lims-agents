@@ -47,6 +47,8 @@ export interface AppOptions {
   log: LogSink | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
+  /** The proxies whose X-Forwarded-For names the source address of a request; none means the socket's peer is the source. */
+  trustedProxies: string[];
 }
 
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
@@ -54,6 +56,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
     logger: options.log ? apiLogger(options.log) : false,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
     genReqId: requestReference,
+    trustProxy: options.trustedProxies,
   }).withTypeProvider<WireTypes>();
   app.setErrorHandler(answerThrown(db));
   app.decorateRequest('requester', null);
