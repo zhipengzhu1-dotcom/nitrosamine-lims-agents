@@ -27,7 +27,9 @@ const STATUS_OF: { readonly [K in RefusalKind]: number } = {
   unknownField: 400,
   malformed: 400,
   badCredentials: 401,
+  labNotChosen: 400,
   noSession: 401,
+  sessionLocked: 423,
   role: 403,
   guard: 403,
   notFound: 404,
@@ -48,10 +50,25 @@ type SeededName = SeededAccount['username'] extends infer U ? (U extends `${infe
 export type Answer<R extends Route> = Exclude<Reply<R>, { kind: 'breach' }>;
 
 export class Client {
-  cookie = '';
+  /** The browser's cookies: the session and, once the browser is enrolled, its device token. */
+  jar = new Map<string, string>();
+  get cookie(): string {
+    return [...this.jar].map(([name, value]) => `${name}=${value}`).join('; ');
+  }
+  set cookie(header: string) {
+    this.jar = new Map(
+      header.split('; ').flatMap((pair): [string, string][] => {
+        const at = pair.indexOf('=');
+        return at > 0 ? [[pair.slice(0, at), pair.slice(at + 1)]] : [];
+      }),
+    );
+  }
   base: string;
-  constructor(base: string) {
+  /** The source address the test's proxy forwards, or none for the socket's own address. */
+  from: string | null;
+  constructor(base: string, from: string | null = null) {
     this.base = base;
+    this.from = from;
   }
 
   call<R extends Route>(route: R, ...request: RouteInput<R>): Promise<Answer<R>> {
@@ -62,12 +79,17 @@ export class Client {
     const post = route.method === 'POST';
     const res = await fetch(this.base + pathOf(route, request), {
       method: route.method,
-      headers: { cookie: this.cookie, ...(post ? { 'content-type': 'application/json' } : {}) },
+      headers: {
+        cookie: this.cookie,
+        ...(post ? { 'content-type': 'application/json' } : {}),
+        ...(this.from ? { 'x-forwarded-for': this.from } : {}),
+      },
       ...(post ? { body: JSON.stringify(request ?? {}) } : {}),
     });
     for (const header of res.headers.getSetCookie()) {
-      const session = /^lims_session=[^;]*/.exec(header);
-      if (session) this.cookie = session[0];
+      const [, name = '', value = ''] = /^([^=]+)=([^;]*)/.exec(header) ?? [];
+      if (value) this.jar.set(name, value);
+      else this.jar.delete(name);
     }
     const answer = readReply(route, res.status, await res.json());
     if (answer.kind === 'breach') assert.fail(answer.problem);
@@ -98,19 +120,31 @@ interface ListenOptions {
   log?: LogSink;
   login?: AppOptions['login'];
   sweepEveryMs?: number | null;
+  logVolume?: AppOptions['logVolume'];
+  trustedProxies?: string[];
 }
 
+/** Listens on 127.0.0.1 and trusts it as a proxy unless told otherwise, so a Client's `from` sets the source address. */
 async function listen(
   db: Kysely<DB>,
-  { secureCookie = false, log, login = 'decided', sweepEveryMs = null }: ListenOptions = {},
+  {
+    secureCookie = false,
+    log,
+    login = 'decided',
+    sweepEveryMs = null,
+    logVolume = null,
+    trustedProxies = ['127.0.0.1'],
+  }: ListenOptions = {},
 ) {
   const lines: string[] = [];
   const app = buildApp(db, {
     log: log ?? { write: (line) => lines.push(line) },
+    logVolume,
     secureCookie,
     accessEventKey,
     login,
     sweepEveryMs,
+    trustedProxies,
   });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(() => app.close());
@@ -140,7 +174,10 @@ export async function startApi(name: string) {
     await db.destroy();
     await superuser.destroy();
   });
-  const { labId } = await db.selectFrom('lab').select('labId').executeTakeFirstOrThrow();
+  const labOf = async (code: string) =>
+    (await db.selectFrom('lab').select('labId').where('code', '=', code).executeTakeFirstOrThrow()).labId;
+  const labId = await labOf('RD');
+  const qcLabId = await labOf('QC');
   const { id: methodId } = await db.selectFrom('method').select('id').executeTakeFirstOrThrow();
 
   return {
@@ -180,13 +217,14 @@ export async function startApi(name: string) {
         .execute();
     },
     labId,
+    qcLabId,
     methodId,
     person(name: SeededName): Account {
       return seeded.find((a) => a.username.startsWith(`${name}.`)) ?? assert.fail(`no seeded person ${name}`);
     },
-    async login(account: Account): Promise<Client> {
+    async login(account: Account, lab = labId): Promise<Client> {
       const client = new Client(base);
-      ok(await client.call(routes.login, { username: account.username, password: account.password }));
+      ok(await client.call(routes.login, { username: account.username, password: account.password, labId: lab }));
       return client;
     },
     async addPerson(

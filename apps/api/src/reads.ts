@@ -137,4 +137,35 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
         : refuse('notFound', 'this Test has no released Test Report');
     },
   });
+
+  app.route({
+    ...routes.incident,
+    handler: async (req) => {
+      if (!req.actor.roles.some((role) => role === 'Admin' || role === 'QA'))
+        refuse('role', 'reading a System Incident is an Admin or QA action');
+      return (
+        (await db
+          .selectFrom('systemIncident')
+          .select([
+            'reference',
+            'kind',
+            'state',
+            'step',
+            'recordId',
+            'requestedBy',
+            'sessionLabId',
+            'errorClass',
+            'sqlstate',
+            'constraintName',
+            'subjectId',
+            sql<string | null>`host(source_address)`.as('sourceAddress'),
+            sql<string | null>`encode(typed_user_id_hmac, 'hex')`.as('typedUserIdHmac'),
+            'openedAt',
+            'loggedAt',
+          ])
+          .where('reference', '=', req.params.reference)
+          .executeTakeFirst()) ?? refuse('notFound', `no System Incident has the reference ${req.params.reference}`)
+      );
+    },
+  });
 }

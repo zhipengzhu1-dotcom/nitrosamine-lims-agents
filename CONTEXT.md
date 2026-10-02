@@ -395,7 +395,7 @@ A record that pauses a Test or Sample for a stated reason (a Deviation, a receip
 _Avoid_: On hold (as a status), suspension, quarantine
 
 **System Incident**:
-A record that the LIMS itself failed or misbehaved (an unexpected failure answered with a reference the person can quote, an alarm, a missed backup or anchor, a failed restore drill, a clock step), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
+A record that the LIMS itself failed or misbehaved (an unexpected failure answered with a reference the person can quote, an alarm, a missed backup or anchor, a failed restore drill, a clock step), or that someone may be attacking sign-in (a lockout, a burst of failed sign-ins from one address or against one unknown user ID, repeated attempts against a locked account), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
 _Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failures)
 
 **Training Record**:
@@ -497,11 +497,15 @@ The permanent, system-generated history of every change to records, accounts and
 _Avoid_: Log, history, change log
 
 **Access Event**:
-The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock, lockout, takeover, Lab switch, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
+The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock (succeeded or failed), lockout, takeover, Lab switch, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
 _Avoid_: Login log, session log, access log
 
+**Lab switch**:
+Moving a signed-in person's work from one Lab to another in which they hold a Membership. It needs the full re-authentication of a sign-in, nothing is chosen for them, and from then on they see only the new Lab's records. It is an Access Event, and a failed one counts toward the lockout.
+_Avoid_: Change Lab, Lab login, context switch
+
 **Workstation**:
-A bench PC the Admin has registered with its name, Lab and Room, which every session and Access Event from it carries. A device that is not registered shows as an unregistered device; the portal and desk PCs may be used that way.
+A bench PC the Admin has registered with its name, Lab, Room and browser policy (the managed browser settings it runs, as the Admin describes them), and whose browser the Admin has enrolled with a device token. Every session and Access Event from that browser carries it, and a session on it opens in its Lab. A device that is not registered shows as an unregistered device; the portal and desk PCs may be used that way.
 _Avoid_: Terminal, client, kiosk
 
 **Commit Key**:

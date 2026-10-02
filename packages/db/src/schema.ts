@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
+export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -19,7 +19,7 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
-export type IncidentKind = "UnexpectedFailure";
+export type IncidentKind = "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure" | "UnraisableLogLine";
 
 export type IncidentState = "Open";
 
@@ -41,7 +41,7 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoLab" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
+export type SignInFailure = "AccountLocked" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -52,11 +52,14 @@ export interface AccessEvent {
   failureReason: SignInFailure | null;
   id: Generated<string>;
   kind: AccessEventKind;
+  previousSessionId: string | null;
+  previousSessionLabId: string | null;
   roles: ArrayType<Role>;
   sessionId: string | null;
   sessionLabId: string | null;
   sourceAddress: string | null;
   subjectId: string | null;
+  takenById: string | null;
   typedUserIdHmac: Buffer | null;
   typedUserIdLength: number | null;
   workstationId: string | null;
@@ -148,6 +151,12 @@ export interface Result {
   value: string;
 }
 
+export interface Room {
+  id: Generated<string>;
+  labId: string;
+  name: string;
+}
+
 export interface Sample {
   description: string;
   id: Generated<string>;
@@ -163,8 +172,10 @@ export interface Session {
   id: Generated<string>;
   labId: string;
   lastSeenAt: Generated<Timestamp>;
+  lockedAt: Timestamp | null;
   personId: string;
   tokenHash: Buffer;
+  workstationId: string | null;
 }
 
 export interface Signature {
@@ -185,17 +196,21 @@ export interface Submission {
 
 export interface SystemIncident {
   constraintName: string | null;
-  errorClass: string;
+  errorClass: string | null;
   id: Generated<string>;
   kind: IncidentKind;
+  loggedAt: Timestamp | null;
   openedAt: Generated<Timestamp>;
   recordId: string | null;
   reference: string;
   requestedBy: string | null;
   sessionLabId: string | null;
+  sourceAddress: string | null;
   sqlstate: string | null;
   state: Generated<IncidentState>;
-  step: string;
+  step: string | null;
+  subjectId: string | null;
+  typedUserIdHmac: Buffer | null;
 }
 
 export interface Test {
@@ -221,6 +236,15 @@ export interface TrainingRecord {
   personId: string;
 }
 
+export interface Workstation {
+  browserPolicy: string;
+  deviceTokenHash: Buffer | null;
+  id: Generated<string>;
+  labId: string;
+  name: string;
+  roomId: string;
+}
+
 export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
@@ -232,6 +256,7 @@ export interface DB {
   person: Person;
   recordVersion: RecordVersion;
   result: Result;
+  room: Room;
   sample: Sample;
   session: Session;
   signature: Signature;
@@ -240,4 +265,5 @@ export interface DB {
   test: Test;
   testReport: TestReport;
   trainingRecord: TrainingRecord;
+  workstation: Workstation;
 }

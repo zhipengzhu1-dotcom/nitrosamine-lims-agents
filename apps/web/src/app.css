@@ -716,8 +716,62 @@ select {
   max-width: 380px;
   margin: 64px auto;
 }
+.signin > fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.labs {
+  border: 0;
+  padding: 0;
+  margin: 0 0 10px;
+}
+.labs legend {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.labs__option {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  margin: 0;
+  font-weight: 400;
+  cursor: pointer;
+}
+.labs__option input {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+}
 .signin .rbtn {
   width: 100%;
+}
+.lock__set {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.lock__set label {
+  margin-bottom: 0;
+}
+.rbtn--plain {
+  background: var(--sheet);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+}
+.rail__session {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 .record-number {
   white-space: nowrap;
@@ -814,6 +868,12 @@ select {
 }
 
 @media (max-width: 640px) {
+  .who {
+    flex-basis: 100%;
+  }
+  .rail__out {
+    flex: 1;
+  }
   .top {
     flex-wrap: wrap;
     gap: 0 12px;
@@ -907,6 +967,18 @@ select {
   }
   .sheet__foot .rbtn {
     flex: 1;
+  }
+  .rail__session {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .rail__session {
+    flex-wrap: wrap;
+  }
+  .rail__session .rbtn {
+    flex: 1 1 auto;
+    padding: 0 8px;
+    white-space: nowrap;
   }
   .signin {
     margin-top: 24px;

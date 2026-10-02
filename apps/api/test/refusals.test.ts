@@ -46,6 +46,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   [K in StepName]: { route: Route; body: StepBody<K> };
 } = {
   login: entry(routes.login, { username: cora.username, password: 'not-the-password' }),
+  switchLab: entry(routes.switchLab, { username: cora.username, password: 'not-the-password', labId: api.labId }),
   verifyAuditTrail: entry(routes.verifyAuditTrail, {}),
   submit: step('submit', {
     commitKey: randomUUID(),
@@ -56,6 +57,16 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   enterResult: step('enterResult', { commitKey: randomUUID(), testId, input: result, signature }),
   review: step('review', { commitKey: randomUUID(), testId, input: {}, signature }),
   release: step('release', { commitKey: randomUUID(), testId, input: {}, signature }),
+  registerWorkstation: entry(routes.registerWorkstation, {
+    name: 'RD-BENCH-99',
+    roomId: randomUUID(),
+    browserPolicy: 'Managed Chrome',
+    reason: 'Register a bench PC',
+  }),
+  registerRoom: entry(routes.registerRoom, { name: 'Balance Room (fictional)', reason: 'Register a Room' }),
+  enrolWorkstation: entry(routes.enrolWorkstation, { workstationId: randomUUID(), reason: 'Enrol the bench PC' }),
+  unlock: entry(routes.unlock, { password: 'not-the-password' }),
+  lock: entry(routes.lock, {}),
   logout: entry(routes.logout, {}),
 };
 
@@ -120,6 +131,8 @@ it('every route that takes a body refuses a field its schema does not name with 
     assert.equal(refusedWith(refused, 'unknownField'), 'the LIMS does not know the field input.extra', name);
   }
   for (const [name, { route, body }] of Object.entries(posts)) {
+    // Each route gets its own session: lock and logout end what the next route's hook would read before the body.
+    const client = await api.login(cora);
     const refused = await client.send(route, { ...body, extra: 1 });
     assert.equal(refusedWith(refused, 'unknownField'), 'the LIMS does not know the field extra', name);
     const control = await client.send(route, body);
