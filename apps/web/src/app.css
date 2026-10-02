@@ -105,7 +105,7 @@ p {
 
 .frame {
   display: grid;
-  grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
+  grid-template: "top" auto "main" minmax(0, 1fr) "rail" auto / minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
   /* Hidden would still scroll: typing in a sheet still sliding in pulled the frame up and the rail over the sheet. */
@@ -113,12 +113,13 @@ p {
 }
 .frame > .plane,
 .sheet {
-  grid-area: 2 / 1;
+  grid-area: main;
 }
 .frame--bare {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template: "top" auto "main" minmax(0, 1fr) / minmax(0, 1fr);
 }
 .top {
+  grid-area: top;
   display: flex;
   align-items: center;
   gap: 24px;
@@ -554,8 +555,7 @@ td a,
 }
 
 .rail {
-  /* Placed, not auto-placed: a phone's open sheet spans row 3 too, and an auto-placed rail would open a second column. */
-  grid-area: 3 / 1;
+  grid-area: rail;
   z-index: 2;
   min-height: var(--rail-h);
   display: flex;
@@ -1112,13 +1112,9 @@ a.btn {
   }
   .sheet {
     --foot-h: 156px;
-    grid-row: 2 / 4;
+    grid-row: main / rail;
     z-index: 3;
     padding: 12px 12px 0;
-  }
-  .frame:has(> .sheet:not([data-closing])) .rail__session {
-    visibility: hidden;
-    transition: visibility 0s var(--dur-sheet-in);
   }
   .sheet h2 {
     flex-wrap: wrap;
@@ -1137,16 +1133,6 @@ a.btn {
   .sheet__foot .rbtn {
     flex: 1;
   }
-  /* A legend that wraps to two lines would sit across the card's top border, so it moves inside the card. */
-  .card legend {
-    float: left;
-    width: 100%;
-    margin-bottom: 8px;
-    padding: 0;
-  }
-  .card legend ~ * {
-    clear: left;
-  }
   .rail__session {
     order: 3;
     flex-basis: 100%;
@@ -1164,6 +1150,39 @@ a.btn {
   }
   .report {
     padding: 16px;
+  }
+}
+
+/* A phone held sideways is under 500px tall, too short for a sheet between the top bar and the rail. */
+@media (max-height: 500px) {
+  .sheet {
+    grid-row: top / rail;
+    z-index: 3;
+  }
+  .sheet__body {
+    align-items: start;
+  }
+  .frame:has(> .sheet:not([data-closing])) .top {
+    visibility: hidden;
+    transition: visibility 0s var(--dur-sheet-in);
+  }
+}
+
+/* A phone, upright or sideways, where an open sheet covers the rail. */
+@media (max-width: 640px), (max-height: 500px) {
+  .frame:has(> .sheet:not([data-closing])) .rail__session {
+    visibility: hidden;
+    transition: visibility 0s var(--dur-sheet-in);
+  }
+  /* A legend that wraps to two lines would sit across the card's top border, so it moves inside the card. */
+  .card legend {
+    float: left;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 0;
+  }
+  .card legend ~ * {
+    clear: left;
   }
 }
 
