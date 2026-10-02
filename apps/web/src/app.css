@@ -143,29 +143,34 @@ p {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--more-before),
-    #000 calc(100% - var(--more-after)),
-    transparent
-  );
 }
-@supports (animation-timeline: scroll()) {
+/* A phone's tab bar always overflows. Chromium leaves a resized bar that no longer overflows in the end state, which fades the first tab, so wider screens get no fade. */
+@media (max-width: 640px) {
   .top nav {
-    animation: more-tabs linear both;
-    animation-timeline: scroll(self inline);
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 var(--more-before),
+      #000 calc(100% - var(--more-after)),
+      transparent
+    );
   }
-}
-/* Without scroll-driven animations the right edge always fades, and a spacer lets the last tab scroll clear of it. */
-@supports not (animation-timeline: scroll()) {
-  .top nav {
-    --more-after: 72px;
+  @supports (animation-timeline: scroll()) {
+    .top nav {
+      animation: more-tabs linear both;
+      animation-timeline: scroll(self inline);
+    }
   }
-  .top nav::after {
-    content: "";
-    flex: none;
-    width: 72px;
+  /* Without scroll-driven animations the right edge always fades, and a spacer lets the last tab scroll clear of it. */
+  @supports not (animation-timeline: scroll()) {
+    .top nav {
+      --more-after: 72px;
+    }
+    .top nav::after {
+      content: "";
+      flex: none;
+      width: 72px;
+    }
   }
 }
 @property --more-before {

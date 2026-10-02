@@ -52,4 +52,9 @@ test('the tab bar fades where more tabs lie beyond, and the last tab scrolls cle
   await expect
     .poll(async () => (await clearOfFade()).room, 'the last tab ends before the fade')
     .toBeGreaterThanOrEqual(0);
+
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await expect
+    .poll(() => nav.evaluate((n) => getComputedStyle(n).maskImage), 'a desktop tab bar that fits does not fade')
+    .toBe('none');
 });
