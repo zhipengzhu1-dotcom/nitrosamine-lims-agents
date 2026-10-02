@@ -1,9 +1,15 @@
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { audited, type DB, postgresFault } from '@lims/db';
-import { routes, stepNames, stepRoute } from '@lims/domain';
-import type { FastifyRequest } from 'fastify';
+import { referencePattern, routes, stepNames, stepRoute } from '@lims/domain';
+import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { type Insertable, type Kysely, sql } from 'kysely';
+import { type Static, type TSchema, Type } from 'typebox';
+import { Value } from 'typebox/value';
 
 const INCIDENT_SERVICE = { actor: 'svc:incident', role: 'system', reason: 'Open a System Incident' };
+const RAISE_SERVICE = { ...INCIDENT_SERVICE, reason: 'Raise an unwritten System Incident from the API log' };
+const UNWRITTEN = 'unwritten System Incident';
 
 const INCIDENT_WRITE_LIMIT = '3s';
 
@@ -27,10 +33,33 @@ function recordIdOf(req: FastifyRequest): string | null {
   return null;
 }
 
+const nullable = <S extends TSchema>(schema: S) => Type.Union([schema, Type.Null()]);
+const id = Type.String({ pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' });
+const unwrittenIncident = Type.Object(
+  {
+    kind: Type.Literal('UnexpectedFailure'),
+    reference: Type.String({ pattern: `^${referencePattern}$` }),
+    requestedBy: nullable(id),
+    sessionLabId: nullable(id),
+    step: Type.String(),
+    recordId: nullable(id),
+    errorClass: Type.String(),
+    sqlstate: nullable(Type.String({ pattern: '^[0-9A-Z]{5}$' })),
+    constraintName: nullable(Type.String()),
+  },
+  { additionalProperties: false },
+);
+/** The line Pino writes for an incident the database could not write: `time` is the API host's clock, in epoch milliseconds. */
+const unwrittenLine = Type.Object({
+  time: Type.Integer(),
+  msg: Type.Literal(UNWRITTEN),
+  unwrittenSystemIncident: unwrittenIncident,
+});
+
 /** Opens a System Incident for an unexpected failure under the reference the person is shown; when the database cannot write it, the log line holds it instead. */
 export async function openSystemIncident(db: Kysely<DB>, req: FastifyRequest, error: Error): Promise<void> {
   const fault = postgresFault(error);
-  const incident = {
+  const incident: Static<typeof unwrittenIncident> = {
     kind: 'UnexpectedFailure',
     reference: req.id,
     requestedBy: req.requester?.person.id ?? null,
@@ -47,6 +76,44 @@ export async function openSystemIncident(db: Kysely<DB>, req: FastifyRequest, er
       await tx.insertInto('systemIncident').values(incident).execute();
     });
   } catch (unwritten) {
-    req.log.error({ err: unwritten, unwrittenSystemIncident: incident }, 'unwritten System Incident');
+    req.log.error({ err: unwritten, unwrittenSystemIncident: incident }, UNWRITTEN);
+  }
+}
+
+function unwrittenOn(line: string): Static<typeof unwrittenLine> | 'unreadable' | null {
+  if (!line.includes(UNWRITTEN)) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return 'unreadable';
+  }
+  if (typeof parsed !== 'object' || parsed === null || !('msg' in parsed) || parsed.msg !== UNWRITTEN) return null;
+  return Value.Check(unwrittenLine, parsed) ? parsed : 'unreadable';
+}
+
+/**
+ * Writes once each unwritten System Incident on the API log file whose reference has no System Incident, with the
+ * instant its line was logged beside the database's insert time; a reference already written is skipped.
+ */
+export async function raiseUnwrittenIncidents(db: Kysely<DB>, file: string, log: FastifyBaseLogger): Promise<void> {
+  let lineNumber = 0;
+  for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
+    lineNumber += 1;
+    const unwritten = unwrittenOn(line);
+    if (unwritten === 'unreadable') log.error({ file, line: lineNumber }, `unreadable ${UNWRITTEN} line`);
+    if (unwritten === null || unwritten === 'unreadable') continue;
+    const { reference } = unwritten.unwrittenSystemIncident;
+    const { numInsertedOrUpdatedRows } = await audited(db, RAISE_SERVICE, (tx) =>
+      tx
+        .insertInto('systemIncident')
+        .values({
+          ...unwritten.unwrittenSystemIncident,
+          loggedAt: sql<Date>`to_timestamp(${unwritten.time}::double precision / 1000)`,
+        })
+        .onConflict((conflict) => conflict.column('reference').doNothing())
+        .executeTakeFirstOrThrow(),
+    );
+    if (numInsertedOrUpdatedRows) log.info({ reference }, `raised ${UNWRITTEN}`);
   }
 }

@@ -179,6 +179,7 @@ export interface SystemIncident {
   errorClass: string;
   id: Generated<string>;
   kind: IncidentKind;
+  loggedAt: Timestamp | null;
   openedAt: Generated<Timestamp>;
   recordId: string | null;
   reference: string;

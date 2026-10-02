@@ -141,4 +141,32 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
       return labScope(db, req.actor).verifyAuditTrail();
     },
   });
+
+  app.route({
+    ...routes.incident,
+    handler: async (req) => {
+      if (!req.actor.roles.some((role) => role === 'Admin' || role === 'QA'))
+        refuse('role', 'reading a System Incident is an Admin or QA action');
+      return (
+        (await db
+          .selectFrom('systemIncident')
+          .select([
+            'reference',
+            'kind',
+            'state',
+            'step',
+            'recordId',
+            'requestedBy',
+            'sessionLabId',
+            'errorClass',
+            'sqlstate',
+            'constraintName',
+            'openedAt',
+            'loggedAt',
+          ])
+          .where('reference', '=', req.params.reference)
+          .executeTakeFirst()) ?? refuse('notFound', `no System Incident has the reference ${req.params.reference}`)
+      );
+    },
+  });
 }

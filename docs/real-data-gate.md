@@ -7,7 +7,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 1 | Closed schemas | [#86](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/86) |
 | 1 | Refusal kinds | [#86](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/86) |
 | 1 | Commit keys | [#87](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/87) |
-| 1 | System Incidents with log volume, redaction and the unwritten-incident check | Partly: [#89](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/89) built the incidents and redaction. Unbuilt: the API log volume in the deploy config with its nightly shipping under `oplogs/` (proposed on #89), and the unwritten-incident check ([#90](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/90)) |
+| 1 | System Incidents with log volume, redaction and the unwritten-incident check | Partly: [#89](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/89) built the incidents and redaction, and [#90](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/90) the unwritten-incident check. Unbuilt: the API log volume in the deploy config with its nightly shipping under `oplogs/` (proposed on #89) |
 | 1 | Access Events with the expiry sweep | [#91](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/91) (Access Events; the expiry sweep is [#92](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/92)) |
 | 1 | Counters | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
 | 1 | Transaction IDs | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
