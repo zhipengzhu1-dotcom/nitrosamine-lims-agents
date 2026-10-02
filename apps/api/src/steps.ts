@@ -218,7 +218,7 @@ type KeptCommit = Pick<Selectable<DB['commitKey']>, 'sessionId' | 'requestHash' 
 
 function receiptOf(kept: KeptCommit, sessionId: string, requestHash: Buffer): StepTaken {
   if (kept.sessionId !== sessionId)
-    refuse('keyReused', 'this press was already saved under another sign-in; reload to see what was saved');
+    refuse('keyReused', 'this press was already saved before the latest sign-in; reload to see what was saved');
   if (!kept.requestHash.equals(requestHash))
     refuse('keyReused', 'this press was already saved with other entries; reload to see what was saved');
   return { testId: kept.testId, state: kept.state };
