@@ -163,10 +163,12 @@ function staffScope(db: Kysely<DB>, req: { actor: Scope['ctx'] }): Scope {
   return labScope(db, req.actor);
 }
 
-/** Whether a company record is one this Lab already sees: a Method always, a Person through a Membership here, a Customer or Submission through a Sample here. */
+/** Whether a company record is one this Lab already sees: a Method or a signature statement always, a Person through a Membership here, a Customer or Submission through a Sample here. */
 async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promise<boolean> {
   switch (table) {
     case 'method':
+    case 'signature_statement':
+    case 'signing_role':
       return true;
     case 'person':
       return Boolean(await scope.from('membership').select('personId').where('personId', '=', id).executeTakeFirst());
@@ -187,6 +189,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'test_report':
     case 'record_version':
     case 'signature':
+    case 'reauthentication':
       return true;
   }
 }

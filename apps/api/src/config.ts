@@ -13,9 +13,17 @@ export interface ApiConfig {
   accessEventKey: Buffer;
   trustedProxies: string[];
   login: Login;
+  release: string;
 }
 
-const API_SETTINGS = ['LIMS_LOG', 'LIMS_LOG_FILE', 'LIMS_ACCESS_EVENT_KEY', 'LIMS_TRUSTED_PROXIES', 'LIMS_LOGIN'];
+const API_SETTINGS = [
+  'LIMS_LOG',
+  'LIMS_LOG_FILE',
+  'LIMS_ACCESS_EVENT_KEY',
+  'LIMS_TRUSTED_PROXIES',
+  'LIMS_LOGIN',
+  'LIMS_RELEASE',
+];
 
 function port(value: string | undefined): number {
   if (value === undefined) return 3000;
@@ -37,6 +45,11 @@ function login(value: string | undefined): Login {
   if (value === undefined) return 'demo';
   if (value === 'demo' || value === 'decided') return value;
   throw new Error(`LIMS_LOGIN must be decided or demo, not ${JSON.stringify(value)}`);
+}
+
+function release(value: string | undefined): string {
+  if (value) return value;
+  throw new Error('The API needs LIMS_RELEASE: every Signature records the app release');
 }
 
 /** Reads the API's environment once, at start: a missing or malformed value stops the process here. */
@@ -62,5 +75,6 @@ export function apiConfig(): ApiConfig {
       .map((proxy) => proxy.trim())
       .filter(Boolean),
     login: login(env.LIMS_LOGIN),
+    release: release(env.LIMS_RELEASE),
   };
 }

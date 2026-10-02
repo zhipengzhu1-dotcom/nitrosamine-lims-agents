@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "PasswordSet" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
+export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "PasswordSet" | "ReauthenticationFailed" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -41,7 +41,7 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "PlatformOperator" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoCredential" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
+export type SignInFailure = "AccountLocked" | "NoCredential" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -145,6 +145,16 @@ export interface Person {
   username: string;
 }
 
+export interface Reauthentication {
+  at: Generated<Timestamp>;
+  authenticator: string;
+  id: Generated<string>;
+  labId: string;
+  meaning: Meaning;
+  personId: string;
+  sessionId: string;
+}
+
 export interface RecordVersion {
   canonicalForm: number;
   content: Buffer;
@@ -198,14 +208,35 @@ export interface Session {
 }
 
 export interface Signature {
+  appRelease: string | null;
+  authenticator: string | null;
+  canonicalForm: number;
+  contentHash: Buffer;
   id: Generated<string>;
   labId: string;
   meaning: Meaning;
   personId: string;
   printedName: ColumnType<string, never, never>;
+  reauthenticationId: string | null;
   recordVersionId: string;
+  role: Role;
+  sessionId: string | null;
   signedAt: Generated<Timestamp>;
+  statementHash: Buffer | null;
+  statementVersion: number | null;
   username: ColumnType<string, never, never>;
+}
+
+export interface SignatureStatement {
+  approvedAt: Generated<Timestamp>;
+  statement: Buffer;
+  statementHash: Generated<Buffer>;
+  version: number;
+}
+
+export interface SigningRole {
+  meaning: Meaning;
+  role: Role;
 }
 
 export interface Submission {
@@ -277,12 +308,15 @@ export interface DB {
   membership: Membership;
   method: Method;
   person: Person;
+  reauthentication: Reauthentication;
   recordVersion: RecordVersion;
   result: Result;
   room: Room;
   sample: Sample;
   session: Session;
   signature: Signature;
+  signatureStatement: SignatureStatement;
+  signingRole: SigningRole;
   submission: Submission;
   systemIncident: SystemIncident;
   test: Test;

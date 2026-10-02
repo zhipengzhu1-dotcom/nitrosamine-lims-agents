@@ -11,5 +11,6 @@ await buildApp(createDb(config.databaseUrl), {
   accessEventKey: config.accessEventKey,
   trustedProxies: config.trustedProxies,
   login: config.login,
+  release: config.release,
   sweepEveryMs: SWEEP_EVERY_MS,
 }).listen(config.listen);

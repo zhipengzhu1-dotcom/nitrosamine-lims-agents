@@ -644,12 +644,13 @@ td a,
 
 .sheet {
   --foot-h: 84px;
+  --foot-gap: 8px;
   align-self: end;
   z-index: 1;
   max-height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
-  scroll-padding-bottom: var(--foot-h);
+  scroll-padding-bottom: calc(var(--foot-h) + var(--foot-gap));
   background: var(--canvas);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -12px 40px rgb(0 0 0 / 0.25);

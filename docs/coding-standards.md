@@ -26,7 +26,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 - Reach Lab-owned rows only through `labScope` (`apps/api/src/scope.ts`), because it filters every query to the Lab of the `ActorContext` ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the-owners-mac-then-a-us-vps.md)).
 - Authorise each request from its `ActorContext` inside the route, never in framework middleware, because a middleware bypass then skips nothing (ADR 0002).
 - Decide who may take a step, and from which state, only in the step registry (`packages/domain/src/steps.ts`). The API and the web both read it, so they cannot disagree (thin slice design).
-- Write a Signature only through the one database function that re-authenticates in the same transaction, so that no code path signs without proving who signs. [Decide the spec gaps the walking skeleton found](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/45) decided the function, and the slice does not have it yet.
+- Write a Signature only through `lims.sign`, the one database function, against a single-use re-authentication record that the API writes in the same transaction after it has checked the typed user ID and password, so that no code path signs without proving who signs. [Decide the spec gaps the walking skeleton found](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/45) decided the function, and [Sign every Signature through the signing function](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/95) built it.
 - Give every exported seam function one doc sentence that states the invariant it guarantees, so that a reader learns the rule at the seam.
 
 ## Types say what crosses a boundary
