@@ -31,7 +31,7 @@ const NEEDS_NO_ROLE = 'none';
 const hashToken = (token: string) => createHash('sha256').update(token).digest();
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
 
-const REFUSAL: { readonly [F in SignInFailure]: () => never } = {
+const REFUSAL: { readonly [F in SignInFailure]: (labName?: string) => never } = {
   UnknownUserId: notValid,
   WrongPassword: notValid,
   WrongPasswordOnLockedAccount: notValid,
@@ -39,7 +39,7 @@ const REFUSAL: { readonly [F in SignInFailure]: () => never } = {
   AccountLocked: () => refuse('accountLocked', 'this account is locked'),
   NoLab: () => refuse('role', 'this account belongs to no Lab'),
   NoLabChosen: () => refuse('labNotChosen', 'choose the Lab to work in'),
-  NoMembership: () => refuse('role', 'you hold no Membership in that Lab'),
+  NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
   SessionEnded: () =>
     refuse('stale', 'this session has already moved to another Lab or ended; reload to see where you work'),
 };
@@ -58,7 +58,11 @@ async function rolesIn(db: Kysely<DB>, personId: string, labId: string): Promise
 
 type LabChoice =
   | { labId: string; roles: Role[] }
-  | { refused: Extract<SignInFailure, 'NoLab' | 'NoLabChosen' | 'NoMembership'>; roles: Role[] };
+  | {
+      refused: Extract<SignInFailure, 'NoLab' | 'NoLabChosen' | 'NoMembership'>;
+      roles: Role[];
+      labName?: string | undefined;
+    };
 
 /**
  * The Lab a sign-in or a Lab switch opens: the one named, if the person holds a Membership there, and never a default.
@@ -82,7 +86,9 @@ async function chooseLab(
   if (labId !== undefined && chosen.length > 0) return { labId, roles: chosen };
   const [first] = held;
   if (!first) return { refused: 'NoLab', roles: person.customerId ? ['Customer'] : [] };
-  return { refused: labId === undefined ? 'NoLabChosen' : 'NoMembership', roles: rolesOf(first.labId) };
+  if (labId === undefined) return { refused: 'NoLabChosen', roles: rolesOf(first.labId) };
+  const named = await db.selectFrom('lab').select('name').where('labId', '=', labId).executeTakeFirst();
+  return { refused: 'NoMembership', roles: rolesOf(first.labId), labName: named?.name };
 }
 
 async function countFailure(tx: Transaction<DB>, personId: string) {
@@ -270,7 +276,7 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
           }
           return recordWrongCredential(tx, 'SignInFailed', subject, 'WrongPassword');
         });
-        return REFUSAL[failure]();
+        return REFUSAL[failure]('refused' in choice ? choice.labName : undefined);
       }
 
       const token = randomBytes(32).toString('base64url');
@@ -345,7 +351,7 @@ export function sessionRoutes(app: App, db: Kysely<DB>): void {
           }
           return recordWrongCredential(tx, 'LabSwitchFailed', inSession, sameUserId ? 'WrongPassword' : 'OtherUserId');
         });
-        return REFUSAL[failure]();
+        return REFUSAL[failure]('refused' in choice ? choice.labName : undefined);
       }
 
       const token = randomBytes(32).toString('base64url');

@@ -94,8 +94,14 @@ it('a sign-in that names no Lab is refused as labNotChosen after the right passw
 it('a sign-in that names a Lab where the person holds no Membership is refused and opens no session', async () => {
   const person = await api.addPerson('choice.foreign', ['Analyst']);
 
-  assert.equal(refusedWith(await signIn(person, api.qcLabId), 'role'), 'you hold no Membership in that Lab');
-  refusedWith(await signIn(person, randomUUID()), 'role');
+  assert.equal(
+    refusedWith(await signIn(person, api.qcLabId), 'role'),
+    'You hold no Membership in QC Laboratory (fictional). Choose another Lab.',
+  );
+  assert.equal(
+    refusedWith(await signIn(person, randomUUID()), 'role'),
+    'You hold no Membership in that Lab. Choose another Lab.',
+  );
 
   assert.deepEqual(await sessionsOf(person.id), []);
   assert.deepEqual(
