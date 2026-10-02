@@ -125,11 +125,13 @@ test.describe('at tablet width', () => {
   test('a tab reached from the keyboard under the fade shows its label and focus ring unfaded', async ({ page }) => {
     const nav = await tabBar(page, TABLET);
     const tabs = nav.getByRole('link');
-    const veiled = await tabs.evaluateAll((links) => {
-      const fadeStarts = (links[0]?.parentElement?.getBoundingClientRect().right ?? 0) - 72;
-      return links.findIndex((a) => a.getBoundingClientRect().right > fadeStarts);
+    // The fade starts clear, so pick the first tab that reaches past its middle, where hiding would show.
+    const veiled = await nav.evaluate((n) => {
+      const fade = Number(getComputedStyle(n, '::after').width.replace('px', ''));
+      const middle = n.getBoundingClientRect().right - fade / 2;
+      return [...n.querySelectorAll('a')].findIndex((a) => a.getBoundingClientRect().right > middle);
     });
-    expect(veiled, 'a tab lies under the right fade').toBeGreaterThan(0);
+    expect(veiled, 'a tab lies past the middle of the right fade').toBeGreaterThan(0);
     await tabs.nth(veiled - 1).focus();
     await page.keyboard.press('Tab');
     const focused = tabs.nth(veiled);
