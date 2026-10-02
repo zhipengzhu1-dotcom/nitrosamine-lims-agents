@@ -32,8 +32,8 @@ async function enrolledBrowser() {
   return { workstation, browser, token: browser.jar.get('lims_device') ?? assert.fail('no device cookie') };
 }
 
-const signInOn = async (browser: Client, account: Account) =>
-  ok(await browser.call(routes.login, { username: account.username, password: account.password }));
+const signInOn = async (browser: Client, account: Account, labId = api.labId) =>
+  ok(await browser.call(routes.login, { username: account.username, password: account.password, labId }));
 
 const eventsOf = (subjectId: string) =>
   api.superuser
@@ -189,16 +189,35 @@ describe('the device token', () => {
     );
   });
 
+  it("an enrolled browser is offered only its Workstation's Lab, and a session on it cannot switch Lab", async () => {
+    const { browser } = await enrolledBrowser();
+    assert.deepEqual(
+      ok(await browser.call(routes.labs)).map((lab) => lab.id),
+      [api.labId],
+    );
+    assert.ok(ok(await new Client(api.base).call(routes.labs)).length > 1, 'another browser sees every Lab');
+    const lena = api.person('lena');
+    await signInOn(browser, lena);
+    const refused = await browser.call(routes.switchLab, {
+      username: lena.username,
+      password: lena.password,
+      labId: api.qcLabId,
+    });
+    assert.match(refusedWith(refused, 'state'), /^this Workstation belongs to /);
+    assert.equal(ok(await browser.call(routes.me)).lab.id, api.labId);
+  });
+
   it("a person with no role in the Workstation's Lab is refused on it after the right password, with the true reason recorded", async () => {
     const { browser, workstation } = await enrolledBrowser();
     const outsider = await api.addPerson(`otto.other-lab-${randomUUID()}`, []);
+    let otherLabId = '';
     await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Arrange another Lab' }, async (tx) => {
-      const { labId } = await tx
+      ({ labId: otherLabId } = await tx
         .insertInto('lab')
         .values({ code: 'OT', name: 'Other Lab (fictional)', timeZone: 'Asia/Tokyo' })
         .returning('labId')
-        .executeTakeFirstOrThrow();
-      await tx.insertInto('membership').values({ labId, personId: outsider.id, role: 'Analyst' }).execute();
+        .executeTakeFirstOrThrow());
+      await tx.insertInto('membership').values({ labId: otherLabId, personId: outsider.id, role: 'Analyst' }).execute();
     });
     const refused = await browser.call(routes.login, { username: outsider.username, password: outsider.password });
     assert.equal(refusedWith(refused, 'role'), "this account belongs to no role in this Workstation's Lab");
@@ -213,7 +232,8 @@ describe('the device token', () => {
       workstationId: workstation.id,
       roles: [],
     });
-    assert.equal((await signInOn(new Client(api.base), outsider)).workstation, null, 'elsewhere the account works');
+    const elsewhere = await signInOn(new Client(api.base), outsider, otherLabId);
+    assert.equal(elsewhere.workstation, null, 'elsewhere the account works');
   });
 
   it('the device token is stored only as its SHA-256, is in no reply body and no Audit Trail entry, and appears in no log line', async () => {
@@ -276,7 +296,14 @@ describe('Lock and Switch user', () => {
       locked: true,
       message: `this screen is locked; ${ana.username} unlocks it with their password, or another person signs in with Switch user`,
     });
-    const servedWhileLocked = new Set<Route>([routes.login, routes.lock, routes.unlock, routes.logout]);
+    const servedWhileLocked = new Set<Route>([
+      routes.labs,
+      routes.login,
+      routes.session,
+      routes.lock,
+      routes.unlock,
+      routes.logout,
+    ]);
     const everyOther = [...Object.values(routes), ...stepNames.map((name) => stepRoute(name))].filter(
       (route) => !servedWhileLocked.has(route),
     );

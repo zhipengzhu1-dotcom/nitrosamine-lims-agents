@@ -3,6 +3,7 @@ import { expect, type Page, test } from '@playwright/test';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string) {
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -86,6 +87,8 @@ test('on an enrolled bench browser, Lock hides the records until the same person
   await expect(page.getByRole('heading', { name: 'Switch user' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Tests' })).toHaveCount(0);
   await expect(record, 'no record content while switching').toHaveCount(0);
+  await expect(page.getByRole('radio'), 'on the Workstation only its Lab is offered').toHaveCount(1);
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill('rui.reviewer');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in on this screen' }).click();

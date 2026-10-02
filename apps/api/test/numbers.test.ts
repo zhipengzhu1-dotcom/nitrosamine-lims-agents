@@ -64,7 +64,7 @@ it('two Labs number their Samples independently, each with its own Lab code', as
   const password = 'quincy-password-for-tests';
   await audited(
     api.db,
-    { actor: 'svc:test', role: 'system', reason: 'Add a second Lab and its Customer User' },
+    { actor: 'svc:test', role: 'system', reason: 'Add a Customer User of the second Lab' },
     async (tx) => {
       const { id: personId } = await tx
         .insertInto('person')
@@ -76,15 +76,10 @@ it('two Labs number their Samples independently, each with its own Lab code', as
         })
         .returning('id')
         .executeTakeFirstOrThrow();
-      const { labId } = await tx
-        .insertInto('lab')
-        .values({ code: 'QC', name: 'QC Laboratory (fictional)', timeZone: 'America/New_York' })
-        .returning('labId')
-        .executeTakeFirstOrThrow();
-      await tx.insertInto('membership').values({ labId, personId, role: 'Customer' }).execute();
+      await tx.insertInto('membership').values({ labId: api.qcLabId, personId, role: 'Customer' }).execute();
     },
   );
-  const quincy = await api.login({ id: '', username: 'quincy.qc-customer', password });
+  const quincy = await api.login({ id: '', username: 'quincy.qc-customer', password }, api.qcLabId);
 
   const rd = await numbersOf(ok(await submit(as.cora)).testId);
   const qcFirst = await numbersOf(ok(await submit(quincy)).testId);

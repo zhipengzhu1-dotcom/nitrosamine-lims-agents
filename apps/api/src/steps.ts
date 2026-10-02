@@ -18,9 +18,12 @@ import {
 } from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
-import { reauthenticate } from './auth.ts';
+import { reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
+
+/** The records a Signature can be given on, each with its own canonical content in the database. */
+export type Signable = 'test' | 'test_report';
 
 interface Effect<I> {
   signedRecord?: 'test_report';
@@ -94,7 +97,10 @@ export async function factsFor(
   assigneeId?: string,
 ): Promise<StepFacts> {
   const signatures = test
-    ? await q.from('signature').select(['meaning', 'personId']).where('recordId', '=', test.id).execute()
+    ? await signedVersions(q)
+        .select(['signature.meaning', 'signature.personId'])
+        .where('recordVersion.recordId', '=', test.id)
+        .execute()
     : [];
   const assignee = assigneeId ?? test?.assigneeId ?? null;
   const trained =
@@ -120,53 +126,35 @@ export async function factsFor(
   };
 }
 
-/** The signed Record Version: the Test as it stands after the step's writes, in a fixed field order. */
-async function recordVersion(q: LabQueries, testId: string): Promise<Buffer> {
-  const record = await q
-    .from('test')
-    .innerJoin('sample', 'sample.id', 'test.sampleId')
-    .innerJoin('method', 'method.id', 'test.methodId')
-    .innerJoin('submission', 'submission.id', 'sample.submissionId')
-    .innerJoin('customer', 'customer.id', 'submission.customerId')
-    .leftJoin('result', 'result.testId', 'test.id')
-    .leftJoin('testReport', 'testReport.testId', 'test.id')
-    .select([
-      'test.id',
-      'customer.name as customer',
-      'sample.number as sample',
-      'sample.description',
-      'sample.receivedAt',
-      'method.code as method',
-      'method.version as methodVersion',
-      'method.title as methodTitle',
-      'test.gxpClass',
-      'result.analyte',
-      'result.value',
-      'result.unit',
-      'result.injectionSequenceRef',
-      'result.notebookRef',
-      sql<string>`result.performed_on::text`.as('performedOn'),
-      'testReport.number as report',
-    ])
-    .where('test.id', '=', testId)
-    .executeTakeFirstOrThrow();
-  return Buffer.from(JSON.stringify(record));
+/** Every Signature of the Lab joined to the Record Version it was given on. */
+export function signedVersions(q: LabQueries) {
+  return q
+    .from('signature')
+    .innerJoin('recordVersion', (j) =>
+      j
+        .onRef('recordVersion.labId', '=', 'signature.labId')
+        .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
+    );
 }
 
-async function sign(q: LabQueries, ctx: ActorContext, meaning: Meaning, table: 'test' | 'test_report', testId: string) {
+/** The record's latest Record Version, which the database wrote as it changed: what a Signature given now binds to. */
+export function latestVersion(q: LabQueries, table: Signable, recordId: string) {
+  return q
+    .from('recordVersion')
+    .select(['id', 'version', 'canonicalForm', sql<string>`encode(content_hash, 'hex')`.as('contentHash')])
+    .where('recordTable', '=', table)
+    .where('recordId', '=', recordId)
+    .orderBy('version', 'desc')
+    .executeTakeFirstOrThrow();
+}
+
+async function sign(q: LabQueries, ctx: ActorContext, meaning: Meaning, table: Signable, testId: string) {
   const recordId =
     table === 'test'
       ? testId
       : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id;
-  await q
-    .insert('signature', {
-      personId: ctx.person.id,
-      meaning,
-      recordTable: table,
-      recordId,
-      content: await recordVersion(q, testId),
-    })
-    .execute();
+  const { id: recordVersionId } = await latestVersion(q, table, recordId);
+  await q.insert('signature', { personId: ctx.person.id, meaning, recordVersionId }).execute();
 }
 
 type KeptCommit = Pick<Selectable<DB['commitKey']>, 'sessionId' | 'requestHash' | 'testId' | 'state'>;
@@ -215,7 +203,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
         password,
         `Re-authenticate to sign ${name}`,
         step.role,
-        req.ip,
+        sourceAddressOf(req),
       );
     }
 

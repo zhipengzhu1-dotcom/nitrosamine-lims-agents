@@ -3,6 +3,7 @@ import { expect, type Locator, type Page, test } from '@playwright/test';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string) {
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -22,9 +23,11 @@ async function atLeast(target: Locator, width: number, height: number) {
 }
 
 async function submittedTest(page: Page, description: string): Promise<string> {
+  const labs: { id: string; code: string }[] = await (await page.request.get('/api/labs')).json();
+  const labId = labs.find((lab) => lab.code === 'RD')?.id;
   const as = async (username: string) => {
     await page.request.post('/api/logout', { data: {} });
-    const res = await page.request.post('/api/login', { data: { username, password: DEMO_PASSWORD } });
+    const res = await page.request.post('/api/login', { data: { username, password: DEMO_PASSWORD, labId } });
     expect(res.ok(), `sign in as ${username}: ${res.status()} ${await res.text()}`).toBe(true);
   };
   const step = async (name: string, body: object) => {
@@ -99,13 +102,15 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await page.getByLabel('Order').selectOption('Newest first');
   await expect(entries.first()).toContainText('Signature Performed');
   const signed = entries.first();
-  await expect(signed.locator('details.long'), 'the signed Record Version and its SHA-256 are long').toHaveCount(2);
-  const long = signed.locator('details.long').first();
+  const versioned = entries.filter({ has: page.locator('details.long') }).first();
+  await expect(versioned).toContainText('Record Version');
+  await expect(versioned.locator('details.long'), 'the signed Record Version and its SHA-256 are long').toHaveCount(2);
+  const long = versioned.locator('details.long').first();
   await expect(long.locator('summary')).toContainText('…');
   await atLeast(long.locator('summary'), 44, 44);
   await long.locator('summary').click();
-  await expect(long).toContainText(`"analyte":"NDMA"`);
-  await expect(long).toContainText(`"description":"${description}"`);
+  await expect(long).toContainText(`"analyte": "NDMA"`);
+  await expect(long).toContainText(`"description": "${description}"`);
 
   const rawButton = signed.getByRole('button', { name: /^Raw entry \d+$/ });
   await atLeast(rawButton, 44, 44);
@@ -113,7 +118,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: /^Raw entry \d+, Lab chain$/ })).toBeVisible();
   await expect(dialog.locator('pre')).toContainText(/"hash": "[0-9a-f]{64}"/);
-  await expect(dialog.locator('pre')).toContainText('"record_table": "test"');
+  await expect(dialog.locator('pre')).toContainText('"record_version_id": "');
   await dialog.getByRole('button', { name: 'Close' }).click();
   await expect(dialog).toBeHidden();
 

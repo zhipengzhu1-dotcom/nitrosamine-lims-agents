@@ -30,6 +30,7 @@ test.beforeAll(() => {
 test('an unexpected failure shows its reference on the Bench Rail and plays no success motion', async ({ page }) => {
   const description = `Metformin HCl tablets (fictional, ${PROBE} ${test.info().project.name} ${randomUUID()})`;
   await page.goto('/');
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill('cora.customer');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();

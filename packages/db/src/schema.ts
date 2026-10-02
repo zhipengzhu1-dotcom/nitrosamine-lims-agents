@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "Lock" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
+export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -19,7 +19,7 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
-export type IncidentKind = "UnexpectedFailure";
+export type IncidentKind = "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure" | "UnraisableLogLine";
 
 export type IncidentState = "Open";
 
@@ -41,7 +41,7 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoLab" | "NotInWorkstationLab" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
+export type SignInFailure = "AccountLocked" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -52,10 +52,12 @@ export interface AccessEvent {
   failureReason: SignInFailure | null;
   id: Generated<string>;
   kind: AccessEventKind;
+  previousSessionId: string | null;
+  previousSessionLabId: string | null;
   roles: ArrayType<Role>;
   sessionId: string | null;
   sessionLabId: string | null;
-  sourceAddress: string;
+  sourceAddress: string | null;
   subjectId: string | null;
   takenById: string | null;
   typedUserIdHmac: Buffer | null;
@@ -124,6 +126,18 @@ export interface Person {
   username: string;
 }
 
+export interface RecordVersion {
+  canonicalForm: number;
+  content: Buffer;
+  contentHash: Generated<Buffer>;
+  id: Generated<string>;
+  labId: string;
+  recordId: string;
+  recordTable: string;
+  savedAt: Generated<Timestamp>;
+  version: number;
+}
+
 export interface Result {
   analyte: string;
   enteredBy: string;
@@ -165,14 +179,11 @@ export interface Session {
 }
 
 export interface Signature {
-  content: Buffer;
-  contentHash: Generated<Buffer>;
   id: Generated<string>;
   labId: string;
   meaning: Meaning;
   personId: string;
-  recordId: string;
-  recordTable: string;
+  recordVersionId: string;
   signedAt: Generated<Timestamp>;
 }
 
@@ -185,17 +196,21 @@ export interface Submission {
 
 export interface SystemIncident {
   constraintName: string | null;
-  errorClass: string;
+  errorClass: string | null;
   id: Generated<string>;
   kind: IncidentKind;
+  loggedAt: Timestamp | null;
   openedAt: Generated<Timestamp>;
   recordId: string | null;
   reference: string;
   requestedBy: string | null;
   sessionLabId: string | null;
+  sourceAddress: string | null;
   sqlstate: string | null;
   state: Generated<IncidentState>;
-  step: string;
+  step: string | null;
+  subjectId: string | null;
+  typedUserIdHmac: Buffer | null;
 }
 
 export interface Test {
@@ -239,6 +254,7 @@ export interface DB {
   membership: Membership;
   method: Method;
   person: Person;
+  recordVersion: RecordVersion;
   result: Result;
   room: Room;
   sample: Sample;

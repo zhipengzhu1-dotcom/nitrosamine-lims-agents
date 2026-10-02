@@ -1,13 +1,13 @@
 import { type ActorContext, routes } from '@lims/domain';
 import { useApi } from './api.ts';
 import { demoSigning, Shell } from './rail.tsx';
-import { Signatures } from './tests.tsx';
+import { Signatures, unsignedNotice } from './tests.tsx';
 import { time } from './time.ts';
 
 export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
   const { data, error } = useApi(routes.report, { id });
   return (
-    <Shell me={me} active="tests" action={null}>
+    <Shell me={me} active="tests" action={null} notice={data && unsignedNotice(data.signatures)}>
       {error && <p className="note--bad">{error}</p>}
       {data && (
         <article className="report">

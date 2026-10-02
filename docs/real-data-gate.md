@@ -7,19 +7,20 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 1 | Closed schemas | [#86](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/86) |
 | 1 | Refusal kinds | [#86](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/86) |
 | 1 | Commit keys | [#87](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/87) |
-| 1 | System Incidents with log volume, redaction and the unwritten-incident check | Partly: [#89](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/89) built the incidents and redaction. Unbuilt: the API log volume in the deploy config with its nightly shipping under `oplogs/` (proposed on #89), and the unwritten-incident check ([#90](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/90)) |
+| 1 | System Incidents with log volume, redaction and the unwritten-incident check | Partly: [#89](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/89) built the incidents and redaction, and [#90](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/90) the unwritten-incident check. Unbuilt: the API log volume in the deploy config with its nightly shipping under `oplogs/` (proposed on #89) |
 | 1 | A chain-verify failure opens a System Incident (QA's Verify chain names the first failing entry and how far the chain is intact, [#111](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/111); the record waits for the System Incident ticket) | |
-| 1 | Access Events with the expiry sweep | [#91](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/91) (Access Events; the expiry sweep is [#92](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/92)) |
+| 1 | Access Events with the expiry sweep | [#91](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/91) (Access Events), [#92](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/92) (the expiry sweep) |
+| 1 | A lockout, a burst of failed sign-ins from one address or against one unknown-ID hash, or repeats against a locked account open a System Incident | [#93](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/93); the per-address rule takes effect in the deploy once [#180](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/180) sets `LIMS_TRUSTED_PROXIES` and Caddy forwards the client's address |
 | 1 | Counters | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
 | 1 | Transaction IDs | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
 | 2 | Signing function and Signature fields | |
-| 2 | Record Versions | |
-| 2 | Lab at sign-in | |
+| 2 | Record Versions | [#94](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/94) |
+| 2 | Lab at sign-in | [#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98) |
 | 2 | Workstations | [#99](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/99) |
 | 2 | Identity Verification | |
 | 2 | Unlock | |
 | 2 | Admin constraint | |
-| 2 | Decided login (TOTP, password rules, lockout 5, pepper) behind the data class | |
+| 2 | Decided login (TOTP, password rules, lockout 5, pepper) behind the data class; TOTP covers sign-in, signing and the Lab switch, which until then re-authenticates with user ID and password only ([#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98)) | |
 | 2 | Release Log, service identities, real-data gate and banner | |
 | 3 | Critical Data Change | |
 | 3 | Return | |

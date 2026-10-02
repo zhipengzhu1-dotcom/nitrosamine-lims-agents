@@ -39,7 +39,9 @@ alter table lims.access_event
   add foreign key (workstation_id) references lims.workstation (id),
   drop constraint access_event_session_kind_check,
   add constraint access_event_session_kind_check check (
-    (session_id is not null or kind::text not in ('SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'))
+    (session_id is not null
+     or kind::text not in ('SignInSucceeded', 'SignOut', 'IdleExpiry', 'AbsoluteExpiry', 'LabSwitch', 'LabSwitchFailed',
+                           'Lock', 'Unlock', 'UnlockFailed', 'Takeover'))
     and (session_id is null or kind <> 'SignInFailed')
   ),
   add constraint access_event_takeover_check check ((kind::text = 'Takeover') = (taken_by_id is not null));
@@ -53,3 +55,6 @@ grant select, insert on lims.room to lims_app;
 grant select, insert on lims.workstation to lims_app;
 grant update (device_token_hash) on lims.workstation to lims_app;
 grant insert (taken_by_id) on lims.access_event to lims_app;
+-- 0010 left lims_app column grants on session; a Lock is the one change it makes in place.
+grant insert (workstation_id) on lims.session to lims_app;
+grant update (locked_at) on lims.session to lims_app;

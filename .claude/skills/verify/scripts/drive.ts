@@ -39,8 +39,8 @@ export interface Proof {
   note: (line: string) => void;
   /** Saves a full-page screenshot as <nn>-<name>.png. */
   shot: (name: string) => Promise<void>;
-  /** Runs a read-only query on the instance database as the postgres superuser and saves its output as <name>.tsv. */
-  sql: (name: string, query: string) => string;
+  /** Runs a read-only query on the instance database as the postgres superuser and saves its output as <name>.tsv. A value goes in `vars` and is read in the query as `:'name'`, so no SQL is built from it. */
+  sql: (name: string, query: string, vars?: Record<string, string>) => string;
   signIn: (username: string, password?: string) => Promise<void>;
   signOut: () => Promise<void>;
   /** Waits for the rail's status line to show the text the server answered with. */
@@ -51,13 +51,13 @@ export interface Proof {
   close: () => Promise<void>;
 }
 
-const psql = (db: string, ...args: string[]) =>
-  execFileSync(`${ROOT}scripts/pg.sh`, ['psql', '-d', db, ...args], { encoding: 'utf8' });
+const psql = (db: string, args: string[], input?: string) =>
+  execFileSync(`${ROOT}scripts/pg.sh`, ['psql', '-d', db, ...args], { encoding: 'utf8', input });
 
 /** Opens a headless Chromium on the instance and a fresh evidence directory, .verify/evidence/<UTC>-<slug>/. */
 export async function open(slug: string): Promise<Proof> {
   const { web, db, password, commit } = instance();
-  const stamp = psql(db, '-tAc', `select to_char(now() at time zone 'utc', 'YYYYMMDD"T"HH24MISS"Z"')`).trim();
+  const stamp = psql(db, ['-tAc', `select to_char(now() at time zone 'utc', 'YYYYMMDD"T"HH24MISS"Z"')`]).trim();
   const dir = `${ROOT}.verify/evidence/${stamp}-${slug}`;
   mkdirSync(dir, { recursive: true });
   writeFileSync(`${dir}/instance.txt`, `web ${web}\ndatabase ${db}\ncommit ${commit}\n`);
@@ -84,14 +84,16 @@ export async function open(slug: string): Promise<Proof> {
       shots += 1;
       await page.screenshot({ path: `${dir}/${String(shots).padStart(2, '0')}-${name}.png`, fullPage: true });
     },
-    sql: (name, query) => {
-      const out = psql(db, '-AF', '\t', '-P', 'footer=off', '-c', query);
+    sql: (name, query, vars = {}) => {
+      const bound = Object.entries(vars).flatMap(([key, value]) => ['-v', `${key}=${value}`]);
+      const out = psql(db, ['-AF', '\t', '-P', 'footer=off', '-v', 'ON_ERROR_STOP=1', ...bound], query);
       writeFileSync(`${dir}/${name}.tsv`, out);
       return out;
     },
     signIn: async (username, pw = password) => {
       note(`sign in as ${username}`);
       await page.goto('/');
+      await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
       await page.getByLabel('Username').fill(username);
       await page.getByLabel('Password').fill(pw);
       await page.getByRole('button', { name: 'Sign in' }).click();

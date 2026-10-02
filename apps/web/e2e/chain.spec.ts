@@ -1,13 +1,17 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { expect, type Locator, type Page, test } from '@playwright/test';
-import { DEMO_PASSWORD, SHOTS } from '../playwright.config.ts';
+import { DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {
   if (SHOTS && test.info().project.name === 'desktop')
     await page.screenshot({ path: `../../docs/design/thin-slice-shots/${name}.png` });
 };
 
+const RD = /R&D Laboratory/;
+
 async function signIn(page: Page, username: string) {
+  await page.getByRole('radio', { name: RD }).check();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -24,6 +28,31 @@ const sign = async (page: Page, meaning: string, password = DEMO_PASSWORD) => {
   await page.getByLabel(/Password/).fill(password);
   await page.getByRole('button', { name: `Sign as ${meaning}` }).click();
 };
+
+function changeResult(testId: string, value: string) {
+  execFileSync(
+    '../../scripts/pg.sh',
+    [
+      'psql',
+      '-q',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '--single-transaction',
+      '-d',
+      E2E_DATABASE,
+      '-v',
+      `test=${testId}`,
+      '-v',
+      `value=${value}`,
+    ],
+    {
+      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
+                     set_config('lims.reason', 'Change a signed Result from outside the chain (e2e)', true);
+              update lims.result set value = :'value' where test_id = :'test';`,
+      stdio: ['pipe', 'ignore', 'inherit'],
+    },
+  );
+}
 
 async function box(target: Locator) {
   const b = await target.boundingBox();
@@ -132,7 +161,8 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(password).toBeFocused();
   const [field, foot] = [await box(password), await box(sheet.locator('.sheet__foot'))];
   expect(field.y + field.height, 'the password field is clear of the sheet foot').toBeLessThanOrEqual(foot.y);
-  expect((await box(sheet)).height, 'the sheet keeps its height').toBe(height);
+  // A box at a fractional position measures a few ten-thousandths of a pixel differently between runs.
+  expect((await box(sheet)).height, 'the sheet keeps its height').toBeCloseTo(height, 2);
 
   await page.request.post('/api/logout', { data: {} });
   const whoAmI: string[] = [];
@@ -143,6 +173,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveText('sign in first');
   expect(whoAmI, 'the web returned to sign-in by the kind, with no second request to decide it').toHaveLength(0);
+  await page.getByRole('radio', { name: RD }).check();
   await page.getByLabel('Username').fill('rui.reviewer');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -211,11 +242,33 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     await expect(page.getByRole('row', { name: new RegExp(`${meaning}.*${signer}`) })).toBeVisible();
   }
   await shot(page, 'test-report');
+
+  const testId = new URL(page.url()).hash.split('/')[2] ?? '';
+  expect(testId).toMatch(/^[0-9a-f-]{36}$/);
+  const signed = page.getByRole('row', { name: /unsigned/ });
+  await expect(signed).toHaveCount(0);
+  changeResult(testId, '0.0380');
+  await page.reload();
+  await expect(page.getByRole('cell', { name: '0.0380', exact: true })).toBeVisible();
+  for (const meaning of ['Performed', 'Reviewed', 'Released'])
+    await expect(page.getByRole('row', { name: new RegExp(`${meaning} unsigned`) })).toBeVisible();
+
+  await page.goto(`/#/tests/${testId}`);
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Reported');
+  await expect(page.locator('dl.facts').first().locator('dt:text-is("Record Version") + dd')).toContainText('4 ·');
+  await expect(page.getByRole('row', { name: /unsigned/ })).toHaveCount(3);
+  await railSays(page, 'Unsigned: Performed, Reviewed, Released. The record changed after signing.');
+  await shot(page, 'test-unsigned');
+  await page.getByRole('button', { name: 'Verify chain' }).click();
+  await expect(page.locator('.verdict')).toHaveText(
+    /Lab chain intact through entry \d+; Company chain intact through entry \d+/,
+  );
 });
 
 test('a wrong password and an unknown user ID show the same failure message', async ({ page }) => {
   const attempt = async (username: string, password: string) => {
     await page.goto('/');
+    await page.getByRole('radio', { name: RD }).check();
     await page.getByLabel('Username').fill(username);
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: 'Sign in' }).click();

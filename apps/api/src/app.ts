@@ -1,5 +1,5 @@
 import type { DB } from '@lims/db';
-import type { ActorContext, Instant } from '@lims/domain';
+import type { ActorContext, Instant, SessionClock } from '@lims/domain';
 import Fastify, {
   type FastifyBaseLogger,
   type FastifyInstance,
@@ -10,8 +10,8 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import { loginRoutes, type SessionKey } from './auth.ts';
-import { apiLogger, type LogSink } from './log.ts';
+import { type Login, loginRoutes, scheduleExpirySweep, SESSION_LIMITS, type SessionKey } from './auth.ts';
+import { apiLogger, checkLogVolume, type LogSink, type LogVolume } from './log.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
 import { sessionRoutes } from './session-routes.ts';
 
@@ -20,6 +20,7 @@ declare module 'fastify' {
     actor: ActorContext;
     requester: ActorContext | null;
     sessionKey: SessionKey;
+    sessionClock: SessionClock;
   }
 }
 
@@ -44,20 +45,30 @@ export type App = FastifyInstance<
 
 export interface AppOptions {
   log: LogSink | null;
+  logVolume: LogVolume | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
+  /** The proxies whose X-Forwarded-For names the source address of a request; none means the socket's peer is the source. */
+  trustedProxies: string[];
+  login: Login;
+  /** How often to run the expiry sweep, or null for an API whose caller runs it. */
+  sweepEveryMs: number | null;
 }
 
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
+  const limits = SESSION_LIMITS[options.login];
   const app = Fastify({
     logger: options.log ? apiLogger(options.log) : false,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
     genReqId: requestReference,
+    trustProxy: options.trustedProxies,
   }).withTypeProvider<WireTypes>();
   app.setErrorHandler(answerThrown(db));
   app.decorateRequest('requester', null);
   app.setNotFoundHandler(() => refuse('notFound', 'no such route'));
-  loginRoutes(app, db, options.accessEventKey, options.secureCookie);
-  sessionRoutes(app, db);
+  if (options.logVolume) checkLogVolume(app, db, options.logVolume);
+  loginRoutes(app, db, options.accessEventKey, options.secureCookie, limits);
+  sessionRoutes(app, db, limits);
+  if (options.sweepEveryMs !== null) scheduleExpirySweep(app, db, limits, options.sweepEveryMs);
   return app;
 }

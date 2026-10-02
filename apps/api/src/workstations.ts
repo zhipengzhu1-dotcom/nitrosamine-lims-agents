@@ -1,31 +1,14 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import type { DB } from '@lims/db';
 import { type ActorContext, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
+import { DEVICE_COOKIE, hashToken } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 
-export const DEVICE_COOKIE = 'lims_device';
 /** Chrome caps a cookie's expiry at 400 days; enrolling the browser again replaces its token. */
 const DEVICE_COOKIE_MAX_AGE_S = 400 * 24 * 60 * 60;
-
-export interface Device {
-  labId: string;
-  id: string;
-}
-
-const hashDeviceToken = (token: string) => createHash('sha256').update(token).digest();
-
-/** The Workstation a browser's device token enrols it as, or undefined for an unregistered device. */
-export async function deviceOf(db: Kysely<DB>, token: string | undefined): Promise<Device | undefined> {
-  if (!token) return undefined;
-  return db
-    .selectFrom('workstation')
-    .select(['labId', 'id'])
-    .where('deviceTokenHash', '=', hashDeviceToken(token))
-    .executeTakeFirst();
-}
 
 const listed = (scope: Scope) =>
   scope
@@ -58,7 +41,7 @@ export function workstationRoutes(app: App, db: Kysely<DB>): void {
         rooms: await scope.from('room').select(['id', 'name']).orderBy('name').execute(),
         workstations: await listed(scope).orderBy('workstation.name').execute(),
         thisBrowser: await listed(scope)
-          .where('workstation.deviceTokenHash', '=', hashDeviceToken(req.cookies[DEVICE_COOKIE] ?? ''))
+          .where('workstation.deviceTokenHash', '=', hashToken(req.cookies[DEVICE_COOKIE] ?? ''))
           .executeTakeFirst()
           .then((w) => w ?? null),
       };
@@ -103,7 +86,7 @@ export function workstationRoutes(app: App, db: Kysely<DB>): void {
       await scope.write(reason, 'Admin', async (q) => {
         const enrolled = await q
           .update('workstation')
-          .set({ deviceTokenHash: hashDeviceToken(token) })
+          .set({ deviceTokenHash: hashToken(token) })
           .where('id', '=', workstationId)
           .executeTakeFirst();
         if (!enrolled.numUpdatedRows) refuse('notFound', 'no such Workstation in this Lab');

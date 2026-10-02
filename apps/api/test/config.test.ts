@@ -57,10 +57,31 @@ for (const [name, key] of [
   });
 }
 
+it('a LIMS_LOGIN other than decided or demo stops the API at start and names LIMS_LOGIN', () => {
+  const started = start({ PORT: '3000', LIMS_ACCESS_EVENT_KEY: 'ab'.repeat(32), LIMS_LOGIN: 'strict' });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.notEqual(started.status, 0);
+  assert.match(started.stderr, /LIMS_LOGIN must be decided or demo, not "strict"/);
+});
+
 it('LIMS_LOG is a setting the API reads', () => {
   const started = start({ LIMS_LOG: '1', PORT: '' });
   assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
   assert.notEqual(started.status, 0);
   assert.match(started.stderr, /PORT/);
   assert.doesNotMatch(started.stderr, /not a LIMS setting/);
+});
+
+it('LIMS_TRUSTED_PROXIES is a setting the API reads', () => {
+  const started = start({ LIMS_TRUSTED_PROXIES: '172.16.0.0/12', PORT: '' });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.match(started.stderr, /PORT/);
+  assert.doesNotMatch(started.stderr, /not a LIMS setting/);
+});
+
+it('a trusted proxy that is not an address or range stops the API at start', () => {
+  const started = start({ LIMS_TRUSTED_PROXIES: '172.16.0.0/12, caddy,', LIMS_ACCESS_EVENT_KEY: 'ab'.repeat(32) });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.notEqual(started.status, 0);
+  assert.match(started.stderr, /invalid IP address: caddy/);
 });
