@@ -38,7 +38,9 @@ test('the Submit sheet and its long Method name fit a 390 px phone with no sidew
   }
 });
 
-test('the tab bar fades where more tabs lie beyond, and the last tab scrolls clear of the fade', async ({ page }) => {
+test('the tabs are 44 px touch targets, the bar fades where more tabs lie beyond, and the last tab scrolls clear of the fade', async ({
+  page,
+}) => {
   await signInAsCustomer(page);
   const nav = page.locator('.top nav');
   const clearOfFade = () =>

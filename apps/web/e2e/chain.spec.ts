@@ -82,26 +82,56 @@ const uncovered = (target: Locator) =>
     return corners.every(([x, y]) => el.contains(document.elementFromPoint(x, y)));
   });
 
-async function typeWhileTheSheetSlidesIn(page: Page, type: () => Promise<void>) {
-  await type();
-  const own = page.viewportSize() ?? DESKTOP;
-  const rail = await box(page.locator('footer.rail'));
-  expect(rail.y + rail.height, 'the rail stays at the foot of the screen').toBeCloseTo(own.height, 0);
+async function typeWhileTheSheetIsStillSlidingIn(page: Page, type: () => Promise<void>) {
   const sheet = page.locator('form.sheet');
-  await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-  const what = sheet.locator('section').filter({ has: page.getByRole('heading', { name: 'What you are signing' }) });
-  const sign = sheet.getByRole('button', { name: /^Sign as / });
-  for (const size of [own, PHONE, DESKTOP]) {
+  const sliding = await sheet.evaluate((el) => {
+    const slide = el.getAnimations();
+    for (const a of slide) a.pause();
+    return slide.length;
+  });
+  expect(sliding, 'the sheet is still sliding in').toBeGreaterThan(0);
+  await type();
+  const rail = await box(page.locator('footer.rail'));
+  const height = page.viewportSize()?.height;
+  expect(rail.y + rail.height, 'the rail stays at the foot of the screen').toBeCloseTo(height ?? 0, 0);
+  await sheet.evaluate((el) =>
+    Promise.all(
+      el.getAnimations().map((a) => {
+        a.play();
+        return a.finished;
+      }),
+    ),
+  );
+}
+
+async function wholeOnScreenAtBothSizes(page: Page, whole: Locator, commit: Locator) {
+  const projectSize = page.viewportSize() ?? DESKTOP;
+  for (const size of [projectSize, PHONE, DESKTOP]) {
     const at = `at ${size.width}x${size.height}`;
     await page.setViewportSize(size);
-    await what.scrollIntoViewIfNeeded();
-    await expect(what, `What you are signing is whole on screen ${at}`).toBeInViewport({ ratio: 1 });
-    expect(await uncovered(what), `nothing covers What you are signing ${at}`).toBe(true);
-    await expect(sign, `the Sign button is on screen ${at}`).toBeInViewport({ ratio: 1 });
-    await sign.click({ trial: true });
+    await whole.scrollIntoViewIfNeeded();
+    await expect(whole, `whole on screen ${at}`).toBeInViewport({ ratio: 1 });
+    expect(await uncovered(whole), `nothing covers it ${at}`).toBe(true);
+    await expect(commit, `the commit button is on screen ${at}`).toBeInViewport({ ratio: 1 });
+    await commit.click({ trial: true });
   }
-  await page.setViewportSize(own);
+  await page.setViewportSize(projectSize);
 }
+
+const shownOnce = (page: Page, text: string) =>
+  expect
+    .poll(
+      () =>
+        page.getByText(text).evaluateAll(
+          (copies) =>
+            copies.filter((e) => {
+              const r = e.getBoundingClientRect();
+              return r.width > 1 && r.height > 1;
+            }).length,
+        ),
+      `"${text}" is on screen once`,
+    )
+    .toBe(1);
 
 test('the whole chain through the UI, ending in a Test Report with three Signatures', async ({ page }) => {
   const description = `Metformin HCl 500 mg tablets, lot NW-0042 (fictional, ${test.info().project.name} ${randomUUID()})`;
@@ -111,6 +141,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     await link.click();
   };
   const sheet = page.locator('form.sheet');
+  const whatYouAreSigning = sheet
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'What you are signing' }) });
+  const signButton = sheet.getByRole('button', { name: /^Sign as / });
   const commitKeys: string[] = [];
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/steps/'))
@@ -129,8 +163,15 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   expect(await sheet.count(), 'under reduced motion the sheet leaves at once').toBe(0);
   await page.emulateMedia({ reducedMotion: null });
   await page.getByRole('button', { name: 'Submit' }).click();
-  await page.getByLabel('Method').selectOption({ index: 1 });
-  await page.getByLabel('Sample description').fill(description);
+  await typeWhileTheSheetIsStillSlidingIn(page, async () => {
+    await page.getByLabel('Method').selectOption({ index: 1 });
+    await page.getByLabel('Sample description').fill(description);
+  });
+  await wholeOnScreenAtBothSizes(
+    page,
+    page.getByLabel('Sample description'),
+    sheet.getByRole('button', { name: 'Submit' }),
+  );
   await page.getByRole('button', { name: 'Submit' }).click();
   await railSays(page, 'now Requested');
   await expect(page.getByRole('row', { name: description })).toContainText('Requested');
@@ -165,9 +206,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     'Notebook reference': 'RD-NB-0007-012',
     'Performed on': '2026-09-30',
   };
-  await typeWhileTheSheetSlidesIn(page, async () => {
+  await typeWhileTheSheetIsStillSlidingIn(page, async () => {
     for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
   });
+  await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
   await shot(page, 'test-signature-sheet');
   await sign(page, 'Performed');
@@ -188,10 +230,12 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(review).toBeFocused();
 
   await review.click();
-  await typeWhileTheSheetSlidesIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
+  await typeWhileTheSheetIsStillSlidingIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
+  await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
   const height = (await box(sheet)).height;
   await sign(page, 'Reviewed', 'not-the-password');
   await railSays(page, 'Refused: the credentials are not valid. Nothing has been signed.');
+  await shownOnce(page, 'Refused: the credentials are not valid. Nothing has been signed.');
   const refusal = sheet.locator('.refusal');
   await expect(refusal).toBeInViewport({ ratio: 1 });
   const [inSheet, inRefusal] = [await box(sheet), await box(refusal)];
@@ -252,7 +296,8 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await signIn(page, 'quinn.qa');
   await openTheTest();
   await page.getByRole('button', { name: 'Release' }).click();
-  await typeWhileTheSheetSlidesIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
+  await typeWhileTheSheetIsStillSlidingIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
+  await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
   let dropped = false;
   await page.route('**/api/steps/release', async (route) => {
     if (dropped) return route.continue();
@@ -261,10 +306,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     return route.abort('connectionreset');
   });
   await sign(page, 'Released');
-  await railSays(
-    page,
-    'The LIMS did not answer. Type your password again and sign with the same entries; they will not be saved twice.',
-  );
+  const unanswered =
+    'The LIMS did not answer. Type your password again and sign with the same entries; they will not be saved twice.';
+  await railSays(page, unanswered);
+  await shownOnce(page, unanswered);
   await sign(page, 'Released');
   await railSays(page, 'now Reported');
   await page.getByRole('button', { name: 'Verify chain' }).click();

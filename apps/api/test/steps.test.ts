@@ -116,7 +116,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     [null, null, []],
     'before release the Customer gets no Record Version hash, which could confirm a guessed Result',
   );
-  assert.equal(unreleased.withheld, true, 'the Customer is told the Result and Signatures exist but are withheld');
+  assert.equal(unreleased.withheld, true, 'the Customer is told the Result and Signatures are withheld until release');
   assert.equal((await view(id, as.rui)).withheld, false, 'staff see the Test whole before release');
   assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
   assert.equal((await view(id, as.cora)).withheld, false, 'release shows the Customer the whole Test');
