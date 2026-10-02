@@ -374,6 +374,17 @@ describe('Lock and Switch user', () => {
       ['SignInSucceeded', 'Lock', 'UnlockFailed', 'UnlockFailed'],
       'the refused unlock is an Access Event, as a sign-in refused by a Lockout is',
     );
+    const reasons = await api.superuser
+      .selectFrom('auditEntry')
+      .select('reason')
+      .where('tableName', '=', 'access_event')
+      .where(sql<boolean>`new_row->>'subject_id' = ${ana.id} and new_row->>'kind' = 'UnlockFailed'`)
+      .execute();
+    assert.deepEqual(
+      reasons,
+      [{ reason: 'Failed authentication' }, { reason: 'Failed authentication' }],
+      'both failed unlocks are recorded as failed authentication',
+    );
   });
 
   it('locking a locked session writes no second lock Access Event, and unlocking an unlocked one no unlock event', async () => {
