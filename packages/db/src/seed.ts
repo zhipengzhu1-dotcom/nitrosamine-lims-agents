@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import { dbConfig } from './config.ts';
 import { hashPassword } from './credentials.ts';
@@ -23,11 +23,16 @@ export interface SeededAccount {
   password: string;
 }
 
-/** Seeds one Lab, one Customer, one Method and the demo people, who all share one password, into an empty database. */
+// A second Lab, so that a person with Memberships in both picks the Lab at sign-in and can switch Lab.
+const secondLab = { code: 'QC', name: 'QC Laboratory (fictional)', members: ['lena.manager', 'rui.reviewer'] } as const;
+
+const SEED = { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' };
+
+/** Seeds two Labs, two Rooms in the first, one Customer, one Method and the demo people, who all share one password, into an empty database. */
 export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('base64url')): Promise<SeededAccount[]> {
   if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
-  return audited(db, { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' }, async (tx) => {
+  const accounts = await audited(db, SEED, async (tx) => {
     const customer = await tx
       .insertInto('customer')
       .values({ name: 'Northwind Generics (fictional)' })
@@ -38,12 +43,22 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
       .values({ code: 'RD-MTH-0001', version: '1', title: 'NDMA in metformin hydrochloride by LC-MS/MS' })
       .returning('id')
       .executeTakeFirstOrThrow();
-    // The Lab comes after the company rows: a transaction locks the company chain before any Lab's (lims.lock_chain).
-    const { labId } = await tx
-      .insertInto('lab')
-      .values({ code: 'RD', name: 'R&D Laboratory (fictional)', timeZone: 'America/New_York' })
-      .returning('labId')
-      .executeTakeFirstOrThrow();
+    // One transaction seeds everything, because only the seeding transaction may make staff without an Identity
+    // Verification (0015). A Lab row starts its own chain, and chains are locked company first, then Labs by ID, so
+    // the Labs come after the company rows and in ID order.
+    const [labId, secondLabId] = [randomUUID(), randomUUID()];
+    const labs = [
+      { labId, code: 'RD', name: 'R&D Laboratory (fictional)', timeZone: 'America/New_York' },
+      { labId: secondLabId, code: secondLab.code, name: secondLab.name, timeZone: 'America/New_York' },
+    ].sort((x, y) => (x.labId < y.labId ? -1 : 1));
+    for (const lab of labs) await tx.insertInto('lab').values(lab).execute();
+    await tx
+      .insertInto('room')
+      .values([
+        { labId, name: 'LC-MS/MS Room (fictional)' },
+        { labId, name: 'Sample Preparation Room (fictional)' },
+      ])
+      .execute();
     const out: SeededAccount[] = [];
     for (const p of people) {
       const { id } = await tx
@@ -59,10 +74,13 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
       await tx.insertInto('membership').values({ labId, personId: id, role: p.role }).execute();
       if ('trained' in p)
         await tx.insertInto('trainingRecord').values({ labId, personId: id, methodId: method.id }).execute();
+      if (secondLab.members.some((m) => m === p.username))
+        await tx.insertInto('membership').values({ labId: secondLabId, personId: id, role: p.role }).execute();
       out.push({ id, username: p.username, role: p.role, password });
     }
     return out;
   });
+  return accounts;
 }
 
 if (import.meta.main) {

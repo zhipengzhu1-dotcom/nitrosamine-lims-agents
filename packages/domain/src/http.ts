@@ -8,6 +8,7 @@ const role = Type.Enum({
   Analyst: 'Analyst',
   Customer: 'Customer',
   LabManager: 'LabManager',
+  PlatformOperator: 'PlatformOperator',
   QA: 'QA',
   Reviewer: 'Reviewer',
   SampleCustodian: 'SampleCustodian',
@@ -53,10 +54,14 @@ export const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' })
 const nullable = <S extends TSchema>(schema: S) => Type.Union([schema, Type.Null()]);
 const closed = { additionalProperties: false } as const;
 
+const lab = Type.Object({ id: uuid, code: Type.String(), name: Type.String() });
+export type Lab = Static<typeof lab>;
 const actorContext = Type.Object({
   person: Type.Object({ id: uuid, username: Type.String(), displayName: Type.String(), customerId: nullable(uuid) }),
-  lab: Type.Object({ id: uuid, code: Type.String(), name: Type.String() }),
+  lab,
   roles: Type.Array(role),
+  /** The Workstation the session's browser is enrolled as, or null for an unregistered device. */
+  workstation: nullable(Type.Object({ name: Type.String(), room: Type.String() })),
 });
 export type ActorContext = Static<typeof actorContext>;
 /**
@@ -103,9 +108,12 @@ const recordVersionRef = Type.Object({
   canonicalForm: Type.Integer({ minimum: 0 }),
   contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
 });
+export type RecordVersionRef = Static<typeof recordVersionRef>;
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
+  username: Type.String(),
+  role: role,
   signedAt: instant,
   record: Type.String(),
   recordVersion: recordVersionRef,
@@ -128,6 +136,9 @@ export const auditedTable = Type.Enum({
   record_version: 'record_version',
   signature: 'signature',
   audit_export: 'audit_export',
+  signature_statement: 'signature_statement',
+  signing_role: 'signing_role',
+  reauthentication: 'reauthentication',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;
 const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
@@ -189,8 +200,48 @@ const trailEntry = Type.Object({
 export type TrailEntry = Static<typeof trailEntry>;
 const trail = Type.Object({ record: recordRef, labZone: Type.String(), entries: Type.Array(trailEntry) });
 export type Trail = Static<typeof trail>;
+/** A person as the Admin of the session's Lab sees them: the roles are those held in that Lab. */
+const staffPerson = Type.Object({
+  id: uuid,
+  username: Type.String(),
+  printedName: Type.String(),
+  roles: Type.Array(role),
+  /** True once the person has set a password through their one-time link. */
+  credentialSet: Type.Boolean(),
+  identityVerifiedAt: nullable(instant),
+  /** Who checked the person's identity and what they checked; null for a seeded demo account. */
+  identityVerifiedBy: nullable(Type.String()),
+  identityEvidence: nullable(Type.String()),
+});
+export type StaffPerson = Static<typeof staffPerson>;
+const identityVerification = Type.Object({
+  id: uuid,
+  printedName: Type.String(),
+  evidence: Type.String(),
+  checkedBy: Type.String(),
+  checkedAt: instant,
+});
+export type IdentityVerification = Static<typeof identityVerification>;
+/** The Lab's staff, and the Identity Verifications its Admins recorded that no account names yet. */
+const staff = Type.Object({ people: Type.Array(staffPerson), awaitingAccount: Type.Array(identityVerification) });
+/** The roles an Admin grants. Platform Operator is held outside the LIMS, and Customer Users get portal accounts. */
+export const grantableRoles = ['SampleCustodian', 'Analyst', 'Reviewer', 'QA', 'LabManager', 'Admin'] as const;
+/** The one-time link's token goes to the person, who sets their own password with it; the LIMS keeps only its hash. */
+const accountCreated = Type.Object({
+  person: staffPerson,
+  link: Type.Object({ token: Type.String(), expiresAt: instant }),
+});
+const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
+/** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
+const username = Type.String({ pattern: '^[a-z][a-z0-9.-]{2,39}$' });
 const reportRef = Type.Object({ id: uuid, number: Type.String() });
-/** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
+/** The signature statement in force: what a signer attests, as QA approved it, with the version a Signature records. */
+const signatureStatement = Type.Object({ version: Type.Integer({ minimum: 1 }), text: Type.String() });
+export type SignatureStatement = Static<typeof signatureStatement>;
+/**
+ * `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a
+ * guessed value be confirmed. `statement` is the signature statement in force, null for a Customer, who never signs.
+ */
 const testView = Type.Object({
   test: testRow,
   recordVersion: nullable(recordVersionRef),
@@ -198,6 +249,7 @@ const testView = Type.Object({
   result: nullable(result),
   signatures: Type.Array(signature),
   next: nullable(Type.Enum(stepNames)),
+  statement: nullable(signatureStatement),
 });
 const testReport = Type.Object({
   report: reportRef,
@@ -287,9 +339,12 @@ export type StepTaken = Static<typeof stepTaken>;
  * a body with a field its closed schema does not name, whatever else is wrong with it; `malformed` is any other
  * request Fastify refuses before the handler runs (a schema fault, unparseable JSON, a wrong media type, too large).
  * `badCredentials` is the one answer to every sign-in failure;
- * `accountLocked`, and `role` for an account with no Lab, come only after the right password. `noSession` covers no session presented and a session that
- * has ended. `stale` asks the person to reload; `state` says the step does not apply. `keyReused` is a Commit Key sent again
- * with a different step or input, or from another session. `notFound` also covers an
+ * `accountLocked`, `labNotChosen` for a sign-in that names no Lab, and `role` for a Lab where the person holds no
+ * Membership, come only after the right password. `noSession` covers no session presented and a session that
+ * has ended. `sessionLocked` answers every request on a locked session except lock, unlock, sign-out and a sign-in over it. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
+ * with a different step or input, or from another session. `recordChanged` is a signing on sight of a Record Version that is no
+ * longer the record's latest: the screen must show the record again before it is signed. `signingRefused` is what the signing
+ * function refuses once the step's transaction has begun, such as a signature statement no longer in force. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
  */
@@ -297,12 +352,16 @@ export const refusalKinds = [
   'unknownField',
   'malformed',
   'badCredentials',
+  'labNotChosen',
   'noSession',
+  'sessionLocked',
   'accountLocked',
   'role',
   'guard',
   'state',
   'stale',
+  'recordChanged',
+  'signingRefused',
   'keyReused',
   'notFound',
   'failure',
@@ -314,15 +373,46 @@ export const isRefusalKind = (value: unknown): value is RefusalKind => refusalKi
 export const refusalBody = Type.Object({ kind: Type.Enum(refusalKinds), message: Type.String() });
 export type RefusalBody = Static<typeof refusalBody>;
 
-const credentials = Type.Object({ username: text, password: text }, closed);
+/** A sign-in names its Lab; the schema lets it out so that the API can answer `labNotChosen` after the password. */
+const signIn = Type.Object({ username: text, password: text, labId: Type.Optional(uuid) }, closed);
+const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, closed);
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
+/** The Record Version the signer saw, as the screen showed it: the signing is refused if the record has moved on. */
+const seenVersion = Type.Object({ version: recordVersionRef.properties.version, contentHash: sha256Hex }, closed);
+const typedCredentials = Type.Object({ username: text, password: text }, closed);
+/** What a signer types on the signature sheet: their user ID and their password. */
+export type TypedCredentials = Static<typeof typedCredentials>;
+/** What a signing sends: the typed credentials, the Record Version the sheet showed and the signature statement version it showed. */
+const signingBody = Type.Object(
+  { ...typedCredentials.properties, recordVersion: seenVersion, statementVersion: Type.Integer({ minimum: 1 }) },
+  closed,
+);
+export type SigningBody = Static<typeof signingBody>;
 const reauthentication = Type.Object({ password: text }, closed);
+const room = Type.Object({ id: uuid, name: Type.String() });
+const workstation = Type.Object({
+  id: uuid,
+  name: Type.String(),
+  room: Type.String(),
+  browserPolicy: Type.String(),
+  enrolled: Type.Boolean(),
+});
+export type Workstation = Static<typeof workstation>;
+const workstations = Type.Object({
+  rooms: Type.Array(room),
+  workstations: Type.Array(workstation),
+  /** The Workstation this browser's device token enrols it as now, which the next sign-in on it carries. */
+  thisBrowser: nullable(workstation),
+});
+const workstationRegistration = Type.Object({ name: text, roomId: uuid, browserPolicy: text, reason: text }, closed);
+const enrolment = Type.Object({ workstationId: uuid, reason: text }, closed);
+const roomRegistration = Type.Object({ name: text, reason: text }, closed);
 const stepEnvelope = Type.Object({
   commitKey: uuid,
   testId: Type.Optional(uuid),
-  signature: Type.Optional(reauthentication),
+  signature: Type.Optional(signingBody),
 });
 const stepInputs = {
   submit: Type.Object({ methodId: uuid, description: text }, closed),
@@ -343,6 +433,10 @@ const stepInputs = {
   release: Type.Object({}, closed),
 } satisfies { [K in StepName]: TObject };
 export type StepInput<K extends StepName> = Static<(typeof stepInputs)[K]>;
+/** A press's step, record and entries as one text, the same in whatever order the entries were typed, so the API and the web agree on which presses are one press. */
+export function pressText(step: StepName, testId: string | null, input: object): string {
+  return JSON.stringify([step, testId, Object.entries(input).sort(([a], [b]) => (a < b ? -1 : 1))]);
+}
 /** A step's body for any K. Its type keeps testId and signature optional; the wire schema requires them where the registry does. */
 export type StepBody<K extends StepName> = Static<typeof stepEnvelope> & { input: StepInput<K> };
 
@@ -368,8 +462,21 @@ function route<
 
 /** Every route the API serves besides the steps. */
 export const routes = {
-  login: route('POST', '/api/login', { body: credentials }, signedIn),
+  labs: route('GET', '/api/labs', {}, Type.Array(lab)),
+  login: route('POST', '/api/login', { body: signIn }, signedIn),
+  switchLab: route('POST', '/api/lab-switch', { body: labSwitch }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
+  lock: route(
+    'POST',
+    '/api/lock',
+    { body: noBody },
+    Type.Object({ locked: Type.Literal(true), message: Type.String() }),
+  ),
+  unlock: route('POST', '/api/unlock', { body: reauthentication }, signedIn),
+  workstations: route('GET', '/api/workstations', {}, workstations),
+  registerRoom: route('POST', '/api/rooms', { body: roomRegistration }, room),
+  registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
+  enrolWorkstation: route('POST', '/api/workstations/enrol', { body: enrolment }, workstation),
   me: route('GET', '/api/me', {}, signedIn),
   /** Reads how long the session has left without counting as activity, for the web's countdown. */
   session: route('GET', '/api/session', {}, sessionClock),
@@ -392,6 +499,37 @@ export const routes = {
     '/api/audit-exports',
     { body: Type.Object({ customerId: uuid, format: auditExportFormat }, closed) },
     auditExport,
+  staff: route('GET', '/api/staff', {}, staff),
+  recordIdentityVerification: route(
+    'POST',
+    '/api/staff/identity-verifications',
+    { body: Type.Object({ printedName: text, evidence: text }, closed) },
+    identityVerification,
+  ),
+  createAccount: route(
+    'POST',
+    '/api/staff/accounts',
+    { body: Type.Object({ identityVerificationId: uuid, username }, closed) },
+    accountCreated,
+  ),
+  issueLink: route('POST', '/api/staff/links', { body: Type.Object({ personId: uuid }, closed) }, accountCreated),
+  grantMembership: route(
+    'POST',
+    '/api/staff/memberships',
+    { body: Type.Object({ personId: uuid, role: Type.Enum(grantableRoles), reason: reasonText }, closed) },
+    staffPerson,
+  ),
+  changePrintedName: route(
+    'POST',
+    '/api/staff/printed-names',
+    { body: Type.Object({ personId: uuid, printedName: text, reason: reasonText }, closed) },
+    staffPerson,
+  ),
+  setPasswordThroughLink: route(
+    'POST',
+    '/api/credentials',
+    { body: Type.Object({ token: Type.String({ minLength: 1, maxLength: 100 }), password: text }, closed) },
+    Type.Object({ username: Type.String() }),
   ),
   incident: route(
     'GET',

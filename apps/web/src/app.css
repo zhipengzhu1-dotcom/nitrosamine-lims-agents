@@ -144,6 +144,60 @@ p {
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* A phone's tab bar always overflows. Chromium leaves a resized bar that no longer overflows in the end state, which fades the first tab, so wider screens get no fade. */
+@media (max-width: 640px) {
+  .top nav {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 var(--more-before),
+      #000 calc(100% - var(--more-after)),
+      transparent
+    );
+  }
+  @supports (animation-timeline: scroll()) {
+    .top nav {
+      animation: more-tabs linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+  /* Without scroll-driven animations the right edge always fades, and a spacer lets the last tab scroll clear of it. */
+  @supports not (animation-timeline: scroll()) {
+    .top nav {
+      --more-after: 72px;
+    }
+    .top nav::after {
+      content: "";
+      flex: none;
+      width: 72px;
+    }
+  }
+}
+@property --more-before {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --more-after {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes more-tabs {
+  from {
+    --more-before: 0px;
+    --more-after: 72px;
+  }
+  8%,
+  92% {
+    --more-before: 72px;
+    --more-after: 72px;
+  }
+  to {
+    --more-before: 72px;
+    --more-after: 0px;
+  }
+}
 .top nav a {
   display: flex;
   align-items: center;
@@ -578,12 +632,13 @@ td a,
 
 .sheet {
   --foot-h: 84px;
+  --foot-gap: 8px;
   align-self: end;
   z-index: 1;
   max-height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
-  scroll-padding-bottom: var(--foot-h);
+  scroll-padding-bottom: calc(var(--foot-h) + var(--foot-gap));
   background: var(--canvas);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -12px 40px rgb(0 0 0 / 0.25);
@@ -669,6 +724,7 @@ td a,
   border-color: var(--line-2);
 }
 .card {
+  min-width: 0;
   background: var(--sheet);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -693,6 +749,11 @@ select {
   border-radius: 8px;
   font: 400 16px var(--font);
 }
+/* WebKit counts a select's chosen text as overflow past its box, which widens the sheet; contain it. Chromium ends the text with an ellipsis, WebKit clips it. */
+select {
+  contain: paint;
+  text-overflow: ellipsis;
+}
 .who__name {
   font-size: 24px;
   font-weight: 800;
@@ -716,8 +777,62 @@ select {
   max-width: 380px;
   margin: 64px auto;
 }
+.signin > fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.labs {
+  border: 0;
+  padding: 0;
+  margin: 0 0 10px;
+}
+.labs legend {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.labs__option {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  margin: 0;
+  font-weight: 400;
+  cursor: pointer;
+}
+.labs__option input {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+}
 .signin .rbtn {
   width: 100%;
+}
+.lock__set {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.lock__set label {
+  margin-bottom: 0;
+}
+.rbtn--plain {
+  background: var(--sheet);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+}
+.rail__session {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 .record-number {
   white-space: nowrap;
@@ -749,6 +864,11 @@ select {
   color: var(--ink);
   font: 600 15px var(--font);
   cursor: pointer;
+}
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -814,6 +934,12 @@ select {
 }
 
 @media (max-width: 640px) {
+  .who {
+    flex-basis: 100%;
+  }
+  .rail__out {
+    flex: 1;
+  }
   .top {
     flex-wrap: wrap;
     gap: 0 12px;
@@ -907,6 +1033,28 @@ select {
   }
   .sheet__foot .rbtn {
     flex: 1;
+  }
+  /* A legend that wraps to two lines would sit across the card's top border, so it moves inside the card. */
+  .card legend {
+    float: left;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 0;
+  }
+  .card legend ~ * {
+    clear: left;
+  }
+  .rail__session {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .rail__session {
+    flex-wrap: wrap;
+  }
+  .rail__session .rbtn {
+    flex: 1 1 auto;
+    padding: 0 8px;
+    white-space: nowrap;
   }
   .signin {
     margin-top: 24px;

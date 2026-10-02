@@ -5,7 +5,7 @@ import { audited } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
 import { numberedKinds, routes, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Client, ok, startApi } from './harness.ts';
+import { type Account, type Client, ok, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_numbers_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -64,7 +64,7 @@ it('two Labs number their Samples independently, each with its own Lab code', as
   const password = 'quincy-password-for-tests';
   await audited(
     api.db,
-    { actor: 'svc:test', role: 'system', reason: 'Add a second Lab and its Customer User' },
+    { actor: 'svc:test', role: 'system', reason: 'Add a Customer User of the second Lab' },
     async (tx) => {
       const { id: personId } = await tx
         .insertInto('person')
@@ -76,15 +76,10 @@ it('two Labs number their Samples independently, each with its own Lab code', as
         })
         .returning('id')
         .executeTakeFirstOrThrow();
-      const { labId } = await tx
-        .insertInto('lab')
-        .values({ code: 'QC', name: 'QC Laboratory (fictional)', timeZone: 'America/New_York' })
-        .returning('labId')
-        .executeTakeFirstOrThrow();
-      await tx.insertInto('membership').values({ labId, personId, role: 'Customer' }).execute();
+      await tx.insertInto('membership').values({ labId: api.qcLabId, personId, role: 'Customer' }).execute();
     },
   );
-  const quincy = await api.login({ id: '', username: 'quincy.qc-customer', password });
+  const quincy = await api.login({ id: '', username: 'quincy.qc-customer', password }, api.qcLabId);
 
   const rd = await numbersOf(ok(await submit(as.cora)).testId);
   const qcFirst = await numbersOf(ok(await submit(quincy)).testId);
@@ -105,17 +100,17 @@ it('two Labs number their Samples independently, each with its own Lab code', as
 
 it('a Test Report Draft is numbered RD-R with the year and six digits when it is created', async () => {
   const { testId } = ok(await submit(as.cora));
-  const step = (
+  const step = async (
     name: 'receive' | 'assign' | 'enterResult' | 'review' | 'release',
     client: Client,
     input = {},
-    password?: string,
+    signer?: Account,
   ) =>
     client.call(stepRoute(name), {
       commitKey: randomUUID(),
       testId,
       input,
-      ...(password && { signature: { password } }),
+      ...(signer && { signature: await signatureOf(client, testId, signer) }),
     });
   ok(await step('receive', as.samir));
   ok(await step('assign', as.lena, { assigneeId: ana.id }));
@@ -131,11 +126,11 @@ it('a Test Report Draft is numbered RD-R with the year and six digits when it is
         notebookRef: 'NB-RD-0001-012',
         performedOn: '2026-09-30',
       },
-      ana.password,
+      ana,
     ),
   );
-  ok(await step('review', as.rui, {}, rui.password));
-  ok(await step('release', as.quinn, {}, quinn.password));
+  ok(await step('review', as.rui, {}, rui));
+  ok(await step('release', as.quinn, {}, quinn));
   assert.equal(ok(await as.cora.call(routes.report, { id: testId })).report.number, `RD-R-${year}-000001`);
 });
 

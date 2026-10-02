@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import pg from 'pg';
-import { checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
+import { checkoutDatabase, databaseUrl, dbServer } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 
 const DATABASE = checkoutDatabase('lims_refusals_test');
 const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
@@ -27,16 +27,36 @@ const id = {
   laterRecordVersion: randomUUID(),
   signature: randomUUID(),
   session: randomUUID(),
+  otherSession: randomUUID(),
   systemIncident: randomUUID(),
   commitKey: randomUUID(),
   transaction: randomUUID(),
   accessEvent: randomUUID(),
   otherPerson: randomUUID(),
   auditExport: randomUUID(),
+  otherPersonSession: randomUUID(),
+  reauthentication: randomUUID(),
+  secondReauthentication: randomUUID(),
+  probeReauthentication: randomUUID(),
+  probeReport: randomUUID(),
+  secondSession: randomUUID(),
+  admin: randomUUID(),
+  operator: randomUUID(),
+  verified: randomUUID(),
+  identityVerification: randomUUID(),
+  credentialLink: randomUUID(),
+  room: randomUUID(),
+  otherLabRoom: randomUUID(),
+  workstation: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
+const deviceToken = Buffer.alloc(32, 2);
 const zeros = Buffer.alloc(32);
+const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest();
+const fixtureContent = Buffer.from('{"id":"fixture"}');
+/** Signature statement 1's hash, read from the migrated database before the fixtures are written. */
+let statementHash: Buffer = zeros;
 
 const fixture: [string, Row][] = [
   ['lims.customer', { id: id.customer, name: 'Refusal Customer (fictional)' }],
@@ -48,6 +68,8 @@ const fixture: [string, Row][] = [
     'lims.person',
     { id: id.otherPerson, username: 'refusal.other', display_name: 'Other Person', password_hash: 'not-a-real-hash' },
   ],
+  ['lims.person', { id: id.admin, username: 'refusal.admin', display_name: 'Refusal Admin' }],
+  ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
   ['lims.method', { id: id.method, code: 'RF-MTH-0001', version: '1', title: 'NDMA by LC-MS/MS (fictional)' }],
   [
     'lims.submission',
@@ -59,6 +81,28 @@ const fixture: [string, Row][] = [
   ['lims.counter', { lab_id: id.lab, kind: 'Sample' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.person, role: 'Analyst' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.otherPerson, role: 'QA' }],
+  ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
+  ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
+  [
+    'lims.identity_verification',
+    {
+      id: id.identityVerification,
+      printed_name: 'Vera Checked',
+      evidence: 'Passport seen in person (fictional)',
+      checked_by: id.admin,
+      checked_in_lab_id: id.otherLab,
+    },
+  ],
+  [
+    'lims.person',
+    {
+      id: id.verified,
+      username: 'refusal.verified',
+      display_name: 'Vera Checked',
+      identity_verification_id: id.identityVerification,
+    },
+  ],
+  ['lims.credential_link', { id: id.credentialLink, person_id: id.verified, token_hash: Buffer.alloc(32, 5) }],
   ['lims.training_record', { lab_id: id.lab, person_id: id.person, method_id: id.method }],
   [
     'lims.sample',
@@ -91,7 +135,49 @@ const fixture: [string, Row][] = [
       record_id: id.untested,
       version: 2,
       canonical_form: 0,
-      content: Buffer.from('{"id":"fixture"}'),
+      content: fixtureContent,
+    },
+  ],
+  ['lims.room', { lab_id: id.lab, id: id.room, name: 'LC-MS/MS Room (fictional)' }],
+  ['lims.room', { lab_id: id.otherLab, id: id.otherLabRoom, name: 'Other Lab Room (fictional)' }],
+  [
+    'lims.workstation',
+    {
+      lab_id: id.lab,
+      id: id.workstation,
+      name: 'RF-BENCH-01',
+      room_id: id.room,
+      browser_policy: 'Managed Chrome',
+      device_token_hash: deviceToken,
+    },
+  ],
+  ['lims.session', { lab_id: id.lab, id: id.session, person_id: id.person, token_hash: token }],
+  ['lims.session', { lab_id: id.otherLab, id: id.otherSession, person_id: id.person, token_hash: Buffer.alloc(32, 4) }],
+  [
+    'lims.session',
+    { lab_id: id.lab, id: id.otherPersonSession, person_id: id.otherPerson, token_hash: Buffer.alloc(32, 5) },
+  ],
+  ['lims.session', { lab_id: id.lab, id: id.secondSession, person_id: id.person, token_hash: Buffer.alloc(32, 6) }],
+  [
+    'lims.reauthentication',
+    {
+      lab_id: id.lab,
+      id: id.reauthentication,
+      session_id: id.session,
+      person_id: id.person,
+      meaning: 'Performed',
+      authenticator: 'Password',
+    },
+  ],
+  [
+    'lims.reauthentication',
+    {
+      lab_id: id.lab,
+      id: id.secondReauthentication,
+      session_id: id.session,
+      person_id: id.person,
+      meaning: 'Reviewed',
+      authenticator: 'Password',
     },
   ],
   [
@@ -100,11 +186,23 @@ const fixture: [string, Row][] = [
       lab_id: id.lab,
       id: id.signature,
       person_id: id.person,
+      printed_name: 'Refusal Person',
+      username: 'refusal.person',
+      role: 'Analyst',
       meaning: 'Performed',
       record_version_id: id.laterRecordVersion,
+      content_hash: sha256(fixtureContent),
+      canonical_form: 0,
+      statement_version: 1,
+      get statement_hash() {
+        return statementHash;
+      },
+      authenticator: 'Password',
+      session_id: id.session,
+      app_release: 'test',
+      reauthentication_id: id.reauthentication,
     },
   ],
-  ['lims.session', { lab_id: id.lab, id: id.session, person_id: id.person, token_hash: token }],
   [
     'lims.system_incident',
     {
@@ -154,9 +252,27 @@ const fixture: [string, Row][] = [
       entry_count: 12,
       data_sha256: Buffer.alloc(32, 5),
       pdf_sha256: Buffer.alloc(32, 6),
+    'lims.access_event',
+    {
+      kind: 'LabSwitch',
+      subject_id: id.person,
+      source_address: '192.0.2.1',
+      session_lab_id: id.lab,
+      session_id: id.session,
+      previous_session_lab_id: id.otherLab,
+      previous_session_id: id.otherSession,
+      roles: '{Analyst}',
     },
   ],
 ];
+const labSwitch: Row = {
+  kind: 'LabSwitch',
+  failure_reason: null,
+  session_lab_id: id.lab,
+  session_id: id.session,
+  previous_session_lab_id: id.otherLab,
+  previous_session_id: id.otherSession,
+};
 const unknownUserIdAttempt: Row = {
   kind: 'SignInFailed',
   failure_reason: 'UnknownUserId',
@@ -164,6 +280,14 @@ const unknownUserIdAttempt: Row = {
   typed_user_id_hmac: Buffer.alloc(32, 3),
   typed_user_id_length: 12,
   roles: '{}',
+};
+
+const takeover: Row = {
+  kind: 'Takeover',
+  failure_reason: null,
+  session_lab_id: id.lab,
+  session_id: id.session,
+  taken_by_id: id.otherPerson,
 };
 
 const tables = {
@@ -175,7 +299,22 @@ const tables = {
   'lims.person': {
     noun: 'person',
     row: { username: 'refusal.second', display_name: 'Second Person', password_hash: 'not-a-real-hash' },
-    notNull: ['id', 'username', 'display_name', 'password_hash', 'failed_logins'],
+    notNull: ['id', 'username', 'display_name', 'failed_logins'],
+  },
+  'lims.identity_verification': {
+    noun: 'Identity Verification',
+    row: {
+      printed_name: 'Second Checked',
+      evidence: 'Driving licence seen in person (fictional)',
+      checked_by: id.admin,
+      checked_in_lab_id: id.otherLab,
+    },
+    notNull: ['id', 'printed_name', 'evidence', 'checked_by', 'checked_in_lab_id', 'checked_at'],
+  },
+  'lims.credential_link': {
+    noun: 'one-time link',
+    row: { person_id: id.verified, token_hash: Buffer.alloc(32, 6) },
+    notNull: ['id', 'person_id', 'token_hash', 'issued_at', 'expires_at'],
   },
   'lims.method': {
     noun: 'Method',
@@ -257,8 +396,57 @@ const tables = {
   },
   'lims.signature': {
     noun: 'Signature',
-    row: { lab_id: id.lab, person_id: id.person, meaning: 'Reviewed', record_version_id: id.laterRecordVersion },
-    notNull: ['lab_id', 'id', 'person_id', 'meaning', 'record_version_id', 'signed_at'],
+    row: {
+      lab_id: id.lab,
+      person_id: id.person,
+      printed_name: 'Refusal Person',
+      username: 'refusal.person',
+      role: 'Analyst',
+      meaning: 'Reviewed',
+      record_version_id: id.laterRecordVersion,
+      content_hash: sha256(fixtureContent),
+      canonical_form: 0,
+      statement_version: 1,
+      get statement_hash() {
+        return statementHash;
+      },
+      authenticator: 'Password',
+      session_id: id.session,
+      app_release: 'test',
+      reauthentication_id: id.secondReauthentication,
+    },
+    notNull: [
+      'lab_id',
+      'id',
+      'person_id',
+      'role',
+      'meaning',
+      'record_version_id',
+      'content_hash',
+      'canonical_form',
+      'signed_at',
+    ],
+  },
+  'lims.signature_statement': {
+    noun: 'signature statement',
+    row: { version: 2, statement: Buffer.from('A second statement (fictional).') },
+    notNull: ['version', 'statement', 'approved_at'],
+  },
+  'lims.signing_role': {
+    noun: 'signing role',
+    row: { role: 'Reviewer', meaning: 'Performed' },
+    notNull: ['role', 'meaning'],
+  },
+  'lims.reauthentication': {
+    noun: 're-authentication record',
+    row: {
+      lab_id: id.lab,
+      session_id: id.session,
+      person_id: id.person,
+      meaning: 'Released',
+      authenticator: 'Password',
+    },
+    notNull: ['lab_id', 'id', 'session_id', 'person_id', 'meaning', 'authenticator', 'at'],
   },
   'lims.session': {
     noun: 'session',
@@ -296,6 +484,16 @@ const tables = {
     noun: 'counter',
     row: { lab_id: id.lab, kind: 'TestReport' },
     notNull: ['kind'],
+  },
+  'lims.room': {
+    noun: 'Room',
+    row: { lab_id: id.lab, name: 'Sample Preparation Room (fictional)' },
+    notNull: ['lab_id', 'id', 'name'],
+  },
+  'lims.workstation': {
+    noun: 'Workstation',
+    row: { lab_id: id.lab, name: 'RF-BENCH-02', room_id: id.room, browser_policy: 'Managed Chrome' },
+    notNull: ['lab_id', 'id', 'name', 'room_id', 'browser_policy'],
   },
   'lims.access_event': {
     noun: 'Access Event',
@@ -377,9 +575,16 @@ const auditedTables: Table[] = [
   'lims.test_report',
   'lims.record_version',
   'lims.signature',
+  'lims.signature_statement',
+  'lims.signing_role',
+  'lims.reauthentication',
   'lims.system_incident',
   'lims.access_event',
   'lims.audit_export',
+  'lims.identity_verification',
+  'lims.credential_link',
+  'lims.room',
+  'lims.workstation',
 ];
 
 const bare = (table: string) => table.slice(table.indexOf('.') + 1);
@@ -391,14 +596,27 @@ function insert(table: string, row: Row): [string, unknown[]] {
   return [`insert into ${table} (${names}) values (${params})`, Object.values(row)];
 }
 
-const AUDIT_CONTEXT = `select set_config('lims.actor', 'svc:test', true), set_config('lims.role', 'system', true),
+// The Admin acts, so that an Identity Verification's checker is the actor of its write.
+const AUDIT_CONTEXT = `select set_config('lims.actor', 'person:refusal.admin', true), set_config('lims.role', 'system', true),
                               set_config('lims.reason', 'Probe a refusal', true),
                               lims.set_this_transaction('lims.numbering', 'on')`;
 
-async function refusalOf(statement: string, values: unknown[] = [], context = true): Promise<pg.DatabaseError> {
+/** The stamp lims.sign leaves, so a probe row reaches the constraints behind the sign_only trigger. */
+const signingStamp = (row: Row) =>
+  typeof row.reauthentication_id === 'string'
+    ? client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', row.reauthentication_id])
+    : Promise.resolve();
+
+async function refusalOf(
+  statement: string,
+  values: unknown[] = [],
+  context = true,
+  row: Row = {},
+): Promise<pg.DatabaseError> {
   await client.query('begin');
   try {
     if (context) await client.query(AUDIT_CONTEXT);
+    await signingStamp(row);
     await client.query(statement, values);
   } catch (error) {
     if (error instanceof pg.DatabaseError) return error;
@@ -409,8 +627,10 @@ async function refusalOf(statement: string, values: unknown[] = [], context = tr
   return assert.fail(`the database accepted ${statement}`);
 }
 
-const refusalOfRow = (table: Table, change: Row = {}, context = true) =>
-  refusalOf(...insert(table, { ...tables[table].row, ...change }), context);
+function refusalOfRow(table: Table, change: Row = {}, context = true) {
+  const row = { ...tables[table].row, ...change };
+  return refusalOf(...insert(table, row), context, row);
+}
 
 function assertConstraint(error: pg.DatabaseError, code: string, table: Table, constraint: string): void {
   assert.deepEqual([error.code, error.table, error.constraint], [code, bare(table), constraint], error.message);
@@ -422,15 +642,22 @@ before(async () => {
   const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   try {
-    await admin.query(`drop database if exists ${DATABASE} with (force)`);
+    await admin.query(`drop database if exists ${pg.escapeIdentifier(DATABASE)} with (force)`);
   } finally {
     await admin.end();
   }
   await migrate(server, DATABASE);
   await client.connect();
+  ({ statementHash } =
+    (
+      await client.query<{ statementHash: Buffer }>(
+        'select statement_hash as "statementHash" from lims.signature_statement where version = 1',
+      )
+    ).rows[0] ?? assert.fail('the migration seeds signature statement 1'));
   for (const [table, row] of fixture) {
     await client.query('begin');
     await client.query(AUDIT_CONTEXT);
+    await signingStamp(row);
     await client.query(...insert(table, row));
     await client.query('commit');
   }
@@ -443,6 +670,7 @@ it('the base row of every table is accepted, so each refusal below comes from th
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
+      await signingStamp(tables[table].row);
       await client.query(...insert(table, tables[table].row));
     } finally {
       await client.query('rollback');
@@ -467,6 +695,8 @@ describe('the database refuses a second row with the key of an existing one', ()
   const keys: Record<Exclude<Table, 'lims.counter'>, Row> = {
     'lims.customer': { id: id.customer },
     'lims.person': { id: id.person },
+    'lims.identity_verification': { id: id.identityVerification },
+    'lims.credential_link': { id: id.credentialLink },
     'lims.method': { id: id.method },
     'lims.submission': { id: id.submission },
     'lims.lab': { lab_id: id.lab },
@@ -478,11 +708,16 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.test_report': { id: id.testReport },
     'lims.record_version': { id: id.laterRecordVersion },
     'lims.signature': { id: id.signature },
+    'lims.signature_statement': { version: 1 },
+    'lims.signing_role': { role: 'Analyst', meaning: 'Performed' },
+    'lims.reauthentication': { id: id.reauthentication },
     'lims.session': { id: id.session },
     'lims.system_incident': { id: id.systemIncident },
     'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
     'lims.audit_export': { id: id.auditExport },
+    'lims.room': { id: id.room },
+    'lims.workstation': { id: id.workstation },
     'lims.audit_chain': { chain: 'company' },
     'lims.audit_entry': { seq: 1 },
     'public.schema_migration': { name: '0001_roles.sql' },
@@ -526,6 +761,18 @@ describe('the database refuses a duplicate of a unique value', () => {
       constraint: 'person_username_key',
     },
     {
+      name: 'a second account on one Identity Verification is refused',
+      table: 'lims.person',
+      change: { identity_verification_id: id.identityVerification },
+      constraint: 'person_identity_verification_id_key',
+    },
+    {
+      name: 'a second one-time link with the same token is refused',
+      table: 'lims.credential_link',
+      change: { token_hash: Buffer.alloc(32, 5) },
+      constraint: 'credential_link_token_hash_key',
+    },
+    {
       name: 'a second Method with the same code and version is refused',
       table: 'lims.method',
       change: { code: 'RF-MTH-0001' },
@@ -542,6 +789,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.submission',
       change: { number: 'SUB-2026-000001' },
       constraint: 'submission_number_key',
+    },
+    {
+      name: 'a second Lab switch out of the same session is refused',
+      table: 'lims.access_event',
+      change: labSwitch,
+      constraint: 'access_event_previous_session_key',
     },
     {
       name: 'a second Sample with the same number in one Lab is refused',
@@ -568,6 +821,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       constraint: 'test_report_lab_id_test_id_key',
     },
     {
+      name: 'a second Signature against one re-authentication record is refused, so the record is single-use',
+      table: 'lims.signature',
+      change: { reauthentication_id: id.reauthentication },
+      constraint: 'signature_reauthentication_id_key',
+    },
+    {
       name: 'a second Record Version with the number of an existing one is refused',
       table: 'lims.record_version',
       change: { version: 2 },
@@ -590,6 +849,30 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.session',
       change: { token_hash: token },
       constraint: 'session_token_hash_key',
+    },
+    {
+      name: 'a second Room of the same name in one Lab is refused',
+      table: 'lims.room',
+      change: { name: 'LC-MS/MS Room (fictional)' },
+      constraint: 'room_lab_id_name_key',
+    },
+    {
+      name: 'a second Workstation of the same name in one Lab is refused',
+      table: 'lims.workstation',
+      change: { name: 'RF-BENCH-01' },
+      constraint: 'workstation_lab_id_name_key',
+    },
+    {
+      name: 'a Workstation with the ID of one in another Lab is refused',
+      table: 'lims.workstation',
+      change: { lab_id: id.otherLab, id: id.workstation, room_id: id.otherLabRoom },
+      constraint: 'workstation_id_key',
+    },
+    {
+      name: 'a second Workstation enrolled with the same device token is refused',
+      table: 'lims.workstation',
+      change: { device_token_hash: deviceToken },
+      constraint: 'workstation_device_token_hash_key',
     },
     {
       name: 'a second System Incident with the same reference is refused',
@@ -625,6 +908,30 @@ describe('the database refuses a reference to a row that does not exist', () => 
       table: 'lims.person',
       change: { customer_id: missing },
       constraint: 'person_customer_id_fkey',
+    },
+    {
+      name: 'a person on an Identity Verification that does not exist is refused',
+      table: 'lims.person',
+      change: { identity_verification_id: missing },
+      constraint: 'person_identity_verification_id_fkey',
+    },
+    {
+      name: 'an Identity Verification by a checker who does not exist is refused',
+      table: 'lims.identity_verification',
+      change: { checked_by: missing },
+      constraint: 'identity_verification_checked_by_fkey',
+    },
+    {
+      name: 'an Identity Verification checked in a Lab that does not exist is refused',
+      table: 'lims.identity_verification',
+      change: { checked_in_lab_id: missing },
+      constraint: 'identity_verification_checked_in_lab_id_fkey',
+    },
+    {
+      name: 'a one-time link for a person who does not exist is refused',
+      table: 'lims.credential_link',
+      change: { person_id: missing },
+      constraint: 'credential_link_person_id_fkey',
     },
     {
       name: 'a Submission for a Customer that does not exist is refused',
@@ -720,24 +1027,104 @@ describe('the database refuses a reference to a row that does not exist', () => 
     noLab('lims.record_version', 'Record Version'),
     noLab('lims.signature', 'Signature'),
     {
-      name: 'a Signature by a person who does not exist is refused',
-      table: 'lims.signature',
-      change: { person_id: missing },
-      constraint: 'signature_person_id_fkey',
-    },
-    {
       name: 'a Signature on a Record Version that does not exist is refused',
       table: 'lims.signature',
       change: { record_version_id: missing },
-      constraint: 'signature_lab_id_record_version_id_fkey',
+      constraint: 'signature_record_version_fkey',
     },
     {
       name: 'a Signature on a Record Version in another Lab is refused',
       table: 'lims.signature',
       change: { lab_id: id.otherLab },
-      constraint: 'signature_lab_id_record_version_id_fkey',
+      constraint: 'signature_record_version_fkey',
+    },
+    {
+      name: "a Signature whose hash is not its Record Version's is refused",
+      table: 'lims.signature',
+      change: { content_hash: zeros },
+      constraint: 'signature_record_version_fkey',
+    },
+    {
+      name: "a Signature whose canonical form is not its Record Version's is refused",
+      table: 'lims.signature',
+      change: { canonical_form: 1 },
+      constraint: 'signature_record_version_fkey',
+    },
+    {
+      name: "a Signature whose statement hash is not its statement version's is refused",
+      table: 'lims.signature',
+      change: { statement_hash: zeros },
+      constraint: 'signature_statement_version_statement_hash_fkey',
+    },
+    {
+      name: 'a Signature against a re-authentication record that does not exist is refused',
+      table: 'lims.signature',
+      change: { reauthentication_id: missing },
+      constraint: 'signature_reauthentication_fkey',
+    },
+    {
+      name: "a Signature with a meaning other than its re-authentication record's is refused",
+      table: 'lims.signature',
+      change: { meaning: 'Released' },
+      constraint: 'signature_reauthentication_fkey',
+    },
+    {
+      name: "a Signature by an authenticator other than its re-authentication record's is refused",
+      table: 'lims.signature',
+      change: { authenticator: 'Totp' },
+      constraint: 'signature_reauthentication_fkey',
+    },
+    {
+      name: "a Signature on a live session of the signer other than its re-authentication record's is refused",
+      table: 'lims.signature',
+      change: { session_id: id.secondSession },
+      constraint: 'signature_reauthentication_fkey',
+    },
+    noLab('lims.reauthentication', 're-authentication record'),
+    {
+      name: 'a re-authentication record of a person who does not exist is refused',
+      table: 'lims.reauthentication',
+      change: { person_id: missing },
+      constraint: 'reauthentication_person_id_fkey',
+    },
+    {
+      name: 'a re-authentication record on a session that does not exist is refused',
+      table: 'lims.reauthentication',
+      change: { session_id: missing },
+      constraint: 'reauthentication_lab_id_session_id_person_id_fkey',
+    },
+    {
+      name: "a re-authentication record on another person's session is refused",
+      table: 'lims.reauthentication',
+      change: { person_id: id.otherPerson },
+      constraint: 'reauthentication_lab_id_session_id_person_id_fkey',
     },
     noLab('lims.session', 'session'),
+    noLab('lims.room', 'Room'),
+    {
+      name: 'a Workstation in a Room of another Lab is refused',
+      table: 'lims.workstation',
+      change: { room_id: id.otherLabRoom },
+      constraint: 'workstation_lab_id_room_id_fkey',
+    },
+    {
+      name: 'a session on a Workstation of another Lab is refused',
+      table: 'lims.session',
+      change: { lab_id: id.otherLab, workstation_id: id.workstation },
+      constraint: 'session_lab_id_workstation_id_fkey',
+    },
+    {
+      name: 'an Access Event on a Workstation that does not exist is refused',
+      table: 'lims.access_event',
+      change: { workstation_id: missing },
+      constraint: 'access_event_workstation_id_fkey',
+    },
+    {
+      name: 'a takeover Access Event by a person who does not exist is refused',
+      table: 'lims.access_event',
+      change: { ...takeover, taken_by_id: missing },
+      constraint: 'access_event_taken_by_id_fkey',
+    },
     noLab('lims.counter', 'counter'),
     {
       name: 'a session of a person who does not exist is refused',
@@ -793,6 +1180,12 @@ describe('the database refuses a reference to a row that does not exist', () => 
         session_id: id.session,
       },
       constraint: 'access_event_session_lab_id_session_id_subject_id_fkey',
+    },
+    {
+      name: 'a Lab switch Access Event from a session that does not exist is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, previous_session_id: missing },
+      constraint: 'access_event_previous_session_fkey',
     },
   ]);
 
@@ -850,6 +1243,55 @@ describe('the database refuses a value outside its allowed set', () => {
       [Buffer.alloc(31), Buffer.alloc(33)],
       'audit_export_pdf_sha256_check',
     ),
+    ...each(
+      'a signature statement version below 1 is refused',
+      'lims.signature_statement',
+      'version',
+      [0, -1],
+      'signature_statement_version_check',
+    ),
+    ...each(
+      'a re-authentication by an authenticator the LIMS does not have is refused',
+      'lims.reauthentication',
+      'authenticator',
+      ['Totp', 'password', ''],
+      'reauthentication_authenticator_check',
+    ),
+    {
+      name: 'a Signature with an empty app release is refused',
+      table: 'lims.signature',
+      change: { app_release: '' },
+      constraint: 'signature_app_release_check',
+    },
+    ...['statement_version', 'statement_hash', 'authenticator', 'session_id', 'app_release'].map((column) => ({
+      name: `a Signature given now without its ${column} is refused`,
+      table: 'lims.signature' as const,
+      change: { [column]: null },
+      constraint: 'signature_given_through_function_check',
+    })),
+    {
+      name: 'a failed re-authentication Access Event without a session is refused',
+      table: 'lims.access_event',
+      change: {
+        kind: 'ReauthenticationFailed',
+        failure_reason: 'WrongPassword',
+        session_lab_id: null,
+        session_id: null,
+      },
+      constraint: 'access_event_session_kind_check',
+    },
+    {
+      name: 'a failed re-authentication Access Event without a failure reason is refused',
+      table: 'lims.access_event',
+      change: { kind: 'ReauthenticationFailed', failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_check',
+    },
+    {
+      name: 'a failed sign-in Access Event with the typed-user-ID failure of a signing is refused',
+      table: 'lims.access_event',
+      change: { kind: 'SignInFailed', failure_reason: 'WrongUserId' },
+      constraint: 'access_event_failure_kind_check',
+    },
     ...each(
       'a Lab code that is not two to four capital letters is refused',
       'lims.lab',
@@ -992,10 +1434,10 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { session_id: id.session },
       constraint: 'access_event_session_check',
     },
-    ...(['SignInSucceeded', 'SignOut'] as const).map((kind) => ({
+    ...(['SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'] as const).map((kind) => ({
       name: `an Access Event of kind ${kind} without a session is refused`,
       table: 'lims.access_event' as const,
-      change: { kind, failure_reason: null },
+      change: { kind, failure_reason: null, ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }) },
       constraint: 'access_event_session_kind_check',
     })),
     ...(['IdleExpiry', 'AbsoluteExpiry'] as const).flatMap((kind) => [
@@ -1019,10 +1461,87 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint: 'access_event_source_address_check',
     },
     {
+      name: 'a takeover Access Event that names no person taking over is refused',
+      table: 'lims.access_event',
+      change: { ...takeover, taken_by_id: null },
+      constraint: 'access_event_takeover_check',
+    },
+    {
+      name: 'a lock Access Event that names a person taking over is refused',
+      table: 'lims.access_event',
+      change: { ...takeover, kind: 'Lock' },
+      constraint: 'access_event_takeover_check',
+    },
+    {
+      name: 'a Workstation device token hash that is not 32 bytes is refused',
+      table: 'lims.workstation',
+      change: { device_token_hash: Buffer.alloc(16, 2) },
+      constraint: 'workstation_device_token_hash_check',
+    },
+    {
       name: 'a failed sign-in Access Event without a failure reason is refused',
       table: 'lims.access_event',
       change: { failure_reason: null },
       constraint: 'access_event_failure_check',
+    },
+    {
+      name: 'a Lab switch Access Event without a session is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, session_lab_id: null, session_id: null },
+      constraint: 'access_event_session_kind_check',
+    },
+    {
+      name: 'a failed Lab switch Access Event without the session it stays in is refused',
+      table: 'lims.access_event',
+      change: { kind: 'LabSwitchFailed' },
+      constraint: 'access_event_session_kind_check',
+    },
+    {
+      name: 'a failed Lab switch Access Event without a failure reason is refused',
+      table: 'lims.access_event',
+      change: { kind: 'LabSwitchFailed', failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_check',
+    },
+    {
+      name: 'a failed sign-in Access Event with a reason only a Lab switch has is refused',
+      table: 'lims.access_event',
+      change: { failure_reason: 'OtherUserId' },
+      constraint: 'access_event_failure_kind_check',
+    },
+    {
+      name: 'a failed Lab switch Access Event with a reason only a sign-in has is refused',
+      table: 'lims.access_event',
+      change: {
+        kind: 'LabSwitchFailed',
+        failure_reason: 'NoLabChosen',
+        session_lab_id: id.lab,
+        session_id: id.session,
+      },
+      constraint: 'access_event_failure_kind_check',
+    },
+    {
+      name: 'a Lab switch Access Event that names no previous session is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, previous_session_lab_id: null, previous_session_id: null },
+      constraint: 'access_event_previous_session_check',
+    },
+    {
+      name: 'an Access Event of another kind that names a previous session is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, kind: 'SignOut' },
+      constraint: 'access_event_previous_session_check',
+    },
+    {
+      name: 'a previous session ID without its Lab is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, previous_session_lab_id: null },
+      constraint: 'access_event_previous_session_check',
+    },
+    {
+      name: 'a Lab switch Access Event into the Lab it came from is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, previous_session_lab_id: id.lab, previous_session_id: id.session },
+      constraint: 'access_event_lab_switch_check',
     },
     {
       name: 'a lockout Access Event with a failure reason is refused',
@@ -1065,6 +1584,39 @@ describe('the database refuses a value outside its allowed set', () => {
       table: 'lims.access_event',
       change: { ...unknownUserIdAttempt, roles: '{Analyst}' },
       constraint: 'access_event_roles_check',
+    },
+    ...each(
+      'an Identity Verification without a printed name is refused',
+      'lims.identity_verification',
+      'printed_name',
+      ['', '   '],
+      'identity_verification_printed_name_check',
+    ),
+    ...each(
+      'an Identity Verification that does not say what was checked is refused',
+      'lims.identity_verification',
+      'evidence',
+      ['', '   '],
+      'identity_verification_evidence_check',
+    ),
+    ...each(
+      'a one-time link whose token hash is not 32 bytes is refused',
+      'lims.credential_link',
+      'token_hash',
+      [Buffer.alloc(31, 7), Buffer.alloc(33, 7)],
+      'credential_link_token_hash_check',
+    ),
+    {
+      name: 'a one-time link that expires before it is issued is refused',
+      table: 'lims.credential_link',
+      change: { expires_at: '2000-01-01T00:00:00Z' },
+      constraint: 'credential_link_expiry_check',
+    },
+    {
+      name: 'a one-time link used outside its life is refused',
+      table: 'lims.credential_link',
+      change: { used_at: '2000-01-01T00:00:00Z' },
+      constraint: 'credential_link_use_check',
     },
   ]);
 });
@@ -1175,7 +1727,7 @@ describe('an audited write without an actor, a role and a reason is refused', ()
   }
 });
 
-describe('a Signature, a Record Version, an Access Event, an Audit Trail entry, a Commit Key, a System Incident or an Audit Export is never changed or removed, even by the superuser', () => {
+describe('a Signature, a Record Version, a signature statement, a re-authentication record, an Access Event, an Audit Trail entry, a Commit Key, a System Incident or an Audit Export is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
     {
       name: 'updating an Audit Export is refused',
@@ -1194,6 +1746,60 @@ describe('a Signature, a Record Version, an Access Event, an Audit Trail entry, 
       table: 'lims.audit_export',
       trigger: 'refuse_truncate',
       statement: 'truncate lims.audit_export',
+    },
+    {
+      name: 'updating a signature statement is refused',
+      table: 'lims.signature_statement',
+      trigger: 'refuse_change',
+      statement: `update lims.signature_statement set statement = 'changed'`,
+    },
+    {
+      name: 'deleting a signature statement is refused',
+      table: 'lims.signature_statement',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.signature_statement',
+    },
+    {
+      name: 'truncating the signature statements is refused',
+      table: 'lims.signature_statement',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.signature_statement, lims.signature',
+    },
+    {
+      name: 'updating a signing role is refused',
+      table: 'lims.signing_role',
+      trigger: 'refuse_change',
+      statement: `update lims.signing_role set meaning = 'Released'`,
+    },
+    {
+      name: 'deleting a signing role is refused',
+      table: 'lims.signing_role',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.signing_role',
+    },
+    {
+      name: 'truncating the signing roles is refused',
+      table: 'lims.signing_role',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.signing_role',
+    },
+    {
+      name: 'updating a re-authentication record is refused',
+      table: 'lims.reauthentication',
+      trigger: 'refuse_change',
+      statement: `update lims.reauthentication set meaning = 'Released'`,
+    },
+    {
+      name: 'deleting a re-authentication record is refused',
+      table: 'lims.reauthentication',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.reauthentication',
+    },
+    {
+      name: 'truncating the re-authentication records is refused',
+      table: 'lims.reauthentication',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.reauthentication, lims.signature',
     },
     {
       name: 'updating a Record Version is refused',
@@ -1286,6 +1892,30 @@ describe('a Signature, a Record Version, an Access Event, an Audit Trail entry, 
       trigger: 'refuse_truncate',
       statement: 'truncate lims.system_incident',
     },
+    {
+      name: 'updating an Identity Verification is refused',
+      table: 'lims.identity_verification',
+      trigger: 'refuse_change',
+      statement: `update lims.identity_verification set evidence = 'Nothing'`,
+    },
+    {
+      name: 'deleting an Identity Verification is refused',
+      table: 'lims.identity_verification',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.identity_verification',
+    },
+    {
+      name: 'truncating the Identity Verifications is refused',
+      table: 'lims.identity_verification',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.identity_verification cascade',
+    },
+    {
+      name: 'truncating the one-time links is refused',
+      table: 'lims.credential_link',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.credential_link',
+    },
   ];
   for (const c of cases) {
     covered.add(`${c.table}.${c.trigger}`);
@@ -1326,6 +1956,211 @@ describe('a Signature, a Record Version, an Access Event, an Audit Trail entry, 
   });
 });
 
+describe('staff accounts keep their identity, and Admin stays apart from the work', () => {
+  const refusedAs = async (statement: string, values: unknown[], code: string, message: string) => {
+    const error = await refusalOf(statement, values);
+    assert.deepEqual([error.code, error.message], [code, message]);
+  };
+  const apart = 'a person who holds Admin or Platform Operator holds no business role, in any Lab';
+  const grant = 'insert into lims.membership (lab_id, person_id, role) values ($1, $2, $3)';
+
+  covered.add('lims.membership.keep_administration_apart');
+  it('a business role for a holder of Admin, even in another Lab, is refused', async () => {
+    for (const role of ['Customer', 'SampleCustodian', 'Analyst', 'Reviewer', 'QA', 'LabManager'])
+      await refusedAs(grant, [id.lab, id.admin, role], 'LA008', apart);
+  });
+  it('a business role for a holder of Platform Operator is refused', async () => {
+    await refusedAs(grant, [id.otherLab, id.operator, 'QA'], 'LA008', apart);
+  });
+  it('Admin or Platform Operator for a holder of a business role, even in another Lab, is refused', async () => {
+    for (const role of ['Admin', 'PlatformOperator'])
+      await refusedAs(grant, [id.otherLab, id.person, role], 'LA008', apart);
+  });
+  it('turning an Admin membership into a business role is refused', async () => {
+    await refusedAs(`update lims.membership set role = 'QA' where person_id = $1`, [id.admin], 'LA008', apart);
+  });
+  it('Admin and Platform Operator may be held together, as the owner does under the demo exception', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(grant, [id.otherLab, id.operator, 'Admin']);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it('two Labs granting Admin and a business role to one person at once: the second waits and is refused', async () => {
+    const other = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    const watcher = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    await other.connect();
+    await watcher.connect();
+    const fresh = randomUUID();
+    try {
+      await client.query('begin');
+      await client.query(AUDIT_CONTEXT);
+      await client.query(
+        `insert into lims.person (id, username, display_name) values ($1, 'refusal.race', 'Race Person')`,
+        [fresh],
+      );
+      await client.query('commit');
+      await client.query('begin');
+      await client.query(AUDIT_CONTEXT);
+      await client.query(grant, [id.lab, fresh, 'Admin']);
+      const { rows } = await other.query<{ pid: number }>('select pg_backend_pid() as pid');
+      await other.query('begin');
+      await other.query(AUDIT_CONTEXT);
+      const answered = { yet: false };
+      const second = other.query(grant, [id.otherLab, fresh, 'Analyst']).then(
+        () => {
+          answered.yet = true;
+          return assert.fail('the database granted a business role to a person being made Admin');
+        },
+        (e: unknown) => {
+          answered.yet = true;
+          return e instanceof pg.DatabaseError ? e : assert.fail(String(e));
+        },
+      );
+      const waiting = async () =>
+        (
+          await watcher.query(`select wait_event_type = 'Lock' as waits from pg_stat_activity where pid = $1`, [
+            rows[0]?.pid,
+          ])
+        ).rows[0]?.waits === true;
+      while (!answered.yet && !(await waiting()));
+      assert.equal(answered.yet, false, 'the second grant answered before the first committed');
+      await client.query('commit');
+      const error = await second;
+      assert.deepEqual([error.code, error.message], ['LA008', apart]);
+    } finally {
+      await other.query('rollback');
+      await other.end();
+      await watcher.end();
+    }
+  });
+
+  covered.add('lims.person.keep_identity');
+  it('changing a username is refused, even by the superuser', async () => {
+    await refusedAs(
+      `update lims.person set username = 'refusal.renamed' where id = $1`,
+      [id.person],
+      'LA002',
+      'a username is never changed',
+    );
+  });
+  it("changing a person's Identity Verification is refused", async () => {
+    await refusedAs(
+      'update lims.person set identity_verification_id = null where id = $1',
+      [id.verified],
+      'LA002',
+      "a person's Identity Verification is never changed",
+    );
+  });
+
+  covered.add('lims.identity_verification.checked_by_the_acting_admin');
+  it('an Identity Verification recorded in the name of someone other than the acting Admin of its Lab is refused', async () => {
+    const checkedBy = (person: string, lab: string) =>
+      refusedAs(
+        `insert into lims.identity_verification (printed_name, evidence, checked_by, checked_in_lab_id)
+         values ('Forged Check', 'Nothing seen', $1, $2)`,
+        [person, lab],
+        'LA007',
+        'an Identity Verification is recorded by the Admin who checked',
+      );
+    await checkedBy(id.person, id.lab);
+    await checkedBy(id.operator, id.lab);
+    await checkedBy(id.admin, id.lab);
+  });
+
+  covered.add('lims.credential_link.link_needs_identity_verification');
+  it('a one-time link for an account with no Identity Verification is refused', async () => {
+    await refusedAs(
+      'insert into lims.credential_link (person_id, token_hash) values ($1, $2)',
+      [id.person, Buffer.alloc(32, 8)],
+      'LA007',
+      'a one-time link goes only to an account with an Identity Verification',
+    );
+  });
+
+  covered.add('lims.credential_link.use_link_once');
+  it('a one-time link is only ever marked used, once, even by the superuser', async () => {
+    const once = 'a one-time link is only ever marked used, once';
+    await refusedAs('update lims.credential_link set token_hash = $1', [Buffer.alloc(32, 9)], 'LA002', once);
+    await refusedAs('delete from lims.credential_link', [], 'LA002', once);
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('update lims.credential_link set used_at = clock_timestamp() where id = $1', [
+        id.credentialLink,
+      ]);
+      await client.query('savepoint used');
+      await assert.rejects(
+        client.query('update lims.credential_link set used_at = clock_timestamp() where id = $1', [id.credentialLink]),
+        { code: 'LA002', message: once },
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.signature.sign_as_the_person');
+  covered.add('lims.signature.signature_printed_name_not_null');
+  it('a Signature takes the printed name and username its signer has, whatever the insert says', async () => {
+    const forged = { ...tables['lims.signature'].row, printed_name: 'Forged Name', username: 'forged.user' };
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await signingStamp(forged);
+      const [statement, values] = insert('lims.signature', forged);
+      const { rows } = await client.query<Row>(`${statement} returning printed_name, username`, values);
+      assert.deepEqual(rows, [{ printed_name: 'Refusal Person', username: 'refusal.person' }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it('a Signature by a person who does not exist is refused', async () => {
+    const error = await refusalOfRow('lims.signature', { person_id: missing });
+    assert.deepEqual([error.code, error.table, error.column], ['23502', 'signature', 'printed_name'], error.message);
+  });
+  covered.add('lims.signature.signature_person_id_fkey');
+  it('removing a person who has signed is refused', async () => {
+    const signer = randomUUID();
+    const [session, proof] = [randomUUID(), randomUUID()];
+    const signed = {
+      ...tables['lims.signature'].row,
+      person_id: signer,
+      session_id: session,
+      reauthentication_id: proof,
+    };
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(
+        `insert into lims.person (id, username, display_name) values ($1, 'refusal.signer', 'Signer')`,
+        [signer],
+      );
+      await client.query('insert into lims.session (lab_id, id, person_id, token_hash) values ($1, $2, $3, $4)', [
+        id.lab,
+        session,
+        signer,
+        Buffer.alloc(32, 7),
+      ]);
+      await client.query(
+        `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
+         values ($1, $2, $3, $4, 'Reviewed', 'Password')`,
+        [id.lab, proof, session, signer],
+      );
+      await signingStamp(signed);
+      await client.query(...insert('lims.signature', signed));
+      await assert.rejects(client.query('delete from lims.person where id = $1', [signer]), (error: unknown) => {
+        assert.ok(error instanceof pg.DatabaseError);
+        assertConstraint(error, '23503', 'lims.signature', 'signature_person_id_fkey');
+        return true;
+      });
+    } finally {
+      await client.query('rollback');
+    }
+  });
+});
+
 it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys, the counters and the Audit Trail itself', async () => {
   const { rows } = await client.query<{ name: string }>(
     `select 'lims.' || c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -1337,6 +2172,273 @@ it('every lims table is captured in the Audit Trail except the sessions, the Com
     rows.map((row) => row.name),
     ['lims.audit_chain', 'lims.audit_entry', 'lims.commit_key', 'lims.counter', 'lims.session'],
   );
+});
+
+describe('a Signature is written only by the signing function, which refuses every signing it cannot stand behind', () => {
+  const asService = `select set_config('lims.actor', 'svc:test', true), set_config('lims.role', 'system', true),
+            set_config('lims.reason', 'Probe the signing function', true)`;
+  const asPerson = (role = 'Analyst') =>
+    `select set_config('lims.actor', 'person:refusal.person', true), set_config('lims.role', '${role}', true),
+            set_config('lims.reason', 'Probe the signing function', true)`;
+  const reauthenticate = (meaning = 'Performed', person = id.person, session = id.session) =>
+    `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
+     values ('${id.lab}', '${id.probeReauthentication}', '${session}', '${person}', '${meaning}', 'Password')`;
+  const versionOf = (recordId: string, version: number) =>
+    `(select id from lims.record_version where lab_id = '${id.lab}' and record_id = '${recordId}' and version = ${version})`;
+  const hashOf = (recordId: string, version: number) =>
+    `(select content_hash from lims.record_version where lab_id = '${id.lab}' and record_id = '${recordId}' and version = ${version})`;
+  const sign = ({
+    reauthentication = id.probeReauthentication,
+    session = id.session,
+    table = 'test',
+    recordId = id.test,
+    seen = versionOf(id.test, 2),
+    hash = hashOf(id.test, 2),
+    statementVersion = 1,
+    meaning = 'Performed',
+    release = 'test',
+  }: {
+    reauthentication?: string;
+    session?: string;
+    table?: string;
+    recordId?: string;
+    seen?: string;
+    hash?: string;
+    statementVersion?: number;
+    meaning?: string;
+    release?: string;
+  } = {}) =>
+    `select lims.sign('${reauthentication}', '${session}', '${table}', '${recordId}', ${seen}, ${hash},
+                      ${statementVersion}, '${meaning}', '${release}')`;
+
+  async function attempt(...statements: string[]): Promise<pg.DatabaseError | null> {
+    await client.query('begin');
+    try {
+      for (const statement of statements) await client.query(statement);
+      return null;
+    } catch (error) {
+      if (error instanceof pg.DatabaseError) return error;
+      throw error;
+    } finally {
+      await client.query('rollback');
+    }
+  }
+  async function refused(...statements: string[]): Promise<string> {
+    const error = await attempt(...statements);
+    assert.ok(error, `the database accepted ${statements.at(-1)}`);
+    assert.equal(error.code, 'LA010', error.message);
+    return error.message;
+  }
+
+  covered.add('lims.signature.sign_only');
+  it('a Signature inserted by a statement, not through the signing function, is refused even for the superuser', async () => {
+    const error = await refusalOf(...insert('lims.signature', { ...tables['lims.signature'].row, id: randomUUID() }));
+    assert.deepEqual([error.code, error.message], ['LA009', 'a Signature is written only by lims.sign']);
+    assert.match(error.where ?? '', /function refuse_unsigned_insert\(\)/);
+  });
+
+  it('the app role holds no insert on Signatures, so only the function, which runs as the owner, writes one', async () => {
+    const error = await attempt(
+      AUDIT_CONTEXT,
+      'set local role lims_app',
+      `insert into lims.signature (lab_id, person_id) values ('${id.lab}', '${id.person}')`,
+    );
+    assert.equal(error?.code, '42501', error?.message);
+  });
+
+  it('a person who re-authenticated in this transaction signs the Record Version they saw, and the row copies the stored hash, form and statement', async () => {
+    await client.query('begin');
+    try {
+      await client.query(asPerson());
+      await client.query(reauthenticate());
+      const { rows } = await client.query<{ sign: string }>(sign());
+      const signature = (
+        await client.query<Row>(
+          `select s.lab_id, s.person_id, s.printed_name, s.username, s.role, s.meaning, s.canonical_form,
+                  s.statement_version, s.statement_hash, s.authenticator, s.session_id, s.app_release,
+                  s.reauthentication_id, v.version, v.content_hash = s.content_hash as hash_copied,
+                  v.canonical_form = s.canonical_form as form_copied, t.statement_hash = s.statement_hash as statement_copied
+             from lims.signature s
+             join lims.record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
+             join lims.signature_statement t on t.version = s.statement_version
+            where s.id = $1`,
+          [rows[0]?.sign],
+        )
+      ).rows[0];
+      assert.deepEqual(signature, {
+        lab_id: id.lab,
+        person_id: id.person,
+        printed_name: 'Refusal Person',
+        username: 'refusal.person',
+        role: 'Analyst',
+        meaning: 'Performed',
+        canonical_form: 1,
+        statement_version: 1,
+        statement_hash: statementHash,
+        authenticator: 'Password',
+        session_id: id.session,
+        app_release: 'test',
+        reauthentication_id: id.probeReauthentication,
+        version: 2,
+        hash_copied: true,
+        form_copied: true,
+        statement_copied: true,
+      });
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  it('a Test Report this transaction created is signed on sight of its Test', async () => {
+    const report = randomUUID();
+    assert.equal(
+      await attempt(
+        asPerson('QA'),
+        `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', 'QA')`,
+        reauthenticate('Released'),
+        `insert into lims.test_report (lab_id, id, test_id, number) values ('${id.lab}', '${report}', '${id.untested}', 'RF-R-2026-000009')`,
+        sign({
+          table: 'test_report',
+          recordId: report,
+          meaning: 'Released',
+          seen: versionOf(id.untested, 2),
+          hash: hashOf(id.untested, 2),
+        }),
+      ),
+      null,
+    );
+  });
+
+  const cases: { name: string; statements: string[]; message: string | RegExp }[] = [
+    {
+      name: 'a service identity cannot sign',
+      statements: [asService, reauthenticate(), sign()],
+      message: 'only a person signs; svc:test is a service identity',
+    },
+    {
+      name: 'an actor who is not a known person cannot sign',
+      statements: [asPerson().replace('person:refusal.person', 'person:nobody'), reauthenticate(), sign()],
+      message: 'the signer person:nobody is not a known person',
+    },
+    {
+      name: 'a locked account cannot sign',
+      statements: [
+        asPerson(),
+        `update lims.person set locked_at = clock_timestamp() where id = '${id.person}'`,
+        reauthenticate(),
+        sign(),
+      ],
+      message: "the signer's account is locked",
+    },
+    {
+      name: 'signing with no re-authentication record is refused',
+      statements: [asPerson(), sign({ reauthentication: missing })],
+      message: 'no re-authentication record: the signer has not re-entered their credentials',
+    },
+    {
+      name: 'signing with a re-authentication record from an earlier transaction is refused',
+      statements: [asPerson('Analyst'), sign({ reauthentication: id.secondReauthentication, meaning: 'Reviewed' })],
+      message: 'the re-authentication record was written by an earlier transaction',
+    },
+    {
+      name: "signing with another person's re-authentication record is refused",
+      statements: [asPerson(), reauthenticate('Performed', id.otherPerson, id.otherPersonSession), sign()],
+      message: "the re-authentication record is another person's",
+    },
+    {
+      name: "signing on another live session of the signer than the re-authentication record's is refused",
+      statements: [asPerson(), reauthenticate(), sign({ session: id.secondSession })],
+      message: 'the re-authentication record was given on another session',
+    },
+    {
+      name: 'signing on sight of a signature statement that is no longer in force is refused',
+      statements: [
+        asPerson(),
+        `insert into lims.signature_statement (version, statement) values (2, convert_to('A newer statement (fictional).', 'UTF8'))`,
+        reauthenticate(),
+        sign(),
+      ],
+      message:
+        'the signature statement changed to version 2 after the signer saw version 1; it must be read again before signing',
+    },
+    {
+      name: 'signing with a re-authentication record given for another meaning is refused',
+      statements: [asPerson(), reauthenticate('Reviewed'), sign()],
+      message: 'the re-authentication record was given to sign Reviewed, not Performed',
+    },
+    {
+      name: 'signing twice with one re-authentication record is refused',
+      statements: [asPerson(), reauthenticate(), sign(), sign()],
+      message: 'the re-authentication record is already used by a Signature',
+    },
+    {
+      name: 'signing on a session that has ended is refused',
+      statements: [
+        asPerson(),
+        reauthenticate(),
+        `update lims.session set ended_at = clock_timestamp() where id = '${id.session}'`,
+        sign(),
+      ],
+      message: "the re-authentication record's session has ended",
+    },
+    {
+      name: 'signing a Meaning the held role does not give is refused',
+      statements: [asPerson('Analyst'), reauthenticate('Reviewed'), sign({ meaning: 'Reviewed' })],
+      message: 'the role Analyst does not give the Signature Meaning Reviewed',
+    },
+    {
+      name: 'signing in a role the person does not hold in the Lab is refused',
+      statements: [asPerson('QA'), reauthenticate(), sign()],
+      message: 'the signer does not hold the role QA in this Lab',
+    },
+    {
+      name: 'signing on sight of a Record Version that is not one of this Lab is refused',
+      statements: [asPerson(), reauthenticate(), sign({ seen: `'${missing}'` })],
+      message: "the Record Version shown is not one of this Lab's",
+    },
+    {
+      name: 'signing on sight of a hash that is not the Record Version stored hash is refused',
+      statements: [asPerson(), reauthenticate(), sign({ hash: `'\\x${zeros.toString('hex')}'::bytea` })],
+      message: 'the hash shown is not the hash of Record Version 2',
+    },
+    {
+      name: 'signing a record that another transaction versioned after the signer saw it is refused',
+      statements: [asPerson(), reauthenticate(), sign({ seen: versionOf(id.test, 1), hash: hashOf(id.test, 1) })],
+      message: 'the record changed after the signer saw it; it must be read again before signing',
+    },
+    {
+      name: 'signing a record other than the one shown, which this transaction did not create, is refused',
+      statements: [asPerson(), reauthenticate(), sign({ recordId: id.untested })],
+      message: 'the test signed is not the record shown, nor one this signing created',
+    },
+    {
+      name: 'signing a Test Report that is not built on the Test shown is refused',
+      statements: [
+        asPerson('QA'),
+        `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', 'QA')`,
+        reauthenticate('Released'),
+        `insert into lims.test_report (lab_id, id, test_id, number) values ('${id.lab}', '${id.probeReport}', '${id.untested}', 'RF-R-2026-000008')`,
+        sign({ table: 'test_report', recordId: id.probeReport, meaning: 'Released' }),
+      ],
+      message: 'the Test Report signed is not built on the Test shown',
+    },
+    {
+      name: 'signing with a null argument is refused rather than skipping the check it feeds',
+      statements: [asPerson(), reauthenticate(), sign({ hash: 'null' })],
+      message: /^a signing names its re-authentication record/,
+    },
+    {
+      name: 'signing a record with no Record Version is refused',
+      statements: [asPerson(), reauthenticate(), sign({ recordId: missing })],
+      message: /^there is no Record Version of test/,
+    },
+  ];
+  for (const c of cases)
+    it(c.name, async () => {
+      const message = await refused(...c.statements);
+      if (typeof c.message === 'string') assert.equal(message, c.message);
+      else assert.match(message, c.message);
+    });
 });
 
 it('every constraint and trigger of a freshly migrated database has a refusing test', async () => {
@@ -1352,6 +2454,25 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
       'unreachable: generated from content, which is not null',
     ],
     ['lims.session.session_lab_id_id_person_id_key', 'unreachable: (lab_id, id) is already the key'],
+    [
+      'lims.record_version.record_version_lab_id_id_content_hash_canonical_form_key',
+      'unreachable: (lab_id, id) is already the key',
+    ],
+    [
+      'lims.signature_statement.signature_statement_version_statement_hash_key',
+      'unreachable: version is already the key',
+    ],
+    [
+      'lims.signature_statement.signature_statement_statement_hash_not_null',
+      'unreachable: generated from statement, which is not null',
+    ],
+    ['lims.reauthentication.reauthentication_facts_key', 'unreachable: (lab_id, id) is already the key'],
+    ['lims.person.staff_account_through_identity_verification', 'staff-accounts.test.ts'],
+    ['lims.membership.staff_role_needs_identity_verification', 'staff-accounts.test.ts'],
+    [
+      'lims.signature.signature_username_not_null',
+      'unreachable: sign_as_the_person sets it with printed_name, whose not null refuses first',
+    ],
     ['lims.test.version_record', 'record-version.test.ts'],
     ['lims.result.version_record', 'record-version.test.ts'],
     ['lims.test_report.version_record', 'record-version.test.ts'],

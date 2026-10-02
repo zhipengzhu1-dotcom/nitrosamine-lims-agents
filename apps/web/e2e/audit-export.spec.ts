@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { expect, type Locator, type Page, test } from '@playwright/test';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
+import { expect, type Locator, type Page, test } from './walk.ts';
 
 async function signIn(page: Page, username: string) {
   await page.getByLabel('Username').fill(username);

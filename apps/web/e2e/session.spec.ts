@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { SESSION_ENDED } from '@lims/domain';
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Page, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 const database = execFileSync(process.execPath, ['../../packages/db/src/checkout.ts', 'database', 'lims_e2e'], {
@@ -36,6 +36,7 @@ test('the Bench Rail counts down to the idle end, and returns to sign-in only wh
 }) => {
   await page.clock.install();
   await page.goto('/');
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill('quinn.qa');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();

@@ -12,13 +12,13 @@ import {
   createDb,
   type DB,
   databaseUrl,
-  dbConfig,
+  dbServer,
   type Json,
   type JsonObject,
 } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 
 const DATABASE = checkoutDatabase('lims_record_version_test');
 const SLICE = checkoutDatabase('lims_record_version_slice_test');
@@ -558,9 +558,50 @@ describe('the migration moves the thin slice’s signed content onto Record Vers
     }
   });
 
+  it("the thin slice's Signatures gain the printed name, username and role as signed and their Record Version's hash and form, and keep no statement, session or release", async () => {
+    const { rows } = await client.query<Record<string, unknown>>(
+      `select s.meaning, s.printed_name, s.username, s.role, s.content_hash = v.content_hash as hash_copied,
+              s.canonical_form = v.canonical_form as form_copied,
+              num_nulls(s.statement_version, s.statement_hash, s.authenticator, s.session_id, s.app_release,
+                        s.reauthentication_id) as nulls
+         from lims.signature s join lims.record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
+        order by s.meaning::text`,
+    );
+    assert.deepEqual(
+      rows,
+      [
+        ['Performed', 'Analyst'],
+        ['Performed', 'Analyst'],
+        ['Released', 'QA'],
+        ['Reviewed', 'Reviewer'],
+      ].map(([meaning, role]) => ({
+        meaning,
+        printed_name: 'Slice Person',
+        username: 'slice.person',
+        role,
+        hash_copied: true,
+        form_copied: true,
+        nulls: 6,
+      })),
+    );
+  });
+
+  it("a later migration gives each thin-slice Signature its signer's printed name and username", async () => {
+    const { rows } = await client.query<{ matches: boolean }>(
+      `select s.printed_name = p.display_name and s.username = p.username as matches
+         from lims.signature s join lims.person p on p.id = s.person_id`,
+    );
+    assert.ok(rows.length > 0, 'the migrated database holds Signatures');
+    assert.deepEqual(
+      rows.map((r) => r.matches),
+      rows.map(() => true),
+    );
+  });
+
   it('the Audit Trail records the move under svc:migrate and both chains still verify', async () => {
     const { rows } = await client.query<{ table_name: string; op: string; n: string }>(
-      `select table_name, op, count(*) as n from lims.audit_entry where actor = 'svc:migrate' group by 1, 2 order by 1, 2`,
+      `select table_name, op, count(*) as n from lims.audit_entry
+        where actor = 'svc:migrate' and reason like 'Move the thin slice%' group by 1, 2 order by 1, 2`,
     );
     assert.deepEqual(rows, [
       { table_name: 'record_version', op: 'INSERT', n: '7' },

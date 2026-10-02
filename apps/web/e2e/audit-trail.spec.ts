@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string) {
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -22,9 +23,11 @@ async function atLeast(target: Locator, width: number, height: number) {
 }
 
 async function submittedTest(page: Page, description: string): Promise<string> {
+  const labs: { id: string; code: string }[] = await (await page.request.get('/api/labs')).json();
+  const labId = labs.find((lab) => lab.code === 'RD')?.id;
   const as = async (username: string) => {
     await page.request.post('/api/logout', { data: {} });
-    const res = await page.request.post('/api/login', { data: { username, password: DEMO_PASSWORD } });
+    const res = await page.request.post('/api/login', { data: { username, password: DEMO_PASSWORD, labId } });
     expect(res.ok(), `sign in as ${username}: ${res.status()} ${await res.text()}`).toBe(true);
   };
   const step = async (name: string, body: object) => {
@@ -42,6 +45,7 @@ async function submittedTest(page: Page, description: string): Promise<string> {
   const ana = analysts.find((a: { displayName: string }) => a.displayName === 'Ana Ferreira');
   await step('assign', { testId, input: { assigneeId: ana.id } });
   await as('ana.analyst');
+  const { recordVersion, statement } = await (await page.request.get(`/api/tests/${testId}`)).json();
   await step('enterResult', {
     testId,
     input: {
@@ -52,7 +56,12 @@ async function submittedTest(page: Page, description: string): Promise<string> {
       notebookRef: 'RD-NB-0007-012',
       performedOn: '2026-09-30',
     },
-    signature: { password: DEMO_PASSWORD },
+    signature: {
+      username: 'ana.analyst',
+      password: DEMO_PASSWORD,
+      recordVersion: { version: recordVersion.version, contentHash: recordVersion.contentHash },
+      statementVersion: statement.version,
+    },
   });
   await page.request.post('/api/logout', { data: {} });
   return testId;
@@ -99,7 +108,8 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await page.getByLabel('Order').selectOption('Newest first');
   await expect(entries.first()).toContainText('Signature Performed');
   const signed = entries.first();
-  const versioned = entries.filter({ has: page.locator('details.long') }).first();
+  // The Signature entry above it also has long values (its copied hashes), so the Record Version is found by its content.
+  const versioned = entries.filter({ has: page.locator('details.long', { hasText: '"analyte"' }) }).first();
   await expect(versioned).toContainText('Record Version');
   await expect(versioned.locator('details.long'), 'the signed Record Version and its SHA-256 are long').toHaveCount(2);
   const long = versioned.locator('details.long').first();
@@ -124,6 +134,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await search.fill('Reviewed');
   await expect(entries).toHaveCount(0);
   await page.getByRole('button', { name: 'Review', exact: true }).click();
+  await page.getByLabel(/User ID/).fill('rui.reviewer');
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign as Reviewed' }).click();
   await expect(page.getByRole('status')).toContainText('now Reviewed');
