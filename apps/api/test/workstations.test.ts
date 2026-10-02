@@ -304,6 +304,7 @@ describe('Lock and Switch user', () => {
       routes.lock,
       routes.unlock,
       routes.logout,
+      routes.setPasswordThroughLink,
     ]);
     const everyOther = [...Object.values(routes), ...stepNames.map((name) => stepRoute(name))].filter(
       (route) => !servedWhileLocked.has(route),

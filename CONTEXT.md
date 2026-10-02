@@ -60,6 +60,18 @@ _Avoid_: Administrator, superuser, IT
 Whoever runs the server and database outside the system. Independent of the Lab, holds no business role, and has no access to records through the system.
 _Avoid_: Admin, host, IT
 
+**Membership**:
+A person's role in one Lab, granted by the Admin with a reason. A person holds a role only in a Lab where they have a Membership for it, and someone holding Admin or Platform Operator in any Lab holds no business role in any Lab.
+_Avoid_: Permission, group, access
+
+**Printed name**:
+The name a person's Signatures and records show. The Admin may change it with a reason; each Signature keeps the printed name as signed. Unlike the username, which never changes.
+_Avoid_: Full name, signing name
+
+**One-time link**:
+The link through which a person sets their own password, so that the Admin never sees or sets it. It works once and expires; the LIMS keeps only a hash of it.
+_Avoid_: Invitation, reset email, activation code
+
 ### Sample chain
 
 **Submission**:
@@ -533,7 +545,7 @@ The record that gives a QA person the authority to sign Approved on Authorisatio
 _Avoid_: Designation, delegation, QA authorisation
 
 **Identity Verification**:
-The recorded check of who a person is (who checked, what, and when), made before their first credential is issued and again before a replacement authenticator is enrolled. It is one of the four facts that enable signing.
+The recorded check of who a person is (which Admin checked, what, and when), made before their first credential is issued and again before a replacement authenticator is enrolled. It is one of the four facts that enable signing.
 _Avoid_: ID check, onboarding, vetting
 
 **Return**:

@@ -804,6 +804,11 @@ select {
   font: 600 15px var(--font);
   cursor: pointer;
 }
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .rbtn:active:not(:disabled) {

@@ -5,6 +5,7 @@ import {
   routes,
   type StepInput,
   type StepName,
+  staffRefusal,
   stepRoute,
   steps,
   type TestState,
@@ -152,6 +153,7 @@ export const modules = [
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
   { key: 'workstations', name: 'Workstations', holds: '' },
+  { key: 'staff', name: 'Staff', holds: '' },
 ] as const;
 export type Module = (typeof modules)[number];
 type ModuleKey = Module['key'];
@@ -174,11 +176,13 @@ export function Shell({
     <div className="frame">
       <TopBar lab={me.lab}>
         <nav>
-          {modules.map((m) => (
-            <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
-              {m.name}
-            </a>
-          ))}
+          {modules
+            .filter((m) => m.key !== 'staff' || staffRefusal(me.roles) === null)
+            .map((m) => (
+              <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
+                {m.name}
+              </a>
+            ))}
         </nav>
       </TopBar>
       <main className="plane">{children}</main>

@@ -12,7 +12,7 @@ const SYSTEM = { actor: 'svc:test', role: 'system', reason: 'Arrange a Lab choic
 
 async function inBothLabs(username: string): Promise<Account> {
   const person = await api.addPerson(username, ['LabManager']);
-  await audited(api.db, SYSTEM, (tx) =>
+  await audited(api.superuser, SYSTEM, (tx) =>
     tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Reviewer' }).execute(),
   );
   return person;

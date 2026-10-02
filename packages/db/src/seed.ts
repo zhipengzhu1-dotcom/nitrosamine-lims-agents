@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import { dbConfig } from './config.ts';
 import { hashPassword } from './credentials.ts';
@@ -43,12 +43,15 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
       .values({ code: 'RD-MTH-0001', version: '1', title: 'NDMA in metformin hydrochloride by LC-MS/MS' })
       .returning('id')
       .executeTakeFirstOrThrow();
-    // The Lab comes after the company rows: a transaction locks the company chain before any Lab's (lims.lock_chain).
-    const { labId } = await tx
-      .insertInto('lab')
-      .values({ code: 'RD', name: 'R&D Laboratory (fictional)', timeZone: 'America/New_York' })
-      .returning('labId')
-      .executeTakeFirstOrThrow();
+    // One transaction seeds everything, because only the seeding transaction may make staff without an Identity
+    // Verification (0015). A Lab row starts its own chain, and chains are locked company first, then Labs by ID, so
+    // the Labs come after the company rows and in ID order.
+    const [labId, secondLabId] = [randomUUID(), randomUUID()];
+    const labs = [
+      { labId, code: 'RD', name: 'R&D Laboratory (fictional)', timeZone: 'America/New_York' },
+      { labId: secondLabId, code: secondLab.code, name: secondLab.name, timeZone: 'America/New_York' },
+    ].sort((x, y) => (x.labId < y.labId ? -1 : 1));
+    for (const lab of labs) await tx.insertInto('lab').values(lab).execute();
     await tx
       .insertInto('room')
       .values([
@@ -71,19 +74,11 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
       await tx.insertInto('membership').values({ labId, personId: id, role: p.role }).execute();
       if ('trained' in p)
         await tx.insertInto('trainingRecord').values({ labId, personId: id, methodId: method.id }).execute();
+      if (secondLab.members.some((m) => m === p.username))
+        await tx.insertInto('membership').values({ labId: secondLabId, personId: id, role: p.role }).execute();
       out.push({ id, username: p.username, role: p.role, password });
     }
     return out;
-  });
-  // Its own transaction: the new Lab is a company row, and the company chain is locked before any Lab's.
-  await audited(db, SEED, async (tx) => {
-    const { labId } = await tx
-      .insertInto('lab')
-      .values({ code: secondLab.code, name: secondLab.name, timeZone: 'America/New_York' })
-      .returning('labId')
-      .executeTakeFirstOrThrow();
-    for (const a of accounts.filter((a) => secondLab.members.some((m) => m === a.username)))
-      await tx.insertInto('membership').values({ labId, personId: a.id, role: a.role }).execute();
   });
   return accounts;
 }
