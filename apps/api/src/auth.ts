@@ -5,6 +5,7 @@ import { type AuditContext, audited, type DB, type Role, type SignInFailure } fr
 import { hashPassword, verifyPassword } from '@lims/db/credentials';
 import {
   type ActorContext,
+  type Authenticator,
   DECIDED_PASSWORD,
   DEMO_PASSWORD,
   type PasswordRule,
@@ -182,11 +183,11 @@ export const refusalsUnder = (policy: LoginPolicy): Refusals => {
 export const record = (tx: Transaction<DB>, event: AccessEvent) => tx.insertInto('accessEvent').values(event).execute();
 
 /** Thrown inside a transaction when another request spent the checked code first, so that it rolls back with nothing written. */
-class CodeSpent extends Error {}
+const CODE_SPENT = new Error('another request spent this code first');
 
-/** Spends the checked code in `tx`, or throws `CodeSpent` for `auditedUnlessCodeSpent` to record and refuse. */
+/** Spends the checked code in `tx`, or throws `CODE_SPENT` for `auditedUnlessCodeSpent` to record and refuse. */
 async function spendCodeOrThrow(tx: Transaction<DB>, personId: string, proof: CodeProof): Promise<void> {
-  if (!(await spendCode(tx, personId, proof))) throw new CodeSpent('another request spent this code first');
+  if (!(await spendCode(tx, personId, proof))) throw CODE_SPENT;
 }
 
 /** How a write refused because its code was spent first is recorded, under which context, and the sentence it answers. */
@@ -197,7 +198,7 @@ interface SpentCode {
 }
 
 /**
- * Runs `write` audited under `ctx`. When `write` throws `CodeSpent`, the rollback keeps nothing of it; `spent.event`
+ * Runs `write` audited under `ctx`. When `write` throws `CODE_SPENT`, the rollback keeps nothing of it; `spent.event`
  * is then written in a transaction of its own, not counted toward the lockout because the code was right, and the
  * write is refused as badCredentials with `spent.sentence`.
  */
@@ -210,7 +211,7 @@ async function auditedUnlessCodeSpent<R>(
   try {
     return await audited(db, ctx, write);
   } catch (error) {
-    if (!(error instanceof CodeSpent)) throw error;
+    if (error !== CODE_SPENT) throw error;
     await audited(db, spent.recordedAs, (tx) => record(tx, spent.event));
     return refuse('badCredentials', spent.sentence);
   }
@@ -344,9 +345,6 @@ export function sourceAddressOf(req: {
   const mapped = /^::ffff:(.+)$/i.exec(address)?.[1];
   return mapped && isIP(mapped) === 4 ? mapped : address;
 }
-
-/** What proved the person: their password alone under the demo login, or their password and an authenticator code. */
-export type Authenticator = 'Password' | 'PasswordAndCode';
 
 /** The credentials `reauthenticate` checked; only this module makes one, so a write cannot claim a proof it was not given. */
 class Reauthenticated {

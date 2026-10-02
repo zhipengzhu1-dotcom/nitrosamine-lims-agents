@@ -249,6 +249,28 @@ it('under the decided login, signing refuses without the typed user ID, the pass
   ok(await enterResult(client, testId, account, { code: code(1) }));
 });
 
+it('a Signature carries what proved its signer: the password and a code under the decided login, the password alone under the demo', async () => {
+  const { account, code } = await enrolled('sig.proof');
+  const client = new Client(decided.base);
+  ok(
+    await client.call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId: api.labId,
+      code: code(),
+    }),
+  );
+  const decidedTest = await assignedTo(account);
+  ok(await enterResult(client, decidedTest, account, { code: code(1) }));
+  const ana = api.person('ana');
+  const demoTest = await assignedTo(ana);
+  ok(await enterResult(await api.login(ana), demoTest, ana, {}));
+  const proofs = async (id: string) =>
+    ok(await as.lena.call(routes.test, { id })).signatures.map((s) => [s.meaning, s.authenticator]);
+  assert.deepEqual(await proofs(decidedTest), [['Performed', 'PasswordAndCode']]);
+  assert.deepEqual(await proofs(demoTest), [['Performed', 'Password']]);
+});
+
 it('enrolment shows the secret as text and as a QR payload once; a second enrolment is the uniform refusal, so the right password alone learns nothing', async () => {
   const account = await api.addPerson('erin.enrol', ['Analyst']);
   const client = new Client(decided.base);

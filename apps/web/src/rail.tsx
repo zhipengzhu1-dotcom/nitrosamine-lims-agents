@@ -61,7 +61,7 @@ export const stepUi: {
 
 type SignedMeaning = NonNullable<(typeof steps)[StepName]['signs']>;
 
-/** What the signature sheet and the Test Report say a signing re-enters, under this login. */
+/** What the signature sheet says a signing re-enters under this login; a given Signature's note comes from the Signature itself. */
 const signingNote = (secondFactor: boolean) =>
   secondFactor
     ? 'A signing re-enters the user ID, the password and a fresh code from the authenticator.'

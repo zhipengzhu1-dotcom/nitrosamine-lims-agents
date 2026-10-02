@@ -115,11 +115,16 @@ const recordVersionRef = Type.Object({
   contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
 });
 export type RecordVersionRef = Static<typeof recordVersionRef>;
+/** What proved a signer at their Signature: the password alone under the demo login, or the password and an authenticator code. */
+export const authenticator = Type.Enum({ Password: 'Password', PasswordAndCode: 'PasswordAndCode' } as const);
+export type Authenticator = Static<typeof authenticator>;
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
   username: Type.String(),
   role: role,
+  /** Null only on a Signature given before the signing function recorded what proved the signer. */
+  authenticator: nullable(authenticator),
   signedAt: instant,
   /** `signedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
   signedAtLab: instant,
