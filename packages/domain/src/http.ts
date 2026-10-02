@@ -22,6 +22,7 @@ const testState = Type.Enum({
   Reported: 'Reported',
 } as const satisfies { [K in db.TestState]: K });
 export type TestState = Static<typeof testState>;
+export const isTestState = (value: unknown): value is TestState => Value.Check(testState, value);
 const meaning = Type.Enum({
   Acknowledged: 'Acknowledged',
   Approved: 'Approved',
@@ -41,11 +42,12 @@ const decimal = Type.String({ pattern: `^${decimalPattern}$` });
 const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
- * A point in time: on the wire, and so in the web and the tests, the ISO 8601 UTC string the database clock produced.
- * The API hands Fastify the Date that Kysely returns, and Fastify writes it with toISOString.
+ * A point in time: on the wire, and so in the web and the tests, an ISO 8601 string the database clock produced, in
+ * UTC unless the field says otherwise (`atLab` carries the Lab's offset). The API hands Fastify the Date that Kysely
+ * returns, and Fastify writes it with toISOString.
  */
 export type Instant = string & { readonly [instantBrand]: true };
-const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' }));
+export const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' }));
 const nullable = <S extends TSchema>(schema: S) => Type.Union([schema, Type.Null()]);
 const closed = { additionalProperties: false } as const;
 
@@ -89,25 +91,83 @@ export type Signature = Static<typeof signature>;
 /** An Audit Trail row snapshot, keyed by its stored column names. */
 const rowSnapshot = Type.Record(Type.String(), Type.Unknown());
 export type RowSnapshot = Static<typeof rowSnapshot>;
-const auditEntry = Type.Object({
-  seq: Type.String(),
+export const auditedTable = Type.Enum({
+  customer: 'customer',
+  person: 'person',
+  method: 'method',
+  submission: 'submission',
+  sample: 'sample',
+  test: 'test',
+  result: 'result',
+  test_report: 'test_report',
+  signature: 'signature',
+} as const);
+export type AuditedTable = Static<typeof auditedTable>;
+const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
+export type ChainKind = Static<typeof chainKind>;
+const sha256Hex = Type.String({ pattern: '^[0-9a-f]{64}$' });
+/** A chain entry number as the database counts it: digits only, so that domain code can compare it without throwing. */
+const seq = Type.String({ pattern: '^[0-9]+$' });
+export const auditOp = Type.Enum({ INSERT: 'INSERT', UPDATE: 'UPDATE', DELETE: 'DELETE' } as const);
+/** An Audit Trail entry as the database holds it. */
+const rawEntry = Type.Object({
+  chain: Type.String(),
+  seq,
   at: instant,
   actor: Type.String(),
   role: Type.String(),
   reason: Type.String(),
   table: Type.String(),
-  op: Type.String(),
+  op: auditOp,
   oldRow: nullable(rowSnapshot),
   newRow: nullable(rowSnapshot),
+  transactionId: nullable(Type.String()),
+  prevHash: sha256Hex,
+  hash: sha256Hex,
 });
-export type AuditEntry = Static<typeof auditEntry>;
+export type RawEntry = Static<typeof rawEntry>;
+const recordRef = Type.Object({ table: Type.String(), id: Type.String(), kind: Type.String(), label: Type.String() });
+export type RecordRef = Static<typeof recordRef>;
+/** A value as the panel shows it: a reference reads as the record's label at the entry's time and links to its trail. */
+const shownValue = Type.Object({
+  text: Type.String(),
+  ref: nullable(Type.Object({ table: auditedTable, id: Type.String() })),
+});
+export type ShownValue = Static<typeof shownValue>;
+const trailChange = Type.Object({
+  field: Type.String(),
+  label: Type.String(),
+  old: nullable(shownValue),
+  new: nullable(shownValue),
+});
+export type TrailChange = Static<typeof trailChange>;
+/**
+ * One Audit Trail entry in glossary words. `at` is the instant in UTC to the microsecond, as the hashed bytes render
+ * it; `atLab` is the same instant on the owning Lab's wall clock, ISO 8601 with the Lab's offset, and null on the
+ * company chain. The web formats each in `apps/web/src/time.ts`.
+ */
+const trailEntry = Type.Object({
+  chain: chainKind,
+  seq,
+  at: instant,
+  atLab: nullable(instant),
+  actor: Type.Object({ label: Type.String(), role: Type.String() }),
+  reason: Type.String(),
+  op: rawEntry.properties.op,
+  record: recordRef,
+  changes: Type.Array(trailChange),
+  afterFirstSave: Type.Boolean(),
+  raw: rawEntry,
+});
+export type TrailEntry = Static<typeof trailEntry>;
+const trail = Type.Object({ record: recordRef, labZone: Type.String(), entries: Type.Array(trailEntry) });
+export type Trail = Static<typeof trail>;
 const reportRef = Type.Object({ number: Type.String() });
 const testView = Type.Object({
   test: testRow,
   report: nullable(reportRef),
   result: nullable(result),
   signatures: Type.Array(signature),
-  auditTrail: Type.Array(auditEntry),
   next: nullable(Type.Enum(stepNames)),
 });
 const testReport = Type.Object({
@@ -120,12 +180,16 @@ const lookups = Type.Object({
   methods: Type.Array(Type.Object({ id: uuid, code: Type.String(), version: Type.String(), title: Type.String() })),
   analysts: Type.Array(Type.Object({ id: uuid, displayName: Type.String() })),
 });
-/** When both hash chains were recomputed, and the seq of the first broken entry of each, or null when it holds. */
-const auditTrailVerification = Type.Object({
-  at: instant,
-  lab: nullable(Type.String()),
-  company: nullable(Type.String()),
+const chainVerification = Type.Object({
+  chain: chainKind,
+  lastEntry: seq,
+  intactThrough: seq,
+  firstFailure: nullable(seq),
+  report: Type.String(),
 });
+export type ChainVerification = Static<typeof chainVerification>;
+const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
+export type AuditTrailVerification = Static<typeof auditTrailVerification>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** What a committed step answers, and what a retry of the same press answers again. */
 export type StepTaken = Static<typeof stepTaken>;
@@ -222,6 +286,13 @@ export const routes = {
   tests: route('GET', '/api/tests', {}, Type.Array(testRow)),
   test: route('GET', '/api/tests/:id', { params: byId }, testView),
   report: route('GET', '/api/tests/:id/report', { params: byId }, testReport),
+  testTrail: route('GET', '/api/tests/:id/trail', { params: byId }, trail),
+  recordTrail: route(
+    'GET',
+    '/api/trails/:table/:id',
+    { params: Type.Object({ table: auditedTable, id: uuid }) },
+    trail,
+  ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
 } satisfies Record<string, Route>;
 
