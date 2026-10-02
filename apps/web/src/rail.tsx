@@ -137,7 +137,7 @@ export function stepAction(
       });
       sessionStorage.removeItem(slot);
       await onDone();
-      return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
+      return `${step.signs ? `${step.signs} Signature` : ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
   };
 }
