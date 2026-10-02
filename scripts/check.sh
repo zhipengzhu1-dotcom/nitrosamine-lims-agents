@@ -17,6 +17,10 @@ if git grep -nIE '^(<{7}|>{7}) '; then
   echo "A tracked file holds a merge conflict marker, at the file and line above. Resolve the conflict, delete the marker lines, and stage the file." >&2
   exit 1
 fi
+if git grep -nE 'runs-on:' -- '.github/workflows/*' | grep -v 'runs-on: \[self-hosted, '; then
+  echo "Every CI job runs on the self-hosted runners (ci/runner/README.md). Write its runs-on as [self-hosted, lims-<slot>] on one line." >&2
+  exit 1
+fi
 if git grep -nE '"[~^][0-9]' -- '*package.json'; then
   echo "Pin every dependency to an exact version." >&2
   exit 1
