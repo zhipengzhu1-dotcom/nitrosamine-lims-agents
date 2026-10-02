@@ -202,7 +202,7 @@ export type StepTaken = Static<typeof stepTaken>;
  * `badCredentials` is the one answer to every sign-in failure;
  * `accountLocked`, `labNotChosen` for a sign-in that names no Lab, and `role` for a Lab where the person holds no
  * Membership, come only after the right password. `noSession` covers no session presented and a session that
- * has ended. `stale` asks the person to reload; `state` says the step does not apply. `keyReused` is a Commit Key sent again
+ * has ended. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
  * with a different step or input, or from another session. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.

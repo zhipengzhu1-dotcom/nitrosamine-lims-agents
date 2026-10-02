@@ -53,6 +53,7 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
 }
 
 let actorChanged = (_me: ActorContext) => {};
+/** Registers the one listener that shows the person the session the server answered with after a Lab switch. */
 export const onActorChanged = (fn: (me: ActorContext) => void) => {
   actorChanged = fn;
 };

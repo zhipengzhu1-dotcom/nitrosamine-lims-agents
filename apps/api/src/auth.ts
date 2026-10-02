@@ -98,8 +98,8 @@ async function countFailure(tx: Transaction<DB>, personId: string) {
     .executeTakeFirstOrThrow();
 }
 
-/** Locks the person's row for the session about to open, and answers whether a lock landed since the password was checked. */
-async function lockedMeanwhile(tx: Transaction<DB>, personId: string): Promise<boolean> {
+/** Locks the person's row for the session about to open; answers true, and resets nothing, if a lock landed since the password was checked. */
+async function resetFailuresUnlessLocked(tx: Transaction<DB>, personId: string): Promise<boolean> {
   const { lockedAt, failedLogins } = await tx
     .selectFrom('person')
     .select(['lockedAt', 'failedLogins'])
@@ -109,6 +109,17 @@ async function lockedMeanwhile(tx: Transaction<DB>, personId: string): Promise<b
   if (lockedAt) return true;
   if (failedLogins > 0) await tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', personId).execute();
   return false;
+}
+
+async function endSession(tx: Transaction<DB>, session: SessionKey): Promise<boolean> {
+  const ended = await tx
+    .updateTable('session')
+    .set({ endedAt: sql`now()` })
+    .where('labId', '=', session.labId)
+    .where('id', '=', session.id)
+    .where('endedAt', 'is', null)
+    .executeTakeFirst();
+  return ended.numUpdatedRows > 0n;
 }
 
 async function openSession(tx: Transaction<DB>, personId: string, labId: string, token: string): Promise<SessionKey> {
@@ -252,7 +263,7 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
 
       const token = randomBytes(32).toString('base64url');
       const locked = await audited(db, SIGN_IN_SERVICE, async (tx) => {
-        if (await lockedMeanwhile(tx, person.id)) {
+        if (await resetFailuresUnlessLocked(tx, person.id)) {
           await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...subject });
           return true;
         }
@@ -275,14 +286,7 @@ export function sessionRoutes(app: App, db: Kysely<DB>): void {
       const { actor, sessionKey: session } = req;
       const as = { actor: `person:${actor.person.username}`, role: NEEDS_NO_ROLE, reason: 'Sign out' };
       await audited(db, as, async (tx) => {
-        const ended = await tx
-          .updateTable('session')
-          .set({ endedAt: sql`now()` })
-          .where('labId', '=', session.labId)
-          .where('id', '=', session.id)
-          .where('endedAt', 'is', null)
-          .executeTakeFirst();
-        if (!ended.numUpdatedRows) return;
+        if (!(await endSession(tx, session))) return;
         await record(tx, {
           kind: 'SignOut',
           subjectId: actor.person.id,
@@ -338,19 +342,12 @@ export function sessionRoutes(app: App, db: Kysely<DB>): void {
       }
 
       const token = randomBytes(32).toString('base64url');
-      const refused = await audited(db, as, async (tx): Promise<SignInFailure | 'SessionEnded' | null> => {
-        if (await lockedMeanwhile(tx, person.id)) {
+      const outcome = await audited(db, as, async (tx): Promise<SignInFailure | 'SessionEnded' | 'Switched'> => {
+        if (await resetFailuresUnlessLocked(tx, person.id)) {
           await record(tx, { kind: 'LabSwitchFailed', failureReason: 'AccountLocked', ...inSession });
           return 'AccountLocked';
         }
-        const ended = await tx
-          .updateTable('session')
-          .set({ endedAt: sql`now()` })
-          .where('labId', '=', session.labId)
-          .where('id', '=', session.id)
-          .where('endedAt', 'is', null)
-          .executeTakeFirst();
-        if (!ended.numUpdatedRows) return 'SessionEnded';
+        if (!(await endSession(tx, session))) return 'SessionEnded';
         const opened = await openSession(tx, person.id, choice.labId, token);
         await record(tx, {
           kind: 'LabSwitch',
@@ -362,10 +359,10 @@ export function sessionRoutes(app: App, db: Kysely<DB>): void {
           previousSessionLabId: session.labId,
           previousSessionId: session.id,
         });
-        return null;
+        return 'Switched';
       });
-      if (refused === 'SessionEnded') return refuse('noSession', 'the session has ended; sign in again');
-      if (refused) return REFUSAL[refused]();
+      if (outcome === 'SessionEnded') return refuse('noSession', 'the session has ended; sign in again');
+      if (outcome !== 'Switched') return REFUSAL[outcome]();
       reply.setCookie(SESSION_COOKIE, token);
       return (await actorFor(db, token)).actor;
     },

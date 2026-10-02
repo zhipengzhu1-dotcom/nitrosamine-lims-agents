@@ -1,15 +1,10 @@
 import { type FormEvent, useState } from 'react';
-import { type ActorContext, type Lab, routes } from '@lims/domain';
+import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
 import { api, switchLab, useApi } from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
 
-interface Credentials {
-  username: string;
-  password: string;
-  labId: string;
-}
+type Credentials = RouteInput<typeof routes.switchLab>[0];
 
-/** User ID, password and a Lab picked from `labs`, none of them filled in or selected. */
 function CredentialsForm({
   title,
   intro,

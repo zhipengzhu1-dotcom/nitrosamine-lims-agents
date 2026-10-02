@@ -133,7 +133,6 @@ const fixture: [string, Row][] = [
     },
   ],
 ];
-/** A Lab switch into the fixture session from a session in another Lab; each case breaks one part of it. */
 const labSwitch: Row = {
   kind: 'LabSwitch',
   failure_reason: null,

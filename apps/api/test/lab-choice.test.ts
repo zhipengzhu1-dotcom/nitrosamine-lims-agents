@@ -10,7 +10,6 @@ import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
 const api = await startApi('lims_api_lab_choice_test');
 const SYSTEM = { actor: 'svc:test', role: 'system', reason: 'Arrange a Lab choice test' };
 
-/** A person who is LabManager in the R&D Lab and Reviewer in the QC Lab. */
 async function inBothLabs(username: string): Promise<Account> {
   const person = await api.addPerson(username, ['LabManager']);
   await audited(api.db, SYSTEM, (tx) =>
