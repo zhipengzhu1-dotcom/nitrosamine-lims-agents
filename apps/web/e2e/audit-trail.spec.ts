@@ -42,6 +42,7 @@ async function submittedTest(page: Page, description: string): Promise<string> {
   const ana = analysts.find((a: { displayName: string }) => a.displayName === 'Ana Ferreira');
   await step('assign', { testId, input: { assigneeId: ana.id } });
   await as('ana.analyst');
+  const { recordVersion } = await (await page.request.get(`/api/tests/${testId}`)).json();
   await step('enterResult', {
     testId,
     input: {
@@ -52,7 +53,11 @@ async function submittedTest(page: Page, description: string): Promise<string> {
       notebookRef: 'RD-NB-0007-012',
       performedOn: '2026-09-30',
     },
-    signature: { password: DEMO_PASSWORD },
+    signature: {
+      username: 'ana.analyst',
+      password: DEMO_PASSWORD,
+      recordVersion: { version: recordVersion.version, contentHash: recordVersion.contentHash },
+    },
   });
   await page.request.post('/api/logout', { data: {} });
   return testId;

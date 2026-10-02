@@ -1,7 +1,10 @@
 import {
   type ActorContext,
   decimalPattern,
+  type RecordVersionRef,
+  type Role,
   routes,
+  type SignatureStatement,
   type StepInput,
   type StepName,
   stepRoute,
@@ -49,13 +52,19 @@ export const stepUi: {
 
 type SignedMeaning = NonNullable<(typeof steps)[StepName]['signs']>;
 
-export const meaningStatement: Record<SignedMeaning, string> = {
-  Performed: 'I performed this Test and the Result is as I entered it.',
-  Reviewed: 'I reviewed this Test, its Result and its record.',
-  Released: 'I release this Test Report to the Customer.',
-};
+export const demoSigning =
+  'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
 
-export const demoSigning = 'Demo: accounts share one password, and a signing re-enters the password only.';
+/** What the Test page knows that a signing needs: the Record Version it shows and the signature statement in force. */
+export interface Signing {
+  recordVersion: RecordVersionRef;
+  statement: SignatureStatement;
+}
+/** What a signer types on the sheet. */
+export interface TypedCredentials {
+  username: string;
+  password: string;
+}
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
@@ -78,8 +87,9 @@ export interface RailAction {
   label: string;
   context: string;
   fields: readonly Field[];
-  signs: { meaning: SignedMeaning; what: string[] } | null;
-  run: (input: Record<string, string>, password: string | null) => Promise<string>;
+  /** `role` is the registry's role for the step, which the server has already found the person to hold here. */
+  signs: ({ meaning: SignedMeaning; what: string[]; role: Role } & Signing) | null;
+  run: (input: Record<string, string>, credentials: TypedCredentials | null) => Promise<string>;
 }
 
 export function stepAction(
@@ -87,6 +97,7 @@ export function stepAction(
   testId: string | null,
   what: string[],
   onDone: () => Promise<void>,
+  signing: Signing | null = null,
 ): RailAction {
   const step = steps[name];
   const ui = stepUi[name];
@@ -94,17 +105,21 @@ export function stepAction(
     label: ui.label,
     context: what[0] ?? '',
     fields: ui.fields,
-    signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
-    async run(input, password) {
+    signs:
+      step.signs && signing
+        ? { meaning: step.signs, what: ui.record ? [...what, ui.record] : what, role: step.role, ...signing }
+        : null,
+    async run(input, credentials) {
       // Kept until the server answers, even across a reload, so pressing again after no answer resends this press.
       const press = `commitKey:${name}:${testId ?? 'new'}`;
       const commitKey = sessionStorage.getItem(press) ?? crypto.randomUUID();
       sessionStorage.setItem(press, commitKey);
+      const { version, contentHash } = signing?.recordVersion ?? { version: 0, contentHash: '' };
       await api(stepRoute(name), {
         commitKey,
         ...(testId && { testId }),
         input,
-        ...(password !== null && { signature: { password } }),
+        ...(credentials && { signature: { ...credentials, recordVersion: { version, contentHash } } }),
       }).catch((e: unknown) => {
         if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(press);
         throw e;
@@ -219,6 +234,7 @@ function unansweredText(e: unknown, signs: boolean): string {
 function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | null; notice?: string | undefined }) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
@@ -291,7 +307,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     inFlight.current = true;
     setBusy(true);
     try {
-      const text = await a.run(values, a.signs ? password : null);
+      const text = await a.run(values, a.signs ? { username, password } : null);
       setNote({ text, tone: 'ok', n: ++count.current });
       returnFocus.current = true;
       if (sheet) close(true);
@@ -302,6 +318,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     } finally {
       inFlight.current = false;
       setBusy(false);
+      setUsername('');
       setPassword('');
     }
   }
@@ -358,15 +375,46 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
                     ))}
                   </section>
                   <section className="card">
+                    <h3>Meaning</h3>
+                    <div className="meaning">
+                      <b>{shown.signs.meaning}</b>
+                      <i>{shown.signs.statement.text}</i>
+                      <small>Signature statement version {shown.signs.statement.version}</small>
+                    </div>
+                    <dl className="facts">
+                      <dt>Eligibility</dt>
+                      <dd>
+                        {me.person.displayName} may sign {shown.signs.meaning} as {words(shown.signs.role)} in{' '}
+                        {me.lab.name}
+                      </dd>
+                      <dt>Record Version</dt>
+                      <dd>{shown.signs.recordVersion.version}</dd>
+                      <dt>SHA-256</dt>
+                      <dd>
+                        <code className="hash">{shown.signs.recordVersion.contentHash}</code>
+                      </dd>
+                    </dl>
+                  </section>
+                  <section className="card">
                     <h3>Who is signing</h3>
                     <p className="who__name">{me.person.displayName}</p>
                     <p className="muted">
                       <code>{me.person.username}</code> · {me.roles.map(words).join(', ')} · {me.lab.name}
                     </p>
-                    <div className="meaning">
-                      <b>{shown.signs.meaning}</b>
-                      <i>{meaningStatement[shown.signs.meaning]}</i>
-                    </div>
+                    <label>
+                      User ID (type it to sign)
+                      <input
+                        type="text"
+                        required
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        value={username}
+                        aria-invalid={refusal !== null && !username}
+                        aria-describedby="sheet-line"
+                        onChange={(e) => setUsername(e.target.value)}
+                      />
+                    </label>
                     <label>
                       Password (type it again to sign)
                       <input

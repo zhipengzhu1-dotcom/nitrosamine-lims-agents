@@ -45,7 +45,7 @@ export interface Proof {
   signOut: () => Promise<void>;
   /** Waits for the rail's status line to show the text the server answered with. */
   railSays: (text: string | RegExp) => Promise<void>;
-  /** Fills the signature sheet's password and presses `Sign as <meaning>`. */
+  /** Types the signed-in person's user ID and the password on the signature sheet and presses `Sign as <meaning>`. */
   sign: (meaning: 'Performed' | 'Reviewed' | 'Released', password?: string) => Promise<void>;
   /** Saves the Playwright trace and closes the browser. Always call it, also after a failure. */
   close: () => Promise<void>;
@@ -105,6 +105,8 @@ export async function open(slug: string): Promise<Proof> {
     },
     sign: async (meaning, pw = password) => {
       note(`sign as ${meaning}`);
+      const username = (await page.getByRole('contentinfo').locator('.who code').textContent()) ?? '';
+      await page.getByLabel(/User ID/).fill(username);
       await page.getByLabel(/Password/).fill(pw);
       await page.getByRole('button', { name: `Sign as ${meaning}` }).click();
     },

@@ -60,9 +60,15 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
   const freshState = useFresh(view, (v) => [v.test.state]);
   const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
   const action = view?.next
-    ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], async () => {
-        await Promise.all([reload(), reloadTrail()]);
-      })
+    ? stepAction(
+        view.next,
+        id,
+        [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])],
+        async () => {
+          await Promise.all([reload(), reloadTrail()]);
+        },
+        view.recordVersion && view.statement ? { recordVersion: view.recordVersion, statement: view.statement } : null,
+      )
     : null;
   if (!view)
     return (

@@ -21,7 +21,9 @@ async function signOut(page: Page) {
 }
 
 const railSays = (page: Page, text: string | RegExp) => expect(page.getByRole('status')).toContainText(text);
-const sign = async (page: Page, meaning: string, password = DEMO_PASSWORD) => {
+const sign = async (page: Page, meaning: string, password = DEMO_PASSWORD, username?: string) => {
+  const typed = username ?? (await page.getByRole('contentinfo').locator('.who code').textContent()) ?? '';
+  await page.getByLabel(/User ID/).fill(typed);
   await page.getByLabel(/Password/).fill(password);
   await page.getByRole('button', { name: `Sign as ${meaning}` }).click();
 };
@@ -127,6 +129,20 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     'Performed on': '2026-09-30',
   };
   for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
+  const signing = page.locator('form.sheet');
+  await expect(signing.getByRole('heading', { name: 'What you are signing' })).toBeVisible();
+  await expect(signing.locator('.meaning')).toContainText(/Performed.*Signature statement version 1/s);
+  await expect(signing.getByText(/^Ana Ferreira may sign Performed as Analyst in R&D Laboratory/)).toBeVisible();
+  const hash = signing.locator('code.hash');
+  await expect(hash).toHaveText(/^[0-9a-f]{64}$/);
+  const userId = page.getByLabel(/User ID/);
+  await expect(userId).toHaveValue('');
+  const [hashBox, userIdBox] = [await box(hash), await box(userId)];
+  expect(hashBox.y + hashBox.height, 'the full hash is shown above the credential fields').toBeLessThanOrEqual(
+    userIdBox.y,
+  );
+  await atLeast(userId, 44, 44);
+  await userId.fill('ana.analyst');
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
   await shot(page, 'test-signature-sheet');
   await sign(page, 'Performed');
