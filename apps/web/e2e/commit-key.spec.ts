@@ -93,7 +93,7 @@ test('the same entries typed in another order after a dropped Submit and a reloa
   expect(new Set(commitKeys).size).toBe(1);
 });
 
-test('the same entries pressed twice after a dropped Submit, a sign-out and a sign-in are told twice the press was already saved', async ({
+test('the same entries after a dropped Submit, a sign-out and a sign-in are refused as already saved at every press until the tab closes', async ({
   page,
 }) => {
   const dropped = sample('dropped reply');
@@ -101,6 +101,7 @@ test('the same entries pressed twice after a dropped Submit, a sign-out and a si
   await page.getByRole('button', { name: 'Cancel' }).click();
   await page.getByRole('button', { name: 'Sign out' }).click();
   await signInAsCora(page);
+  await expect(page.getByRole('row', { name: dropped }), 'the sign-in shows the saved Submission').toHaveCount(1);
 
   await fillSubmitSheet(page, dropped, 'method first');
   const submit = page.getByRole('button', { name: 'Submit' });
@@ -119,4 +120,30 @@ test('the same entries pressed twice after a dropped Submit, a sign-out and a si
   expect(countSubmissionsInTheAuditTrail(dropped), 'the Audit Trail holds one Submission for the entries').toBe(1);
   await page.reload();
   await expect(page.getByRole('row', { name: dropped }), 'the Submission is saved once').toHaveCount(1);
+
+  await fillSubmitSheet(page, dropped, 'description first');
+  expect(await press(), 'a reload keeps the Commit Key until the tab closes').toBe(first);
+  expect(new Set(commitKeys).size).toBe(1);
+  expect(countSubmissionsInTheAuditTrail(dropped)).toBe(1);
+});
+
+test('the same entries pressed into an ended session after a dropped Submit, then after a sign-in, are told the press was already saved', async ({
+  page,
+}) => {
+  const dropped = sample('dropped reply');
+  const commitKeys = await signInAndDropOneSubmit(page, dropped);
+  const out = await page.request.post('/api/logout', { data: {} });
+  expect(out.status(), await out.text()).toBe(200);
+
+  const ended = page.waitForResponse('**/api/steps/submit');
+  await page.getByRole('button', { name: 'Submit' }).click();
+  expect((await ended).status(), 'the session that held the press has ended').toBe(401);
+  await signInAsCora(page);
+  await fillSubmitSheet(page, dropped, 'method first');
+  const answered = page.waitForResponse('**/api/steps/submit');
+  await page.getByRole('button', { name: 'Submit' }).click();
+  expect((await answered).status(), 'the press is refused as already saved').toBe(422);
+  expect(commitKeys).toHaveLength(3);
+  expect(new Set(commitKeys).size, 'every press resends the Commit Key of the saved press').toBe(1);
+  expect(countSubmissionsInTheAuditTrail(dropped), 'the Audit Trail holds one Submission for the entries').toBe(1);
 });

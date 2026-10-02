@@ -146,9 +146,9 @@ export function stepAction(
         ? { meaning: step.signs, what: ui.record ? [...what, ui.record] : what, role: step.role, ...signing }
         : null,
     async run(input, credentials) {
-      // Kept until the server answers, even across a reload, so the same press after no answer resends its Commit Key.
-      // A keyReused answer keeps it too: the LIMS already holds that press, and a fresh key would record it again.
-      // The slot names the press by a digest, so no entries are kept in the browser.
+      // Kept, even across a reload, sign-in or refusal, until the LIMS answers that it recorded the press: no other answer
+      // proves the LIMS does not already hold it, and a new key would record it twice. A key the LIMS does not hold is
+      // claimed by the next press as if new. The slot names the press by a digest, so no entries are kept in the browser.
       const slot = await commitKeySlot(pressText(name, testId, input));
       const commitKey = sessionStorage.getItem(slot) ?? crypto.randomUUID();
       sessionStorage.setItem(slot, commitKey);
@@ -165,7 +165,6 @@ export function stepAction(
             },
           }),
       }).catch(async (e: unknown) => {
-        if (e instanceof Refused && e.kind !== 'failure' && e.kind !== 'keyReused') sessionStorage.removeItem(slot);
         // The record or the statement moved on: the page reads it again, so the next sheet shows what is current.
         if (e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) await onDone();
         throw e;

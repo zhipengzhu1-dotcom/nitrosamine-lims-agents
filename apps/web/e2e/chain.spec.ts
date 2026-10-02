@@ -168,9 +168,13 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     .filter({ has: page.getByRole('heading', { name: 'What you are signing' }) });
   const signButton = sheet.getByRole('button', { name: /^Sign as / });
   const commitKeys: string[] = [];
+  const keysOfStep = new Map<string, Set<string>>();
   page.on('request', (request) => {
-    if (request.method() === 'POST' && request.url().includes('/api/steps/'))
-      commitKeys.push(request.postDataJSON().commitKey);
+    if (request.method() !== 'POST' || !request.url().includes('/api/steps/')) return;
+    const { commitKey } = request.postDataJSON();
+    commitKeys.push(commitKey);
+    const step = new URL(request.url()).pathname;
+    keysOfStep.set(step, (keysOfStep.get(step) ?? new Set()).add(commitKey));
   });
 
   await page.goto('/');
@@ -380,8 +384,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   ]);
   const [releaseKey, retryKey] = commitKeys.slice(-2);
   expect(retryKey, 'the press whose reply was dropped is resent with its Commit Key').toBe(releaseKey);
+  for (const [step, keys] of keysOfStep)
+    expect(keys.size, `${step} resends its Commit Key after a refusal or no answer`).toBe(1);
   const presses = new Set(commitKeys);
-  expect(presses.size, 'every other press sent a fresh Commit Key').toBe(commitKeys.length - 1);
+  expect(presses.size, 'each step sent a fresh Commit Key').toBe(keysOfStep.size);
   for (const key of presses)
     expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   const reportLink = page.locator('.facts').getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ });
