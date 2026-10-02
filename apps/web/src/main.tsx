@@ -84,7 +84,8 @@ function App() {
   return <Fragment key={`${me.lab.id}:${me.person.id}`}>{page(route, me)}</Fragment>;
 }
 
-function page(route: Route, me: ActorContext) {
+/** The signed-in pages; the welcome and authenticator pages render before any session, so `App` returns them first. */
+function page(route: Exclude<Route, { page: 'welcome' | 'authenticator' }>, me: ActorContext) {
   switch (route.page) {
     case 'tests':
       return <Worklist me={me} open={route.open} />;
@@ -100,10 +101,6 @@ function page(route: Route, me: ActorContext) {
       return <TrailPage key={`${route.table}/${route.id}`} me={me} table={route.table} id={route.id} />;
     case 'auditExport':
       return <AuditExportPage me={me} />;
-    case 'welcome':
-      return <WelcomePage token={route.token} />;
-    case 'authenticator':
-      return <AuthenticatorPage />;
     case 'module':
       return (
         <Placeholder

@@ -490,9 +490,9 @@ export const isRefusalKind = (value: unknown): value is RefusalKind => refusalKi
 export const refusalBody = Type.Object({ kind: Type.Enum(refusalKinds), message: Type.String() });
 export type RefusalBody = Static<typeof refusalBody>;
 
-/** A sign-in names its Lab; the schema lets it out so that the API can answer `labNotChosen` after the password. */
 /** The six-digit code from the person's authenticator, which the decided login asks for; any other text is a wrong code. */
 const code = Type.Optional(text);
+/** A sign-in names its Lab; the schema lets it out so that the API can answer `labNotChosen` after the password. */
 const signIn = Type.Object({ username: text, password: text, code, labId: Type.Optional(uuid) }, closed);
 const labSwitch = Type.Object({ username: text, password: text, code, labId: uuid }, closed);
 const authenticatorEnrolment = Type.Object({ username: text, password: text }, closed);
