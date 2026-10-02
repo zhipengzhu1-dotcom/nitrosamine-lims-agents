@@ -1,15 +1,10 @@
 import type { ExportedEntry, RowSnapshot, ShownValue, TrailEntry } from './http.ts';
 
-/** What an Audit Export prints in place of another Customer's identifier. */
 export const REDACTED = '[redacted]';
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/**
- * Redacts Audit Trail entries for one Customer: every occurrence of an identifier in `others` becomes REDACTED, in
- * readable and raw values alike, and an identifier in `own` is never touched, even where it contains one in `others`.
- * The match is by value, so it holds for any record that names another Customer's Sample, whatever its fields.
- */
+/** Replaces every identifier in `others` with REDACTED in readable and raw values alike, and never touches one in `own`, even where it contains one in `others`. */
 export function redactionFor(own: readonly string[], others: readonly string[]): (entry: TrailEntry) => ExportedEntry {
   const mine = new Set(own);
   const theirs = others.filter((s) => s.trim() !== '' && !mine.has(s));
@@ -17,11 +12,11 @@ export function redactionFor(own: readonly string[], others: readonly string[]):
     theirs.length === 0
       ? null
       : new RegExp(
-          [...new Set([...theirs, ...own.filter((s) => s.trim() !== '')])]
+          `(?<![\\p{L}\\p{N}])(?:${[...new Set([...theirs, ...own.filter((s) => s.trim() !== '')])]
             .sort((a, b) => b.length - a.length)
             .map((s) => escaped(s))
-            .join('|'),
-          'g',
+            .join('|')})(?![\\p{L}\\p{N}])`,
+          'gu',
         );
   return (entry) => {
     let redacted = false;

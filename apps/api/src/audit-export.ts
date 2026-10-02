@@ -43,13 +43,10 @@ interface CustomerRecords {
   labIds: string[];
   submissionIds: Set<string>;
   methodIds: Set<string>;
-  names: string[];
+  userIds: string[];
+  identifiers: string[];
 }
 
-/**
- * Every record of this Lab and the company that belongs to one Customer, keyed by that Customer: the ids of its Lab
- * records, the Submissions and Methods its Samples reach, and every identifier that names it or one of its records.
- */
 async function recordsByCustomer(scope: Scope) {
   const [samples, tests, results, reports, versions, signatures, customers, submissions, users] = await Promise.all([
     scope
@@ -71,15 +68,15 @@ async function recordsByCustomer(scope: Scope) {
       .execute(),
   ]);
   const of = new Map<string, CustomerRecords>(
-    customers.map((c) => [c.id, { labIds: [], submissionIds: new Set(), methodIds: new Set(), names: [c.id, c.name] }]),
+    customers.map((c) => [c.id, { labIds: [], submissionIds: new Set(), methodIds: new Set(), userIds: [], identifiers: [c.id, c.name] }]),
   );
   const owner = new Map<string, string>();
-  const own = (id: string, by: string | undefined, ...names: string[]) => {
+  const own = (id: string, by: string | undefined, ...identifiers: string[]) => {
     const customer = by === undefined ? undefined : of.get(by);
     if (by === undefined || !customer) return;
     owner.set(id, by);
     customer.labIds.push(id);
-    customer.names.push(id, ...names);
+    customer.identifiers.push(id, ...identifiers);
   };
   for (const s of samples) {
     own(s.id, s.customerId, s.number);
@@ -94,8 +91,12 @@ async function recordsByCustomer(scope: Scope) {
   for (const r of reports) own(r.id, owner.get(r.testId), r.number);
   for (const v of versions) own(v.id, owner.get(v.recordId));
   for (const s of signatures) own(s.id, owner.get(s.recordVersionId));
-  for (const s of submissions) of.get(s.customerId)?.names.push(s.id, s.number);
-  for (const u of users) if (u.customerId) of.get(u.customerId)?.names.push(u.id, u.username, u.displayName);
+  for (const s of submissions) of.get(s.customerId)?.identifiers.push(s.id, s.number);
+  for (const u of users) {
+    const customer = u.customerId === null ? undefined : of.get(u.customerId);
+    customer?.userIds.push(u.id);
+    customer?.identifiers.push(u.id, u.username, u.displayName);
+  }
   return of;
 }
 
@@ -133,7 +134,6 @@ const CSV_HEADER = [
   'Previous hash',
 ];
 
-/** One CSV row per changed field, or one row for an entry that changed none, so the file sorts and filters in a spreadsheet. */
 function csvOf(data: AuditExportData): string {
   const rows = data.entries.flatMap((e) => {
     const base = (field: string, label: string, old: string, now: string, oldRaw: string, newRaw: string) => [
@@ -217,7 +217,7 @@ const fileStem = (name: string, asOf: Instant) =>
       .toLowerCase() || 'customer'
   }-${asOf.slice(0, 10)}`;
 
-/** Registers the Audit Export routes: QA lists the Customers of this Lab and generates one Customer's redacted export, recorded on the Lab chain. */
+/** Only QA in this Lab lists Customers or exports, and every Audit Export is recorded on the Lab chain with its files' hashes. */
 export function auditExportRoutes(app: App, db: Kysely<DB>): void {
   app.route({
     ...routes.auditExportCustomers,
@@ -235,7 +235,7 @@ export function auditExportRoutes(app: App, db: Kysely<DB>): void {
       const labId = scope.ctx.lab.id;
       const byCustomer = await recordsByCustomer(scope);
       const mine = byCustomer.get(customer.id) ?? refuse('notFound', 'no such Customer in this Lab');
-      const others = [...byCustomer].flatMap(([id, c]) => (id === customer.id ? [] : c.names));
+      const others = [...byCustomer].flatMap(([id, c]) => (id === customer.id ? [] : c.identifiers));
       const { asOf } = await scope.company
         .selectNoFrom(sql<Instant>`to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as('asOf'))
         .executeTakeFirstOrThrow();
@@ -256,6 +256,7 @@ export function auditExportRoutes(app: App, db: Kysely<DB>): void {
                 eb('tableName', '=', 'submission'),
                 eb(rowId, '=', sql<string>`any(${[...mine.submissionIds]}::text[])`),
               ]),
+              eb.and([eb('tableName', '=', 'person'), eb(rowId, '=', sql<string>`any(${mine.userIds}::text[])`)]),
               eb.and([
                 eb('tableName', '=', 'method'),
                 eb(rowId, '=', sql<string>`any(${[...mine.methodIds]}::text[])`),
@@ -273,7 +274,7 @@ export function auditExportRoutes(app: App, db: Kysely<DB>): void {
           .where('labId', '=', labId)
           .executeTakeFirstOrThrow(),
       ]);
-      const redact = redactionFor(mine.names, others);
+      const redact = redactionFor(mine.identifiers, others);
       const data: AuditExportData = {
         customer,
         lab: { code: lab.code, name: lab.name, zone: lab.timeZone },

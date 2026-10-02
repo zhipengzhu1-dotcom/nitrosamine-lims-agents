@@ -1,8 +1,8 @@
 const PAGE = { width: 595, height: 842, margin: 36 } as const;
 const FONT_SIZE = 8;
 const LEADING = 10;
-/** Courier's advance is 0.6 em, so this many characters fill the line between the margins. */
-export const PDF_COLUMNS = Math.floor((PAGE.width - 2 * PAGE.margin) / (FONT_SIZE * 0.6));
+const COURIER_ADVANCE_EM = 0.6;
+export const PDF_COLUMNS = Math.floor((PAGE.width - 2 * PAGE.margin) / (FONT_SIZE * COURIER_ADVANCE_EM));
 const LINES_PER_PAGE = Math.floor((PAGE.height - 2 * PAGE.margin - 2 * LEADING) / LEADING);
 
 /** A character Courier's WinAnsi encoding cannot print becomes `?`; the data file beside the PDF keeps it as written. */

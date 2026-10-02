@@ -230,7 +230,7 @@ export const auditExportData = Type.Object({
   customer: customerRef,
   lab: Type.Object({ code: Type.String(), name: Type.String(), zone: Type.String() }),
   asOf: instant,
-  generatedBy: Type.Object({ label: Type.String(), username: Type.String(), role: Type.String() }),
+  generatedBy: Type.Object({ label: Type.String(), username: Type.String(), role }),
   chains: Type.Array(chainVerification),
   entries: Type.Array(exportedEntry),
 });

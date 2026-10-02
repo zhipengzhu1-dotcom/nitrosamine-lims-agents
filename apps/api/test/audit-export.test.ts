@@ -66,7 +66,6 @@ async function take(client: Client, name: StepName, testId: string, input: StepI
   ok(await client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) }));
 }
 
-/** A Test the Customer User submits on `methodId`, taken as far as `released` says, with its Sample's number. */
 async function submitted(customer: Client, { methodId = api.methodId, released = false } = {}) {
   const { testId } = ok(
     await customer.call(stepRoute('submit'), {
@@ -104,6 +103,7 @@ it("QA's export for one Customer holds the entries of its Submissions, Samples, 
   const kinds = new Set(data.entries.map((e) => e.record.kind));
   for (const kind of [
     'Customer',
+    'Person',
     'Submission',
     'Sample',
     'Test',

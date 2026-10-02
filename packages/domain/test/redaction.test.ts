@@ -6,7 +6,6 @@ import { instant, REDACTED, redactionFor, type TrailEntry } from '../src/index.t
 const HASH = 'ab'.repeat(32);
 const at = Value.Decode(instant, '2026-10-01T12:00:00.000000Z');
 
-/** A shared record's entry whose title, reason, label and raw rows all say `text`. */
 function entryNaming(text: string): TrailEntry {
   return {
     chain: 'company',
@@ -77,6 +76,12 @@ describe("an Audit Export replaces another Customer's identifiers and keeps the 
       text: 'For Northwind and Contoso Labs (fictional)',
       expected: `For ${REDACTED} and ${REDACTED}`,
       redacted: true,
+    },
+    {
+      name: "another Customer's name inside a longer word is left alone",
+      text: 'Northwinds and Contoso Labs (fictional)s',
+      expected: 'Northwinds and Contoso Labs (fictional)s',
+      redacted: false,
     },
     {
       name: 'a value naming no Customer is unchanged',
