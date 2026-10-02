@@ -805,8 +805,16 @@ td a,
   padding: 16px;
   margin: 0;
 }
+/* Inside the card at every size: a legend that wraps to two lines would sit across the card's top border. */
 .card legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 0;
   font-weight: 700;
+}
+.card legend ~ * {
+  clear: left;
 }
 label {
   display: flex;
@@ -1153,14 +1161,18 @@ a.btn {
   }
 }
 
-/* A phone held sideways is under 500px tall, too short for a sheet between the top bar and the rail. */
-@media (max-height: 500px) {
+/* A window held sideways and under 500px tall (a phone, or a short desktop window) is too short for a sheet between
+   the top bar and the rail. Landscape only: an upright Android phone with its keyboard up is also under 500px tall. */
+@media (max-height: 500px) and (orientation: landscape) {
   .sheet {
     grid-row: top / rail;
     z-index: 3;
   }
   .sheet__body {
     align-items: start;
+  }
+  .sheet__foot {
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
   }
   .frame:has(> .sheet:not([data-closing])) .top {
     visibility: hidden;
@@ -1169,20 +1181,10 @@ a.btn {
 }
 
 /* A phone, upright or sideways, where an open sheet covers the rail. */
-@media (max-width: 640px), (max-height: 500px) {
-  .frame:has(> .sheet:not([data-closing])) .rail__session {
+@media (max-width: 640px), (max-height: 500px) and (orientation: landscape) {
+  .frame:has(> .sheet:not([data-closing])) :is(.rail__session, .who a) {
     visibility: hidden;
     transition: visibility 0s var(--dur-sheet-in);
-  }
-  /* A legend that wraps to two lines would sit across the card's top border, so it moves inside the card. */
-  .card legend {
-    float: left;
-    width: 100%;
-    margin-bottom: 8px;
-    padding: 0;
-  }
-  .card legend ~ * {
-    clear: left;
   }
 }
 

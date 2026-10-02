@@ -143,6 +143,10 @@ async function wholeOnScreenAtEverySize(page: Page, whole: Locator, commit: Loca
     }));
     expect(bars.top, `the top bar holds the first row ${at}`).toBe(0);
     expect(bars.rail, `the rail holds the last row ${at}`).toBeCloseTo(size.height, 0);
+    for (const legend of await page.locator('form.sheet fieldset.card > legend').all()) {
+      const [heading, card] = [await box(legend), await box(legend.locator('..'))];
+      expect(heading.y - card.y, `the field card's heading sits inside its border ${at}`).toBeGreaterThanOrEqual(16);
+    }
   }
   await page.setViewportSize(projectSize);
 }
