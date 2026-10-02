@@ -88,6 +88,7 @@ async function atLeast(target: Locator, width: number, height: number) {
 }
 
 const PHONE = { width: 390, height: 844 };
+const LANDSCAPE = { width: 844, height: 390 };
 const DESKTOP = { width: 1360, height: 900 };
 
 const uncovered = (target: Locator) =>
@@ -124,9 +125,9 @@ async function typeWhileTheSheetIsStillSlidingIn(page: Page, type: () => Promise
   );
 }
 
-async function wholeOnScreenAtBothSizes(page: Page, whole: Locator, commit: Locator) {
+async function wholeOnScreenAtEverySize(page: Page, whole: Locator, commit: Locator) {
   const projectSize = page.viewportSize() ?? DESKTOP;
-  for (const size of [projectSize, PHONE, DESKTOP]) {
+  for (const size of [projectSize, PHONE, LANDSCAPE, DESKTOP]) {
     const at = `at ${size.width}x${size.height}`;
     await page.setViewportSize(size);
     await whole.scrollIntoViewIfNeeded();
@@ -136,6 +137,12 @@ async function wholeOnScreenAtBothSizes(page: Page, whole: Locator, commit: Loca
     expect(await uncovered(whole), `nothing covers it ${at}`).toBe(true);
     await expect(commit, `the commit button is on screen ${at}`).toBeInViewport({ ratio: 1 });
     await commit.click({ trial: true });
+    const bars = await page.evaluate(() => ({
+      top: document.querySelector('.top')?.getBoundingClientRect().top,
+      rail: document.querySelector('footer.rail')?.getBoundingClientRect().bottom,
+    }));
+    expect(bars.top, `the top bar keeps the head of the screen ${at}`).toBe(0);
+    expect(bars.rail, `the rail keeps the foot of the screen ${at}`).toBeCloseTo(size.height, 0);
   }
   await page.setViewportSize(projectSize);
 }
@@ -193,7 +200,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     await page.getByLabel('Method').selectOption({ index: 1 });
     await page.getByLabel('Sample description').fill(description);
   });
-  await wholeOnScreenAtBothSizes(
+  await wholeOnScreenAtEverySize(
     page,
     page.getByLabel('Sample description'),
     sheet.getByRole('button', { name: 'Submit' }),
@@ -235,7 +242,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await typeWhileTheSheetIsStillSlidingIn(page, async () => {
     for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
   });
-  await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
+  await wholeOnScreenAtEverySize(page, whatYouAreSigning, signButton);
   const signing = page.locator('form.sheet');
   await expect(signing.getByRole('heading', { name: 'What you are signing' })).toBeVisible();
   await expect(signing.locator('.meaning')).toContainText(/Performed.*Signature statement version 1/s);
@@ -296,7 +303,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(sheet.getByText(/^Rui Tanaka may sign Reviewed as Reviewer in R&D Laboratory/)).toBeVisible();
   await expect(sheet.locator('code.hash')).toHaveText(/^[0-9a-f]{64}$/);
   await typeWhileTheSheetIsStillSlidingIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
-  await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
+  await wholeOnScreenAtEverySize(page, whatYouAreSigning, signButton);
   const height = (await box(sheet)).height;
   await sign(page, 'Reviewed', 'not-the-password');
   await railSays(page, 'Refused: The user ID or password is not valid. Nothing has been signed.');
@@ -362,7 +369,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await openTheTest();
   await page.getByRole('button', { name: 'Release' }).click();
   await typeWhileTheSheetIsStillSlidingIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
-  await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
+  await wholeOnScreenAtEverySize(page, whatYouAreSigning, signButton);
   let dropped = false;
   await page.route('**/api/steps/release', async (route) => {
     if (dropped) return route.continue();
