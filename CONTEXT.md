@@ -509,8 +509,12 @@ The permanent, system-generated history of every change to records, accounts and
 _Avoid_: Log, history, change log
 
 **Access Event**:
-The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock (succeeded or failed), lockout, takeover, Lab switch, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
+The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock (succeeded or failed), lockout, takeover, Lab switch, failed Re-authentication at signing, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. A lockout is stamped at the instant the lock landed, and each of the person's sessions still live then ends at that instant. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
 _Avoid_: Login log, session log, access log
+
+**Audit Export**:
+The Audit Trail of one Customer's Submissions, Samples, Tests and their records, with the shared records they use, which QA generates to answer that Customer's audit. Another Customer's identifiers are redacted wherever they appear. It comes as a searchable data file (JSON or CSV) with a PDF of the same entries, each entry in glossary words beside its raw values. Generating one is itself recorded in the Audit Trail with the hash of each file handed out. Customers never see the Audit Trail any other way.
+_Avoid_: Audit report, trail dump, audit log export
 
 **Lab switch**:
 Moving a signed-in person's work from one Lab to another in which they hold a Membership. It needs the full re-authentication of a sign-in, nothing is chosen for them, and from then on they see only the new Lab's records. It is an Access Event, and a failed one counts toward the lockout.
@@ -535,6 +539,14 @@ _Avoid_: E-sig, approval, sign-off
 **Signature Meaning**:
 What an Electronic Signature attests: Performed, Verified, Reviewed, Approved, Released, Authored or Acknowledged.
 _Avoid_: Signature type, status
+
+**Signature Statement**:
+The QA-approved, versioned sentence a signer attests to on every Electronic Signature, shown on the signature sheet before the credentials. Each Signature records the version it showed and its hash, and a later version comes into force only through a Release Log entry that QA signs Approved.
+_Avoid_: Attestation text, legal text, disclaimer
+
+**Re-authentication**:
+The signer's proof of identity for one Electronic Signature: the typed user ID, password and second factor, checked again whatever the session already proved. A successful one is a single-use record for that person, session and Signature Meaning, written with the Signature it enables; a failed one is an Access Event that counts toward the lockout.
+_Avoid_: Password prompt, confirmation, session reuse
 
 **Authorisation**:
 QA's grant allowing a person to sign with a given Signature Meaning within a scope (a Method or record type) in one Lab, valid for 12 months unless renewed through a Competence Assessment. A Method Authorisation covers every version of that Method; each version still needs its own Training Record. QA may suspend one, citing a Deviation, and nobody grants, renews or lifts their own; QA's Approved signature on one rests on a current Appointment. It is separate from a Training Record: being trained is not being authorised. It is one of four separate facts that must all hold before a person can sign, with an Identity Verification, the Acknowledged e-signature policy and LIMS-use training. A Reviewed Authorisation on a Test's Method also lets its holder approve a correction to a result made after Performed and before Released, unless they proposed it or signed Performed.

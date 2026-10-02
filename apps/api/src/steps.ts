@@ -1,10 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { DB } from '@lims/db';
+import { type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
   type Meaning,
   type PersonId,
+  pressText,
   type RouteReply,
+  type SignatureStatement,
+  type SigningBody,
   refusal,
   type Step,
   type StepBody,
@@ -137,7 +140,11 @@ export function signedVersions(q: LabQueries) {
     );
 }
 
-/** The record's latest Record Version, which the database wrote as it changed: what a Signature given now binds to. */
+/**
+ * The record's latest Record Version, which the database wrote as it changed: what a Signature given now binds to. Every
+ * signable row has one, because the `version_record` trigger writes it on insert, so a missing one throws as a broken
+ * invariant.
+ */
 export function latestVersion(q: LabQueries, table: Signable, recordId: string) {
   return q
     .from('recordVersion')
@@ -148,13 +155,62 @@ export function latestVersion(q: LabQueries, table: Signable, recordId: string) 
     .executeTakeFirstOrThrow();
 }
 
-async function sign(q: LabQueries, ctx: ActorContext, meaning: Meaning, table: Signable, testId: string) {
+interface Seen {
+  id: string;
+  contentHash: string;
+}
+
+interface Signing {
+  meaning: Meaning;
+  table: Signable;
+  testId: string;
+  seen: Seen;
+  statementVersion: number;
+  release: string;
+}
+
+/** Signs through lims.sign, the only path to a Signature, against a re-authentication record written here. */
+async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signing: Signing) {
+  const { meaning, table, testId, seen, statementVersion, release } = signing;
   const recordId =
     table === 'test'
       ? testId
       : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id;
-  const { id: recordVersionId } = await latestVersion(q, table, recordId);
-  await q.insert('signature', { personId: ctx.person.id, meaning, recordVersionId }).execute();
+  const proof = await q
+    .insert('reauthentication', { sessionId, personId: ctx.person.id, meaning, authenticator: 'Password' })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  await sql`select lims.sign(${proof.id}, ${sessionId}, ${table}, ${recordId}, ${seen.id},
+                             decode(${seen.contentHash}, 'hex'), ${statementVersion}, ${meaning}, ${release})`
+    .execute(q.company)
+    .catch(signingRefused);
+}
+
+/** lims.sign's own refusal (LA010) reaches the bench as a refusal; any other failure is thrown with its cause. */
+function signingRefused(error: unknown): never {
+  if (postgresFault(error)?.sqlstate === 'LA010' && error instanceof Error) refuse('signingRefused', error.message);
+  throw new Error('signing failed', { cause: error });
+}
+
+/** The signature statement with the highest version: what the sheet shows and what lims.sign records. */
+export function statementInForce(scope: LabQueries): Promise<SignatureStatement> {
+  return scope.company
+    .selectFrom('signatureStatement')
+    .select(['version', sql<string>`convert_from(statement, 'UTF8')`.as('text')])
+    .orderBy('version', 'desc')
+    .executeTakeFirstOrThrow();
+}
+
+async function seenVersion(scope: LabQueries, testId: string, signature: SigningBody): Promise<Seen> {
+  const latest = await latestVersion(scope, 'test', testId);
+  if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
+    refuse('recordChanged', 'the Test changed since this screen loaded it; read it again before signing');
+  if ((await statementInForce(scope)).version !== signature.statementVersion)
+    refuse(
+      'signingRefused',
+      'the signature statement changed since this screen loaded it; read it again before signing',
+    );
+  return { id: latest.id, contentHash: signature.recordVersion.contentHash };
 }
 
 type KeptCommit = Pick<Selectable<DB['commitKey']>, 'sessionId' | 'requestHash' | 'testId' | 'state'>;
@@ -167,7 +223,7 @@ function receiptOf(kept: KeptCommit, sessionId: string, requestHash: Buffer): St
   return { testId: kept.testId, state: kept.state };
 }
 
-function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): void {
+function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, release: string): void {
   const step: Step = steps[name];
   const effect: Effect<StepInput<K>> = effects[name];
   const route = stepRoute(name);
@@ -176,7 +232,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
     const sessionId = req.sessionKey.id;
     const scope = labScope(db, actor);
     const requestHash = createHash('sha256')
-      .update(JSON.stringify({ step: name, testId: body.testId ?? null, input: body.input }))
+      .update(pressText(name, body.testId ?? null, body.input))
       .digest();
     const kept = (q: LabQueries) =>
       q.from('commitKey').select(['sessionId', 'requestHash', 'testId', 'state']).where('key', '=', body.commitKey);
@@ -195,16 +251,34 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
       req.log.info({ step: name, testId: first.testId }, 'step replayed');
       return receiptOf(first, sessionId, requestHash);
     }
+    let signing: Signing | null = null;
     if (step.signs) {
-      const { password } = body.signature ?? refuse('malformed', `${name} needs the signer's password`);
+      // A retry whose first press committed between the registry check and here replays, as it does on a refusal.
+      const first = await kept(scope).executeTakeFirst();
+      if (first) {
+        req.log.info({ step: name, testId: first.testId }, 'step replayed');
+        return receiptOf(first, sessionId, requestHash);
+      }
+      const signature = body.signature ?? refuse('malformed', `${name} needs the signer's credentials`);
+      const testId = test?.id ?? refuse('malformed', `${name} signs a Test`);
+      const seen = await seenVersion(scope, testId, signature);
       await reauthenticate(
         db,
         { actor, session: req.sessionKey },
-        password,
+        { username: signature.username, password: signature.password },
         `Re-authenticate to sign ${name}`,
         step.role,
         sourceAddressOf(req),
+        'ReauthenticationFailed',
       );
+      signing = {
+        meaning: step.signs,
+        table: effect.signedRecord ?? 'test',
+        testId,
+        seen,
+        statementVersion: signature.statementVersion,
+        release,
+      };
     }
 
     const claim = { testId: test?.id ?? randomUUID(), state: step.to };
@@ -228,7 +302,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
         if (!moved.numUpdatedRows) refuse('stale', 'the Test has moved on; reload it');
       }
       await effect.write(q, actor, testId, body.input);
-      if (step.signs) await sign(q, actor, step.signs, effect.signedRecord ?? 'test', testId);
+      if (signing) await sign(q, actor, sessionId, signing);
       return { receipt: claim, replayed: false };
     });
     req.log.info({ step: name, testId: receipt.testId }, replayed ? 'step replayed' : 'step taken');
@@ -237,6 +311,6 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
 }
 
 /** `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema. */
-export function stepRoutes(app: App, db: Kysely<DB>): void {
-  for (const name of stepNames) registerStep(app, db, name);
+export function stepRoutes(app: App, db: Kysely<DB>, release: string): void {
+  for (const name of stepNames) registerStep(app, db, name, release);
 }

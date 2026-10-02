@@ -1,10 +1,22 @@
 import { type ActorContext, type Result, routes, type Signature, steps, type TestRow } from '@lims/domain';
 import { useCallback, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
-import { Shell, Status, stepAction } from './rail.tsx';
+import { Shell, Status, stepAction, words } from './rail.tsx';
+import { type Column, StackTable } from './stack.tsx';
 import { time } from './time.ts';
 import { TestTrail } from './trail.tsx';
 const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on Sample ${t.sampleNumber}`;
+
+const noTests: TestRow[] = [];
+const worklistColumns: Column<TestRow>[] = [
+  { head: 'Sample', cell: (t) => <a href={`#/tests/${t.id}`}>{t.sampleNumber}</a> },
+  { head: 'Description', cell: (t) => t.description },
+  { head: 'Customer', cell: (t) => t.customer },
+  { head: 'Method', cell: (t) => `${t.methodCode} v${t.methodVersion}` },
+  { head: 'State', cell: (t) => <Status state={t.state} /> },
+  { head: 'Analyst', cell: (t) => t.assignee },
+  { head: 'Received', cell: (t) => time(t.receivedAt) },
+];
 
 export function Worklist({ me }: { me: ActorContext }) {
   const { data: tests, error, reload } = useApi(routes.tests);
@@ -16,38 +28,12 @@ export function Worklist({ me }: { me: ActorContext }) {
     <Shell me={me} active="tests" action={action}>
       <h1>Tests</h1>
       {error && <p className="note--bad">{error}</p>}
-      <table className="stack">
-        <thead>
-          <tr>
-            <th>Sample</th>
-            <th>Description</th>
-            <th>Customer</th>
-            <th>Method</th>
-            <th>State</th>
-            <th>Analyst</th>
-            <th>Received</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tests?.map((t) => (
-            <tr key={t.id} className={freshTests.has(t.id) ? 'row--fresh' : undefined}>
-              <td data-label="Sample">
-                <a href={`#/tests/${t.id}`}>{t.sampleNumber}</a>
-              </td>
-              <td data-label="Description">{t.description}</td>
-              <td data-label="Customer">{t.customer}</td>
-              <td data-label="Method">
-                {t.methodCode} v{t.methodVersion}
-              </td>
-              <td data-label="State">
-                <Status state={t.state} />
-              </td>
-              <td data-label="Analyst">{t.assignee}</td>
-              <td data-label="Received">{time(t.receivedAt)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <StackTable
+        columns={worklistColumns}
+        rows={tests ?? noTests}
+        rowKey={(t) => t.id}
+        rowClass={(t) => (freshTests.has(t.id) ? 'row--fresh' : undefined)}
+      />
       {tests?.length === 0 && <p className="muted">No Tests yet.</p>}
     </Shell>
   );
@@ -60,9 +46,15 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
   const freshState = useFresh(view, (v) => [v.test.state]);
   const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
   const action = view?.next
-    ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], async () => {
-        await Promise.all([reload(), reloadTrail()]);
-      })
+    ? stepAction(
+        view.next,
+        id,
+        [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])],
+        async () => {
+          await Promise.all([reload(), reloadTrail()]);
+        },
+        view.recordVersion && view.statement ? { recordVersion: view.recordVersion, statement: view.statement } : null,
+      )
     : null;
   if (!view)
     return (
@@ -73,8 +65,9 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
   const { test, result, report } = view;
   return (
     <Shell me={me} active="tests" action={action} notice={unsignedNotice(view.signatures)}>
-      <h1>
+      <h1 className="record-head">
         {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
+        {view.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
       </h1>
       <dl className="facts">
         <dt>Sample</dt>
@@ -105,7 +98,9 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         )}
       </dl>
       <h2>Result</h2>
-      {result ? (
+      {view.withheld ? (
+        <p className="muted">The Result is not released yet. It shows here when the Test Report is released.</p>
+      ) : result ? (
         <dl className="facts">
           <dt>{result.analyte}</dt>
           <dd className="value">
@@ -122,7 +117,11 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         <p className="muted">No Result entered.</p>
       )}
       <h2>Signatures</h2>
-      <Signatures rows={view.signatures} fresh={freshSignatures} />
+      {view.withheld ? (
+        <p className="muted">The Signatures are not released yet. They show here with the Result.</p>
+      ) : (
+        <Signatures rows={view.signatures} fresh={freshSignatures} />
+      )}
       {me.person.customerId === null && <TestTrail me={me} id={id} onReload={onTrailReload} />}
     </Shell>
   );
@@ -140,43 +139,31 @@ export function unsignedNotice(rows: Signature[]): string | undefined {
 const rowClass = (s: Signature, fresh?: ReadonlySet<string>) =>
   [fresh?.has(signatureKey(s)) ? 'row--fresh' : '', s.unsigned ? 'row--unsigned' : ''].join(' ').trim() || undefined;
 
+const signatureColumns: Column<Signature>[] = [
+  {
+    head: 'Meaning',
+    cell: (s) => (
+      <span className="sig-line">
+        <span className="sig">{s.meaning}</span>
+        {s.unsigned && <Status mark="Unsigned" />}
+      </span>
+    ),
+  },
+  { head: 'Signed by', cell: (s) => `${s.signer} (${s.username}, ${words(s.role)})` },
+  { head: 'Time', cell: (s) => time(s.signedAt) },
+  { head: 'Record', cell: (s) => s.record },
+  { head: 'Record Version', cell: (s) => s.recordVersion.version },
+  {
+    head: 'SHA-256 of the signed Record Version',
+    label: 'SHA-256',
+    cell: (s) => <code className="hash">{s.recordVersion.contentHash}</code>,
+  },
+];
+
 /** Only the rows whose keys are in `fresh`, which the server has just returned on this page, animate in. */
 export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: ReadonlySet<string> }) {
   if (!rows.length) return <p className="muted">No Signatures yet.</p>;
   return (
-    <table className="stack">
-      <thead>
-        <tr>
-          <th>Meaning</th>
-          <th>Signed by</th>
-          <th>Time</th>
-          <th>Record</th>
-          <th>Record Version</th>
-          <th>SHA-256 of the signed Record Version</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((s) => (
-          <tr key={signatureKey(s)} className={rowClass(s, fresh)}>
-            <td className="sig" data-label="Meaning">
-              {s.meaning}
-              {s.unsigned && (
-                <>
-                  {' '}
-                  <span className="unsigned">unsigned</span>
-                </>
-              )}
-            </td>
-            <td data-label="Signed by">{s.signer}</td>
-            <td data-label="Time">{time(s.signedAt)}</td>
-            <td data-label="Record">{s.record}</td>
-            <td data-label="Record Version">{s.recordVersion.version}</td>
-            <td data-label="SHA-256">
-              <code className="hash">{s.recordVersion.contentHash}</code>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <StackTable columns={signatureColumns} rows={rows} rowKey={signatureKey} rowClass={(s) => rowClass(s, fresh)} />
   );
 }

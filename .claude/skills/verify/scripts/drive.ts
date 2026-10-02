@@ -37,15 +37,15 @@ export interface Proof {
   password: string;
   /** Writes a line to steps.log in the evidence directory and echoes it. */
   note: (line: string) => void;
-  /** Saves a full-page screenshot as <nn>-<name>.png. */
-  shot: (name: string) => Promise<void>;
+  /** Saves a screenshot as <nn>-<name>.png: the full page, or with `fullPage` false only the screen a person sees, with the rail and any sheet in place. */
+  shot: (name: string, fullPage?: boolean) => Promise<void>;
   /** Runs a read-only query on the instance database as the postgres superuser and saves its output as <name>.tsv. A value goes in `vars` and is read in the query as `:'name'`, so no SQL is built from it. */
   sql: (name: string, query: string, vars?: Record<string, string>) => string;
   signIn: (username: string, password?: string) => Promise<void>;
   signOut: () => Promise<void>;
   /** Waits for the rail's status line to show the text the server answered with. */
   railSays: (text: string | RegExp) => Promise<void>;
-  /** Fills the signature sheet's password and presses `Sign as <meaning>`. */
+  /** Types the signed-in person's user ID and the password on the signature sheet and presses `Sign as <meaning>`. */
   sign: (meaning: 'Performed' | 'Reviewed' | 'Released', password?: string) => Promise<void>;
   /** Saves the Playwright trace and closes the browser. Always call it, also after a failure. */
   close: () => Promise<void>;
@@ -54,15 +54,22 @@ export interface Proof {
 const psql = (db: string, args: string[], input?: string) =>
   execFileSync(`${ROOT}scripts/pg.sh`, ['psql', '-d', db, ...args], { encoding: 'utf8', input });
 
-/** Opens a headless Chromium on the instance and a fresh evidence directory, .verify/evidence/<UTC>-<slug>/. */
-export async function open(slug: string): Promise<Proof> {
+/** The screens a drive runs on: a desktop, and a phone with touch at the width every UI pull request is reviewed at. */
+export const screens = {
+  desktop: { viewport: { width: 1360, height: 900 } },
+  phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
+} as const;
+export type Screen = keyof typeof screens;
+
+/** Opens a headless Chromium on the instance at `screen` and a fresh evidence directory, .verify/evidence/<UTC>-<slug>/. */
+export async function open(slug: string, screen: Screen = 'desktop'): Promise<Proof> {
   const { web, db, password, commit } = instance();
   const stamp = psql(db, ['-tAc', `select to_char(now() at time zone 'utc', 'YYYYMMDD"T"HH24MISS"Z"')`]).trim();
   const dir = `${ROOT}.verify/evidence/${stamp}-${slug}`;
   mkdirSync(dir, { recursive: true });
-  writeFileSync(`${dir}/instance.txt`, `web ${web}\ndatabase ${db}\ncommit ${commit}\n`);
+  writeFileSync(`${dir}/instance.txt`, `web ${web}\ndatabase ${db}\ncommit ${commit}\nscreen ${screen}\n`);
   const browser = await chromium.launch();
-  const context = await browser.newContext({ baseURL: web, viewport: { width: 1360, height: 900 } });
+  const context = await browser.newContext({ baseURL: web, ...screens[screen] });
   await context.tracing.start({ screenshots: true, snapshots: true });
   const page = await context.newPage();
   let shots = 0;
@@ -80,9 +87,20 @@ export async function open(slug: string): Promise<Proof> {
     password,
     note,
     railSays,
-    shot: async (name) => {
+    shot: async (name, fullPage = true) => {
       shots += 1;
-      await page.screenshot({ path: `${dir}/${String(shots).padStart(2, '0')}-${name}.png`, fullPage: true });
+      // A shot shows the settled screen: every answer in, and no sheet, note or row caught mid-fade.
+      await page.waitForLoadState('networkidle');
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getAnimations()
+            // A scroll-driven animation (the tab bar's more-tabs hint) never finishes, so only timed ones are awaited.
+            .filter((a) => a.timeline === document.timeline && a.effect?.getComputedTiming().endTime !== Infinity)
+            .map((a) => a.finished.catch(() => null)),
+        ),
+      );
+      await page.screenshot({ path: `${dir}/${String(shots).padStart(2, '0')}-${name}.png`, fullPage });
     },
     sql: (name, query, vars = {}) => {
       const bound = Object.entries(vars).flatMap(([key, value]) => ['-v', `${key}=${value}`]);
@@ -106,6 +124,8 @@ export async function open(slug: string): Promise<Proof> {
     },
     sign: async (meaning, pw = password) => {
       note(`sign as ${meaning}`);
+      const username = (await page.getByRole('contentinfo').locator('.who code').textContent()) ?? '';
+      await page.getByLabel(/User ID/).fill(username);
       await page.getByLabel(/Password/).fill(pw);
       await page.getByRole('button', { name: `Sign as ${meaning}` }).click();
     },

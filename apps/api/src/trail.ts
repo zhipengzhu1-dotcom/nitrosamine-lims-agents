@@ -4,6 +4,7 @@ import {
   type AuditedTable,
   auditedRecords,
   auditOp,
+  type ChainVerification,
   chainVerification,
   currentLabel,
   describeTrail,
@@ -15,10 +16,19 @@ import {
   type RowImage,
   type RowSnapshot,
   routes,
+  type StoredInstant,
+  storedInstants,
   type TimedEntry,
   type Trail,
 } from '@lims/domain';
-import { type ExpressionBuilder, type ExpressionWrapper, type Kysely, type SqlBool, sql } from 'kysely';
+import {
+  type ExpressionBuilder,
+  type ExpressionWrapper,
+  type Kysely,
+  type RawBuilder,
+  type SqlBool,
+  sql,
+} from 'kysely';
 import { Value } from 'typebox/value';
 import type { App } from './app.ts';
 import { openChainIncident } from './incident.ts';
@@ -36,25 +46,30 @@ function opOf(op: string): TimedEntry['op'] {
   throw new Error(`an Audit Trail entry has the op ${op}`);
 }
 
+const inUtc = (at: RawBuilder<unknown>) =>
+  sql<Instant>`to_char(${at} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+const onWallClock = (at: RawBuilder<unknown>, zone: RawBuilder<unknown>) => sql<Instant>`
+  to_char(${at} at time zone ${zone}, 'YYYY-MM-DD"T"HH24:MI:SS.US')
+    || case when (${at} at time zone ${zone}) < (${at} at time zone 'UTC') then '-' else '+' end
+    || to_char(greatest((${at} at time zone ${zone}) - (${at} at time zone 'UTC'),
+                        (${at} at time zone 'UTC') - (${at} at time zone ${zone})), 'HH24:MI')`;
+const entryAt = sql.ref('audit_entry.at');
 /** Selected as text, not a Date: the driver's Date keeps milliseconds, and order and labels compare `at` to the microsecond, as the hash renders it. */
-const atText = sql<Instant>`to_char(at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-/** The same instant on the owning Lab's wall clock, rendered by the database from the Lab's zone; null on the company chain. */
+const atText = inUtc(entryAt);
 const atLabText = sql<Instant | null>`(
-  select to_char(audit_entry.at at time zone l.time_zone, 'YYYY-MM-DD"T"HH24:MI:SS.US')
-      || case when (audit_entry.at at time zone l.time_zone) < (audit_entry.at at time zone 'UTC') then '-' else '+' end
-      || to_char(greatest((audit_entry.at at time zone l.time_zone) - (audit_entry.at at time zone 'UTC'),
-                          (audit_entry.at at time zone 'UTC') - (audit_entry.at at time zone l.time_zone)), 'HH24:MI')
+  select ${onWallClock(entryAt, sql.ref('l.time_zone'))}
     from lims.lab l where l.lab_id::text = audit_entry.chain)`;
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
 const newId = sql<string>`new_row->>'id'`;
 const usernameOf = sql<string>`new_row->>'username'`;
 
-type Where = (eb: ExpressionBuilder<DB, 'auditEntry'>) => ExpressionWrapper<DB, 'auditEntry', SqlBool>;
+export type Where = (eb: ExpressionBuilder<DB, 'auditEntry'>) => ExpressionWrapper<DB, 'auditEntry', SqlBool>;
 
 const chainOf = (scope: Scope, table: AuditedTable) =>
   auditedRecords[table].chain === 'lab' ? scope.ctx.lab.id : 'company';
 
-async function rawEntries(scope: Scope, where: Where): Promise<TimedEntry[]> {
+/** The entries `where` picks from this Lab's chain and the company chain, as stored. */
+export async function rawEntries(scope: Scope, where: Where): Promise<TimedEntry[]> {
   const rows = await scope
     .trail()
     .select([
@@ -118,7 +133,7 @@ async function imagesWanted(scope: Scope, wanted: RecordIds[], usernames: string
 }
 
 /** Every image of every record the entries reference, following references until no label needs a record not yet loaded. */
-async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<RowImage[]> {
+export async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<RowImage[]> {
   const usernames = [...new Set(entries.map((e) => actorUsername(e.actor)).filter((u) => u !== null))];
   const loaded = new Map<AuditedTable, Set<string>>();
   const unloaded = (wanted: RecordIds[]) =>
@@ -138,6 +153,20 @@ async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<RowImage[
   return images;
 }
 
+/** Each stored instant as the database renders it, in UTC and on `zone`'s wall clock, so that no host clock formats one. */
+export async function storedInstantsIn(
+  scope: Scope,
+  zone: string,
+  stored: string[],
+): Promise<Map<string, StoredInstant>> {
+  const value = sql.ref('v.stored');
+  const { rows } = await sql<StoredInstant & { stored: string }>`
+    select v.stored, ${inUtc(sql`${value}::timestamptz`)} as at,
+           ${onWallClock(sql`${value}::timestamptz`, sql`${zone}::text`)} as at_lab
+      from unnest(${stored}::text[]) as v(stored)`.execute(scope.company);
+  return new Map(rows.map(({ stored: key, ...rendered }) => [key, rendered]));
+}
+
 async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, where: Where): Promise<Trail> {
   const entries = await rawEntries(scope, where);
   if (entries.length === 0) refuse('notFound', `no such ${auditedRecords[root.table].kind} in this Lab`);
@@ -147,6 +176,7 @@ async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, 
     .where('labId', '=', scope.ctx.lab.id)
     .executeTakeFirstOrThrow();
   const images = await imagesFor(scope, entries);
+  const instants = await storedInstantsIn(scope, timeZone, storedInstants(entries));
   return {
     record: {
       table: root.table,
@@ -155,7 +185,7 @@ async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, 
       label: currentLabel([...images, ...imagesOf(entries)], root.table, root.id),
     },
     labZone: timeZone,
-    entries: describeTrail(entries, images, scope.ctx.lab.id),
+    entries: describeTrail(entries, images, scope.ctx.lab.id, instants),
   };
 }
 
@@ -164,10 +194,12 @@ function staffScope(db: Kysely<DB>, req: { actor: Scope['ctx'] }): Scope {
   return labScope(db, req.actor);
 }
 
-/** Whether a company record is one this Lab already sees: a Method always, a Person through a Membership here, a Customer or Submission through a Sample here. */
+/** Whether a company record is one this Lab already sees: a Method or a signature statement always, a Person through a Membership here, a Customer or Submission through a Sample here. */
 async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promise<boolean> {
   switch (table) {
     case 'method':
+    case 'signature_statement':
+    case 'signing_role':
       return true;
     case 'person':
       return Boolean(await scope.from('membership').select('personId').where('personId', '=', id).executeTakeFirst());
@@ -188,6 +220,8 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'test_report':
     case 'record_version':
     case 'signature':
+    case 'audit_export':
+    case 'reauthentication':
       return true;
   }
 }
@@ -246,15 +280,27 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
     handler: async (req) => {
       if (!req.actor.roles.includes('QA')) refuse('role', 'verifying the Audit Trail is a QA action');
       const { at, chains } = await labScope(db, req.actor).verifyAuditTrail();
-      const verified = [];
-      for (const { chain, chainId, lastEntry, firstFailure } of chains) {
-        const broken =
-          firstFailure === null
-            ? null
-            : { firstFailure, incident: await openChainIncident(db, req.actor, chainId, firstFailure) };
-        verified.push(chainVerification(chain, lastEntry, broken));
-      }
-      return { at, chains: verified };
+      return { at, chains: await chainVerifications(db, req.actor, chains) };
     },
   });
+}
+
+/**
+ * Reads each recomputed chain as QA sees it; a break opens its System Incident, or answers the one already open, so
+ * no break is shown without a record. `db` must be able to write while the caller's read stays open.
+ */
+export async function chainVerifications(
+  db: Kysely<DB>,
+  requester: Scope['ctx'],
+  chains: Awaited<ReturnType<Scope['verifyAuditTrail']>>['chains'],
+): Promise<ChainVerification[]> {
+  const verified = [];
+  for (const { chain, chainId, lastEntry, firstFailure } of chains) {
+    const broken =
+      firstFailure === null
+        ? null
+        : { firstFailure, incident: await openChainIncident(db, requester, chainId, firstFailure) };
+    verified.push(chainVerification(chain, lastEntry, broken));
+  }
+  return verified;
 }

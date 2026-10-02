@@ -558,6 +558,34 @@ describe('the migration moves the thin slice’s signed content onto Record Vers
     }
   });
 
+  it("the thin slice's Signatures gain the printed name, username and role as signed and their Record Version's hash and form, and keep no statement, session or release", async () => {
+    const { rows } = await client.query<Record<string, unknown>>(
+      `select s.meaning, s.printed_name, s.username, s.role, s.content_hash = v.content_hash as hash_copied,
+              s.canonical_form = v.canonical_form as form_copied,
+              num_nulls(s.statement_version, s.statement_hash, s.authenticator, s.session_id, s.app_release,
+                        s.reauthentication_id) as nulls
+         from lims.signature s join lims.record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
+        order by s.meaning::text`,
+    );
+    assert.deepEqual(
+      rows,
+      [
+        ['Performed', 'Analyst'],
+        ['Performed', 'Analyst'],
+        ['Released', 'QA'],
+        ['Reviewed', 'Reviewer'],
+      ].map(([meaning, role]) => ({
+        meaning,
+        printed_name: 'Slice Person',
+        username: 'slice.person',
+        role,
+        hash_copied: true,
+        form_copied: true,
+        nulls: 6,
+      })),
+    );
+  });
+
   it("a later migration gives each thin-slice Signature its signer's printed name and username", async () => {
     const { rows } = await client.query<{ matches: boolean }>(
       `select s.printed_name = p.display_name and s.username = p.username as matches

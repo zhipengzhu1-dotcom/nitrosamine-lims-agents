@@ -35,8 +35,9 @@ Each feature file starts with an H1 and one paragraph on the behaviour a user se
 - [Take a Test through its steps](./test-steps.md) covers Receive, Assign, Enter Result, Review and Release, with their Signatures and refusals.
 - [Test Report](./test-report.md) covers the released report and its three Signatures.
 - [Test Audit Trail](./test-audit-trail.md) covers the Audit Trail panel on a Test page, the entries behind it, raw entries, record links and QA's Verify chain.
-- [Record Versions and unsigned Signatures](./record-versions.md) covers the Record Version a Test shows, the version each Signature binds to, and the `unsigned` marker after a change behind the chain.
+- [Record Versions and unsigned Signatures](./record-versions.md) covers the Record Version a Test and its Test Report show, the version each Signature binds to, and the `Unsigned` Status after a change behind the chain.
 - [Staff accounts](./staff-accounts.md) covers Identity Verification, account creation with a one-time link, Memberships and printed-name changes, for the Admin at `#/staff`.
 - [Workstations, Lock and Switch user](./workstations.md) covers registering and enrolling a Workstation, and the rail's Lock and Switch user.
+- [Your preferences: reduced motion](./preferences.md) covers the per-person reduced-motion preference and how it combines with the device's setting.
 
 Not mapped yet: the nav modules (Equipment, Inventory, Deviations, Documents, Training, Stability, Notebooks, Dashboards). Each is a placeholder page at `#/<module>` that says what it will hold. Add a feature file when one of them gets behaviour.

@@ -77,7 +77,10 @@ const sessionClock = Type.Object({
 export type SessionClock = Static<typeof sessionClock>;
 /** What a person is told when the API refuses a session that has ended; the web shows it as the API sends it. */
 export const SESSION_ENDED = 'Your session has ended. Sign in again.';
-const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock });
+/** The person's own settings for the web. `reducedMotion` only ever reduces motion: the device's own setting still applies when it is off. */
+const preferences = Type.Object({ reducedMotion: Type.Boolean() }, closed);
+export type Preferences = Static<typeof preferences>;
+const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock, preferences });
 export type SignedInView = Static<typeof signedIn>;
 const testRow = Type.Object({
   id: uuid,
@@ -108,10 +111,14 @@ const recordVersionRef = Type.Object({
   canonicalForm: Type.Integer({ minimum: 0 }),
   contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
 });
+export type RecordVersionRef = Static<typeof recordVersionRef>;
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
+  username: Type.String(),
+  role: role,
   signedAt: instant,
+  /** The signed record's glossary noun, such as "Test Report". */
   record: Type.String(),
   recordVersion: recordVersionRef,
   /** True once the record has a Record Version later than the one this Signature was given on. */
@@ -132,6 +139,10 @@ export const auditedTable = Type.Enum({
   test_report: 'test_report',
   record_version: 'record_version',
   signature: 'signature',
+  audit_export: 'audit_export',
+  signature_statement: 'signature_statement',
+  signing_role: 'signing_role',
+  reauthentication: 'reauthentication',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;
 const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
@@ -159,10 +170,15 @@ const rawEntry = Type.Object({
 export type RawEntry = Static<typeof rawEntry>;
 const recordRef = Type.Object({ table: Type.String(), id: Type.String(), kind: Type.String(), label: Type.String() });
 export type RecordRef = Static<typeof recordRef>;
-/** A value as the panel shows it: a reference reads as the record's label at the entry's time and links to its trail. */
+/**
+ * A value as the panel shows it: a reference reads as the record's label at the entry's time and links to its trail;
+ * a stored instant carries the database's renderings, UTC and, on the Lab chain, the Lab's wall clock, as an entry's
+ * `at` and `atLab` do, and `text` keeps it as stored.
+ */
 const shownValue = Type.Object({
   text: Type.String(),
   ref: nullable(Type.Object({ table: auditedTable, id: Type.String() })),
+  instant: nullable(Type.Object({ at: instant, atLab: nullable(instant) })),
 });
 export type ShownValue = Static<typeof shownValue>;
 const trailChange = Type.Object({
@@ -228,17 +244,29 @@ const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' })
 /** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
 const username = Type.String({ pattern: '^[a-z][a-z0-9.-]{2,39}$' });
 const reportRef = Type.Object({ id: uuid, number: Type.String() });
-/** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
+/** The signature statement in force: what a signer attests, as QA approved it, with the version a Signature records. */
+const signatureStatement = Type.Object({ version: Type.Integer({ minimum: 1 }), text: Type.String() });
+export type SignatureStatement = Static<typeof signatureStatement>;
+/**
+ * `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a
+ * guessed value be confirmed. `statement` is the signature statement in force, null for a Customer, who never signs.
+ * `withheld` is true while the Result, Signatures and Record Version are held back from a Customer until release, so their
+ * absence never reads as none.
+ */
 const testView = Type.Object({
   test: testRow,
   recordVersion: nullable(recordVersionRef),
   report: nullable(reportRef),
   result: nullable(result),
   signatures: Type.Array(signature),
+  withheld: Type.Boolean(),
   next: nullable(Type.Enum(stepNames)),
+  statement: nullable(signatureStatement),
 });
+/** `recordVersion` is the Test Report's latest, which the Released Signature's version is compared with. */
 const testReport = Type.Object({
   report: reportRef,
+  recordVersion: recordVersionRef,
   test: testRow,
   result: nullable(result),
   signatures: Type.Array(signature),
@@ -247,8 +275,12 @@ const lookups = Type.Object({
   methods: Type.Array(Type.Object({ id: uuid, code: Type.String(), version: Type.String(), title: Type.String() })),
   analysts: Type.Array(Type.Object({ id: uuid, displayName: Type.String() })),
 });
+/** How a recomputed chain stands: Intact through its last entry, or Broken at its first failure. */
+export const chainVerdict = Type.Union([Type.Literal('Intact'), Type.Literal('Broken')]);
+export type ChainVerdict = Static<typeof chainVerdict>;
 const chainVerification = Type.Object({
   chain: chainKind,
+  verdict: chainVerdict,
   lastEntry: seq,
   intactThrough: seq,
   firstFailure: nullable(seq),
@@ -259,6 +291,37 @@ const chainVerification = Type.Object({
 export type ChainVerification = Static<typeof chainVerification>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
+const auditExportFormat = Type.Enum({ JSON: 'JSON', CSV: 'CSV' } as const satisfies { [K in db.AuditExportFormat]: K });
+export type AuditExportFormat = Static<typeof auditExportFormat>;
+const customerRef = Type.Object({ id: uuid, name: Type.String() });
+/** An entry as an Audit Export carries it: `redacted` is true when another Customer's identifier was replaced in it, raw values included, so its raw rows no longer hash to `raw.hash`. */
+const exportedEntry = Type.Object({ ...trailEntry.properties, redacted: Type.Boolean() });
+export type ExportedEntry = Static<typeof exportedEntry>;
+/** The JSON data file of an Audit Export: what it covers, as of when, the chains' state then, and every entry. */
+export const auditExportData = Type.Object({
+  customer: customerRef,
+  lab: Type.Object({ code: Type.String(), name: Type.String(), zone: Type.String() }),
+  asOf: instant,
+  generatedBy: Type.Object({ label: Type.String(), username: Type.String(), role }),
+  chains: Type.Array(chainVerification),
+  entries: Type.Array(exportedEntry),
+});
+export type AuditExportData = Static<typeof auditExportData>;
+const exportedFile = Type.Object({
+  name: Type.String(),
+  mediaType: Type.String(),
+  sha256: sha256Hex,
+  base64: Type.String({ pattern: '^[A-Za-z0-9+/]*={0,2}$' }),
+});
+const auditExport = Type.Object({
+  id: uuid,
+  customer: customerRef,
+  generatedAt: instant,
+  entryCount: Type.Integer({ minimum: 0 }),
+  /** The data file in the format asked for, then its PDF. */
+  files: Type.Tuple([exportedFile, exportedFile]),
+});
+export type AuditExport = Static<typeof auditExport>;
 const systemIncident = Type.Object({
   reference: Type.String({ pattern: `^${referencePattern}$` }),
   kind: Type.Enum({
@@ -303,7 +366,9 @@ export type StepTaken = Static<typeof stepTaken>;
  * `accountLocked`, `labNotChosen` for a sign-in that names no Lab, and `role` for a Lab where the person holds no
  * Membership, come only after the right password. `noSession` covers no session presented and a session that
  * has ended. `sessionLocked` answers every request on a locked session except lock, unlock, sign-out and a sign-in over it. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
- * with a different step or input, or from another session. `notFound` also covers an
+ * with a different step or input, or from another session. `recordChanged` is a signing on sight of a Record Version that is no
+ * longer the record's latest: the screen must show the record again before it is signed. `signingRefused` is what the signing
+ * function refuses once the step's transaction has begun, such as a signature statement no longer in force. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
  */
@@ -319,6 +384,8 @@ export const refusalKinds = [
   'guard',
   'state',
   'stale',
+  'recordChanged',
+  'signingRefused',
   'keyReused',
   'notFound',
   'failure',
@@ -336,6 +403,17 @@ const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, c
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
+/** The Record Version the signer saw, as the screen showed it: the signing is refused if the record has moved on. */
+const seenVersion = Type.Object({ version: recordVersionRef.properties.version, contentHash: sha256Hex }, closed);
+const typedCredentials = Type.Object({ username: text, password: text }, closed);
+/** What a signer types on the signature sheet: their user ID and their password. */
+export type TypedCredentials = Static<typeof typedCredentials>;
+/** What a signing sends: the typed credentials, the Record Version the sheet showed and the signature statement version it showed. */
+const signingBody = Type.Object(
+  { ...typedCredentials.properties, recordVersion: seenVersion, statementVersion: Type.Integer({ minimum: 1 }) },
+  closed,
+);
+export type SigningBody = Static<typeof signingBody>;
 const reauthentication = Type.Object({ password: text }, closed);
 const room = Type.Object({ id: uuid, name: Type.String() });
 const workstation = Type.Object({
@@ -358,7 +436,7 @@ const roomRegistration = Type.Object({ name: text, reason: text }, closed);
 const stepEnvelope = Type.Object({
   commitKey: uuid,
   testId: Type.Optional(uuid),
-  signature: Type.Optional(reauthentication),
+  signature: Type.Optional(signingBody),
 });
 const stepInputs = {
   submit: Type.Object({ methodId: uuid, description: text }, closed),
@@ -379,6 +457,10 @@ const stepInputs = {
   release: Type.Object({}, closed),
 } satisfies { [K in StepName]: TObject };
 export type StepInput<K extends StepName> = Static<(typeof stepInputs)[K]>;
+/** A press's step, record and entries as one text, the same in whatever order the entries were typed, so the API and the web agree on which presses are one press. */
+export function pressText(step: StepName, testId: string | null, input: object): string {
+  return JSON.stringify([step, testId, Object.entries(input).sort(([a], [b]) => (a < b ? -1 : 1))]);
+}
 /** A step's body for any K. Its type keeps testId and signature optional; the wire schema requires them where the registry does. */
 export type StepBody<K extends StepName> = Static<typeof stepEnvelope> & { input: StepInput<K> };
 
@@ -420,6 +502,7 @@ export const routes = {
   registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
   enrolWorkstation: route('POST', '/api/workstations/enrol', { body: enrolment }, workstation),
   me: route('GET', '/api/me', {}, signedIn),
+  setPreferences: route('POST', '/api/me/preferences', { body: preferences }, preferences),
   /** Reads how long the session has left without counting as activity, for the web's countdown. */
   session: route('GET', '/api/session', {}, sessionClock),
   lookups: route('GET', '/api/lookups', {}, lookups),
@@ -434,6 +517,14 @@ export const routes = {
     trail,
   ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
+  /** The Customers QA can export for: those with a Sample in this Lab. */
+  auditExportCustomers: route('GET', '/api/audit-exports/customers', {}, Type.Array(customerRef)),
+  auditExport: route(
+    'POST',
+    '/api/audit-exports',
+    { body: Type.Object({ customerId: uuid, format: auditExportFormat }, closed) },
+    auditExport,
+  ),
   staff: route('GET', '/api/staff', {}, staff),
   recordIdentityVerification: route(
     'POST',

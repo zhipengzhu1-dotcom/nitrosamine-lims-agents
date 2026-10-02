@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { audited } from '@lims/db';
 import { type Route, type RouteInput, routes, stepNames, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { endExpiredSessions, SESSION_LIMITS } from '../src/auth.ts';
+import { SESSION_LIMITS } from '../src/auth.ts';
 import { type Account, type Answer, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_workstations_test');
@@ -360,14 +360,13 @@ describe('Lock and Switch user', () => {
     );
   });
 
-  it('a locked screen does not keep its session alive: past the idle limit the sweep ends it with an idle-expiry Access Event, and unlock is refused', async () => {
+  it('a locked screen does not keep its session alive: past the idle limit unlock is refused and ends it with an idle-expiry Access Event', async () => {
     const ana = await api.addPerson(`ana.locked-idle-${randomUUID()}`, ['Analyst']);
     const browser = await api.login(ana);
     ok(await browser.call(routes.lock));
     refusedWith(await browser.call(routes.unlock, { password: 'not-the-password' }), 'badCredentials');
     await api.advanceClock(ana, SESSION_LIMITS.decided.idleMs + 60_000);
     refusedWith(await browser.call(routes.unlock, { password: ana.password }), 'noSession');
-    await endExpiredSessions(api.db, SESSION_LIMITS.decided);
     assert.deepEqual(
       (await eventsOf(ana.id)).map((e) => e.kind).sort(),
       ['IdleExpiry', 'Lock', 'SignInSucceeded', 'UnlockFailed'],
@@ -387,7 +386,7 @@ describe('Lock and Switch user', () => {
     );
   });
 
-  it('a sign-in over a session already past its idle limit leaves it to the expiry sweep, with no takeover Access Event', async () => {
+  it('a sign-in over a session already past its idle limit ends it with its idle-expiry Access Event, not a takeover', async () => {
     const ana = await api.addPerson(`ana.expired-${randomUUID()}`, ['Analyst']);
     const rui = await api.addPerson(`rui.next-morning-${randomUUID()}`, ['Reviewer']);
     const browser = await api.login(ana);
@@ -399,14 +398,13 @@ describe('Lock and Switch user', () => {
     await signInOn(browser, rui);
     assert.deepEqual(
       (await sessionsOf(ana.id)).map((s) => s.ended),
-      [false],
-      'not ended here, so the sweep writes its expiry Access Event',
+      [true],
     );
     assert.notEqual(ok(await browser.call(routes.me)).person.id, ana.id, 'the browser now holds the new session');
     assert.deepEqual(
-      (await eventsOf(ana.id)).map((e) => e.kind),
-      ['SignInSucceeded'],
-      'no Takeover of a session that had already ended',
+      (await eventsOf(ana.id)).map((e) => e.kind).sort(),
+      ['IdleExpiry', 'SignInSucceeded'],
+      'no Takeover of a session that had already lapsed',
     );
   });
 

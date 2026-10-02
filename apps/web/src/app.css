@@ -21,8 +21,8 @@
   --ok: #17724a;
   --bad: #b3261e;
   --bad-tint: #fce8e5;
-  --font: "Atkinson Hyperlegible Next", "Segoe UI", system-ui, sans-serif;
-  --mono: "Atkinson Hyperlegible Mono", Consolas, ui-monospace, monospace;
+  --font: "Segoe UI", system-ui, sans-serif;
+  --mono: Consolas, ui-monospace, monospace;
   --top-h: 48px;
   --rail-h: 76px;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -101,6 +101,8 @@ p {
   grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
+  /* Hidden would still scroll: typing in a sheet still sliding in pulled the frame up and the rail over the sheet. */
+  overflow: clip;
 }
 .frame > .plane,
 .sheet {
@@ -143,6 +145,60 @@ p {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+}
+/* A phone's tab bar always overflows. Chromium leaves a resized bar that no longer overflows in the end state, which fades the first tab, so wider screens get no fade. */
+@media (max-width: 640px) {
+  .top nav {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 var(--more-before),
+      #000 calc(100% - var(--more-after)),
+      transparent
+    );
+  }
+  @supports (animation-timeline: scroll()) {
+    .top nav {
+      animation: more-tabs linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+  /* Without scroll-driven animations the right edge always fades, and a spacer lets the last tab scroll clear of it. */
+  @supports not (animation-timeline: scroll()) {
+    .top nav {
+      --more-after: 72px;
+    }
+    .top nav::after {
+      content: "";
+      flex: none;
+      width: 72px;
+    }
+  }
+}
+@property --more-before {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --more-after {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes more-tabs {
+  from {
+    --more-before: 0px;
+    --more-after: 72px;
+  }
+  8%,
+  92% {
+    --more-before: 72px;
+    --more-after: 72px;
+  }
+  to {
+    --more-before: 72px;
+    --more-after: 0px;
+  }
 }
 .top nav a {
   display: flex;
@@ -235,8 +291,15 @@ th {
   flex-basis: 100%;
 }
 .verdict {
-  margin: 0;
   flex: 1 1 320px;
+}
+.verdict p {
+  margin: 0;
+}
+.chains {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
 }
 .entries {
   list-style: none;
@@ -365,14 +428,11 @@ td a,
   color: var(--sig);
   font-weight: 700;
 }
-.unsigned {
-  margin-left: 8px;
-  padding: 2px 6px;
-  border: 1.5px solid var(--bad);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--bad);
-  background: var(--bad-tint);
+.sig-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 .row--unsigned .sig {
   color: var(--ink-3);
@@ -399,6 +459,21 @@ td a,
 }
 .status--done {
   --accent: var(--ink);
+}
+.status--ok {
+  color: var(--ok);
+}
+.status--bad {
+  color: var(--bad);
+}
+.glyph {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .track i.on {
   background: var(--accent);
@@ -447,7 +522,8 @@ td a,
 }
 
 .rail {
-  grid-row: 3;
+  /* Placed, not auto-placed: a phone's open sheet spans row 3 too, and an auto-placed rail would open a second column. */
+  grid-area: 3 / 1;
   z-index: 2;
   min-height: var(--rail-h);
   display: flex;
@@ -470,6 +546,14 @@ td a,
   font-size: 20px;
   font-weight: 800;
 }
+.who a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: inherit;
+  text-decoration-color: var(--bench-line);
+  text-underline-offset: 4px;
+}
 .who span {
   font-size: 13px;
   color: var(--on-bench-2);
@@ -487,6 +571,15 @@ td a,
   min-width: 0;
   font-size: 15px;
   font-weight: 700;
+}
+/* An open sheet shows its own line, so the rail's copy stays for screen readers only. */
+.frame:has(> .sheet:not([data-closing])) .rail__context .note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .note {
   margin: 0;
@@ -544,7 +637,6 @@ td a,
   cursor: pointer;
   transition:
     transform var(--dur-press) var(--ease-out),
-    filter var(--dur-press) var(--ease-out),
     opacity var(--dur-enter) var(--ease-out);
 }
 @starting-style {
@@ -562,9 +654,9 @@ td a,
     filter: brightness(1.08);
   }
 }
+/* The press scales only. A filter transition on the press crashes Playwright's Linux WebKit renderer (WPE SIGSEGV). */
 .rbtn:active:not(:disabled) {
   transform: scale(0.97);
-  filter: brightness(0.92);
 }
 .rbtn:disabled {
   opacity: 0.6;
@@ -578,12 +670,13 @@ td a,
 
 .sheet {
   --foot-h: 84px;
+  --foot-gap: 8px;
   align-self: end;
   z-index: 1;
   max-height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
-  scroll-padding-bottom: var(--foot-h);
+  scroll-padding-bottom: calc(var(--foot-h) + var(--foot-gap));
   background: var(--canvas);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -12px 40px rgb(0 0 0 / 0.25);
@@ -668,7 +761,11 @@ td a,
   color: var(--ink);
   border-color: var(--line-2);
 }
+.prefs {
+  max-width: 560px;
+}
 .card {
+  min-width: 0;
   background: var(--sheet);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -692,6 +789,11 @@ select {
   border: 1px solid var(--edge);
   border-radius: 8px;
   font: 400 16px var(--font);
+}
+/* WebKit counts a select's chosen text as overflow past its box, which widens the sheet; contain it. Chromium ends the text with an ellipsis, WebKit clips it. */
+select {
+  contain: paint;
+  text-overflow: ellipsis;
 }
 .who__name {
   font-size: 24px;
@@ -731,7 +833,8 @@ select {
   font-weight: 600;
   margin-bottom: 4px;
 }
-.labs__option {
+.labs__option,
+.check {
   flex-direction: row;
   align-items: center;
   gap: 12px;
@@ -740,7 +843,8 @@ select {
   font-weight: 400;
   cursor: pointer;
 }
-.labs__option input {
+.labs__option input,
+.check input {
   flex: none;
   width: 24px;
   height: 24px;
@@ -810,7 +914,8 @@ a.btn {
   text-decoration: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
+/* motion.ts sets data-reduce-motion when the device or the signed-in person asks for reduced motion. */
+:where(:root[data-reduce-motion]) {
   .rbtn:active:not(:disabled) {
     transform: none;
   }
@@ -863,7 +968,6 @@ a.btn {
   .rail__context {
     order: 1;
     flex-basis: 100%;
-    min-height: 2lh;
     font-size: 14px;
   }
   .rbtn--commit {
@@ -896,6 +1000,7 @@ a.btn {
     border-top: 1px solid var(--line);
   }
   .top nav a {
+    min-height: 44px;
     padding: 0 10px;
   }
   .plane {
@@ -905,6 +1010,15 @@ a.btn {
     flex-wrap: wrap;
     gap: 4px 12px;
     font-size: 22px;
+  }
+  .record-head {
+    position: sticky;
+    top: -12px;
+    z-index: 1;
+    margin-inline: -12px;
+    padding: 8px 12px;
+    background: var(--canvas);
+    border-bottom: 1px solid var(--line);
   }
   .facts dd {
     overflow-wrap: anywhere;
@@ -929,8 +1043,17 @@ a.btn {
   .stack tr {
     display: block;
   }
+  /* The table contains its hidden head: placed from the page instead, the head sits below the frame on a long record and lets the page scroll under the sheet. */
+  .stack {
+    position: relative;
+  }
   .stack thead {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .stack tr {
     padding: 8px 12px;
@@ -945,6 +1068,7 @@ a.btn {
   }
   .stack td::before {
     content: attr(data-label);
+    content: attr(data-label) / "";
     color: var(--ink-3);
     font-size: 12px;
     font-weight: 700;
@@ -954,7 +1078,13 @@ a.btn {
   }
   .sheet {
     --foot-h: 156px;
+    grid-row: 2 / 4;
+    z-index: 3;
     padding: 12px 12px 0;
+  }
+  .frame:has(> .sheet:not([data-closing])) .rail__session {
+    visibility: hidden;
+    transition: visibility 0s var(--dur-sheet-in);
   }
   .sheet h2 {
     flex-wrap: wrap;
@@ -964,7 +1094,7 @@ a.btn {
   .sheet__foot {
     flex-wrap: wrap;
     gap: 8px;
-    padding: 10px 0 12px;
+    padding: 10px 0 max(12px, env(safe-area-inset-bottom));
   }
   .sheet__line {
     --lines: 3;
@@ -972,6 +1102,16 @@ a.btn {
   }
   .sheet__foot .rbtn {
     flex: 1;
+  }
+  /* A legend that wraps to two lines would sit across the card's top border, so it moves inside the card. */
+  .card legend {
+    float: left;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 0;
+  }
+  .card legend ~ * {
+    clear: left;
   }
   .rail__session {
     order: 3;
@@ -1015,4 +1155,44 @@ a.btn {
     border: 0;
     max-width: none;
   }
+}
+
+.export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+}
+.export label {
+  margin: 0;
+  flex: 1 1 220px;
+}
+.export select {
+  width: 100%;
+}
+.export__done ul {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+.export__done li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.export__done a.btn {
+  display: inline-flex;
+  align-items: center;
+  height: auto;
+  min-height: 44px;
+  padding: 8px 16px;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.export__done code {
+  overflow-wrap: anywhere;
 }

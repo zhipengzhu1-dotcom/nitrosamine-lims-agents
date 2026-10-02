@@ -5,6 +5,7 @@ import { audited } from '@lims/db';
 import {
   auditedRecords,
   auditedTables,
+  isAuditedTable,
   routes,
   type StepInput,
   type StepName,
@@ -12,7 +13,7 @@ import {
   type TrailEntry,
 } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_trail_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -42,7 +43,7 @@ const result = {
 };
 
 async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
-  const signature = signer && { password: signer.password };
+  const signature = signer && (await signatureOf(client, testId, signer));
   assert.equal(
     (await client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) }))
       .status,
@@ -115,6 +116,24 @@ it("the Test's trail lists the Test's, its Result's and Signatures' entries with
   assert.ok(!entries.some((e) => otherTrail.entries.some((o) => o.raw.chain === e.raw.chain && o.seq === e.seq)));
 });
 
+function onLabClock(at: string): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset',
+    // oxlint-disable-next-line no-restricted-globals -- parses an instant to render it; reads no clock
+  }).formatToParts(new Date(at));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '';
+  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice(3);
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${at.slice(19, 26)}${offset}`;
+}
+
 it("each entry carries the actor's label and role, the field's glossary name, old and new value, the reason, and UTC plus Lab-zone time; company-chain entries carry UTC only", async () => {
   const id = await submitTestTo('Assigned');
   const { entries } = await trailOf(id);
@@ -128,7 +147,12 @@ it("each entry carries the actor's label and role, the field's glossary name, ol
         reason: 'assign',
         op: 'UPDATE',
         changes: [
-          { field: 'state', label: 'State', old: { text: 'Ready', ref: null }, new: { text: 'Assigned', ref: null } },
+          {
+            field: 'state',
+            label: 'State',
+            old: { text: 'Ready', ref: null, instant: null },
+            new: { text: 'Assigned', ref: null, instant: null },
+          },
         ],
       },
       {
@@ -140,29 +164,15 @@ it("each entry carries the actor's label and role, the field's glossary name, ol
             field: 'assignee_id',
             label: 'Analyst',
             old: null,
-            new: { text: 'Ana Ferreira', ref: { table: 'person', id: ana.id } },
+            new: { text: 'Ana Ferreira', ref: { table: 'person', id: ana.id }, instant: null },
           },
         ],
       },
     ],
   );
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-    timeZoneName: 'longOffset',
-    // oxlint-disable-next-line no-restricted-globals -- the test's own rendering of the entry's instant, independent of the database's; reads no clock
-  }).formatToParts(new Date(assign.at));
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '';
-  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice(3);
   assert.equal(
     assign.atLab,
-    `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${assign.at.slice(19, 26)}${offset}`,
+    onLabClock(assign.at),
     'the same instant on the Lab wall clock, ISO 8601 with the offset, as Intl renders it',
   );
   assert.match(assign.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, 'UTC to the microsecond, as hashed');
@@ -274,6 +284,21 @@ it("a company record out of this Lab's sight is not found: a person of another L
   assert.ok(ok(await as.rui.call(routes.recordTrail, { table: 'customer', id: customerId })).entries.length > 0);
 });
 
+it('every column a row snapshot stores has a glossary label in the registry, other than the id and the Lab', async () => {
+  await submitTestTo('Reported');
+  const { rows } = await sql<{ table: string; column: string }>`
+    select distinct table_name as "table", jsonb_object_keys(coalesce(new_row, old_row)) as "column"
+      from lims.audit_entry where table_name = any(${auditedTables}::text[])`.execute(api.db);
+  assert.deepEqual(
+    rows.filter(
+      ({ table, column }) =>
+        !['id', 'lab_id'].includes(column) &&
+        !(isAuditedTable(table) && Object.hasOwn(auditedRecords[table].fields, column)),
+    ),
+    [],
+  );
+});
+
 it("the registry's chain for each audited table matches whether the table carries a lab_id column", async () => {
   const { rows } = await sql<{ table: string }>`
     select table_name as "table" from information_schema.columns
@@ -296,7 +321,7 @@ it("a cited record's own trail holds only that record's entries, and a record ou
   refusedWith(await as.rui.call(routes.recordTrail, { table: 'sample', id }), 'notFound');
 });
 
-it("QA's Verify chain on an untouched chain replies intact through entry N, with N the chain's last entry; another role is refused", async () => {
+it("QA's Verify chain on an untouched chain replies Intact, verified through entry N, with N the chain's last entry; another role is refused", async () => {
   await submitTestTo('Ready');
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   const [labLast, companyLast] = [await lastEntryOf(api.labId), await lastEntryOf('company')];
@@ -307,7 +332,8 @@ it("QA's Verify chain on an untouched chain replies intact through entry N, with
       intactThrough: labLast,
       firstFailure: null,
       incident: null,
-      report: `intact through entry ${labLast}`,
+      verdict: 'Intact',
+      report: `verified through entry ${labLast}`,
     },
     {
       chain: 'company',
@@ -315,7 +341,8 @@ it("QA's Verify chain on an untouched chain replies intact through entry N, with
       intactThrough: companyLast,
       firstFailure: null,
       incident: null,
-      report: `intact through entry ${companyLast}`,
+      verdict: 'Intact',
+      report: `verified through entry ${companyLast}`,
     },
   ]);
   assert.equal(
@@ -334,6 +361,25 @@ it('a Customer User asking for any trail is refused', async () => {
   );
   refusedWith(await as.cora.call(routes.recordTrail, { table: 'test', id }), 'role');
   refusedWith(await as.cora.call(routes.recordTrail, { table: 'method', id: api.methodId }), 'role');
+});
+
+it('a stored instant carries its UTC and Lab-zone renderings, a Record kind reads as its glossary noun, and a hash as hex', async () => {
+  const id = await submitTestTo('SubmittedForReview');
+  const { entries } = await trailOf(id);
+  const changeOf = (table: string, field: string) =>
+    entries.flatMap((e) => (e.record.table === table ? e.changes : [])).find((c) => c.field === field)?.new ??
+    assert.fail(`the ${table} ${field} change`);
+  for (const [table, field] of [
+    ['sample', 'received_at'],
+    ['signature', 'signed_at'],
+    ['record_version', 'saved_at'],
+  ] as const) {
+    const { instant } = changeOf(table, field);
+    assert.match(instant?.at ?? '', /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, `${field} in UTC to the microsecond`);
+    assert.equal(instant?.atLab, onLabClock(instant?.at ?? ''), `${field} on the Lab wall clock`);
+  }
+  assert.equal(changeOf('record_version', 'record_table').text, 'Test');
+  assert.match(changeOf('record_version', 'content_hash').text, /^[0-9a-f]{64}$/);
 });
 
 it('the raw entry under each readable entry keeps the stored values and hashes', async () => {
@@ -394,6 +440,7 @@ it('after an entry is altered by the database owner, Verify chain names it as th
     intactThrough: String(altered - 1n),
     firstFailure: String(altered),
     incident,
+    verdict: 'Broken',
     report: `entry ${altered} fails to verify; intact through entry ${altered - 1n}; recorded as System Incident ${incident}`,
   });
 
