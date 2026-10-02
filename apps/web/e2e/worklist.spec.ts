@@ -53,10 +53,9 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
   const chips = pipeline.getByRole('radio');
   const all = pipeline.getByRole('radio', { name: /^All \d+$/ });
   await expect(all, 'the Worklist opens on every state').toBeChecked();
-  for (const chip of await chips.all()) {
+  for (const chip of await chips.all())
     await expect(chip, 'a shown state holds at least one Test').toHaveAccessibleName(/ [1-9]\d*$/);
-    await atLeast44(chip, 'a state filter');
-  }
+  for (const label of await pipeline.locator('label').all()) await atLeast44(label, 'a state filter');
   const inReviewChip = pipeline.getByRole('radio', { name: /^Submitted For Review \d+$/ });
   await inReviewChip.check();
   await expect(page.getByRole('row', { name: inReview }), 'the filter keeps a Test in the chosen state').toBeVisible();

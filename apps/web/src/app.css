@@ -329,7 +329,6 @@ th {
   gap: 6px;
 }
 .pipeline .pipe {
-  position: relative;
   flex-direction: row;
   align-items: center;
   gap: 8px;
@@ -343,16 +342,11 @@ th {
   font-size: 13px;
   cursor: pointer;
 }
-/* The radio covers its chip, so a press anywhere on the chip chooses it; the chip's border shows the choice. */
 .pipe input {
-  position: absolute;
-  z-index: 1;
-  inset: -1px;
-  width: calc(100% + 2px);
-  height: calc(100% + 2px);
+  flex: none;
+  width: 18px;
+  height: 18px;
   margin: 0;
-  opacity: 0;
-  cursor: pointer;
 }
 .pipe b {
   font-variant-numeric: tabular-nums;
@@ -361,10 +355,6 @@ th {
   border-color: var(--act);
   box-shadow: inset 0 0 0 1px var(--act);
   background: color-mix(in srgb, var(--act) 8%, var(--sheet));
-}
-.pipe:has(input:focus-visible) {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
 }
 .row--open td {
   background: color-mix(in srgb, var(--act) 8%, var(--sheet));
@@ -376,7 +366,6 @@ th {
 .split__close {
   margin-bottom: 8px;
 }
-/* Narrower than a desktop, an open record takes the screen as it does alone, and the plane scrolls it. */
 .split__list {
   display: none;
 }

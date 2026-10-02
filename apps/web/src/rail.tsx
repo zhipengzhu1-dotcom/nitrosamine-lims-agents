@@ -67,7 +67,6 @@ export interface SigningView {
   recordVersion: RecordVersionRef;
   statement: SignatureStatement;
 }
-/** Every Test state, in the order the steps reach them. */
 export const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
@@ -241,21 +240,21 @@ type ModuleKey = Module['key'];
 
 /**
  * `notice` is what the rail says when the person has no step to take here, such as which Signatures are unsigned.
- * `record` names the record the rail acts on, so a sheet or answer for one record never stays on for the next.
+ * A new `railKey` starts the rail afresh, so a sheet or answer for one record never stays on for the next.
  */
 export function Shell({
   me,
   active,
   action,
   notice,
-  record,
+  railKey,
   children,
 }: {
   me: ActorContext;
   active: ModuleKey | null;
   action: RailAction | null;
   notice?: string | undefined;
-  record?: string;
+  railKey?: string;
   children: ReactNode;
 }) {
   return (
@@ -273,7 +272,7 @@ export function Shell({
         </nav>
       </TopBar>
       <main className="plane">{children}</main>
-      <Rail key={record} me={me} action={action} notice={notice} />
+      <Rail key={railKey} me={me} action={action} notice={notice} />
     </div>
   );
 }

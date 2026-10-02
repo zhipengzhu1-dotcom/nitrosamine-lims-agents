@@ -39,7 +39,6 @@ const besideHeads = new Set(['Sample', 'State', 'Received']);
 const searchText = (t: TestRow) =>
   [t.sampleNumber, t.description, t.customer, methodLine(t), t.methodTitle].join('\n').toLowerCase();
 
-/** The Test states the found Tests are in, each with its count. A state no found Test is in is hidden unless chosen. */
 function Pipeline({
   found,
   chosen,
@@ -68,7 +67,6 @@ function Pipeline({
   );
 }
 
-/** The Lab's Tests, filtered by state and search. `open` is the Test shown beside the list. */
 export function Worklist({ me, open }: { me: ActorContext; open: string | null }) {
   const { data: tests, error, reload } = useApi(routes.tests);
   const freshTests = useFresh(tests, (rows) => rows.map((t) => t.id));
@@ -131,9 +129,7 @@ export function TestPage({
   list?: ReactNode;
   afterStep?: () => Promise<void>;
 }) {
-  const { data: answer, error, reload } = useApi(routes.test, { id });
-  // Beside the Worklist this page stays mounted when another Test opens, so the answer for the Test before is not shown.
-  const view = answer?.test.id === id ? answer : undefined;
+  const { data: view, error, reload } = useApi(routes.test, { id });
   const [reloadTrail, setReloadTrail] = useState<() => Promise<void>>(() => async () => {});
   const onTrailReload = useCallback((fn: () => Promise<void>) => setReloadTrail(() => fn), []);
   const freshState = useFresh(view, (v) => [v.test.state]);
@@ -150,8 +146,8 @@ export function TestPage({
       )
     : null;
   const frame = (record: ReactNode) => (
-    <Shell me={me} active="tests" action={action} notice={view && unsignedNotice(view.signatures)} record={id}>
-      {list ? <Split list={list} record={record} close="#/tests" /> : record}
+    <Shell me={me} active="tests" action={action} notice={view && unsignedNotice(view.signatures)} railKey={id}>
+      {list ? <Split list={list} record={record} closeHref="#/tests" /> : record}
     </Shell>
   );
   if (!view) return frame(error ? <p className="note--bad">{error}</p> : null);
