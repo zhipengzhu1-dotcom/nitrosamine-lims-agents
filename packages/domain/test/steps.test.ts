@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   type Refusal,
   type Role,
+  type Sentence,
   refusal,
   type StepFacts,
   type StepName,
@@ -70,7 +71,7 @@ describe('a step by any role but its own is refused', () => {
 });
 
 describe("a step whose guard fails is refused with the guard's reason", () => {
-  const cases: { name: string; step: StepName; facts: Partial<StepFacts>; refused: string | null }[] = [
+  const cases: { name: string; step: StepName; facts: Partial<StepFacts>; refused: Sentence | null }[] = [
     {
       name: 'assigning an Analyst without a Training Record for the Method is refused',
       step: 'assign',
@@ -115,37 +116,4 @@ describe("a step whose guard fails is refused with the guard's reason", () => {
       const expected: Refusal | null = c.refused === null ? null : { kind: 'guard', message: c.refused };
       assert.deepEqual(refusal(c.step, from, [role], { ...allowed, ...c.facts }), expected);
     });
-});
-
-describe('every refusal the step registry gives is a sentence for the person at the bench', () => {
-  it('each message starts with a capital letter and ends with a full stop', () => {
-    const people = [null, 'ana', 'rui'];
-    const facts = people.flatMap((assignee) =>
-      [true, false].flatMap((assigneeTrained) =>
-        people.flatMap((Performed) =>
-          people.map(
-            (Reviewed): StepFacts => ({
-              actor: 'ana',
-              assignee,
-              assigneeTrained,
-              signers: { ...(Performed && { Performed }), ...(Reviewed && { Reviewed }) },
-            }),
-          ),
-        ),
-      ),
-    );
-    const held: Role[][] = [[], ...roles.map((role) => [role])];
-    const messages = new Set(
-      stepNames.flatMap((name) =>
-        states.flatMap((state) =>
-          held.flatMap((some) => facts.flatMap((f) => refusal(name, state, some, f)?.message ?? [])),
-        ),
-      ),
-    );
-    assert.ok(messages.size > stepNames.length, 'the registry was asked for its refusals');
-    assert.deepEqual(
-      [...messages].filter((message) => !/^[A-Z][\s\S]*\.$/.test(message)),
-      [],
-    );
-  });
 });

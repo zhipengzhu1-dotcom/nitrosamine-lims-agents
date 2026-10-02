@@ -1,8 +1,9 @@
 import type { RefusalKind, Role } from './http.ts';
+import type { Sentence } from './sentence.ts';
 
 export interface StaffRefusal {
   kind: Extract<RefusalKind, 'role' | 'guard'>;
-  message: string;
+  message: Sentence;
 }
 
 /** Staff accounts are managed by the Admin of the session's Lab, and by no one else. */

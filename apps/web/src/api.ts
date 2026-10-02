@@ -8,6 +8,7 @@ import {
   type RouteInput,
   type RouteReply,
   routes,
+  type Sentence,
   type SessionClock,
   type SignedInView,
 } from '@lims/domain';
@@ -15,20 +16,27 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { setPersonReducesMotion } from './motion.ts';
 
 export class Refused extends Error {
+  declare message: Sentence;
   kind: RefusalKind;
-  constructor(kind: RefusalKind, message: string) {
+  constructor(kind: RefusalKind, message: Sentence) {
     super(message);
     this.kind = kind;
   }
 }
 
-function refusedBy(json: unknown, fallback: string): Refused {
+function refusedBy(json: unknown, fallback: Sentence): Refused {
   const body: object = typeof json === 'object' && json !== null ? json : {};
   return new Refused(
     'kind' in body && isRefusalKind(body.kind) ? body.kind : 'failure',
-    'message' in body && typeof body.message === 'string' ? body.message : fallback,
+    'message' in body && typeof body.message === 'string'
+      ? // oxlint-disable-next-line typescript/consistent-type-assertions -- the API's message is typed Sentence where it is written, and the API tests check every refused answer is one
+        (body.message as Sentence)
+      : fallback,
   );
 }
+
+/** What a screen shows when a call fails: the server's refusal as written, or one sentence when the LIMS did not answer, never the browser's own error text. */
+export const failureText = (e: unknown): Sentence => (e instanceof Refused ? e.message : 'The LIMS did not answer.');
 
 let signedOut = (_message: string) => {};
 export const onSignedOut = (fn: (message: string) => void) => {
@@ -221,7 +229,7 @@ export function useApi<R extends Route>(
     let live = true;
     call(route, path).then(
       (data) => live && setState({ data }),
-      (e: Error) => live && setState({ error: e.message }),
+      (e: unknown) => live && setState({ error: failureText(e) }),
     );
     return () => {
       live = false;

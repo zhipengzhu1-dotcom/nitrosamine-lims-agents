@@ -1,6 +1,17 @@
 import { type FormEvent, useState } from 'react';
 import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
-import { api, type LockMode, setPreferences, signIn, signOut, switchLab, unlock, useApi } from './api.ts';
+import {
+  api,
+  failureText,
+  type LockMode,
+  Refused,
+  setPreferences,
+  signIn,
+  signOut,
+  switchLab,
+  unlock,
+  useApi,
+} from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
 import { field, useCommit } from './form.tsx';
 
@@ -36,7 +47,7 @@ function CredentialsForm({
     };
     setBusy(true);
     onSubmit({ username: field('username'), password: field('password'), labId: field('labId') })
-      .catch((err: Error) => setError(err.message))
+      .catch((err: unknown) => setError(failureText(err)))
       .finally(() => setBusy(false));
   }
   return (
@@ -178,8 +189,8 @@ export function LockScreen({
     setError('');
     unlock(typeof password === 'string' ? password : '')
       .then(onIn)
-      .catch((err: Error) => {
-        setError(err.message);
+      .catch((err: unknown) => {
+        setError(failureText(err));
         setBusy(false);
       });
   }
@@ -263,7 +274,7 @@ export function WelcomePage({ token }: { token: string }) {
             onSubmit={(e) =>
               commit(e, async (form) => {
                 const password = field(form, 'password');
-                if (password !== field(form, 'confirm')) throw new Error('The two passwords differ.');
+                if (password !== field(form, 'confirm')) throw new Refused('malformed', 'The two passwords differ.');
                 const set = await api(routes.setPasswordThroughLink, { token, password });
                 setUsername(set.username);
                 history.replaceState(null, '', location.pathname);

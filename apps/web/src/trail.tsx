@@ -13,7 +13,7 @@ import {
   type TrailEntry,
 } from '@lims/domain';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
-import { api, Refused, useApi, useFresh } from './api.ts';
+import { api, failureText, Refused, useApi, useFresh } from './api.ts';
 import { Shell, Status, words } from './rail.tsx';
 import { labTime, time } from './time.ts';
 
@@ -158,7 +158,7 @@ function VerifyChain() {
     try {
       setAnswer({ found: await api(routes.verifyAuditTrail) });
     } catch (error) {
-      setAnswer({ failed: error instanceof Refused ? error.message : 'The LIMS did not answer.' });
+      setAnswer({ failed: failureText(error) });
     } finally {
       inFlight.current = false;
       setBusy(false);

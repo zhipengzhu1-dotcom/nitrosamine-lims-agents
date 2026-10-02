@@ -6,6 +6,7 @@ import { hashPassword } from '@lims/db/credentials';
 import { migrate } from '@lims/db/migrate';
 import { type SeededAccount, seed } from '@lims/db/seed';
 import {
+  isSentence,
   pathOf,
   type RefusalKind,
   type Reply,
@@ -22,9 +23,6 @@ import { type AppOptions, buildApp } from '../src/app.ts';
 type LogSink = NonNullable<AppOptions['log']>;
 
 const server = dbServer();
-
-/** A message for the person at the bench is a sentence: it starts with a capital letter and ends with a full stop. */
-export const SENTENCE = /^[A-Z][\s\S]*\.$/;
 
 /** The status each kind answers with, as the tests expect it; every refused answer is checked against this table. */
 const STATUS_OF: { readonly [K in RefusalKind]: number } = {
@@ -101,7 +99,10 @@ export class Client {
     if (answer.kind === 'breach') assert.fail(answer.problem);
     if (answer.kind === 'refused') {
       assert.equal(answer.status, STATUS_OF[answer.body.kind], `the status of a ${answer.body.kind} refusal`);
-      assert.match(answer.body.message, SENTENCE, `the message of a ${answer.body.kind} refusal`);
+      assert.ok(
+        isSentence(answer.body.message),
+        `the message of a ${answer.body.kind} refusal: ${answer.body.message}`,
+      );
     }
     return answer;
   }

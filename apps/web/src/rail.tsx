@@ -390,7 +390,10 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
       await lock(mode);
     } catch (e) {
       setNote({
-        text: e instanceof Refused ? `Refused: ${e.message}` : 'The LIMS did not answer. Press again.',
+        text:
+          e instanceof Refused
+            ? `${e.kind === 'failure' ? 'Not finished' : 'Refused'}: ${e.message}`
+            : 'The LIMS did not answer. Press again.',
         tone: 'bad',
         n: ++count.current,
       });

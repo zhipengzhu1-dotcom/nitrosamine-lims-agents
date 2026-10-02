@@ -54,7 +54,8 @@ async function post(
   return { status: res.status, text: await res.text() };
 }
 
-const referenceIn = (text: string) => /reference (\w+)\."/.exec(text)?.[1] ?? assert.fail(`no reference in ${text}`);
+const referenceIn = (text: string) =>
+  /reference (\w+), then reload/.exec(text)?.[1] ?? assert.fail(`no reference in ${text}`);
 
 it('an unexpected failure answers a generic 500 that names a reference, not the database error', async () => {
   const testId = await assignedToLou();

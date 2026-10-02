@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from '@lims/db/credentials';
-import { type ActorContext, routes, SESSION_ENDED, type SignedInView } from '@lims/domain';
+import { type ActorContext, routes, type Sentence, SESSION_ENDED, type SignedInView } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
 import { openJobIncident } from './incident.ts';
@@ -280,7 +280,7 @@ export async function reauthenticate(
 
 const interval = (ms: number) => sql<string>`${ms} * interval '1 millisecond'`;
 
-const lockedMessage = (displayName: string) =>
+const lockedMessage = (displayName: string): Sentence =>
   `This screen is locked. ${displayName} unlocks it with their password, or another person signs in with Switch user.`;
 
 /**

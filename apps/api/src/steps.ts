@@ -260,8 +260,8 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
         req.log.info({ step: name, testId: first.testId }, 'step replayed');
         return receiptOf(first, sessionId, requestHash);
       }
-      const signature = body.signature ?? refuse('malformed', "This step needs the signer's credentials.");
-      const testId = test?.id ?? refuse('malformed', 'Name the Test this step signs.');
+      const signature = body.signature ?? refuse('malformed', `The ${name} step needs the signer's credentials.`);
+      const testId = test?.id ?? refuse('malformed', `The ${name} step signs a Test, and this request names none.`);
       const seen = await seenVersion(scope, testId, signature);
       await reauthenticate(
         db,

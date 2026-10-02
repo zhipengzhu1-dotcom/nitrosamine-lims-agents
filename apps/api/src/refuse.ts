@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { DB } from '@lims/db';
-import type { RefusalKind } from '@lims/domain';
+import type { RefusalKind, Sentence } from '@lims/domain';
 import type { FastifyError, FastifyReply, FastifyRequest, FastifySchemaValidationError } from 'fastify';
 import type { Kysely } from 'kysely';
 import { openSystemIncident, referenceOf } from './incident.ts';
@@ -27,14 +27,14 @@ const STATUS: { readonly [K in RefusalKind]: number } = {
 
 class Refused extends Error {
   kind: RefusalKind;
-  constructor(kind: RefusalKind, message: string) {
+  constructor(kind: RefusalKind, message: Sentence) {
     super(message);
     this.kind = kind;
   }
 }
 
 /** The one place a refusal becomes HTTP: `answerThrown` writes it as the route's 4xx body with its kind's status. */
-export function refuse(kind: Exclude<RefusalKind, 'failure'>, message: string): never {
+export function refuse(kind: Exclude<RefusalKind, 'failure'>, message: Sentence): never {
   throw new Refused(kind, message);
 }
 
@@ -73,7 +73,7 @@ export function answerThrown(db: Kysely<DB>) {
     await openSystemIncident(db, req, error);
     return reply.code(STATUS.failure).send({
       kind: 'failure',
-      message: `The LIMS could not finish this request. Reload to see what was saved, and give the Admin reference ${req.id}.`,
+      message: `The LIMS could not finish this request. Give the Admin the reference ${req.id}, then reload to see what was saved.`,
     });
   };
 }

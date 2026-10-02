@@ -1,4 +1,5 @@
 import type { Meaning, RefusalKind, Role, TestState } from './http.ts';
+import type { Sentence } from './sentence.ts';
 
 export type PersonId = string;
 
@@ -14,7 +15,7 @@ export interface Step {
   to: TestState;
   role: Role;
   signs: Meaning | null;
-  guard?: (f: StepFacts) => string | null;
+  guard?: (f: StepFacts) => Sentence | null;
 }
 
 export const steps = {
@@ -70,7 +71,7 @@ export const stepNames = Object.keys(steps).filter((key): key is StepName => Obj
 
 export interface Refusal {
   kind: Extract<RefusalKind, 'state' | 'role' | 'guard'>;
-  message: string;
+  message: Sentence;
 }
 
 export function refusal(
