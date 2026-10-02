@@ -394,6 +394,7 @@ describe('Lock and Switch user', () => {
     const lock = await api.lockOutWhile(ana, () => browser.call(routes.lock));
 
     assert.equal(refusedWith(lock, 'noSession'), SESSION_ENDED);
+    assert.equal(refusedWith(await browser.call(routes.me), 'noSession'), SESSION_ENDED);
     const { lockedAt } = await api.superuser
       .selectFrom('person')
       .select('lockedAt')
@@ -404,7 +405,11 @@ describe('Lock and Switch user', () => {
       .select(['endedAt', sql<boolean>`locked_at is not null`.as('locked')])
       .where('personId', '=', ana.id)
       .executeTakeFirstOrThrow();
-    assert.deepEqual([endedAt, locked], [lockedAt, false], 'the session ended at the Lockout and was never locked');
+    assert.deepEqual(
+      [endedAt, locked],
+      [lockedAt, false],
+      'the next request ended the session at the Lockout, and the lock press never locked it',
+    );
     assert.deepEqual(
       (await eventsOf(ana.id)).map((e) => e.kind),
       ['SignInSucceeded'],
@@ -424,7 +429,7 @@ describe('Lock and Switch user', () => {
     assert.deepEqual(
       events.map((e) => e.kind).sort(),
       ['IdleExpiry', 'SignInSucceeded'],
-      'the expiry is stamped at last activity plus the idle limit, so it sorts by kind here',
+      'the expiry is stamped at last activity plus the idle limit, which advanceClock moved before the sign-in event',
     );
     assert.deepEqual(
       events.map((e) => e.workstationId),

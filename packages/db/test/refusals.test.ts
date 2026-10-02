@@ -2608,19 +2608,74 @@ describe('a Signature is written only by the signing function, which refuses eve
 });
 
 describe('a session is locked and unlocked only by lims.lock_session and lims.unlock_session', () => {
-  const limits = `interval '15 minutes', interval '12 hours'`;
-  const lock = `select lims.lock_session('${id.lab}', '${id.session}', ${limits})`;
+  const asOwner = `select set_config('lims.actor', 'person:refusal.person', true)`;
+  const args = `'${id.lab}', '${id.session}', interval '15 minutes', interval '12 hours', '192.0.2.1'`;
+  const lock = `${asOwner}; select lims.lock_session(${args})`;
+  const unlock = `select lims.unlock_session(${args})`;
+  const reauthenticated = `select lims.set_this_transaction('lims.reauthenticated', '${id.person}')`;
   const message = 'a session is locked and unlocked only by lims.lock_session and lims.unlock_session';
 
   covered.add('lims.session.lock_through_function');
   it('a session locked by a statement, not through the function, is refused even for the superuser', async () => {
-    const error = await refusalOf(`update lims.session set locked_at = clock_timestamp() where id = '${id.session}'`);
+    const error = await refusalOf('update lims.session set locked_at = clock_timestamp() where id = $1', [id.session]);
     assert.deepEqual([error.code, error.message], ['LA011', message]);
   });
 
   it('a locked session unlocked by a statement, not through the function, is refused even for the superuser', async () => {
     const error = await refusalOf(`${lock}; update lims.session set locked_at = null where id = '${id.session}'`);
     assert.deepEqual([error.code, error.message], ['LA011', message]);
+  });
+
+  it("a lock or an unlock by anyone but the session's person is refused", async () => {
+    const error = await refusalOf(`select lims.lock_session(${args})`);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA012', 'a session is locked and unlocked only by its own person, not person:refusal.admin'],
+    );
+    const unlocking = await refusalOf(
+      `${lock}; ${reauthenticated}; select set_config('lims.actor', 'person:refusal.other', true); ${unlock}`,
+    );
+    assert.equal(unlocking.code, 'LA012', unlocking.message);
+  });
+
+  it("an unlock in a transaction not stamped with the re-authentication of the session's person is refused", async () => {
+    const error = await refusalOf(`${lock}; ${unlock}`);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA013', "an unlock needs the session's person re-authenticated in this transaction"],
+    );
+    const other = await refusalOf(
+      `${lock}; select lims.set_this_transaction('lims.reauthenticated', '${id.otherPerson}'); ${unlock}`,
+    );
+    assert.equal(other.code, 'LA013', other.message);
+  });
+
+  it("a lock and its unlock, each by the session's person with the unlock re-authenticated, write one Lock and one Unlock Access Event", async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(asOwner);
+      const { rows: locked } = await client.query<{ changed: boolean }>(`select lims.lock_session(${args}) as changed`);
+      const { rows: again } = await client.query<{ changed: boolean }>(`select lims.lock_session(${args}) as changed`);
+      await client.query(reauthenticated);
+      const { rows: unlocked } = await client.query<{ changed: boolean }>(`${unlock} as changed`);
+      const { rows: events } = await client.query<{ kind: string; source: string; roles: string }>(
+        `select kind, host(source_address) as source, roles::text as roles from lims.access_event
+          where session_id = $1 and kind in ('Lock', 'Unlock') order by at`,
+        [id.session],
+      );
+      assert.deepEqual(
+        [locked[0]?.changed, again[0]?.changed, unlocked[0]?.changed],
+        [true, false, true],
+        'the second lock changed nothing',
+      );
+      assert.deepEqual(events, [
+        { kind: 'Lock', source: '192.0.2.1', roles: '{Analyst}' },
+        { kind: 'Unlock', source: '192.0.2.1', roles: '{Analyst}' },
+      ]);
+    } finally {
+      await client.query('rollback');
+    }
   });
 
   it('the app role holds no update on locked_at, so a lock or an unlock by a statement is refused before any trigger', async () => {
