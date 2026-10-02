@@ -21,10 +21,10 @@ Preconditions:
 - doctor.sh is all `ok:`.
 - A `Reported` Test: `node .claude/skills/verify/scripts/chain.ts Reported`.
 
-- **Version.** Sign in as `quinn.qa` and open the Test. `page.locator('dt:text-is("Record Version") + dd')` contains `3 ·` and a 64-character hex hash. No row matches `getByRole('row', { name: /unsigned/ })`.
+- **Version.** Sign in as `quinn.qa` and open the Test. `page.locator('dl.facts').first().locator('dt:text-is("Record Version") + dd')` contains `3 ·` and a 64-character hex hash. No row matches `getByRole('row', { name: /unsigned/ })`.
 - **Change behind the chain.** Run, against the instance's database (`.verify/instance/env` names it), in one transaction: `select set_config('lims.actor', 'svc:verify', true), set_config('lims.role', 'system', true), set_config('lims.reason', 'Change a signed Result (verify)', true); update lims.result set value = '0.0380' where test_id = '<id>';` For example `scripts/pg.sh psql --single-transaction -d <database> -f change.sql`.
-- **Unsigned.** Reload the Test page. `Record Version` now contains `4 ·` with another hash, `getByRole('row', { name: /unsigned/ })` has count 3 (`Performed`, `Reviewed` and `Released`), and `v.railSays('Unsigned: Performed, Reviewed, Released. The record changed after signing.')` holds. Open the report: the three Signature rows carry `unsigned` there too; for QA the rail shows the Verify Audit Trail context instead of the notice, because an action's context comes first.
-- **Proof.** Screenshot the Test page and the report. Run `select record_table, version, canonical_form, encode(content_hash, 'hex') from lims.record_version order by record_table, version`: the Test has versions 1 to 4 and the Test Report 1 and 2, all in canonical form 1. `Verify Audit Trail` still reports both chains consistent, and the Audit Trail table shows `INSERT record_version` rows under `svc:verify`.
+- **Unsigned.** Reload the Test page. `Record Version` now contains `4 ·` with another hash, `getByRole('row', { name: /unsigned/ })` has count 3 (`Performed`, `Reviewed` and `Released`), and `v.railSays('Unsigned: Performed, Reviewed, Released. The record changed after signing.')` holds. Open the report: the three Signature rows carry `unsigned` there too, and the rail names them.
+- **Proof.** Screenshot the Test page and the report. Run `select record_table, version, canonical_form, encode(content_hash, 'hex') from lims.record_version order by record_table, version`: the Test has versions 1 to 4 and the Test Report 1 and 2, all in canonical form 1. `Verify chain` on the Test page still reports both chains intact, and the Audit Trail panel shows the `record_version` entries under `svc:verify`.
 
 ## Gotchas
 

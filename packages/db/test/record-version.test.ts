@@ -439,7 +439,7 @@ describe('the migration moves the thin slice’s signed content onto Record Vers
     const dir = await mkdtemp(join(tmpdir(), 'lims-slice-migrations-'));
     copies.push(dir);
     await cp(migrations, dir, { recursive: true });
-    for (const name of await readdir(dir)) if (name >= '0008') await rm(join(dir, name));
+    for (const name of await readdir(dir)) if (name >= '0009') await rm(join(dir, name));
     await dropDatabase(SLICE);
     await migrate(server, SLICE, pathToFileURL(`${dir}/`));
     client = new pg.Client({ connectionString: databaseUrl(server, SLICE) });

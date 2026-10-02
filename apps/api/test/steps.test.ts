@@ -121,12 +121,13 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   const reported = await view(id, as.quinn);
   assert.equal(reported.test.state, 'Reported');
   assert.equal(reported.result?.value, '0.0300', 'the Result as typed');
+  const auditTrail = ok(await as.quinn.call(routes.testTrail, { id })).entries.map((e) => e.raw);
   assert.equal(
-    reported.auditTrail.find((e) => e.table === 'result')?.newRow?.value,
+    auditTrail.find((e) => e.table === 'result')?.newRow?.value,
     '0.0300',
     'the Audit Trail keeps the Result as typed',
   );
-  const testInsert = reported.auditTrail.find((e) => e.table === 'test' && e.op === 'INSERT')?.newRow;
+  const testInsert = auditTrail.find((e) => e.table === 'test' && e.op === 'INSERT')?.newRow;
   assert.deepEqual(
     Object.keys(testInsert ?? {}).sort(),
     ['assignee_id', 'gxp_class', 'id', 'lab_id', 'method_id', 'sample_id', 'state'],
@@ -152,7 +153,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     [K in StepName]: Account;
   };
   for (const name of stepNames) {
-    const entries = reported.auditTrail.filter((e) => e.reason === name);
+    const entries = auditTrail.filter((e) => e.reason === name);
     assert.ok(entries.length > 0, `an audit entry for ${name}`);
     for (const e of entries)
       assert.deepEqual([e.actor, e.role], [`person:${actors[name].username}`, steps[name].role], name);
@@ -216,7 +217,13 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     'the Test Report is built on the Test content it was released with',
   );
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
-  assert.deepEqual([verified.lab, verified.company], [null, null]);
+  assert.deepEqual(
+    verified.chains.map((c) => [c.chain, c.firstFailure]),
+    [
+      ['lab', null],
+      ['company', null],
+    ],
+  );
   const { recent } = await api.db
     .selectNoFrom(sql<boolean>`${verified.at}::timestamptz between now() - interval '1 minute' and now()`.as('recent'))
     .executeTakeFirstOrThrow();
@@ -262,8 +269,8 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
     'the Customer sees the Released signature as unsigned on the Test Report',
   );
   assert.ok(
-    changed.auditTrail.some(
-      (e) => e.table === 'record_version' && e.reason === 'Change a signed Result from outside the chain',
+    ok(await as.quinn.call(routes.testTrail, { id })).entries.some(
+      (e) => e.raw.table === 'record_version' && e.reason === 'Change a signed Result from outside the chain',
     ),
     'the new Record Version is in the Audit Trail under the change that made it',
   );

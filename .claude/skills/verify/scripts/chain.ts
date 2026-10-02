@@ -85,11 +85,12 @@ try {
     await v.signOut();
   }
 
-  const test = `(select t.id from lims.test t join lims.sample s on s.id = t.sample_id where s.number = '${sample}')`;
+  const test = "(select t.id from lims.test t join lims.sample s on s.id = t.sample_id where s.number = :'sample')";
   v.sql(
     'test',
     `select s.number, t.state, t.assignee_id is not null as assigned from lims.test t
-    join lims.sample s on s.id = t.sample_id where s.number = '${sample}'`,
+    join lims.sample s on s.id = t.sample_id where s.number = :'sample'`,
+    { sample },
   );
   const records = `(select ${test} union select id from lims.test_report where test_id = ${test})`;
   v.sql(
@@ -97,17 +98,19 @@ try {
     `select s.meaning, v.record_table, v.version, s.signed_at from lims.signature s
     join lims.record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
     where v.record_id in ${records} order by s.signed_at`,
+    { sample },
   );
   v.sql(
     'audit-trail',
     `select chain, seq, at, actor, role, reason, table_name, op from lims.audit_entry
     where (coalesce(new_row, old_row)->>'id')::uuid in ${records}
-       or (coalesce(new_row, old_row)->>'id') = (select id::text from lims.sample where number = '${sample}')
+       or (coalesce(new_row, old_row)->>'id') = (select id::text from lims.sample where number = :'sample')
        or (coalesce(new_row, old_row)->>'test_id')::uuid = ${test}
        or (coalesce(new_row, old_row)->>'record_id')::uuid in ${records}
        or (coalesce(new_row, old_row)->>'record_version_id')::uuid in
           (select id from lims.record_version where record_id in ${records})
     order by at, chain, seq`,
+    { sample },
   );
   v.note(`${sample} reached ${until}`);
 } finally {

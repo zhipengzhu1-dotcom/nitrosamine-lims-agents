@@ -1,30 +1,13 @@
 import { type ActorContext, routes } from '@lims/domain';
-import { api, useApi } from './api.ts';
-import { demoSigning, type RailAction, Shell } from './rail.tsx';
-import { Signatures, time, unsignedNotice } from './tests.tsx';
-
-const verifyAction: RailAction = {
-  label: 'Verify Audit Trail',
-  context: 'Recompute the hash chains of this Lab and of the company',
-  fields: [],
-  signs: null,
-  async run() {
-    const { at, lab, company } = await api(routes.verifyAuditTrail);
-    const chain = (name: string, broken: string | null) =>
-      broken === null ? `${name} chain internally consistent` : `${name} chain BROKEN at entry ${broken}`;
-    return `Recomputed at ${time(at)}: ${chain('Lab', lab)}, ${chain('company', company)}. Not anchored off-server (demo).`;
-  },
-};
+import { useApi } from './api.ts';
+import { demoSigning, Shell } from './rail.tsx';
+import { Signatures, unsignedNotice } from './tests.tsx';
+import { time } from './time.ts';
 
 export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
   const { data, error } = useApi(routes.report, { id });
   return (
-    <Shell
-      me={me}
-      active="tests"
-      action={me.roles.includes('QA') ? verifyAction : null}
-      notice={data && unsignedNotice(data.signatures)}
-    >
+    <Shell me={me} active="tests" action={null} notice={data && unsignedNotice(data.signatures)}>
       {error && <p className="note--bad">{error}</p>}
       {data && (
         <article className="report">

@@ -1,10 +1,11 @@
-import type { DB, Json } from '@lims/db';
-import { nextStep, type RowSnapshot, routes } from '@lims/domain';
+import type { DB } from '@lims/db';
+import { nextStep, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 import { factsFor, latestVersion, signedVersions } from './steps.ts';
+import { trailRoutes } from './trail.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -32,12 +33,6 @@ function visibleTests(scope: Scope) {
       'test.assigneeId',
     ]);
   return customerId === null ? tests : tests.where('submission.customerId', '=', customerId);
-}
-
-function snapshot(row: Json | null): RowSnapshot | null {
-  if (row === null) return null;
-  if (typeof row !== 'object' || Array.isArray(row)) throw new Error('an Audit Trail row snapshot is not an object');
-  return row;
 }
 
 async function testView(scope: Scope, id: string) {
@@ -93,23 +88,12 @@ async function testView(scope: Scope, id: string) {
             })),
           )
       : [],
-    auditTrail: isCustomer
-      ? []
-      : await scope
-          .auditTrail()
-          .select(['seq', 'at', 'actor', 'role', 'reason', 'tableName as table', 'op', 'oldRow', 'newRow'])
-          .where(sql<boolean>`coalesce(new_row, old_row)->>'id' = any(${ids}) or coalesce(new_row, old_row)->>'test_id' = ${id}
-        or coalesce(new_row, old_row)->>'record_id' = any(${ids})
-        or coalesce(new_row, old_row)->>'record_version_id' in
-           (select id::text from lims.record_version where lab_id = ${scope.ctx.lab.id} and record_id = any(${ids}))`)
-          .orderBy('seq')
-          .execute()
-          .then((entries) => entries.map((e) => ({ ...e, oldRow: snapshot(e.oldRow), newRow: snapshot(e.newRow) }))),
     next: nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test)),
   };
 }
 
 export function readRoutes(app: App, db: Kysely<DB>): void {
+  trailRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => req.actor });
 
   app.route({
@@ -147,14 +131,6 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
       return report
         ? { report, test, result, signatures }
         : refuse('notFound', 'this Test has no released Test Report');
-    },
-  });
-
-  app.route({
-    ...routes.verifyAuditTrail,
-    handler: async (req) => {
-      if (!req.actor.roles.includes('QA')) refuse('role', 'verifying the Audit Trail is a QA action');
-      return labScope(db, req.actor).verifyAuditTrail();
     },
   });
 }
