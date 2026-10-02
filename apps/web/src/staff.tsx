@@ -240,6 +240,14 @@ function staffColumns(onIssued: (link: Link) => void): Column<StaffPerson>[] {
           ? `${time(p.identityVerifiedAt)} by ${p.identityVerifiedBy}: ${p.identityEvidence}`
           : 'Not recorded (seeded demo account)',
     },
+    {
+      head: 'Access Events',
+      cell: (p) => (
+        <a className="tap" href={`#/staff/${p.id}/access-events`} aria-label={`Access Events of ${p.printedName}`}>
+          Access Events
+        </a>
+      ),
+    },
   ];
 }
 
