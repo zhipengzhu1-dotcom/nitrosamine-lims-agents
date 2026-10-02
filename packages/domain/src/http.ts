@@ -587,6 +587,8 @@ function route<
 /** Every route the API serves besides the steps. */
 export const routes = {
   labs: route('GET', '/api/labs', {}, Type.Array(lab)),
+  /** Tells the sign-in page, before any session, whether this login asks for an authenticator code. */
+  loginPolicy: route('GET', '/api/login', {}, Type.Object({ secondFactor: Type.Boolean() })),
   login: route('POST', '/api/login', { body: signIn }, signedIn),
   switchLab: route('POST', '/api/lab-switch', { body: labSwitch }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),

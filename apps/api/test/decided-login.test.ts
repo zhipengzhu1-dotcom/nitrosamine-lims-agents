@@ -90,6 +90,11 @@ const eventsOf = (personId: string) =>
     .orderBy('at')
     .execute();
 
+it('the sign-in page learns whether the login asks for a code before anyone signs in', async () => {
+  assert.deepEqual(ok(await new Client(decided.base).call(routes.loginPolicy)), { secondFactor: true });
+  assert.deepEqual(ok(await new Client(api.base).call(routes.loginPolicy)), { secondFactor: false });
+});
+
 it('under the decided login, sign-in needs the password and a current code; a missing or wrong code is the uniform failure and a failed Access Event', async () => {
   const { account, code } = await enrolled('dora.decided');
   assert.equal(refusedWith(await signIn(account, account.password), 'badCredentials'), NOT_VALID);

@@ -577,6 +577,7 @@ export function loginRoutes(
       return (device ? labs.where('labId', '=', device.labId) : labs).execute();
     },
   });
+  app.route({ ...routes.loginPolicy, handler: async () => ({ secondFactor: limits.secondFactor }) });
   app.route({
     ...routes.login,
     handler: async (req, reply) => {
