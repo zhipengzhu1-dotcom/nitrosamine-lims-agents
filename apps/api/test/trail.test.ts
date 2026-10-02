@@ -389,6 +389,11 @@ it("a Test's Signatures and Received carry UTC and its Lab's wall clock on the W
       { actor: 'svc:test', role: 'system', reason: 'Show the Lab clock in a zone no other Lab has' },
       (tx) => tx.updateTable('lab').set({ timeZone }).where('labId', '=', api.labId).execute(),
     );
+  const { timeZone: before } = await api.db
+    .selectFrom('lab')
+    .select('timeZone')
+    .where('labId', '=', api.labId)
+    .executeTakeFirstOrThrow();
   const id = await submitTestTo('Reported');
   await setZone('Asia/Tokyo');
   try {
@@ -421,7 +426,7 @@ it("a Test's Signatures and Received carry UTC and its Lab's wall clock on the W
       assert.equal(atLab, onLabClock(inTrail.at, labZone), `${at} on the Lab wall clock, as Intl renders it`);
     }
   } finally {
-    await setZone('America/New_York');
+    await setZone(before);
   }
 });
 
