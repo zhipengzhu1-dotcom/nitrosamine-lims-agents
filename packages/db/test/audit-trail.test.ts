@@ -85,6 +85,7 @@ it('an Audit Trail row snapshot keeps the stored column names and leaves out the
     'display_name',
     'failed_logins',
     'id',
+    'identity_verification_id',
     'locked_at',
     'username',
   ]);

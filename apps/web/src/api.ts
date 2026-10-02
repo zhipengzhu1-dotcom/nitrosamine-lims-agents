@@ -153,12 +153,29 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
     endSession(refused.message);
     throw refused;
   }
+  if (refused?.kind === 'sessionLocked') locked(refused.message, 'unlock');
   if (refused) throw refused;
   if (session && route.url !== routes.session.url)
     session.idleEndsAt = Math.max(session.idleEndsAt, sentAt + session.idleLimitMs);
   // oxlint-disable-next-line typescript/consistent-type-assertions -- a wire body has no static type; the API serializes every 2xx through this route's reply schema, and the web does not repeat the check
   return json as RouteReply<R>;
 }
+
+export type LockMode = 'unlock' | 'switch';
+let locked = (_message: string, _mode: LockMode) => {};
+/** Registers the one listener that shows the lock screen, in the server's words, when the session is locked. */
+export const onLocked = (fn: (message: string, mode: LockMode) => void) => {
+  locked = fn;
+};
+
+/** Locks the session and, once the server has, shows the lock screen; Switch user opens it on the sign-in form. */
+export async function lock(mode: LockMode): Promise<void> {
+  const { message } = await api(routes.lock);
+  locked(message, mode);
+}
+
+/** Unlocks the session with the same person's password and restarts its countdown. */
+export const unlock = (password: string) => startSession(() => api(routes.unlock, { password }));
 
 let actorChanged = (_me: ActorContext) => {};
 /** Registers the one listener that shows the person the session the server answered with after a Lab switch. */

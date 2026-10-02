@@ -558,9 +558,22 @@ describe('the migration moves the thin slice’s signed content onto Record Vers
     }
   });
 
+  it("a later migration gives each thin-slice Signature its signer's printed name and username", async () => {
+    const { rows } = await client.query<{ matches: boolean }>(
+      `select s.printed_name = p.display_name and s.username = p.username as matches
+         from lims.signature s join lims.person p on p.id = s.person_id`,
+    );
+    assert.ok(rows.length > 0, 'the migrated database holds Signatures');
+    assert.deepEqual(
+      rows.map((r) => r.matches),
+      rows.map(() => true),
+    );
+  });
+
   it('the Audit Trail records the move under svc:migrate and both chains still verify', async () => {
     const { rows } = await client.query<{ table_name: string; op: string; n: string }>(
-      `select table_name, op, count(*) as n from lims.audit_entry where actor = 'svc:migrate' group by 1, 2 order by 1, 2`,
+      `select table_name, op, count(*) as n from lims.audit_entry
+        where actor = 'svc:migrate' and reason like 'Move the thin slice%' group by 1, 2 order by 1, 2`,
     );
     assert.deepEqual(rows, [
       { table_name: 'record_version', op: 'INSERT', n: '7' },

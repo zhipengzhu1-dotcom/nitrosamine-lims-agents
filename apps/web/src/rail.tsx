@@ -5,15 +5,16 @@ import {
   routes,
   type StepInput,
   type StepName,
+  staffRefusal,
   stepRoute,
   steps,
   type TestState,
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
+import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
 
-export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst';
+export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room';
 export interface Field<N extends string = string> {
   name: N;
   label: string;
@@ -151,6 +152,8 @@ export const modules = [
   },
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
+  { key: 'workstations', name: 'Workstations', holds: '' },
+  { key: 'staff', name: 'Staff', holds: '' },
 ] as const;
 export type Module = (typeof modules)[number];
 type ModuleKey = Module['key'];
@@ -173,11 +176,13 @@ export function Shell({
     <div className="frame">
       <TopBar lab={me.lab}>
         <nav>
-          {modules.map((m) => (
-            <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
-              {m.name}
-            </a>
-          ))}
+          {modules
+            .filter((m) => m.key !== 'staff' || staffRefusal(me.roles) === null)
+            .map((m) => (
+              <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
+                {m.name}
+              </a>
+            ))}
         </nav>
       </TopBar>
       <main className="plane">{children}</main>
@@ -200,6 +205,8 @@ interface Note {
   text: string;
   tone: 'ok' | 'bad';
   n: number;
+  /** The action whose answer this is, so opening another action clears it. */
+  action?: string;
 }
 /** The sheet keeps the action it opened for, so its closing frames never show the step that came next. */
 type Sheet = { action: RailAction; closing: boolean } | null;
@@ -223,6 +230,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
   const [note, setNote] = useState<Note | null>(null);
   const [refusal, setRefusal] = useState<Note | null>(null);
   const [instant, setInstant] = useState(false);
+  const [locking, setLocking] = useState(false);
   const inFlight = useRef(false);
   const count = useRef(0);
   const returnFocus = useRef(false);
@@ -270,6 +278,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     if (inFlight.current) return;
     clearTimeout(fallback.current);
     setRefusal(null);
+    setNote((n) => (n?.action === a.label ? n : null));
     setSheet({ action: a, closing: false });
   }
   function close(clear: boolean) {
@@ -291,17 +300,36 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     setBusy(true);
     try {
       const text = await a.run(values, a.signs ? password : null);
-      setNote({ text, tone: 'ok', n: ++count.current });
+      setNote({ text, tone: 'ok', n: ++count.current, action: a.label });
       returnFocus.current = true;
       if (sheet) close(true);
     } catch (e) {
-      const unanswered: Note = { text: unansweredText(e, a.signs !== null), tone: 'bad', n: ++count.current };
+      const unanswered: Note = {
+        text: unansweredText(e, a.signs !== null),
+        tone: 'bad',
+        n: ++count.current,
+        action: a.label,
+      };
       setNote(unanswered);
       if (sheet) setRefusal(unanswered);
     } finally {
       inFlight.current = false;
       setBusy(false);
       setPassword('');
+    }
+  }
+
+  async function lockAs(mode: LockMode) {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setLocking(true);
+    try {
+      await lock(mode);
+    } catch (e) {
+      setNote({ text: `Refused: ${e instanceof Error ? e.message : String(e)}.`, tone: 'bad', n: ++count.current });
+    } finally {
+      inFlight.current = false;
+      setLocking(false);
     }
   }
 
@@ -403,6 +431,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
           <span>
             {me.lab.code} · {me.roles.map(words).join(', ')} · <code>{me.person.username}</code>
           </span>
+          <span>{me.workstation ? `${me.workstation.name} · ${me.workstation.room}` : 'Unregistered device'}</span>
           <SessionCountdown />
         </div>
         <div ref={statusLine} className="rail__context" role="status" tabIndex={-1}>
@@ -423,18 +452,28 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
             {action.label}
           </button>
         )}
-        <button
-          type="button"
-          className="rbtn rbtn--quiet rail__out"
-          onClick={() => {
-            location.hash = '#/switch-lab';
-          }}
-        >
-          Switch Lab
-        </button>
-        <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void signOut()}>
-          Sign out
-        </button>
+        <fieldset className="rail__session" disabled={busy || locking}>
+          {!me.workstation && (
+            <button
+              type="button"
+              className="rbtn rbtn--quiet rail__out"
+              onClick={() => {
+                location.hash = '#/switch-lab';
+              }}
+            >
+              Switch Lab
+            </button>
+          )}
+          <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void lockAs('switch')}>
+            Switch user
+          </button>
+          <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void lockAs('unlock')}>
+            Lock
+          </button>
+          <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </fieldset>
       </footer>
     </>
   );
@@ -457,10 +496,25 @@ function FieldInput({ field, value, onChange }: { field: Field; value: string; o
   const change = (e: { target: { value: string } }) => onChange(e.target.value);
   if (field.kind === 'method' || field.kind === 'analyst')
     return <LookupSelect field={field} value={value} onChange={change} />;
+  if (field.kind === 'room') return <RoomSelect value={value} onChange={change} />;
   const props = { required: true, value, onChange: change };
   if (field.kind === 'date') return <input type="date" {...props} />;
   if (field.kind === 'decimal') return <input inputMode="decimal" pattern={decimalPattern} {...props} />;
   return <input {...props} />;
+}
+
+function RoomSelect({ value, onChange }: { value: string; onChange: (e: { target: { value: string } }) => void }) {
+  const { data } = useApi(routes.workstations);
+  return (
+    <select required value={value} onChange={onChange}>
+      <option value="">Choose…</option>
+      {data?.rooms.map((r) => (
+        <option key={r.id} value={r.id}>
+          {r.name}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 function LookupSelect({

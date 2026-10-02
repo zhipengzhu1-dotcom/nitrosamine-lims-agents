@@ -6,3 +6,4 @@ playwright-report/
 __pycache__/
 .ruff_cache/
 .verify/
+apps/web/api-log/

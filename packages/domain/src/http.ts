@@ -8,6 +8,7 @@ const role = Type.Enum({
   Analyst: 'Analyst',
   Customer: 'Customer',
   LabManager: 'LabManager',
+  PlatformOperator: 'PlatformOperator',
   QA: 'QA',
   Reviewer: 'Reviewer',
   SampleCustodian: 'SampleCustodian',
@@ -59,6 +60,8 @@ const actorContext = Type.Object({
   person: Type.Object({ id: uuid, username: Type.String(), displayName: Type.String(), customerId: nullable(uuid) }),
   lab,
   roles: Type.Array(role),
+  /** The Workstation the session's browser is enrolled as, or null for an unregistered device. */
+  workstation: nullable(Type.Object({ name: Type.String(), room: Type.String() })),
 });
 export type ActorContext = Static<typeof actorContext>;
 /**
@@ -190,6 +193,40 @@ const trailEntry = Type.Object({
 export type TrailEntry = Static<typeof trailEntry>;
 const trail = Type.Object({ record: recordRef, labZone: Type.String(), entries: Type.Array(trailEntry) });
 export type Trail = Static<typeof trail>;
+/** A person as the Admin of the session's Lab sees them: the roles are those held in that Lab. */
+const staffPerson = Type.Object({
+  id: uuid,
+  username: Type.String(),
+  printedName: Type.String(),
+  roles: Type.Array(role),
+  /** True once the person has set a password through their one-time link. */
+  credentialSet: Type.Boolean(),
+  identityVerifiedAt: nullable(instant),
+  /** Who checked the person's identity and what they checked; null for a seeded demo account. */
+  identityVerifiedBy: nullable(Type.String()),
+  identityEvidence: nullable(Type.String()),
+});
+export type StaffPerson = Static<typeof staffPerson>;
+const identityVerification = Type.Object({
+  id: uuid,
+  printedName: Type.String(),
+  evidence: Type.String(),
+  checkedBy: Type.String(),
+  checkedAt: instant,
+});
+export type IdentityVerification = Static<typeof identityVerification>;
+/** The Lab's staff, and the Identity Verifications its Admins recorded that no account names yet. */
+const staff = Type.Object({ people: Type.Array(staffPerson), awaitingAccount: Type.Array(identityVerification) });
+/** The roles an Admin grants. Platform Operator is held outside the LIMS, and Customer Users get portal accounts. */
+export const grantableRoles = ['SampleCustodian', 'Analyst', 'Reviewer', 'QA', 'LabManager', 'Admin'] as const;
+/** The one-time link's token goes to the person, who sets their own password with it; the LIMS keeps only its hash. */
+const accountCreated = Type.Object({
+  person: staffPerson,
+  link: Type.Object({ token: Type.String(), expiresAt: instant }),
+});
+const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
+/** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
+const username = Type.String({ pattern: '^[a-z][a-z0-9.-]{2,39}$' });
 const reportRef = Type.Object({ id: uuid, number: Type.String() });
 /** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
 const testView = Type.Object({
@@ -259,7 +296,7 @@ export type StepTaken = Static<typeof stepTaken>;
  * `badCredentials` is the one answer to every sign-in failure;
  * `accountLocked`, `labNotChosen` for a sign-in that names no Lab, and `role` for a Lab where the person holds no
  * Membership, come only after the right password. `noSession` covers no session presented and a session that
- * has ended. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
+ * has ended. `sessionLocked` answers every request on a locked session except lock, unlock, sign-out and a sign-in over it. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
  * with a different step or input, or from another session. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
@@ -270,6 +307,7 @@ export const refusalKinds = [
   'badCredentials',
   'labNotChosen',
   'noSession',
+  'sessionLocked',
   'accountLocked',
   'role',
   'guard',
@@ -293,6 +331,24 @@ const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, c
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
 const reauthentication = Type.Object({ password: text }, closed);
+const room = Type.Object({ id: uuid, name: Type.String() });
+const workstation = Type.Object({
+  id: uuid,
+  name: Type.String(),
+  room: Type.String(),
+  browserPolicy: Type.String(),
+  enrolled: Type.Boolean(),
+});
+export type Workstation = Static<typeof workstation>;
+const workstations = Type.Object({
+  rooms: Type.Array(room),
+  workstations: Type.Array(workstation),
+  /** The Workstation this browser's device token enrols it as now, which the next sign-in on it carries. */
+  thisBrowser: nullable(workstation),
+});
+const workstationRegistration = Type.Object({ name: text, roomId: uuid, browserPolicy: text, reason: text }, closed);
+const enrolment = Type.Object({ workstationId: uuid, reason: text }, closed);
+const roomRegistration = Type.Object({ name: text, reason: text }, closed);
 const stepEnvelope = Type.Object({
   commitKey: uuid,
   testId: Type.Optional(uuid),
@@ -346,6 +402,17 @@ export const routes = {
   login: route('POST', '/api/login', { body: signIn }, signedIn),
   switchLab: route('POST', '/api/lab-switch', { body: labSwitch }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
+  lock: route(
+    'POST',
+    '/api/lock',
+    { body: noBody },
+    Type.Object({ locked: Type.Literal(true), message: Type.String() }),
+  ),
+  unlock: route('POST', '/api/unlock', { body: reauthentication }, signedIn),
+  workstations: route('GET', '/api/workstations', {}, workstations),
+  registerRoom: route('POST', '/api/rooms', { body: roomRegistration }, room),
+  registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
+  enrolWorkstation: route('POST', '/api/workstations/enrol', { body: enrolment }, workstation),
   me: route('GET', '/api/me', {}, signedIn),
   /** Reads how long the session has left without counting as activity, for the web's countdown. */
   session: route('GET', '/api/session', {}, sessionClock),
@@ -361,6 +428,38 @@ export const routes = {
     trail,
   ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
+  staff: route('GET', '/api/staff', {}, staff),
+  recordIdentityVerification: route(
+    'POST',
+    '/api/staff/identity-verifications',
+    { body: Type.Object({ printedName: text, evidence: text }, closed) },
+    identityVerification,
+  ),
+  createAccount: route(
+    'POST',
+    '/api/staff/accounts',
+    { body: Type.Object({ identityVerificationId: uuid, username }, closed) },
+    accountCreated,
+  ),
+  issueLink: route('POST', '/api/staff/links', { body: Type.Object({ personId: uuid }, closed) }, accountCreated),
+  grantMembership: route(
+    'POST',
+    '/api/staff/memberships',
+    { body: Type.Object({ personId: uuid, role: Type.Enum(grantableRoles), reason: reasonText }, closed) },
+    staffPerson,
+  ),
+  changePrintedName: route(
+    'POST',
+    '/api/staff/printed-names',
+    { body: Type.Object({ personId: uuid, printedName: text, reason: reasonText }, closed) },
+    staffPerson,
+  ),
+  setPasswordThroughLink: route(
+    'POST',
+    '/api/credentials',
+    { body: Type.Object({ token: Type.String({ minLength: 1, maxLength: 100 }), password: text }, closed) },
+    Type.Object({ username: Type.String() }),
+  ),
   incident: route(
     'GET',
     '/api/incidents/:reference',

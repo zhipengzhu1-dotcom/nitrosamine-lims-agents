@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
+export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "PasswordSet" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -39,9 +39,9 @@ export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "Released" | "Reviewed" | "Verified";
 
-export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "QA" | "Reviewer" | "SampleCustodian";
+export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "PlatformOperator" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoLab" | "NoLabChosen" | "NoMembership" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
+export type SignInFailure = "AccountLocked" | "NoCredential" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -59,6 +59,7 @@ export interface AccessEvent {
   sessionLabId: string | null;
   sourceAddress: string | null;
   subjectId: string | null;
+  takenById: string | null;
   typedUserIdHmac: Buffer | null;
   typedUserIdLength: number | null;
   workstationId: string | null;
@@ -90,9 +91,27 @@ export interface CommitKey {
   testId: string;
 }
 
+export interface CredentialLink {
+  expiresAt: Generated<Timestamp>;
+  id: Generated<string>;
+  issuedAt: Generated<Timestamp>;
+  personId: string;
+  tokenHash: Buffer;
+  usedAt: Timestamp | null;
+}
+
 export interface Customer {
   id: Generated<string>;
   name: string;
+}
+
+export interface IdentityVerification {
+  checkedAt: Generated<Timestamp>;
+  checkedBy: string;
+  checkedInLabId: string;
+  evidence: string;
+  id: Generated<string>;
+  printedName: string;
 }
 
 export interface Lab {
@@ -120,8 +139,9 @@ export interface Person {
   displayName: string;
   failedLogins: Generated<number>;
   id: Generated<string>;
+  identityVerificationId: string | null;
   lockedAt: Timestamp | null;
-  passwordHash: string;
+  passwordHash: string | null;
   username: string;
 }
 
@@ -150,6 +170,12 @@ export interface Result {
   value: string;
 }
 
+export interface Room {
+  id: Generated<string>;
+  labId: string;
+  name: string;
+}
+
 export interface Sample {
   description: string;
   id: Generated<string>;
@@ -165,8 +191,10 @@ export interface Session {
   id: Generated<string>;
   labId: string;
   lastSeenAt: Generated<Timestamp>;
+  lockedAt: Timestamp | null;
   personId: string;
   tokenHash: Buffer;
+  workstationId: string | null;
 }
 
 export interface Signature {
@@ -174,8 +202,10 @@ export interface Signature {
   labId: string;
   meaning: Meaning;
   personId: string;
+  printedName: ColumnType<string, never, never>;
   recordVersionId: string;
   signedAt: Generated<Timestamp>;
+  username: ColumnType<string, never, never>;
 }
 
 export interface Submission {
@@ -227,17 +257,29 @@ export interface TrainingRecord {
   personId: string;
 }
 
+export interface Workstation {
+  browserPolicy: string;
+  deviceTokenHash: Buffer | null;
+  id: Generated<string>;
+  labId: string;
+  name: string;
+  roomId: string;
+}
+
 export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
   commitKey: CommitKey;
+  credentialLink: CredentialLink;
   customer: Customer;
+  identityVerification: IdentityVerification;
   lab: Lab;
   membership: Membership;
   method: Method;
   person: Person;
   recordVersion: RecordVersion;
   result: Result;
+  room: Room;
   sample: Sample;
   session: Session;
   signature: Signature;
@@ -246,4 +288,5 @@ export interface DB {
   test: Test;
   testReport: TestReport;
   trainingRecord: TrainingRecord;
+  workstation: Workstation;
 }

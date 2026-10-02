@@ -32,6 +32,7 @@ const roleSet = {
   QA: null,
   LabManager: null,
   Admin: null,
+  PlatformOperator: null,
 } satisfies Record<Role, null>;
 const roles = Object.keys(roleSet).filter((key): key is Role => Object.hasOwn(roleSet, key));
 

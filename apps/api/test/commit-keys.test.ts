@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { type StepBody, type StepName, stepRoute } from '@lims/domain';
-import type { DB } from '@lims/db';
-import { sql, type Transaction } from 'kysely';
+import { sql } from 'kysely';
 import { type Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_commit_keys_test');
@@ -106,24 +105,12 @@ it('a Submission sent twice with the same Commit Key creates one Submission and 
   assert.deepEqual(await totals(), before, 'the retry writes nothing');
 });
 
-async function untilWaitingOnLocks(tx: Transaction<DB>, sessions: number): Promise<void> {
-  for (let waiting = 0; waiting < sessions; ) {
-    await sql`select pg_sleep(0.05)`.execute(tx);
-    ({ n: waiting } = await tx
-      .selectNoFrom(
-        sql<number>`(select count(*)::int from pg_stat_activity
-          where datname = current_database() and wait_event_type = 'Lock')`.as('n'),
-      )
-      .executeTakeFirstOrThrow());
-  }
-}
-
 async function bothWaitingOnLockedTable<T>(table: 'submission' | 'result', presses: () => Promise<T>[]) {
   let answers: Promise<T[]> | undefined;
   await api.superuser.transaction().execute(async (tx) => {
     await sql`lock table ${sql.table(`lims.${table}`)} in exclusive mode`.execute(tx);
     answers = Promise.all(presses());
-    await untilWaitingOnLocks(tx, 2);
+    await api.untilWaitingOnLocks(2);
   });
   return answers ?? assert.fail('the presses were sent');
 }
