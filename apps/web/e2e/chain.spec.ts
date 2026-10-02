@@ -23,6 +23,24 @@ async function signOut(page: Page) {
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 }
 
+const signatureRow = (page: Page, meaning: string) =>
+  page.locator('tr', { has: page.locator('td[data-label="Meaning"] .sig', { hasText: meaning }) });
+
+async function unsignedBesideMeanings(page: Page) {
+  for (const meaning of ['Performed', 'Reviewed', 'Released']) {
+    const cell = signatureRow(page, meaning).locator('td[data-label="Meaning"]');
+    const mark = cell.locator('.status');
+    await expect(mark).toHaveText('Unsigned');
+    await expect(mark, `${meaning}'s mark is in the bad tone`).toHaveClass(/\bstatus--bad\b/);
+    await expect(mark.locator('svg.glyph')).toHaveCount(1);
+    const [word, status] = [await box(cell.locator('.sig')), await box(mark)];
+    expect(
+      Math.abs(word.y + word.height / 2 - (status.y + status.height / 2)),
+      `${meaning} and Unsigned share a line`,
+    ).toBeLessThan(word.height / 2);
+  }
+}
+
 const railSays = (page: Page, text: string | RegExp) => expect(page.getByRole('status')).toContainText(text);
 const sign = async (page: Page, meaning: string, password = DEMO_PASSWORD, username?: string) => {
   const typed = username ?? (await page.getByRole('contentinfo').locator('.who code').textContent()) ?? '';
@@ -169,7 +187,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     'a new attempt clears the earlier refusal before the server answers',
   ).toHaveCount(0);
   heldPerformed.resolve();
-  await railSays(page, 'now Submitted For Review');
+  await railSays(page, 'Performed Signature recorded in the Audit Trail. The Test is now Submitted For Review.');
   await signOut(page);
 
   await signIn(page, 'rui.reviewer');
@@ -283,22 +301,36 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   ]) {
     await expect(page.getByRole('row', { name: new RegExp(`${meaning}.*${signer}`) })).toBeVisible();
   }
+  const reportVersion = page.locator('dl.facts dt:text-is("Record Version") + dd');
+  await expect(reportVersion, "the Test Report's current Record Version, the Released Signature's").toHaveText(
+    /^1 · [0-9a-f]{64}$/,
+  );
+  await expect(signatureRow(page, 'Released').locator('td[data-label="Record Version"]')).toHaveText('1');
   await shot(page, 'test-report');
 
   const testId = new URL(page.url()).hash.split('/')[2] ?? '';
   expect(testId).toMatch(/^[0-9a-f-]{36}$/);
-  const signed = page.getByRole('row', { name: /unsigned/ });
-  await expect(signed).toHaveCount(0);
+  await expect(page.locator('.status--bad')).toHaveCount(0);
   changeResult(testId, '0.0380');
   await page.reload();
   await expect(page.getByRole('cell', { name: '0.0380', exact: true })).toBeVisible();
-  for (const meaning of ['Performed', 'Reviewed', 'Released'])
-    await expect(page.getByRole('row', { name: new RegExp(`${meaning} unsigned`) })).toBeVisible();
+  await expect(reportVersion).toHaveText(/^2 · [0-9a-f]{64}$/);
+  await expect(page.getByRole('heading', { level: 1 }).locator('.status')).toHaveText('Signatures unsigned');
+  await unsignedBesideMeanings(page);
 
   await page.goto(`/#/tests/${testId}`);
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Reported');
+  await expect(page.getByRole('heading', { level: 1 }).locator('.status')).toHaveText([
+    'Reported',
+    'Signatures unsigned',
+  ]);
   await expect(page.locator('dl.facts').first().locator('dt:text-is("Record Version") + dd')).toContainText('4 ·');
-  await expect(page.getByRole('row', { name: /unsigned/ })).toHaveCount(3);
+  await unsignedBesideMeanings(page);
+  for (const [meaning, record] of [
+    ['Performed', 'Test'],
+    ['Reviewed', 'Test'],
+    ['Released', 'Test Report'],
+  ] as const)
+    await expect(signatureRow(page, meaning).locator('td[data-label="Record"]')).toHaveText(record);
   await railSays(page, 'Unsigned: Performed, Reviewed, Released. The record changed after signing.');
   await shot(page, 'test-unsigned');
   await page.getByRole('button', { name: 'Verify chain' }).click();

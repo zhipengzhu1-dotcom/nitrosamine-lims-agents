@@ -140,7 +140,11 @@ export function signedVersions(q: LabQueries) {
     );
 }
 
-/** The record's latest Record Version, which the database wrote as it changed: what a Signature given now binds to. */
+/**
+ * The record's latest Record Version, which the database wrote as it changed: what a Signature given now binds to. Every
+ * signable row has one, because the `version_record` trigger writes it on insert, so a missing one throws as a broken
+ * invariant.
+ */
 export function latestVersion(q: LabQueries, table: Signable, recordId: string) {
   return q
     .from('recordVersion')

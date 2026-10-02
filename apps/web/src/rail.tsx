@@ -1,6 +1,5 @@
 import {
   type ActorContext,
-  type ChainVerdict,
   decimalPattern,
   mayTake,
   type Lab,
@@ -68,20 +67,35 @@ export interface SigningView {
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-const verdictLook = {
-  Intact: { tone: 'ok', glyph: 'M3 8.5l3.5 3.5L13 4.5' },
-  Broken: { tone: 'bad', glyph: 'M4 4l8 8M12 4l-8 8' },
+const unsignedLook = {
+  tone: 'bad',
+  glyph: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 5v3.5M8 11h0" />
+    </>
+  ),
+} as const;
+const markLook = {
+  Intact: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
+  Broken: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
+  Unsigned: unsignedLook,
+  'Signatures unsigned': unsignedLook,
 } as const;
 
-/** A Test state with its track, or a chain verdict with its glyph; `fresh` marks a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them. */
-export function Status(props: { state: TestState; fresh?: boolean } | { verdict: ChainVerdict }) {
-  if ('verdict' in props) {
-    const { tone, glyph } = verdictLook[props.verdict];
+/**
+ * A Test state with its track, or a mark with its glyph: a chain verdict, an unsigned Signature, or a record with an
+ * unsigned Signature. `fresh` marks a state the server has just confirmed on this page: the word and glyph are final,
+ * and an accent plays around them.
+ */
+export function Status(props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook }) {
+  if ('mark' in props) {
+    const { tone, glyph } = markLook[props.mark];
     return (
       <span className={`status status--${tone}`}>
-        {props.verdict}
+        {props.mark}
         <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
-          <path d={glyph} />
+          {glyph}
         </svg>
       </span>
     );
@@ -156,7 +170,7 @@ export function stepAction(
       });
       sessionStorage.removeItem(slot);
       await onDone();
-      return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
+      return `${step.signs ? `${step.signs} Signature` : ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
   };
 }

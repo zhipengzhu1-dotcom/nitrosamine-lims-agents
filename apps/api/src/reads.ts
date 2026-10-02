@@ -139,10 +139,11 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
   app.route({
     ...routes.report,
     handler: async (req) => {
-      const { report, test, result, signatures } = await testView(labScope(db, req.actor), req.params.id);
-      return report
-        ? { report, test, result, signatures }
-        : refuse('notFound', 'this Test has no released Test Report');
+      const scope = labScope(db, req.actor);
+      const { report, test, result, signatures } = await testView(scope, req.params.id);
+      if (!report) return refuse('notFound', 'this Test has no released Test Report');
+      const { version, canonicalForm, contentHash } = await latestVersion(scope, 'test_report', report.id);
+      return { report, recordVersion: { version, canonicalForm, contentHash }, test, result, signatures };
     },
   });
 
