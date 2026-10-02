@@ -2,7 +2,8 @@ import { fchmodSync, openSync, writeSync } from 'node:fs';
 import { type DB, postgresFault } from '@lims/db';
 import type { FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
-import { raiseUnwrittenIncidents } from './incident.ts';
+import { openJobIncident, raiseUnwrittenIncidents } from './incident.ts';
+import { requestReference } from './refuse.ts';
 
 export interface LogSink {
   write(line: string): void;
@@ -70,16 +71,27 @@ const CHECK_EVERY_MS = 15 * 60 * 1000;
 
 /**
  * Raises every unwritten System Incident on the log volume at API start, where a failure stops the start, and every
- * 15 minutes after, where a failure is logged and the next check tries again.
+ * 15 minutes after, one check at a time, where a failure opens a System Incident and the next check tries again.
  */
 export function checkLogVolume(app: FastifyInstance, db: Kysely<DB>, volume: LogVolume): void {
   const check = () => raiseUnwrittenIncidents(db, volume.file, app.log);
+  let running: Promise<void> | null = null;
   let cancel = () => {};
   app.addHook('onReady', async () => {
     await check();
-    cancel = volume.clock.every(CHECK_EVERY_MS, () =>
-      check().catch((err: unknown) => app.log.error({ err }, 'the unwritten System Incident check failed')),
-    );
+    cancel = volume.clock.every(CHECK_EVERY_MS, async () => {
+      running ??= check()
+        .catch((err: Error) =>
+          openJobIncident(db, app.log, { reference: requestReference(), step: 'raiseUnwrittenIncidents' }, err),
+        )
+        .finally(() => {
+          running = null;
+        });
+      await running;
+    });
   });
-  app.addHook('onClose', async () => cancel());
+  app.addHook('onClose', async () => {
+    cancel();
+    await running;
+  });
 }

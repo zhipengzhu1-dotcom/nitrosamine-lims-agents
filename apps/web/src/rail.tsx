@@ -10,7 +10,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, Refused, signOut, useApi } from './api.ts';
+import { api, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst';
 export interface Field<N extends string = string> {
@@ -154,15 +154,18 @@ export const modules = [
 export type Module = (typeof modules)[number];
 type ModuleKey = Module['key'];
 
+/** `notice` is what the rail says when the person has no step to take here, such as which Signatures are unsigned. */
 export function Shell({
   me,
   active,
   action,
+  notice,
   children,
 }: {
   me: ActorContext;
   active: ModuleKey;
   action: RailAction | null;
+  notice?: string | undefined;
   children: ReactNode;
 }) {
   return (
@@ -177,7 +180,7 @@ export function Shell({
         </nav>
       </TopBar>
       <main className="plane">{children}</main>
-      <Rail me={me} action={action} />
+      <Rail me={me} action={action} notice={notice} />
     </div>
   );
 }
@@ -213,7 +216,7 @@ function unansweredText(e: unknown, signs: boolean): string {
   return `Refused: ${e.message}.${signs ? ' Nothing has been signed.' : ''}`;
 }
 
-function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
+function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | null; notice?: string | undefined }) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [password, setPassword] = useState('');
@@ -401,10 +404,11 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
           <span>
             {me.roles.map(words).join(', ')} · <code>{me.person.username}</code>
           </span>
+          <SessionCountdown />
         </div>
         <div ref={statusLine} className="rail__context" role="status" tabIndex={-1}>
           <p key={note?.n} className={`note ${note ? `note--${note.tone}` : ''}`}>
-            {note?.text ?? action?.context ?? 'Nothing for you to commit here.'}
+            {note?.text ?? action?.context ?? notice ?? 'Nothing for you to commit here.'}
           </p>
         </div>
         {action && !opened && (
@@ -425,6 +429,19 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
         </button>
       </footer>
     </>
+  );
+}
+
+const twoDigits = (n: number) => String(n).padStart(2, '0');
+
+function SessionCountdown() {
+  const left = useSecondsLeft();
+  if (left === null) return null;
+  const [h, m, s] = [Math.floor(left / 3600), Math.floor(left / 60) % 60, left % 60];
+  return (
+    <span className="who__clock">
+      Session ends in <time>{h > 0 ? `${h}:${twoDigits(m)}:${twoDigits(s)}` : `${m}:${twoDigits(s)}`}</time>
+    </span>
   );
 }
 

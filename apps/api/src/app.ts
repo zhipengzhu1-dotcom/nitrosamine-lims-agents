@@ -1,5 +1,5 @@
 import type { DB } from '@lims/db';
-import type { ActorContext, Instant } from '@lims/domain';
+import type { ActorContext, Instant, SessionClock } from '@lims/domain';
 import Fastify, {
   type FastifyBaseLogger,
   type FastifyInstance,
@@ -10,7 +10,16 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE, type SessionKey } from './auth.ts';
+import {
+  actorFor,
+  type Login,
+  loginRoutes,
+  logoutRoute,
+  scheduleExpirySweep,
+  SESSION_COOKIE,
+  SESSION_LIMITS,
+  type SessionKey,
+} from './auth.ts';
 import { apiLogger, checkLogVolume, type LogSink, type LogVolume } from './log.ts';
 import { readRoutes } from './reads.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
@@ -21,6 +30,7 @@ declare module 'fastify' {
     actor: ActorContext;
     requester: ActorContext | null;
     sessionKey: SessionKey;
+    sessionClock: SessionClock;
   }
 }
 
@@ -48,9 +58,13 @@ export interface AppOptions {
   logVolume: LogVolume | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
+  login: Login;
+  /** How often to run the expiry sweep, or null for an API whose caller runs it. */
+  sweepEveryMs: number | null;
 }
 
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
+  const limits = SESSION_LIMITS[options.login];
   const app = Fastify({
     logger: options.log ? apiLogger(options.log) : false,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
@@ -60,17 +74,23 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   app.decorateRequest('requester', null);
   app.setNotFoundHandler(() => refuse('notFound', 'no such route'));
   if (options.logVolume) checkLogVolume(app, db, options.logVolume);
-  loginRoutes(app, db, options.accessEventKey, options.secureCookie);
+  loginRoutes(app, db, options.accessEventKey, options.secureCookie, limits);
   app.register(async (signedIn) => {
     signedIn.decorateRequest('actor');
     signedIn.decorateRequest('sessionKey');
+    signedIn.decorateRequest('sessionClock');
     signedIn.addHook('onRequest', async (req) => {
-      ({ actor: req.actor, session: req.sessionKey } = await actorFor(db, req.cookies[SESSION_COOKIE]));
+      ({
+        actor: req.actor,
+        session: req.sessionKey,
+        clock: req.sessionClock,
+      } = await actorFor(db, req.cookies[SESSION_COOKIE], limits));
       req.requester = req.actor;
     });
-    logoutRoute(signedIn, db);
+    logoutRoute(signedIn, db, limits);
     readRoutes(signedIn, db);
     stepRoutes(signedIn, db);
   });
+  if (options.sweepEveryMs !== null) scheduleExpirySweep(app, db, limits, options.sweepEveryMs);
   return app;
 }

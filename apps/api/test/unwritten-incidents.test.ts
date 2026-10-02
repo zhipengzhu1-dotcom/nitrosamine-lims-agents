@@ -159,17 +159,21 @@ it('a line whose record ID is in upper case is raised, with the ID as the databa
   assert.equal(incident?.recordId, NO_SUCH_ROW);
 });
 
-it('a 15-minute check that fails is logged, and the next check raises what the failed one could not', async () => {
+it('a 15-minute check that fails opens a System Incident, and the next check raises what the failed one could not', async () => {
   const file = logVolume('failing');
   const { clock, advance } = handClock();
-  const started = await startOn(file, clock);
+  await startOn(file, clock);
   rmSync(file);
+  const failedChecks = () =>
+    api.db
+      .selectFrom('systemIncident')
+      .select('errorClass')
+      .where('kind', '=', 'UnexpectedFailure')
+      .where('step', '=', 'raiseUnwrittenIncidents')
+      .execute();
 
   await advance(FIFTEEN_MINUTES);
-  assert.ok(
-    started.logLines().some((line) => line.msg === 'the unwritten System Incident check failed'),
-    'the failed check is in the log',
-  );
+  assert.deepEqual(await failedChecks(), [{ errorClass: 'Error' }], 'the failed check is a System Incident');
   logVolume('failing', unwrittenLine('FX00000B'));
   appendFileSync(file, unwrittenLine('FX00000C').replace('"recordId":null', '"recordId":null,"addedLater":true'));
   await advance(FIFTEEN_MINUTES);
