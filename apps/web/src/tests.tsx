@@ -1,7 +1,7 @@
 import { type ActorContext, type Result, routes, type Signature, steps, type TestRow } from '@lims/domain';
 import { useCallback, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
-import { Shell, Status, stepAction } from './rail.tsx';
+import { Shell, Status, stepAction, words } from './rail.tsx';
 import { time } from './time.ts';
 import { TestTrail } from './trail.tsx';
 const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on Sample ${t.sampleNumber}`;
@@ -60,9 +60,15 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
   const freshState = useFresh(view, (v) => [v.test.state]);
   const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
   const action = view?.next
-    ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], async () => {
-        await Promise.all([reload(), reloadTrail()]);
-      })
+    ? stepAction(
+        view.next,
+        id,
+        [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])],
+        async () => {
+          await Promise.all([reload(), reloadTrail()]);
+        },
+        view.recordVersion && view.statement ? { recordVersion: view.recordVersion, statement: view.statement } : null,
+      )
     : null;
   if (!view)
     return (
@@ -75,6 +81,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
     <Shell me={me} active="tests" action={action} notice={unsignedNotice(view.signatures)}>
       <h1>
         {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
+        {view.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
       </h1>
       <dl className="facts">
         <dt>Sample</dt>
@@ -105,7 +112,9 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         )}
       </dl>
       <h2>Result</h2>
-      {result ? (
+      {view.withheld ? (
+        <p className="muted">The Result is not released yet. It shows here when the Test Report is released.</p>
+      ) : result ? (
         <dl className="facts">
           <dt>{result.analyte}</dt>
           <dd className="value">
@@ -122,7 +131,11 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         <p className="muted">No Result entered.</p>
       )}
       <h2>Signatures</h2>
-      <Signatures rows={view.signatures} fresh={freshSignatures} />
+      {view.withheld ? (
+        <p className="muted">The Signatures are not released yet. They show here with the Result.</p>
+      ) : (
+        <Signatures rows={view.signatures} fresh={freshSignatures} />
+      )}
       {me.person.customerId === null && <TestTrail me={me} id={id} onReload={onTrailReload} />}
     </Shell>
   );
@@ -158,16 +171,15 @@ export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: Readonl
       <tbody>
         {rows.map((s) => (
           <tr key={signatureKey(s)} className={rowClass(s, fresh)}>
-            <td className="sig" data-label="Meaning">
-              {s.meaning}
-              {s.unsigned && (
-                <>
-                  {' '}
-                  <span className="unsigned">unsigned</span>
-                </>
-              )}
+            <td data-label="Meaning">
+              <span className="sig-line">
+                <span className="sig">{s.meaning}</span>
+                {s.unsigned && <Status mark="Unsigned" />}
+              </span>
             </td>
-            <td data-label="Signed by">{s.signer}</td>
+            <td data-label="Signed by">
+              {s.signer} ({s.username}, {words(s.role)})
+            </td>
             <td data-label="Time">{time(s.signedAt)}</td>
             <td data-label="Record">{s.record}</td>
             <td data-label="Record Version">{s.recordVersion.version}</td>

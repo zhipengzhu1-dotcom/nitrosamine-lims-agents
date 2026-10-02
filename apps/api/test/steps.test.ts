@@ -3,10 +3,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { audited, type Json, type JsonObject } from '@lims/db';
 import { sql } from 'kysely';
-import { routes, type StepInput, type StepName, stepNames, stepRoute, steps } from '@lims/domain';
+import { routes, type StepInput, type StepName, stepNames, type SigningBody, stepRoute, steps } from '@lims/domain';
 import { LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
 import { labScope } from '../src/scope.ts';
-import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, type Client, ok, refusedWith, signatureOf, startApi, TEST_RELEASE } from './harness.ts';
 
 const api = await startApi('lims_api_steps_test');
 const [cora, samir, lena, ana, theo, rui, quinn] = [
@@ -55,7 +55,7 @@ const result = {
 };
 
 async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
-  const signature = signer && { password: signer.password };
+  const signature = signer && (await signatureOf(client, testId, signer));
   return client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) });
 }
 
@@ -110,12 +110,16 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     'this Test has no released Test Report',
     'no Test Report for the Customer before release',
   );
+  const unreleased = await view(id, as.cora);
   assert.deepEqual(
-    [(await view(id, as.cora)).recordVersion, (await view(id, as.cora)).signatures],
-    [null, []],
+    [unreleased.recordVersion, unreleased.result, unreleased.signatures],
+    [null, null, []],
     'before release the Customer gets no Record Version hash, which could confirm a guessed Result',
   );
+  assert.equal(unreleased.withheld, true, 'the Customer is told the Result and Signatures are withheld until release');
+  assert.equal((await view(id, as.rui)).withheld, false, 'staff see the Test whole before release');
   assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
+  assert.equal((await view(id, as.cora)).withheld, false, 'release shows the Customer the whole Test');
 
   const reported = await view(id, as.quinn);
   assert.equal(reported.test.state, 'Reported');
@@ -135,9 +139,9 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   assert.deepEqual(
     reported.signatures.map((s) => [s.meaning, s.signer, s.record, s.recordVersion.version, s.unsigned]),
     [
-      ['Performed', 'Ana Ferreira', 'test', 3, false],
-      ['Reviewed', 'Rui Tanaka', 'test', 3, false],
-      ['Released', 'Quinn Adeyemi', 'test_report', 1, false],
+      ['Performed', 'Ana Ferreira', 'Test', 3, false],
+      ['Reviewed', 'Rui Tanaka', 'Test', 3, false],
+      ['Released', 'Quinn Adeyemi', 'Test Report', 1, false],
     ],
     'Performed and Reviewed bind to the Record Version the Result made; Released to the Test Report',
   );
@@ -237,6 +241,12 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
   const signed = await view(id, as.quinn);
   const reportId = signed.report?.id ?? assert.fail();
   const before = signed.recordVersion ?? assert.fail();
+  const released = ok(await as.cora.call(routes.report, { id }));
+  assert.deepEqual(
+    [released.recordVersion.version, released.signatures.find((s) => s.meaning === 'Released')?.recordVersion],
+    [1, released.recordVersion],
+    'the Test Report read names its current Record Version, the one the Released Signature was given on',
+  );
 
   await changeResult(id, '0.0380');
   const changed = await view(id, as.quinn);
@@ -263,9 +273,17 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
     ],
     'the Test Report built on the Test has a new Record Version too',
   );
+  const changedReport = ok(await as.cora.call(routes.report, { id }));
   assert.ok(
-    ok(await as.cora.call(routes.report, { id })).signatures.every((s) => s.unsigned),
+    changedReport.signatures.every((s) => s.unsigned),
     'the Customer sees the Released signature as unsigned on the Test Report',
+  );
+  const { version, canonicalForm, contentHash } =
+    (await recordVersions('test_report', reportId)).at(-1) ?? assert.fail();
+  assert.deepEqual(
+    [changedReport.recordVersion, version],
+    [{ version, canonicalForm, contentHash }, 2],
+    "the Test Report read names the report's new Record Version, later than the Released Signature's",
   );
   assert.ok(
     ok(await as.quinn.call(routes.testTrail, { id })).entries.some(
@@ -313,7 +331,12 @@ it('the Analyst who signed Performed cannot review, and the Reviewer who reviewe
   const id = await submitTestTo('Assigned', dana);
   assert.equal((await take(as.dana, 'enterResult', id, result, dana)).status, 200);
   assert.equal((await view(id, as.dana)).next, null, 'review is not offered to the Analyst who performed it');
-  const anySignature = { password: 'unused' };
+  const anySignature = {
+    username: 'unused',
+    password: 'unused',
+    recordVersion: { version: 1, contentHash: '0'.repeat(64) },
+    statementVersion: 1,
+  };
   const selfReview = await as.dana.call(stepRoute('review'), {
     commitKey: randomUUID(),
     testId: id,
@@ -336,24 +359,209 @@ it('the Analyst who signed Performed cannot review, and the Reviewer who reviewe
 it('a signing with a wrong password is refused and changes nothing, and a signing on an ended session is refused by another kind', async () => {
   const id = await submitTestTo('Assigned', wes);
   const before = await view(id);
-  const enter = (password: string) =>
-    as.wes.call(stepRoute('enterResult'), {
-      commitKey: randomUUID(),
-      testId: id,
-      input: result,
-      signature: { password },
-    });
+  const seen = await signatureOf(as.wes, id, wes);
+  const enter = (signature: SigningBody) =>
+    as.wes.call(stepRoute('enterResult'), { commitKey: randomUUID(), testId: id, input: result, signature });
 
-  assert.equal(refusedWith(await enter('not-the-password'), 'badCredentials'), 'the credentials are not valid');
+  assert.equal(
+    refusedWith(await enter({ ...seen, password: 'not-the-password' }), 'badCredentials'),
+    'the user ID or password is not valid',
+  );
   assert.deepEqual(
     await view(id),
     before,
     'a wrong password leaves the Test, Result, Signatures and Audit Trail as they were',
   );
-  assert.equal((await enter(wes.password)).status, 200);
+  assert.equal((await enter(seen)).status, 200);
 
   ok(await as.wes.call(routes.logout));
-  assert.equal(refusedWith(await enter(wes.password), 'noSession'), 'sign in first');
+  assert.equal(refusedWith(await enter(seen), 'noSession'), 'sign in first');
+});
+
+it('a typed user ID that is not the session person is refused like a wrong password, and each failure is its own Access Event that counts toward the lockout', async () => {
+  const signer = await api.addPerson('kim.analyst', ['Analyst'], { trained: true });
+  const client = await api.login(signer);
+  const id = await submitTestTo('Assigned', signer);
+  const failures = async () =>
+    (
+      await api.superuser
+        .selectFrom('person')
+        .select('failedLogins')
+        .where('id', '=', signer.id)
+        .executeTakeFirstOrThrow()
+    ).failedLogins;
+  const seen = await signatureOf(client, id, signer);
+  const attempt = (signature: SigningBody) =>
+    client.call(stepRoute('enterResult'), { commitKey: randomUUID(), testId: id, input: result, signature });
+
+  assert.equal(
+    refusedWith(await attempt({ ...seen, username: ana.username }), 'badCredentials'),
+    'the user ID or password is not valid',
+  );
+  assert.equal(await failures(), 1, "another person's user ID with the right password counts one failure");
+  assert.equal(
+    refusedWith(await attempt({ ...seen, password: 'wrong' }), 'badCredentials'),
+    'the user ID or password is not valid',
+  );
+  assert.equal(await failures(), 2);
+  const { id: sessionId } = await api.superuser
+    .selectFrom('session')
+    .select('id')
+    .where('personId', '=', signer.id)
+    .executeTakeFirstOrThrow();
+  assert.deepEqual(
+    await api.superuser
+      .selectFrom('accessEvent')
+      .select(['kind', 'failureReason', 'sessionId', sql<string[]>`roles::text[]`.as('roles')])
+      .where('subjectId', '=', signer.id)
+      .where('kind', '=', 'ReauthenticationFailed')
+      .orderBy('at')
+      .execute(),
+    [
+      { kind: 'ReauthenticationFailed', failureReason: 'WrongUserId', sessionId, roles: ['Analyst'] },
+      { kind: 'ReauthenticationFailed', failureReason: 'WrongPassword', sessionId, roles: ['Analyst'] },
+    ],
+    'each failed re-authentication is an Access Event on the session, naming why',
+  );
+  assert.equal((await view(id, client)).signatures.length, 0, 'nothing was signed');
+  assert.equal((await attempt(seen)).status, 200, 'the right user ID and password sign');
+  assert.equal(await failures(), 0, 'a signing that proves the person clears the count');
+});
+
+it('a signing on sight of a signature statement version that is not in force is refused, with no System Incident', async () => {
+  const id = await submitTestTo('Assigned');
+  const seen = await signatureOf(as.ana, id, ana);
+  const refused = await as.ana.call(stepRoute('enterResult'), {
+    commitKey: randomUUID(),
+    testId: id,
+    input: result,
+    signature: { ...seen, statementVersion: 999 },
+  });
+  assert.equal(
+    refusedWith(refused, 'signingRefused'),
+    'the signature statement changed since this screen loaded it; read it again before signing',
+  );
+  assert.deepEqual((await view(id, as.ana)).signatures, [], 'nothing was signed');
+  const { n } = await api.superuser
+    .selectFrom('systemIncident')
+    .select(sql<number>`count(*)::int`.as('n'))
+    .where('step', '=', 'enterResult')
+    .executeTakeFirstOrThrow();
+  assert.equal(n, 0, 'a refused signing opens no System Incident');
+});
+
+it('a signing on sight of a Record Version that is no longer the latest is refused with its own kind and writes no Signature', async () => {
+  const id = await submitTestTo('Assigned');
+  assert.equal((await take(as.ana, 'enterResult', id, result, ana)).status, 200);
+  const seen = await signatureOf(as.rui, id, rui);
+  await audited(
+    api.superuser,
+    { actor: 'svc:test', role: 'system', reason: 'Rename the Customer behind the Test' },
+    (tx) =>
+      tx
+        .updateTable('customer')
+        .set({ name: `Northwind Generics renamed ${randomUUID()} (fictional)` })
+        .where('id', '=', customerId)
+        .execute(),
+  );
+  const refused = await as.rui.call(stepRoute('review'), {
+    commitKey: randomUUID(),
+    testId: id,
+    input: {},
+    signature: seen,
+  });
+  assert.equal(
+    refusedWith(refused, 'recordChanged'),
+    'the Test changed since this screen loaded it; read it again before signing',
+  );
+  const after = await view(id, as.rui);
+  assert.deepEqual(
+    [after.test.state, after.signatures.map((s) => s.meaning)],
+    ['SubmittedForReview', ['Performed']],
+    'no Reviewed Signature and no state move',
+  );
+  assert.ok(
+    after.recordVersion && after.recordVersion.version > seen.recordVersion.version,
+    'the Test has a later version',
+  );
+  assert.equal(
+    (await take(as.rui, 'review', id, {}, rui)).status,
+    200,
+    'reading the Test again lets the Reviewer sign',
+  );
+});
+
+it(`every Signature of the chain is written by the signing function and records the signer as signed, the stored hash and form, statement 1, the authenticator, the session and the release ${TEST_RELEASE}`, async () => {
+  const id = await submitTestTo('Assigned');
+  assert.equal((await take(as.ana, 'enterResult', id, result, ana)).status, 200);
+  assert.equal((await take(as.rui, 'review', id, {}, rui)).status, 200);
+  assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
+  const rows = await api.superuser
+    .selectFrom('signature as s')
+    .innerJoin('recordVersion as v', (j) => j.onRef('v.labId', '=', 's.labId').onRef('v.id', '=', 's.recordVersionId'))
+    .innerJoin('reauthentication as r', (j) =>
+      j.onRef('r.labId', '=', 's.labId').onRef('r.id', '=', 's.reauthenticationId'),
+    )
+    .innerJoin('signatureStatement as t', 't.version', 's.statementVersion')
+    .innerJoin('person as p', 'p.id', 's.personId')
+    .select([
+      's.meaning',
+      's.printedName',
+      's.username',
+      's.role',
+      'v.recordTable',
+      'v.version',
+      sql<boolean>`s.content_hash = v.content_hash`.as('hashCopied'),
+      sql<boolean>`s.canonical_form = v.canonical_form`.as('formCopied'),
+      's.statementVersion',
+      sql<boolean>`s.statement_hash = t.statement_hash`.as('statementCopied'),
+      's.authenticator',
+      's.appRelease',
+      sql<boolean>`s.session_id = r.session_id and s.person_id = r.person_id and s.meaning = r.meaning`.as(
+        'reauthenticated',
+      ),
+      sql<boolean>`exists (select from lims.session x where x.lab_id = s.lab_id and x.id = s.session_id and x.person_id = p.id)`.as(
+        'onOwnSession',
+      ),
+    ])
+    .where('v.recordId', 'in', [id, api.superuser.selectFrom('testReport').select('id').where('testId', '=', id)])
+    .orderBy('s.signedAt')
+    .execute();
+  const signed = (meaning: string, signer: Account, role: string, recordTable: string, version: number) => ({
+    meaning,
+    printedName:
+      signer.username === ana.username
+        ? 'Ana Ferreira'
+        : signer.username === rui.username
+          ? 'Rui Tanaka'
+          : 'Quinn Adeyemi',
+    username: signer.username,
+    role,
+    recordTable,
+    version,
+    hashCopied: true,
+    formCopied: true,
+    statementVersion: 1,
+    statementCopied: true,
+    authenticator: 'Password',
+    appRelease: TEST_RELEASE,
+    reauthenticated: true,
+    onOwnSession: true,
+  });
+  assert.deepEqual(rows, [
+    signed('Performed', ana, 'Analyst', 'test', 3),
+    signed('Reviewed', rui, 'Reviewer', 'test', 3),
+    signed('Released', quinn, 'QA', 'test_report', 1),
+  ]);
+  assert.deepEqual(
+    (await view(id, as.quinn)).signatures.map((s) => [s.meaning, s.username, s.role]),
+    [
+      ['Performed', ana.username, 'Analyst'],
+      ['Reviewed', rui.username, 'Reviewer'],
+      ['Released', quinn.username, 'QA'],
+    ],
+    'every screen can show the username and role at signing',
+  );
 });
 
 it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and writes a lockout Access Event with the session and the step's role`, async () => {
@@ -366,7 +574,7 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
         commitKey: randomUUID(),
         testId: id,
         input: result,
-        signature: { password: 'wrong' },
+        signature: { ...(await signatureOf(client, id, signer)), password: 'wrong' },
       }),
       'badCredentials',
     );
@@ -384,6 +592,11 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
     .executeTakeFirstOrThrow();
   assert.deepEqual(events, [
     { kind: 'SignInSucceeded', sessionId: session.id, roles: ['Analyst'] },
+    ...Array.from({ length: LOCKOUT_AFTER_FAILURES }, () => ({
+      kind: 'ReauthenticationFailed',
+      sessionId: session.id,
+      roles: ['Analyst'],
+    })),
     { kind: 'Lockout', sessionId: session.id, roles: ['Analyst'] },
   ]);
   const incidents = await api.superuser

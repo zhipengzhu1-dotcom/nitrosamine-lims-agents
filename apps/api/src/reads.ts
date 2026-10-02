@@ -1,12 +1,13 @@
 import type { DB } from '@lims/db';
-import { nextStep, routes } from '@lims/domain';
+import { nextStep, recordKind, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { factsFor, latestVersion, signedVersions } from './steps.ts';
+import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
 import { staffRoutes } from './staff.ts';
 import { trailRoutes } from './trail.ts';
+import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -42,8 +43,10 @@ async function testView(scope: Scope, id: string) {
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
-  const visibleToActor = !isCustomer || test.state === 'Reported';
-  const latest = visibleToActor ? await latestVersion(scope, 'test', id) : null;
+  // Released means a Test Report exists, the same fact the report route refuses on, so the two reads cannot disagree.
+  const withheld = isCustomer && !report;
+  const latest = withheld ? null : await latestVersion(scope, 'test', id);
+  const next = nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test));
   return {
     test,
     recordVersion: latest && {
@@ -52,8 +55,9 @@ async function testView(scope: Scope, id: string) {
       contentHash: latest.contentHash,
     },
     report: report ? { id: report.id, number: report.number } : null,
-    result: visibleToActor
-      ? ((await scope
+    result: withheld
+      ? null
+      : ((await scope
           .from('result')
           .select([
             'analyte',
@@ -64,13 +68,15 @@ async function testView(scope: Scope, id: string) {
             sql<string>`performed_on::text`.as('performedOn'),
           ])
           .where('testId', '=', id)
-          .executeTakeFirst()) ?? null)
-      : null,
-    signatures: visibleToActor
-      ? await signedVersions(scope)
+          .executeTakeFirst()) ?? null),
+    signatures: withheld
+      ? []
+      : await signedVersions(scope)
           .select([
             'signature.meaning',
             'signature.printedName as signer',
+            'signature.username',
+            'signature.role',
             'signature.signedAt',
             'recordVersion.recordTable as record',
             'recordVersion.version',
@@ -86,18 +92,21 @@ async function testView(scope: Scope, id: string) {
           .orderBy('signature.signedAt')
           .execute()
           .then((rows) =>
-            rows.map(({ version, canonicalForm, contentHash, ...signature }) => ({
+            rows.map(({ record, version, canonicalForm, contentHash, ...signature }) => ({
               ...signature,
+              record: recordKind(record),
               recordVersion: { version, canonicalForm, contentHash },
             })),
-          )
-      : [],
-    next: nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test)),
+          ),
+    withheld,
+    next,
+    statement: isCustomer ? null : await statementInForce(scope),
   };
 }
 
 export function readRoutes(app: App, db: Kysely<DB>): void {
   trailRoutes(app, db);
+  auditExportRoutes(app, db);
   staffRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => ({ ...req.actor, session: req.sessionClock }) });
 
@@ -132,10 +141,11 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
   app.route({
     ...routes.report,
     handler: async (req) => {
-      const { report, test, result, signatures } = await testView(labScope(db, req.actor), req.params.id);
-      return report
-        ? { report, test, result, signatures }
-        : refuse('notFound', 'this Test has no released Test Report');
+      const scope = labScope(db, req.actor);
+      const { report, test, result, signatures } = await testView(scope, req.params.id);
+      if (!report) return refuse('notFound', 'this Test has no released Test Report');
+      const { version, canonicalForm, contentHash } = await latestVersion(scope, 'test_report', report.id);
+      return { report, recordVersion: { version, canonicalForm, contentHash }, test, result, signatures };
     },
   });
 

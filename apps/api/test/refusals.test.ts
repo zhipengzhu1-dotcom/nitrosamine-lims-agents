@@ -13,7 +13,7 @@ import {
 } from '@lims/domain';
 import type { Static, TObject } from 'typebox';
 import { Value } from 'typebox/value';
-import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_refusals_test');
 const cora = api.person('cora');
@@ -33,7 +33,12 @@ const entry = <R extends Route & { schema: { body: TObject } }>(route: R, body: 
 const step = <K extends StepName>(name: K, body: StepBody<K>) => ({ route: stepRoute(name), body });
 
 const testId = randomUUID();
-const signature = { password: 'unused' };
+const signature = {
+  username: 'unused',
+  password: 'unused',
+  recordVersion: { version: 1, contentHash: '0'.repeat(64) },
+  statementVersion: 1,
+};
 const result = {
   analyte: 'NDMA',
   value: '0.0300',
@@ -48,6 +53,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   login: entry(routes.login, { username: cora.username, password: 'not-the-password' }),
   switchLab: entry(routes.switchLab, { username: cora.username, password: 'not-the-password', labId: api.labId }),
   verifyAuditTrail: entry(routes.verifyAuditTrail, {}),
+  auditExport: entry(routes.auditExport, { customerId: randomUUID(), format: 'JSON' }),
   submit: step('submit', {
     commitKey: randomUUID(),
     input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
@@ -178,7 +184,7 @@ it('a signing step with the right password and an unknown field in the signature
     commitKey: randomUUID(),
     testId: id,
     input: result,
-    signature: { password: lou.password, extra: 1 },
+    signature: { ...(await signatureOf(client, id, lou)), extra: 1 },
   });
   assert.equal(refusedWith(refused, 'unknownField'), 'the LIMS does not know the field signature.extra');
   assert.deepEqual(await counts(), before, 'no Signature, no Result and no Audit Trail entry');

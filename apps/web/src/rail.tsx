@@ -1,14 +1,20 @@
 import {
   type ActorContext,
   decimalPattern,
+  mayTake,
   type Lab,
+  type RecordVersionRef,
+  type Role,
+  pressText,
   routes,
+  type SignatureStatement,
   type StepInput,
   type StepName,
   staffRefusal,
   stepRoute,
   steps,
   type TestState,
+  type TypedCredentials,
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -51,18 +57,50 @@ export const stepUi: {
 
 type SignedMeaning = NonNullable<(typeof steps)[StepName]['signs']>;
 
-export const meaningStatement: Record<SignedMeaning, string> = {
-  Performed: 'I performed this Test and the Result is as I entered it.',
-  Reviewed: 'I reviewed this Test, its Result and its record.',
-  Released: 'I release this Test Report to the Customer.',
-};
+export const demoSigning =
+  'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
 
-export const demoSigning = 'Demo: accounts share one password, and a signing re-enters the password only.';
+export interface SigningView {
+  recordVersion: RecordVersionRef;
+  statement: SignatureStatement;
+}
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-/** `fresh` marks a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them. */
-export function Status({ state, fresh = false }: { state: TestState; fresh?: boolean }) {
+const unsignedLook = {
+  tone: 'bad',
+  glyph: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 5v3.5M8 11h0" />
+    </>
+  ),
+} as const;
+const markLook = {
+  Intact: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
+  Broken: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
+  Unsigned: unsignedLook,
+  'Signatures unsigned': unsignedLook,
+} as const;
+
+/**
+ * A Test state with its track, or a mark with its glyph: a chain verdict, an unsigned Signature, or a record with an
+ * unsigned Signature. `fresh` marks a state the server has just confirmed on this page: the word and glyph are final,
+ * and an accent plays around them.
+ */
+export function Status(props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook }) {
+  if ('mark' in props) {
+    const { tone, glyph } = markLook[props.mark];
+    return (
+      <span className={`status status--${tone}`}>
+        {props.mark}
+        <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
+          {glyph}
+        </svg>
+      </span>
+    );
+  }
+  const { state, fresh = false } = props;
   const at = stateOrder.indexOf(state);
   return (
     <span className={`status ${state === 'Reported' ? 'status--done' : ''} ${fresh ? 'status--fresh' : ''}`}>
@@ -80,8 +118,13 @@ export interface RailAction {
   label: string;
   context: string;
   fields: readonly Field[];
-  signs: { meaning: SignedMeaning; what: string[] } | null;
-  run: (input: Record<string, string>, password: string | null) => Promise<string>;
+  signs: ({ meaning: SignedMeaning; what: string[]; role: Role } & SigningView) | null;
+  run: (input: Record<string, string>, credentials: TypedCredentials | null) => Promise<string>;
+}
+
+async function commitKeySlot(press: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(press));
+  return `commitKey:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
 export function stepAction(
@@ -89,6 +132,7 @@ export function stepAction(
   testId: string | null,
   what: string[],
   onDone: () => Promise<void>,
+  signing: SigningView | null = null,
 ): RailAction {
   const step = steps[name];
   const ui = stepUi[name];
@@ -96,24 +140,37 @@ export function stepAction(
     label: ui.label,
     context: what[0] ?? '',
     fields: ui.fields,
-    signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
-    async run(input, password) {
-      // Kept until the server answers, even across a reload, so pressing again after no answer resends this press.
-      const press = `commitKey:${name}:${testId ?? 'new'}`;
-      const commitKey = sessionStorage.getItem(press) ?? crypto.randomUUID();
-      sessionStorage.setItem(press, commitKey);
+    signs:
+      step.signs && signing
+        ? { meaning: step.signs, what: ui.record ? [...what, ui.record] : what, role: step.role, ...signing }
+        : null,
+    async run(input, credentials) {
+      // Kept until the server answers, even across a reload, so the same press after no answer resends its Commit Key.
+      // The slot names the press by a digest, so no entries are kept in the browser.
+      const slot = await commitKeySlot(pressText(name, testId, input));
+      const commitKey = sessionStorage.getItem(slot) ?? crypto.randomUUID();
+      sessionStorage.setItem(slot, commitKey);
       await api(stepRoute(name), {
         commitKey,
         ...(testId && { testId }),
         input,
-        ...(password !== null && { signature: { password } }),
-      }).catch((e: unknown) => {
-        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(press);
+        ...(credentials &&
+          signing && {
+            signature: {
+              ...credentials,
+              recordVersion: { version: signing.recordVersion.version, contentHash: signing.recordVersion.contentHash },
+              statementVersion: signing.statement.version,
+            },
+          }),
+      }).catch(async (e: unknown) => {
+        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(slot);
+        // The record or the statement moved on: the page reads it again, so the next sheet shows what is current.
+        if (e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) await onDone();
         throw e;
       });
-      sessionStorage.removeItem(press);
+      sessionStorage.removeItem(slot);
       await onDone();
-      return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
+      return `${step.signs ? `${step.signs} Signature` : ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
   };
 }
@@ -152,6 +209,7 @@ export const modules = [
   },
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
+  { key: 'audit-export', name: 'Audit Export', holds: '', takes: 'generateAuditExport' },
   { key: 'workstations', name: 'Workstations', holds: '' },
   { key: 'staff', name: 'Staff', holds: '' },
 ] as const;
@@ -178,6 +236,7 @@ export function Shell({
         <nav>
           {modules
             .filter((m) => m.key !== 'staff' || staffRefusal(me.roles) === null)
+            .filter((m) => !('takes' in m) || mayTake(m.takes, me.roles))
             .map((m) => (
               <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
                 {m.name}
@@ -225,6 +284,7 @@ function unansweredText(e: unknown, signs: boolean): string {
 function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | null; notice?: string | undefined }) {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
@@ -298,9 +358,11 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
+    setRefusal(null);
     try {
-      const text = await a.run(values, a.signs ? password : null);
+      const text = await a.run(values, a.signs ? { username, password } : null);
       setNote({ text, tone: 'ok', n: ++count.current, action: a.label });
+      setUsername('');
       returnFocus.current = true;
       if (sheet) close(true);
     } catch (e) {
@@ -311,7 +373,8 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
         action: a.label,
       };
       setNote(unanswered);
-      if (sheet) setRefusal(unanswered);
+      if (sheet && e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) close(false);
+      else if (sheet) setRefusal(unanswered);
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -385,15 +448,51 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
                     ))}
                   </section>
                   <section className="card">
+                    <h3>Meaning</h3>
+                    <div className="meaning">
+                      <b>{shown.signs.meaning}</b>
+                      <i>{shown.signs.statement.text}</i>
+                      <small>Signature statement version {shown.signs.statement.version}</small>
+                    </div>
+                    <dl className="facts">
+                      <dt>Eligibility</dt>
+                      <dd>
+                        {me.person.displayName} may sign {shown.signs.meaning} as {words(shown.signs.role)} in{' '}
+                        {me.lab.name}
+                      </dd>
+                      <dt>Record Version</dt>
+                      <dd>{shown.signs.recordVersion.version}</dd>
+                      <dt>SHA-256</dt>
+                      <dd>
+                        <code className="hash">{shown.signs.recordVersion.contentHash}</code>
+                      </dd>
+                    </dl>
+                    {(shown.fields.length > 0 || shown.signs.what.length > 1) && (
+                      <p className="muted">
+                        The Signature binds the Record Version this step writes from what is shown and entered.
+                      </p>
+                    )}
+                  </section>
+                  <section className="card">
                     <h3>Who is signing</h3>
                     <p className="who__name">{me.person.displayName}</p>
                     <p className="muted">
                       <code>{me.person.username}</code> · {me.roles.map(words).join(', ')} · {me.lab.name}
                     </p>
-                    <div className="meaning">
-                      <b>{shown.signs.meaning}</b>
-                      <i>{meaningStatement[shown.signs.meaning]}</i>
-                    </div>
+                    <label>
+                      User ID (type it to sign)
+                      <input
+                        type="text"
+                        required
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        value={username}
+                        aria-invalid={refusal !== null && !username}
+                        aria-describedby="sheet-line"
+                        onChange={(e) => setUsername(e.target.value)}
+                      />
+                    </label>
                     <label>
                       Password (type it again to sign)
                       <input

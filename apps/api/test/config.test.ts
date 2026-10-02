@@ -8,7 +8,7 @@ const UNREACHABLE = 'postgres://nobody@127.0.0.1:1';
 
 function start(env: Record<string, string>) {
   return spawnSync(process.execPath, [api], {
-    env: { LIMS_PG: UNREACHABLE, LIMS_DB: 'lims_unreachable', ...env },
+    env: { LIMS_PG: UNREACHABLE, LIMS_DB: 'lims_unreachable', LIMS_RELEASE: 'config-test', ...env },
     encoding: 'utf8',
     timeout: 10_000,
   });
@@ -84,6 +84,13 @@ it('LIMS_TRUSTED_PROXIES is a setting the API reads', () => {
   assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
   assert.match(started.stderr, /PORT/);
   assert.doesNotMatch(started.stderr, /not a LIMS setting/);
+});
+
+it('a missing LIMS_RELEASE stops the API at start, because every Signature records the app release', () => {
+  const started = start({ LIMS_RELEASE: '', LIMS_ACCESS_EVENT_KEY: 'ab'.repeat(32) });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.notEqual(started.status, 0);
+  assert.match(started.stderr, /LIMS_RELEASE/);
 });
 
 it('a trusted proxy that is not an address or range stops the API at start', () => {

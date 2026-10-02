@@ -23,8 +23,28 @@ async function signOut(page: Page) {
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 }
 
+const signatureRow = (page: Page, meaning: string) =>
+  page.locator('tr', { has: page.locator('td[data-label="Meaning"] .sig', { hasText: meaning }) });
+
+async function unsignedBesideMeanings(page: Page) {
+  for (const meaning of ['Performed', 'Reviewed', 'Released']) {
+    const cell = signatureRow(page, meaning).locator('td[data-label="Meaning"]');
+    const mark = cell.locator('.status');
+    await expect(mark).toHaveText('Unsigned');
+    await expect(mark, `${meaning}'s mark is in the bad tone`).toHaveClass(/\bstatus--bad\b/);
+    await expect(mark.locator('svg.glyph')).toHaveCount(1);
+    const [word, status] = [await box(cell.locator('.sig')), await box(mark)];
+    expect(
+      Math.abs(word.y + word.height / 2 - (status.y + status.height / 2)),
+      `${meaning} and Unsigned share a line`,
+    ).toBeLessThan(word.height / 2);
+  }
+}
+
 const railSays = (page: Page, text: string | RegExp) => expect(page.getByRole('status')).toContainText(text);
-const sign = async (page: Page, meaning: string, password = DEMO_PASSWORD) => {
+const sign = async (page: Page, meaning: string, password = DEMO_PASSWORD, username?: string) => {
+  const typed = username ?? (await page.getByRole('contentinfo').locator('.who code').textContent()) ?? '';
+  await page.getByLabel(/User ID/).fill(typed);
   await page.getByLabel(/Password/).fill(password);
   await page.getByRole('button', { name: `Sign as ${meaning}` }).click();
 };
@@ -67,6 +87,74 @@ async function atLeast(target: Locator, width: number, height: number) {
   expect(b.height + 0.01, 'touch target height').toBeGreaterThanOrEqual(height);
 }
 
+const PHONE = { width: 390, height: 844 };
+const DESKTOP = { width: 1360, height: 900 };
+
+const uncovered = (target: Locator) =>
+  target.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const corners = [
+      [r.left + 12, r.top + 12],
+      [r.right - 12, r.top + 12],
+      [r.left + 12, r.bottom - 12],
+      [r.right - 12, r.bottom - 12],
+    ] as const;
+    return corners.every(([x, y]) => el.contains(document.elementFromPoint(x, y)));
+  });
+
+async function typeWhileTheSheetIsStillSlidingIn(page: Page, type: () => Promise<void>) {
+  const sheet = page.locator('form.sheet');
+  const sliding = await sheet.evaluate((el) => {
+    const slide = el.getAnimations();
+    for (const a of slide) a.pause();
+    return slide.length;
+  });
+  expect(sliding, 'the sheet is still sliding in').toBeGreaterThan(0);
+  await type();
+  const rail = await box(page.locator('footer.rail'));
+  const height = page.viewportSize()?.height;
+  expect(rail.y + rail.height, 'the rail stays at the foot of the screen').toBeCloseTo(height ?? 0, 0);
+  await sheet.evaluate((el) =>
+    Promise.all(
+      el.getAnimations().map((a) => {
+        a.play();
+        return a.finished;
+      }),
+    ),
+  );
+}
+
+async function wholeOnScreenAtBothSizes(page: Page, whole: Locator, commit: Locator) {
+  const projectSize = page.viewportSize() ?? DESKTOP;
+  for (const size of [projectSize, PHONE, DESKTOP]) {
+    const at = `at ${size.width}x${size.height}`;
+    await page.setViewportSize(size);
+    await whole.scrollIntoViewIfNeeded();
+    const edges = await box(whole);
+    expect(edges.y, `whole on screen ${at}, to the pixel`).toBeGreaterThan(-1);
+    expect(edges.y + edges.height, `whole on screen ${at}, to the pixel`).toBeLessThan(size.height + 1);
+    expect(await uncovered(whole), `nothing covers it ${at}`).toBe(true);
+    await expect(commit, `the commit button is on screen ${at}`).toBeInViewport({ ratio: 1 });
+    await commit.click({ trial: true });
+  }
+  await page.setViewportSize(projectSize);
+}
+
+const shownOnce = (page: Page, text: string) =>
+  expect
+    .poll(
+      () =>
+        page.getByText(text).evaluateAll(
+          (copies) =>
+            copies.filter((e) => {
+              const r = e.getBoundingClientRect();
+              return r.width > 1 && r.height > 1;
+            }).length,
+        ),
+      `"${text}" is on screen once`,
+    )
+    .toBe(1);
+
 test('the whole chain through the UI, ending in a Test Report with three Signatures', async ({ page }) => {
   const description = `Metformin HCl 500 mg tablets, lot NW-0042 (fictional, ${test.info().project.name} ${randomUUID()})`;
   const openTheTest = async () => {
@@ -75,6 +163,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     await link.click();
   };
   const sheet = page.locator('form.sheet');
+  const whatYouAreSigning = sheet
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: 'What you are signing' }) });
+  const signButton = sheet.getByRole('button', { name: /^Sign as / });
   const commitKeys: string[] = [];
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/steps/'))
@@ -93,8 +185,15 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   expect(await sheet.count(), 'under reduced motion the sheet leaves at once').toBe(0);
   await page.emulateMedia({ reducedMotion: null });
   await page.getByRole('button', { name: 'Submit' }).click();
-  await page.getByLabel('Method').selectOption({ index: 1 });
-  await page.getByLabel('Sample description').fill(description);
+  await typeWhileTheSheetIsStillSlidingIn(page, async () => {
+    await page.getByLabel('Method').selectOption({ index: 1 });
+    await page.getByLabel('Sample description').fill(description);
+  });
+  await wholeOnScreenAtBothSizes(
+    page,
+    page.getByLabel('Sample description'),
+    sheet.getByRole('button', { name: 'Submit' }),
+  );
   await page.getByRole('button', { name: 'Submit' }).click();
   await railSays(page, 'now Requested');
   await expect(page.getByRole('row', { name: description })).toContainText('Requested');
@@ -129,11 +228,48 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     'Notebook reference': 'RD-NB-0007-012',
     'Performed on': '2026-09-30',
   };
-  for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
-  await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
+  await typeWhileTheSheetIsStillSlidingIn(page, async () => {
+    for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
+  });
+  await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
+  const signing = page.locator('form.sheet');
+  await expect(signing.getByRole('heading', { name: 'What you are signing' })).toBeVisible();
+  await expect(signing.locator('.meaning')).toContainText(/Performed.*Signature statement version 1/s);
+  await expect(signing.getByText(/^Ana Ferreira may sign Performed as Analyst in R&D Laboratory/)).toBeVisible();
+  const hash = signing.locator('code.hash');
+  await expect(hash).toHaveText(/^[0-9a-f]{64}$/);
+  const userId = page.getByLabel(/User ID/);
+  await expect(userId).toHaveValue('');
+  expect(
+    await signing.evaluate((form) => {
+      const [shown, typed] = [form.querySelector('code.hash'), form.querySelector('input[type=text]')];
+      return Boolean(shown && typed && shown.compareDocumentPosition(typed) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }),
+    'the record, meaning, eligibility and full hash come before the credential fields',
+  ).toBe(true);
+  const passwordField = page.getByLabel(/Password/);
+  for (const field of [userId, passwordField]) {
+    await atLeast(field, 44, 44);
+    await expect(field, 'a credential field keeps 16px text so a phone does not zoom').toHaveCSS('font-size', '16px');
+  }
+  await userId.fill('ana.analyst');
+  await passwordField.fill(DEMO_PASSWORD);
   await shot(page, 'test-signature-sheet');
+  await sign(page, 'Performed', 'not-the-password');
+  await railSays(page, 'Refused: the user ID or password is not valid. Nothing has been signed.');
+  await expect(signing.locator('.refusal')).toBeVisible();
+  const heldPerformed = Promise.withResolvers<void>();
+  await page.route('**/api/steps/enterResult', async (route) => {
+    await heldPerformed.promise;
+    await route.continue();
+  });
   await sign(page, 'Performed');
-  await railSays(page, 'now Submitted For Review');
+  await expect(
+    signing.locator('.refusal'),
+    'a new attempt clears the earlier refusal before the server answers',
+  ).toHaveCount(0);
+  heldPerformed.resolve();
+  await railSays(page, 'Performed Signature recorded in the Audit Trail. The Test is now Submitted For Review.');
   await signOut(page);
 
   await signIn(page, 'rui.reviewer');
@@ -150,9 +286,17 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(review).toBeFocused();
 
   await review.click();
+  await expect(sheet.locator('.meaning'), 'the Reviewed sheet shows its meaning and statement').toContainText(
+    /Reviewed.*Signature statement version 1/s,
+  );
+  await expect(sheet.getByText(/^Rui Tanaka may sign Reviewed as Reviewer in R&D Laboratory/)).toBeVisible();
+  await expect(sheet.locator('code.hash')).toHaveText(/^[0-9a-f]{64}$/);
+  await typeWhileTheSheetIsStillSlidingIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
+  await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
   const height = (await box(sheet)).height;
   await sign(page, 'Reviewed', 'not-the-password');
-  await railSays(page, 'Refused: the credentials are not valid. Nothing has been signed.');
+  await railSays(page, 'Refused: the user ID or password is not valid. Nothing has been signed.');
+  await shownOnce(page, 'Refused: the user ID or password is not valid. Nothing has been signed.');
   const refusal = sheet.locator('.refusal');
   await expect(refusal).toBeInViewport({ ratio: 1 });
   const [inSheet, inRefusal] = [await box(sheet), await box(refusal)];
@@ -202,9 +346,19 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(page.getByRole('status'), 'with no step left, focus goes to the status line').toBeFocused();
   await signOut(page);
 
+  await signIn(page, 'cora.customer');
+  await openTheTest();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Reviewed');
+  await expect(page.getByText('The Result is not released yet.')).toBeVisible();
+  await expect(page.getByText('The Signatures are not released yet.')).toBeVisible();
+  await expect(page.getByText(/No Result entered|No Signatures yet/), 'never that none exists').toHaveCount(0);
+  await signOut(page);
+
   await signIn(page, 'quinn.qa');
   await openTheTest();
   await page.getByRole('button', { name: 'Release' }).click();
+  await typeWhileTheSheetIsStillSlidingIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
+  await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
   let dropped = false;
   await page.route('**/api/steps/release', async (route) => {
     if (dropped) return route.continue();
@@ -213,16 +367,17 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     return route.abort('connectionreset');
   });
   await sign(page, 'Released');
-  await railSays(
-    page,
-    'The LIMS did not answer. Type your password again and sign with the same entries; they will not be saved twice.',
-  );
+  const unanswered =
+    'The LIMS did not answer. Type your password again and sign with the same entries; they will not be saved twice.';
+  await railSays(page, unanswered);
+  await shownOnce(page, unanswered);
   await sign(page, 'Released');
   await railSays(page, 'now Reported');
   await page.getByRole('button', { name: 'Verify chain' }).click();
-  await expect(page.locator('.verdict')).toHaveText(
-    /^Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC: Lab chain intact through entry \d+; Company chain intact through entry \d+\. Not anchored off-server \(demo\)\.$/,
-  );
+  await expect(page.locator('.chains li')).toHaveText([
+    /^Lab chain Intact verified through entry \d+$/,
+    /^Company chain Intact verified through entry \d+$/,
+  ]);
   const [releaseKey, retryKey] = commitKeys.slice(-2);
   expect(retryKey, 'the press whose reply was dropped is resent with its Commit Key').toBe(releaseKey);
   const presses = new Set(commitKeys);
@@ -241,28 +396,40 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   ]) {
     await expect(page.getByRole('row', { name: new RegExp(`${meaning}.*${signer}`) })).toBeVisible();
   }
+  const reportVersion = page.locator('dl.facts dt:text-is("Record Version") + dd');
+  await expect(reportVersion, "the Test Report's current Record Version, the Released Signature's").toHaveText(
+    /^1 · [0-9a-f]{64}$/,
+  );
+  await expect(signatureRow(page, 'Released').locator('td[data-label="Record Version"]')).toHaveText('1');
   await shot(page, 'test-report');
 
   const testId = new URL(page.url()).hash.split('/')[2] ?? '';
   expect(testId).toMatch(/^[0-9a-f-]{36}$/);
-  const signed = page.getByRole('row', { name: /unsigned/ });
-  await expect(signed).toHaveCount(0);
+  await expect(page.locator('.status--bad')).toHaveCount(0);
   changeResult(testId, '0.0380');
   await page.reload();
   await expect(page.getByRole('cell', { name: '0.0380', exact: true })).toBeVisible();
-  for (const meaning of ['Performed', 'Reviewed', 'Released'])
-    await expect(page.getByRole('row', { name: new RegExp(`${meaning} unsigned`) })).toBeVisible();
+  await expect(reportVersion).toHaveText(/^2 · [0-9a-f]{64}$/);
+  await expect(page.getByRole('heading', { level: 1 }).locator('.status')).toHaveText('Signatures unsigned');
+  await unsignedBesideMeanings(page);
 
   await page.goto(`/#/tests/${testId}`);
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Reported');
+  await expect(page.getByRole('heading', { level: 1 }).locator('.status')).toHaveText([
+    'Reported',
+    'Signatures unsigned',
+  ]);
   await expect(page.locator('dl.facts').first().locator('dt:text-is("Record Version") + dd')).toContainText('4 ·');
-  await expect(page.getByRole('row', { name: /unsigned/ })).toHaveCount(3);
+  await unsignedBesideMeanings(page);
+  for (const [meaning, record] of [
+    ['Performed', 'Test'],
+    ['Reviewed', 'Test'],
+    ['Released', 'Test Report'],
+  ] as const)
+    await expect(signatureRow(page, meaning).locator('td[data-label="Record"]')).toHaveText(record);
   await railSays(page, 'Unsigned: Performed, Reviewed, Released. The record changed after signing.');
   await shot(page, 'test-unsigned');
   await page.getByRole('button', { name: 'Verify chain' }).click();
-  await expect(page.locator('.verdict')).toHaveText(
-    /Lab chain intact through entry \d+; Company chain intact through entry \d+/,
-  );
+  await expect(page.locator('.chains li')).toHaveText([/^Lab chain Intact /, /^Company chain Intact /]);
 });
 
 test('a wrong password and an unknown user ID show the same failure message', async ({ page }) => {
@@ -278,7 +445,7 @@ test('a wrong password and an unknown user ID show the same failure message', as
   };
   const wrongPassword = await attempt('rui.reviewer', 'not-the-password');
   const unknownUserId = await attempt(`nobody-${randomUUID()}`, DEMO_PASSWORD);
-  expect(wrongPassword).toBe('the credentials are not valid');
+  expect(wrongPassword).toBe('the user ID or password is not valid');
   expect(unknownUserId).toBe(wrongPassword);
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 });
