@@ -91,7 +91,7 @@ p {
 .muted {
   color: var(--ink-3);
 }
-/* A time breaks only between its UTC and Lab halves, never inside a date or before its offset. */
+/* A date, or a clock with its zone, never breaks inside itself. */
 .when {
   white-space: nowrap;
 }

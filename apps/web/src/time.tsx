@@ -8,15 +8,25 @@ const labTime = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 19)} ${iso
 /** A Lab record's instant as text: UTC, then the Lab's wall clock that the API rendered, when it sent one. */
 export const whenText = (at: string, atLab: string | null) => (atLab ? `${time(at)} · ${labTime(atLab)}` : time(at));
 
+/** A shown time that breaks only between its date and its clock, so a narrow cell never splits a date or strands an offset. */
+function Unbroken({ text }: { text: string }) {
+  const gap = text.indexOf(' ');
+  return (
+    <>
+      <span className="when">{text.slice(0, gap)}</span> <span className="when">{text.slice(gap + 1)}</span>
+    </>
+  );
+}
+
 /** A Lab record's instant as `whenText` reads, with the Lab's wall clock muted beside the UTC, in one element so a stacked cell keeps it in its value column. */
 export function When({ at, atLab }: { at: string; atLab: string | null }) {
   return (
     <span>
-      <span className="when">{time(at)}</span>
+      <Unbroken text={time(at)} />
       {atLab && (
         <span className="muted">
           {' '}
-          · <span className="when">{labTime(atLab)}</span>
+          · <Unbroken text={labTime(atLab)} />
         </span>
       )}
     </span>
