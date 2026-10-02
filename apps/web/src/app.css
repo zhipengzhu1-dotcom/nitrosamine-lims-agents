@@ -419,14 +419,11 @@ td a,
   color: var(--sig);
   font-weight: 700;
 }
-.unsigned {
-  margin-left: 8px;
-  padding: 2px 6px;
-  border: 1.5px solid var(--bad);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--bad);
-  background: var(--bad-tint);
+.sig-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
 }
 .row--unsigned .sig {
   color: var(--ink-3);
@@ -453,6 +450,18 @@ td a,
 }
 .status--done {
   --accent: var(--ink);
+}
+.status--bad {
+  color: var(--bad);
+}
+.glyph {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .track i.on {
   background: var(--accent);

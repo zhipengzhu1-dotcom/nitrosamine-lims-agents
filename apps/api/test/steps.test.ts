@@ -237,6 +237,12 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
   const signed = await view(id, as.quinn);
   const reportId = signed.report?.id ?? assert.fail();
   const before = signed.recordVersion ?? assert.fail();
+  const released = ok(await as.cora.call(routes.report, { id }));
+  assert.deepEqual(
+    [released.recordVersion.version, released.signatures.find((s) => s.meaning === 'Released')?.recordVersion],
+    [1, released.recordVersion],
+    'the Test Report read names its current Record Version, the one the Released Signature was given on',
+  );
 
   await changeResult(id, '0.0380');
   const changed = await view(id, as.quinn);
@@ -263,9 +269,17 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
     ],
     'the Test Report built on the Test has a new Record Version too',
   );
+  const changedReport = ok(await as.cora.call(routes.report, { id }));
   assert.ok(
-    ok(await as.cora.call(routes.report, { id })).signatures.every((s) => s.unsigned),
+    changedReport.signatures.every((s) => s.unsigned),
     'the Customer sees the Released signature as unsigned on the Test Report',
+  );
+  const { version, canonicalForm, contentHash } =
+    (await recordVersions('test_report', reportId)).at(-1) ?? assert.fail();
+  assert.deepEqual(
+    [changedReport.recordVersion, version],
+    [{ version, canonicalForm, contentHash }, 2],
+    "the Test Report read names the report's new Record Version, later than the Released Signature's",
   );
   assert.ok(
     ok(await as.quinn.call(routes.testTrail, { id })).entries.some(

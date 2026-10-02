@@ -250,8 +250,10 @@ const testView = Type.Object({
   next: nullable(Type.Enum(stepNames)),
   statement: nullable(signatureStatement),
 });
+/** `recordVersion` is the Test Report's latest, which the Released Signature's version is compared with. */
 const testReport = Type.Object({
   report: reportRef,
+  recordVersion: recordVersionRef,
   test: testRow,
   result: nullable(result),
   signatures: Type.Array(signature),

@@ -66,8 +66,26 @@ export interface SigningView {
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-/** `fresh` marks a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them. */
-export function Status({ state, fresh = false }: { state: TestState; fresh?: boolean }) {
+const unsignedWords = { signature: 'Unsigned', record: 'Signatures unsigned' } as const;
+
+/**
+ * A Test state with its track, or the unsigned mark of a Signature or of a record with an unsigned Signature. `fresh` marks
+ * a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them.
+ */
+export function Status(
+  props: { state: TestState; fresh?: boolean } | { unsigned: keyof typeof unsignedWords },
+): ReactNode {
+  if ('unsigned' in props)
+    return (
+      <span className="status status--bad">
+        {unsignedWords[props.unsigned]}
+        <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
+          <circle cx="8" cy="8" r="6" />
+          <path d="M8 5v3.5M8 11h0" />
+        </svg>
+      </span>
+    );
+  const { state, fresh = false } = props;
   const at = stateOrder.indexOf(state);
   return (
     <span className={`status ${state === 'Reported' ? 'status--done' : ''} ${fresh ? 'status--fresh' : ''}`}>
