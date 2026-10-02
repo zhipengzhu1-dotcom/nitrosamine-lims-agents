@@ -344,7 +344,7 @@ export async function auditedAfterReauthentication<R>(
 }
 
 /**
- * Proves the person of the session again, to sign or to unlock: the password must be theirs, and a typed user ID, when
+ * Proves the person of the session again, to sign, unlock or change the password: the password must be theirs, and a typed user ID, when
  * given, must be theirs too. Success writes nothing and answers a `Reauthenticated` for the write it enables, which
  * `auditedAfterReauthentication` holds. A failure refuses as badCredentials, counts toward the lockout and writes
  * `failureEvent`, with why for a failed re-authentication; a lockout it applies is an Access Event.

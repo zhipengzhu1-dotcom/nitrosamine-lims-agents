@@ -512,6 +512,8 @@ const signingBody = Type.Object(
 );
 export type SigningBody = Static<typeof signingBody>;
 const reauthentication = Type.Object({ password: text, code }, closed);
+/** A signed-in password change: the current password and, under the decided login, a fresh code, then the new password. */
+const passwordChange = Type.Object({ password: text, code, newPassword: text }, closed);
 const room = Type.Object({ id: uuid, name: Type.String() });
 const workstation = Type.Object({
   id: uuid,
@@ -595,6 +597,12 @@ export const routes = {
     Type.Object({ locked: Type.Literal(true), message: Type.String() }),
   ),
   unlock: route('POST', '/api/unlock', { body: reauthentication }, signedIn),
+  changePassword: route(
+    'POST',
+    '/api/password',
+    { body: passwordChange },
+    Type.Object({ changed: Type.Literal(true) }),
+  ),
   workstations: route('GET', '/api/workstations', {}, workstations),
   registerRoom: route('POST', '/api/rooms', { body: roomRegistration }, room),
   registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),

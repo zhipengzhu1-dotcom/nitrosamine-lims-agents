@@ -2765,6 +2765,43 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
   });
 });
 
+describe("a password is changed only by lims.change_password, after the session's person re-authenticated", () => {
+  const change = `select lims.change_password('${id.lab}', '${id.session}', 'scrypt-hmac$changed', '192.0.2.1')`;
+
+  it("a password change in a transaction not stamped with the re-authentication of the session's person is refused", async () => {
+    const error = await refusalOf(change);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA015', "a password change needs the session's person re-authenticated in this transaction"],
+    );
+    const other = await refusalOf(
+      `select lims.set_this_transaction('lims.reauthenticated', '${id.otherPerson}'); ${change}`,
+    );
+    assert.equal(other.code, 'LA015', other.message);
+  });
+
+  it("a password change after the session's person re-authenticated sets the hash and writes a PasswordChanged Access Event", async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(`select lims.set_this_transaction('lims.reauthenticated', '${id.person}')`);
+      await client.query(`set local role lims_app; ${change}`);
+      const { rows: person } = await client.query('select password_hash from lims.person where id = $1', [id.person]);
+      const { rows: events } = await client.query(
+        `select kind, session_lab_id, host(source_address) as source, roles::text as roles from lims.access_event
+          where session_id = $1 and kind = 'PasswordChanged'`,
+        [id.session],
+      );
+      assert.deepEqual(person, [{ password_hash: 'scrypt-hmac$changed' }]);
+      assert.deepEqual(events, [
+        { kind: 'PasswordChanged', session_lab_id: id.lab, source: '192.0.2.1', roles: '{Analyst}' },
+      ]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+});
+
 it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.authenticator.authenticator_pkey', 'authenticator.test.ts'],

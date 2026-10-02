@@ -205,6 +205,38 @@ it('a password under 15 characters or missing a character type is refused with a
   );
 });
 
+it('a signed-in person changes their password with the current password and a fresh code; a weak new password is refused first', async () => {
+  const { account, code } = await enrolled('cal.change');
+  const client = new Client(decided.base);
+  ok(
+    await client.call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId: api.labId,
+      code: code(),
+    }),
+  );
+  const change = (password: string, newPassword: string) =>
+    client.call(routes.changePassword, { password, code: code(1), newPassword });
+  assert.equal(
+    refusedWith(await change(account.password, 'longenoughbutplain'), 'malformed'),
+    'A password needs an uppercase letter, a digit and a symbol.',
+  );
+  assert.equal(
+    refusedWith(await change('not-the-password', 'Benchline-2026-second'), 'badCredentials'),
+    'The password or code is not valid.',
+  );
+  ok(await change(account.password, 'Benchline-2026-second'));
+  assert.deepEqual((await eventsOf(account.id)).map((event) => event.kind).slice(-2), [
+    'ReauthenticationFailed',
+    'PasswordChanged',
+  ]);
+  const codeless = (password: string) =>
+    new Client(api.base).call(routes.login, { username: account.username, password, labId: api.labId });
+  refusedWith(await codeless(account.password), 'badCredentials');
+  ok(await codeless('Benchline-2026-second'));
+});
+
 it('5 consecutive failures, mixing sign-in and signing, lock the account; only the right password and code then learn of the lock', async () => {
   const { account, code } = await enrolled('lou.lockout');
   const client = new Client(decided.base);

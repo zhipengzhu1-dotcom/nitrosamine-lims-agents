@@ -2,6 +2,7 @@ import type { DB } from '@lims/db';
 import type { Kysely } from 'kysely';
 import type { App } from './app.ts';
 import { actorFor, labSwitchRoute, lockScreenRoutes, SESSION_COOKIE, type Credentials } from './auth.ts';
+import { passwordChangeRoute } from './password-change.ts';
 import { preferenceRoutes } from './preferences.ts';
 import { readRoutes } from './reads.ts';
 import { staffRoutes } from './staff.ts';
@@ -29,6 +30,7 @@ export function sessionRoutes(app: App, db: Kysely<DB>, credentials: Credentials
   withSession(true, (lockScreen) => lockScreenRoutes(lockScreen, db, credentials));
   withSession(false, (signedIn) => {
     labSwitchRoute(signedIn, db, credentials);
+    passwordChangeRoute(signedIn, db, credentials);
     preferenceRoutes(signedIn, db);
     readRoutes(signedIn, db);
     staffRoutes(signedIn, db, limits);

@@ -87,6 +87,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   registerRoom: entry(routes.registerRoom, { name: 'Balance Room (fictional)', reason: 'Register a Room' }),
   enrolWorkstation: entry(routes.enrolWorkstation, { workstationId: randomUUID(), reason: 'Enrol the bench PC' }),
   unlock: entry(routes.unlock, { password: 'not-the-password' }),
+  changePassword: entry(routes.changePassword, { password: 'not-the-password', newPassword: 'Benchline-2026-unused' }),
   lock: entry(routes.lock, {}),
   logout: entry(routes.logout, {}),
 };
