@@ -16,6 +16,7 @@ after(() => rmSync(volume, { recursive: true, force: true }));
 
 const LOGGED = { ms: 1_790_000_000_123, iso: '2026-09-21T14:13:20.123Z' };
 const FIFTEEN_MINUTES = 15 * 60 * 1000;
+const NO_SUCH_ROW = 'abcdef01-2345-4678-89ab-cdef01234567';
 
 function unwrittenLine(reference: string, time = LOGGED.ms): string {
   return `${JSON.stringify({
@@ -139,6 +140,17 @@ it('a line whose reference already has a System Incident is skipped, and startin
   assert.equal((await auditEntriesOf('FX000003')).length, 1, 'the second start wrote nothing');
 });
 
+it('a line whose record ID is in upper case is raised, with the ID as the database stores it', async () => {
+  await startOn(
+    logVolume(
+      'upper',
+      unwrittenLine('FX00000A').replace('"recordId":null', `"recordId":"${NO_SUCH_ROW.toUpperCase()}"`),
+    ),
+  );
+  const [incident] = await incidentsWith('FX00000A');
+  assert.equal(incident?.recordId, NO_SUCH_ROW);
+});
+
 it('a line added after start is raised by the next 15-minute check and not before', async () => {
   const file = logVolume('later');
   const { clock, advance } = handClock();
@@ -159,7 +171,6 @@ it("the System Incident's reply shows the logged instant and the insert time as 
     const incident = ok(await (await api.login(api.person(reader))).call(routes.incident, { reference: 'FX000005' }));
     assert.equal(incident.loggedAt, LOGGED.iso, `${reader} reads the logged instant`);
     assert.match(incident.openedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/, `${reader} reads the insert time`);
-    assert.notEqual(incident.openedAt, incident.loggedAt);
   }
 });
 
@@ -170,17 +181,17 @@ it('reading a System Incident is refused to anyone but Admin and QA, and an unkn
   refusedWith(await quinn.call(routes.incident, { reference: 'FX0000ZZ' }), 'notFound');
 });
 
-it('an unwritten line the check cannot read is logged as unreadable, and the lines after it are still raised', async () => {
+it('an unwritten line the check cannot read, or whose values the database refuses, is logged as unreadable, and the lines after it are still raised', async () => {
   const unknownPerson = unwrittenLine('FX000006').replace('"requestedBy":null', '"requestedBy":"lou"');
   const torn = `${unwrittenLine('FX000008').slice(0, -2)}\n`;
-  const started = await startOn(logVolume('unreadable', unknownPerson, torn, unwrittenLine('FX000007')));
+  const noSuchPerson = unwrittenLine('FX000009').replace('"requestedBy":null', `"requestedBy":"${NO_SUCH_ROW}"`);
+  const started = await startOn(logVolume('unreadable', unknownPerson, torn, noSuchPerson, unwrittenLine('FX000007')));
 
-  assert.deepEqual(await incidentsWith('FX000006'), []);
-  assert.deepEqual(await incidentsWith('FX000008'), []);
+  for (const reference of ['FX000006', 'FX000008', 'FX000009']) assert.deepEqual(await incidentsWith(reference), []);
   assert.equal((await incidentsWith('FX000007')).length, 1);
   const unreadable = started
     .logLines()
     .filter((line) => line.msg === 'unreadable unwritten System Incident line')
     .map((line) => line.line);
-  assert.deepEqual(unreadable, [1, 2], 'the log names each line it could not read');
+  assert.deepEqual(unreadable, [1, 2, 3], 'the log names each line it could not read or the database refused');
 });

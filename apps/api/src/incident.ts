@@ -34,15 +34,14 @@ function recordIdOf(req: FastifyRequest): string | null {
 }
 
 const nullable = <S extends TSchema>(schema: S) => Type.Union([schema, Type.Null()]);
-const id = Type.String({ pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' });
 const unwrittenIncident = Type.Object(
   {
     kind: Type.Literal('UnexpectedFailure'),
     reference: Type.String({ pattern: `^${referencePattern}$` }),
-    requestedBy: nullable(id),
-    sessionLabId: nullable(id),
+    requestedBy: nullable(Type.String()),
+    sessionLabId: nullable(Type.String()),
     step: Type.String(),
-    recordId: nullable(id),
+    recordId: nullable(Type.String()),
     errorClass: Type.String(),
     sqlstate: nullable(Type.String({ pattern: '^[0-9A-Z]{5}$' })),
     constraintName: nullable(Type.String()),
@@ -92,25 +91,35 @@ function unwrittenOn(line: string): Static<typeof unwrittenLine> | 'unreadable' 
   return Value.Check(unwrittenLine, parsed) ? parsed : 'unreadable';
 }
 
+/** A data exception (22) or integrity constraint violation (23): the database refused this line's values, not the write. */
+const REFUSED_VALUES = /^2[23]/;
+
+async function raise(db: Kysely<DB>, { time, unwrittenSystemIncident }: Static<typeof unwrittenLine>) {
+  try {
+    const { numInsertedOrUpdatedRows } = await audited(db, RAISE_SERVICE, async (tx) => {
+      await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
+      return tx
+        .insertInto('systemIncident')
+        .values({ ...unwrittenSystemIncident, loggedAt: sql<Date>`to_timestamp(${time}::double precision / 1000)` })
+        .onConflict((conflict) => conflict.column('reference').doNothing())
+        .executeTakeFirstOrThrow();
+    });
+    return numInsertedOrUpdatedRows ? 'raised' : 'written';
+  } catch (error) {
+    if (REFUSED_VALUES.test(postgresFault(error)?.sqlstate ?? '')) return 'unreadable';
+    throw error;
+  }
+}
+
 /** Writes each unwritten System Incident on the API log file whose reference has no System Incident yet, with the instant its line was logged. */
 export async function raiseUnwrittenIncidents(db: Kysely<DB>, file: string, log: FastifyBaseLogger): Promise<void> {
   let lineNumber = 0;
   for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
     lineNumber += 1;
     const unwritten = unwrittenOn(line);
-    if (unwritten === 'unreadable') log.error({ file, line: lineNumber }, `unreadable ${UNWRITTEN} line`);
-    if (unwritten === null || unwritten === 'unreadable') continue;
-    const { reference } = unwritten.unwrittenSystemIncident;
-    const { numInsertedOrUpdatedRows } = await audited(db, RAISE_SERVICE, (tx) =>
-      tx
-        .insertInto('systemIncident')
-        .values({
-          ...unwritten.unwrittenSystemIncident,
-          loggedAt: sql<Date>`to_timestamp(${unwritten.time}::double precision / 1000)`,
-        })
-        .onConflict((conflict) => conflict.column('reference').doNothing())
-        .executeTakeFirstOrThrow(),
-    );
-    if (numInsertedOrUpdatedRows) log.info({ reference }, `raised ${UNWRITTEN}`);
+    if (unwritten === null) continue;
+    const outcome = unwritten === 'unreadable' ? unwritten : await raise(db, unwritten);
+    if (outcome === 'unreadable') log.error({ file, line: lineNumber }, `unreadable ${UNWRITTEN} line`);
+    if (outcome === 'raised') log.info({ file, line: lineNumber }, `raised ${UNWRITTEN}`);
   }
 }

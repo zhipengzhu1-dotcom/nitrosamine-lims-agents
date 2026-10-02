@@ -53,6 +53,7 @@ export interface Clock {
   every(ms: number, task: () => Promise<void>): () => void;
 }
 
+/** The process's own timer, for production; tests inject a clock they advance by hand. */
 export const systemClock: Clock = {
   every: (ms, task) => {
     const timer = setInterval(() => void task(), ms);
