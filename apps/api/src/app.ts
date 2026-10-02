@@ -10,11 +10,11 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import { type Credentials, endLapsedSessions, loginRoutes, type SessionKey, type SessionLimits } from './auth.ts';
+import { type Credentials, endLapsedSessions, type SessionKey, type SessionLimits } from './auth.ts';
 import { openJobIncident } from './incident.ts';
 import { apiLogger, checkLogVolume, type LogSink, type LogVolume } from './log.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
-import { sessionRoutes } from './session-routes.ts';
+import { apiRoutes } from './routes.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -72,8 +72,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   app.decorateRequest('requester', null);
   app.setNotFoundHandler(() => refuse('notFound', 'The LIMS has no such route.'));
   if (options.logVolume) checkLogVolume(app, db, options.logVolume);
-  loginRoutes(app, db, options.accessEventKey, options.secureCookie, credentials);
-  sessionRoutes(app, db, credentials, options.release);
+  apiRoutes(app, db, options, credentials);
   if (options.sweepEveryMs !== null) scheduleExpirySweep(app, db, limits, options.sweepEveryMs);
   return app;
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
+import { audited } from '@lims/db';
 import { routes, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
 import { LOGIN } from '../src/auth.ts';
@@ -133,6 +134,66 @@ it('a code used once is refused at its second use, at sign-in and at signing', a
   assert.deepEqual((await eventsOf(account.id)).map((event) => event.failureReason).filter(Boolean), [
     'WrongCode',
     'WrongCode',
+  ]);
+});
+
+it('a sign-in refused for a Lab the person holds no Membership in spends no code; the same code then opens a Lab they hold', async () => {
+  const { account, code } = await enrolled('mia.membership');
+  const inLab = (labId: string) =>
+    new Client(decided.base).call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId,
+      code: code(),
+    });
+  refusedWith(await inLab(api.qcLabId), 'role');
+  ok(await inLab(api.labId));
+  assert.deepEqual(await eventsOf(account.id), [
+    { kind: 'AuthenticatorEnrolled', failureReason: null },
+    { kind: 'SignInFailed', failureReason: 'NoMembership' },
+    { kind: 'SignInSucceeded', failureReason: null },
+  ]);
+});
+
+it('a signing refused because the Test moved on spends no code; the same code then signs a fresh Test', async () => {
+  const { account, code } = await enrolled('stan.stale');
+  const client = new Client(decided.base);
+  ok(
+    await client.call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId: api.labId,
+      code: code(),
+    }),
+  );
+  const moved = await assignedTo(account);
+  const fresh = await assignedTo(account);
+  // The Test is moved under the signing's feet: the move holds the row until the signing waits on it, then commits.
+  const SYSTEM = { actor: 'svc:test', role: 'system', reason: 'Move a Test while it is signed' } as const;
+  const { answer } = await audited(api.superuser, SYSTEM, async (tx) => {
+    await tx.updateTable('test').set({ state: 'Ready' }).where('id', '=', moved).execute();
+    const answer = enterResult(client, moved, account, { code: code(1) });
+    answer.catch(() => {});
+    await api.untilWaitingOnLocks(1);
+    return { answer };
+  });
+  refusedWith(await answer, 'stale');
+  ok(await enterResult(client, fresh, account, { code: code(1) }));
+});
+
+it('two sign-ins racing with one code give one session and one refusal, and no failure is recorded against the person', async () => {
+  const { account, code } = await enrolled('rae.race');
+  const answers = await Promise.all([
+    signIn(account, account.password, code()),
+    signIn(account, account.password, code()),
+  ]);
+  assert.deepEqual(answers.map((a) => (a.kind === 'reply' ? 'reply' : a.body.kind)).sort(), [
+    'badCredentials',
+    'reply',
+  ]);
+  assert.deepEqual(await eventsOf(account.id), [
+    { kind: 'AuthenticatorEnrolled', failureReason: null },
+    { kind: 'SignInSucceeded', failureReason: null },
   ]);
 });
 
