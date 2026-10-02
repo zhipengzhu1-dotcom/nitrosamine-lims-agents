@@ -83,6 +83,8 @@ async function countFailure(tx: Transaction<DB>, personId: string) {
  * falls back to the peer, and an IPv4-mapped IPv6 address is the IPv4 address.
  */
 export function sourceAddressOf(req: FastifyRequest): string {
+  if (!isIP(req.ip))
+    req.log.warn('a trusted proxy forwarded a source address that is not an address; the peer is used');
   const address = (isIP(req.ip) ? req.ip : (req.socket.remoteAddress ?? '')).replace(/%.*$/, '');
   const mapped = /^::ffff:(.+)$/i.exec(address)?.[1];
   return mapped && isIP(mapped) === 4 ? mapped : address;

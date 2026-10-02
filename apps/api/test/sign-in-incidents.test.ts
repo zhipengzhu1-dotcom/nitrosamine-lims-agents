@@ -114,6 +114,17 @@ it('a burst whose attempts arrive at once opens one System Incident', async () =
   assert.equal((await incidents('SignInBurstFromAddress')).filter((i) => i.sourceAddress === from).length, 1);
 });
 
+it('the incident trigger fires after the Audit Trail capture, which holds the company chain', async () => {
+  const { rows } = await sql<{ name: string }>`select tgname as name from pg_trigger
+    where tgrelid = 'lims.access_event'::regclass and not tgisinternal and tgtype & 4 = 4 and tgtype & 2 = 0
+    order by tgname`.execute(api.superuser);
+  const names = rows.map((r) => r.name);
+  assert.deepEqual(
+    names.filter((name) => name === 'capture' || name === 'open_incident'),
+    ['capture', 'open_incident'],
+  );
+});
+
 it('during a burst every attempt writes its failure Access Event and gets the same reply as an attempt before it', async () => {
   const from = nextAddress();
   const known = await api.addPerson('burst.known', ['Analyst']);

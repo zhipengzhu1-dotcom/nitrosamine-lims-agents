@@ -46,6 +46,9 @@ export function apiConfig(): ApiConfig {
     logFile,
     secureCookie,
     accessEventKey: accessEventKey(env.LIMS_ACCESS_EVENT_KEY),
-    trustedProxies: env.LIMS_TRUSTED_PROXIES ? env.LIMS_TRUSTED_PROXIES.split(',').map((proxy) => proxy.trim()) : [],
+    trustedProxies: (env.LIMS_TRUSTED_PROXIES ?? '')
+      .split(',')
+      .map((proxy) => proxy.trim())
+      .filter(Boolean),
   };
 }
