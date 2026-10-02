@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, submittedTest, test } from './walk.ts';
+import { expect, type Locator, type Page, submittedTest, test, utcThenLabClock } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string, lab = /R&D Laboratory/) {
@@ -36,7 +36,16 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
 
   await page.reload();
   await signIn(page, 'rui.reviewer');
+  const receivedOnWorklist = page.getByRole('row', { name: description }).locator('td[data-label="Received"]');
+  await expect(receivedOnWorklist, 'the Worklist shows Received in UTC, then on the Lab wall clock').toHaveText(
+    utcThenLabClock,
+  );
+  const received = await receivedOnWorklist.textContent();
   await openTheTest();
+  await expect(
+    page.locator('dl.facts dt:text-is("Received") + dd'),
+    'the Test page shows the same Received',
+  ).toHaveText(received ?? '');
   const trail = page.getByRole('region', { name: 'Audit Trail' });
   const entries = trail.getByRole('listitem');
   await expect(trail.getByRole('heading', { name: 'Audit Trail' })).toBeVisible();
@@ -91,6 +100,16 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await expect(signed.locator('dt:text-is("Signed at") + dd')).toHaveText(
     /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d -0[45]:00$/,
   );
+  const signedAt = await signed.locator('dt:text-is("Signed at") + dd').textContent();
+  await expect(
+    page.locator('td[data-label="Time"]'),
+    "the Signatures table's Time is the Audit Trail's Signed at, in UTC then on the Lab wall clock",
+  ).toHaveText([signedAt ?? '']);
+  const receipt = entries.filter({ has: page.locator('dt:text-is("Received")') });
+  await expect(
+    receipt.locator('dt:text-is("Received") + dd'),
+    "the trail's Received is the one the Test page shows",
+  ).toHaveText(`none → ${received}`);
   // The Signature entry above it also has long values (its copied hashes), so the Record Version is found by its content.
   const versioned = entries.filter({ has: page.locator('details.long', { hasText: '"analyte"' }) }).first();
   await expect(versioned).toContainText('Record Version');

@@ -14,9 +14,9 @@ import {
   type TrailEntry,
 } from '@lims/domain';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
-import { api, Refused, useApi, useFresh } from './api.ts';
+import { api, failureText, Refused, useApi, useFresh } from './api.ts';
 import { Shell, Status, words } from './rail.tsx';
-import { labTime, time } from './time.ts';
+import { time, When, whenText } from './time.tsx';
 
 const entryKey = (e: TrailEntry) => `${e.chain}:${e.seq}`;
 const action = { INSERT: 'created', UPDATE: 'changed', DELETE: 'removed' } as const;
@@ -24,18 +24,8 @@ const chainWords = { lab: 'Lab chain', company: 'Company chain' } as const;
 const SHORT = 48;
 const NONE = 'none';
 
-const whenText = (at: string, atLab: string | null) => (atLab ? `${time(at)} · ${labTime(atLab)}` : time(at));
 const valueText = (value: ShownValue | null) =>
   value === null ? NONE : value.instant ? whenText(value.instant.at, value.instant.atLab) : value.text;
-
-function When({ at, atLab }: { at: string; atLab: string | null }) {
-  return (
-    <>
-      {time(at)}
-      {atLab && <span className="muted"> · {labTime(atLab)}</span>}
-    </>
-  );
-}
 
 function searchText(e: TrailEntry): string {
   return [
@@ -159,7 +149,7 @@ function VerifyChain() {
     try {
       setAnswer({ found: await api(routes.verifyAuditTrail) });
     } catch (error) {
-      setAnswer({ failed: error instanceof Error ? error.message : 'the LIMS did not answer' });
+      setAnswer({ failed: failureText(error) });
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -317,8 +307,8 @@ export function AuditExportPage({ me }: { me: ActorContext }) {
     } catch (error) {
       setRefusal(
         error instanceof Refused && error.kind !== 'failure'
-          ? `Refused: ${error.message}. No export was generated.`
-          : `Not finished: ${error instanceof Error ? error.message : 'the LIMS did not answer'}. Generate again to see what was recorded.`,
+          ? `Refused: ${error.message} No export was generated.`
+          : `Not finished: ${error instanceof Refused ? error.message : 'The LIMS did not answer.'} Generate again to see what was recorded.`,
       );
     } finally {
       inFlight.current = false;
