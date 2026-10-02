@@ -144,63 +144,86 @@ p {
   display: flex;
   flex: 1 1 auto;
   align-self: stretch;
-  gap: 16px;
+  --tab-gap: 16px;
+  --tab-inset: 0px;
+  gap: var(--tab-gap);
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
-/* A phone's tab bar always overflows. Chromium leaves a resized bar that no longer overflows in the end state, which fades the first tab, so wider screens get no fade. */
-@media (max-width: 640px) {
+/* The fade where more tabs lie beyond: a veil stuck to each edge that takes no room and no press, shown only while tabs lie past that edge. A sticky box stops at the bar's padding, so a negative inset carries the veil to the edge. */
+.top nav::before,
+.top nav::after {
+  content: "";
+  position: sticky;
+  flex: none;
+  width: 72px;
+  pointer-events: none;
+  opacity: 0;
+}
+.top nav::before {
+  left: calc(-1 * var(--tab-inset));
+  margin-right: calc(-72px - var(--tab-gap));
+  background: linear-gradient(to right, var(--sheet), transparent);
+}
+.top nav::after {
+  right: calc(-1 * var(--tab-inset));
+  margin-left: calc(-72px - var(--tab-gap));
+  background: linear-gradient(to left, var(--sheet), transparent);
+}
+@supports (container-type: scroll-state) {
   .top nav {
-    mask-image: linear-gradient(
-      to right,
-      transparent,
-      #000 var(--more-before),
-      #000 calc(100% - var(--more-after)),
-      transparent
-    );
+    container-type: scroll-state;
   }
-  @supports (animation-timeline: scroll()) {
-    .top nav {
-      animation: more-tabs linear both;
-      animation-timeline: scroll(self inline);
+  @container scroll-state(scrollable: left) {
+    .top nav::before {
+      opacity: 1;
     }
   }
-  /* Without scroll-driven animations the right edge always fades, and a spacer lets the last tab scroll clear of it. */
-  @supports not (animation-timeline: scroll()) {
-    .top nav {
-      --more-after: 72px;
-    }
+  @container scroll-state(scrollable: right) {
     .top nav::after {
-      content: "";
-      flex: none;
-      width: 72px;
+      opacity: 1;
     }
   }
 }
-@property --more-before {
-  syntax: "<length>";
-  inherits: false;
-  initial-value: 0px;
+/* Without scroll-state queries, only a phone's bar fades, because it always overflows. A scroll timeline keeps its end state when a resize makes the bar fit, which would fade the first tab. */
+@supports not (container-type: scroll-state) {
+  @media (max-width: 640px) {
+    @supports (animation-timeline: scroll()) {
+      .top nav::before {
+        animation: more-before linear both;
+        animation-timeline: scroll(nearest inline);
+      }
+      .top nav::after {
+        animation: more-after linear both;
+        animation-timeline: scroll(nearest inline);
+      }
+    }
+    /* Without scroll timelines the right edge always fades, and the veil takes its own room so the last tab scrolls clear of it. */
+    @supports not (animation-timeline: scroll()) {
+      .top nav::after {
+        margin-left: 0;
+        opacity: 1;
+      }
+    }
+  }
 }
-@property --more-after {
-  syntax: "<length>";
-  inherits: false;
-  initial-value: 0px;
-}
-@keyframes more-tabs {
+@keyframes more-before {
   from {
-    --more-before: 0px;
-    --more-after: 72px;
+    opacity: 0;
   }
   8%,
+  to {
+    opacity: 1;
+  }
+}
+@keyframes more-after {
+  from,
   92% {
-    --more-before: 72px;
-    --more-after: 72px;
+    opacity: 1;
   }
   to {
-    --more-before: 72px;
-    --more-after: 0px;
+    opacity: 0;
   }
 }
 .top nav a {
@@ -1000,9 +1023,10 @@ a.btn {
   .top nav {
     order: 1;
     flex: 0 0 calc(100% + 24px);
-    gap: 0;
+    --tab-gap: 0px;
     margin: 0 -12px;
-    padding: 0 6px;
+    --tab-inset: 6px;
+    padding: 0 var(--tab-inset);
     border-top: 1px solid var(--line);
   }
   .top nav a {
