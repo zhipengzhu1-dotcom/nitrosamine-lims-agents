@@ -289,8 +289,15 @@ th {
   flex-basis: 100%;
 }
 .verdict {
-  margin: 0;
   flex: 1 1 320px;
+}
+.verdict p {
+  margin: 0;
+}
+.chains {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
 }
 .entries {
   list-style: none;
@@ -450,6 +457,9 @@ td a,
 }
 .status--done {
   --accent: var(--ink);
+}
+.status--ok {
+  color: var(--ok);
 }
 .status--bad {
   color: var(--bad);
@@ -1095,4 +1105,44 @@ a.btn {
     border: 0;
     max-width: none;
   }
+}
+
+.export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+}
+.export label {
+  margin: 0;
+  flex: 1 1 220px;
+}
+.export select {
+  width: 100%;
+}
+.export__done ul {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+.export__done li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.export__done a.btn {
+  display: inline-flex;
+  align-items: center;
+  height: auto;
+  min-height: 44px;
+  padding: 8px 16px;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.export__done code {
+  overflow-wrap: anywhere;
 }

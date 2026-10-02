@@ -1,6 +1,8 @@
 import {
   type ActorContext,
+  type ChainVerdict,
   decimalPattern,
+  mayTake,
   type Lab,
   type RecordVersionRef,
   type Role,
@@ -66,23 +68,40 @@ export interface SigningView {
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
+const unsignedMark = (
+  <>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M8 5v3.5M8 11h0" />
+  </>
+);
+const markLook = {
+  Intact: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
+  Broken: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
+  Unsigned: { tone: 'bad', glyph: unsignedMark },
+  'Signatures unsigned': { tone: 'bad', glyph: unsignedMark },
+} as const;
 const unsignedWords = { signature: 'Unsigned', record: 'Signatures unsigned' } as const;
 
 /**
- * A Test state with its track, or the unsigned mark of a Signature or of a record with an unsigned Signature. `fresh` marks
- * a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them.
+ * A Test state with its track, a chain verdict, or the unsigned mark of a Signature or of a record with an unsigned
+ * Signature. `fresh` marks a state the server has just confirmed on this page: the word and glyph are final, and an
+ * accent plays around them.
  */
-export function Status(props: { state: TestState; fresh?: boolean } | { unsigned: keyof typeof unsignedWords }) {
-  if ('unsigned' in props)
+export function Status(
+  props: { state: TestState; fresh?: boolean } | { verdict: ChainVerdict } | { unsigned: keyof typeof unsignedWords },
+) {
+  if (!('state' in props)) {
+    const word = 'verdict' in props ? props.verdict : unsignedWords[props.unsigned];
+    const { tone, glyph } = markLook[word];
     return (
-      <span className="status status--bad">
-        {unsignedWords[props.unsigned]}
+      <span className={`status status--${tone}`}>
+        {word}
         <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
-          <circle cx="8" cy="8" r="6" />
-          <path d="M8 5v3.5M8 11h0" />
+          {glyph}
         </svg>
       </span>
     );
+  }
   const { state, fresh = false } = props;
   const at = stateOrder.indexOf(state);
   return (
@@ -192,6 +211,7 @@ export const modules = [
   },
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
+  { key: 'audit-export', name: 'Audit Export', holds: '', takes: 'generateAuditExport' },
   { key: 'workstations', name: 'Workstations', holds: '' },
   { key: 'staff', name: 'Staff', holds: '' },
 ] as const;
@@ -218,6 +238,7 @@ export function Shell({
         <nav>
           {modules
             .filter((m) => m.key !== 'staff' || staffRefusal(me.roles) === null)
+            .filter((m) => !('takes' in m) || mayTake(m.takes, me.roles))
             .map((m) => (
               <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
                 {m.name}
