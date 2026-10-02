@@ -41,7 +41,9 @@ export function enrolmentRoute(app: App, db: Kysely<DB>, accessEventKey: Buffer,
         return refusal();
       };
       const signedIn = await browserSession(db, req.cookies[SESSION_COOKIE]);
-      if (signedIn && signedIn.personId !== person?.id) return failed(person ? 'OtherPersonSignedIn' : 'UnknownUserId');
+      // The guard answers for every user ID, known or not, so the signed-in browser learns nothing about which exist.
+      if (signedIn && signedIn.personId !== person?.id)
+        return failed(person ? 'OtherPersonSignedIn' : 'UnknownUserId', REFUSAL.OtherPersonSignedIn);
       const proven = await verifyPassword(password, person?.passwordHash ?? TIMING_DECOY_HASH, pepper);
       if (!person) return failed('UnknownUserId');
       if (!person.passwordHash) return failed('NoCredential');

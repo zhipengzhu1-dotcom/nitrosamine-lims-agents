@@ -466,6 +466,19 @@ it('an Admin signed in on their own browser cannot enrol the authenticator of an
     { kind: 'PasswordSet', failureReason: null },
     { kind: 'SignInFailed', failureReason: 'OtherPersonSignedIn' },
   ]);
+  // A user ID nobody holds gets the same guard, so the signed-in browser learns nothing about which IDs exist.
+  assert.equal(
+    refusedWith(await ada.call(routes.enrolAuthenticator, { username: 'nobody.signedin', password }), 'guard'),
+    'Sign out first. Only the holder of an account enrols its authenticator, in a browser where no one else is signed in.',
+  );
+  assert.deepEqual(
+    await api.superuser
+      .selectFrom('accessEvent')
+      .select(['kind', 'failureReason', 'subjectId', 'typedUserIdLength'])
+      .where('typedUserIdHmac', '=', createHmac('sha256', api.accessEventKey).update('nobody.signedin').digest())
+      .execute(),
+    [{ kind: 'SignInFailed', failureReason: 'UnknownUserId', subjectId: null, typedUserIdLength: 15 }],
+  );
   ok(await new Client(decided.base).call(routes.enrolAuthenticator, { username: 'paz.holder', password }));
   assert.deepEqual(
     (await eventsOf(person.id)).map((event) => event.kind),
