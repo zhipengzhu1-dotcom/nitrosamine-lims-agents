@@ -151,6 +151,24 @@ it('a line whose record ID is in upper case is raised, with the ID as the databa
   assert.equal(incident?.recordId, NO_SUCH_ROW);
 });
 
+it('a 15-minute check that fails is logged, and the next check raises what the failed one could not', async () => {
+  const file = logVolume('failing');
+  const { clock, advance } = handClock();
+  const started = await startOn(file, clock);
+  rmSync(file);
+
+  await advance(FIFTEEN_MINUTES);
+  assert.ok(
+    started.logLines().some((line) => line.msg === 'the unwritten System Incident check failed'),
+    'the failed check is in the log',
+  );
+  logVolume('failing', unwrittenLine('FX00000B'));
+  appendFileSync(file, unwrittenLine('FX00000C').replace('"recordId":null', '"recordId":null,"addedLater":true'));
+  await advance(FIFTEEN_MINUTES);
+  assert.equal((await incidentsWith('FX00000B')).length, 1, 'the next check raises the line');
+  assert.equal((await incidentsWith('FX00000C')).length, 1, 'a line with a field this version does not know is raised');
+});
+
 it('a line added after start is raised by the next 15-minute check and not before', async () => {
   const file = logVolume('later');
   const { clock, advance } = handClock();

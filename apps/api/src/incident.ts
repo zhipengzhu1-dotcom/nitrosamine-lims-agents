@@ -46,7 +46,7 @@ const unwrittenIncident = Type.Object(
     sqlstate: nullable(Type.String({ pattern: '^[0-9A-Z]{5}$' })),
     constraintName: nullable(Type.String()),
   },
-  { additionalProperties: false },
+  { additionalProperties: true },
 );
 /** Pino stamps `time` in epoch milliseconds from the API host's clock. */
 const unwrittenLine = Type.Object({
@@ -94,13 +94,15 @@ function unwrittenOn(line: string): Static<typeof unwrittenLine> | 'unreadable' 
 /** A data exception (22) or integrity constraint violation (23): the database refused this line's values, not the write. */
 const REFUSED_VALUES = /^2[23]/;
 
-async function raise(db: Kysely<DB>, { time, unwrittenSystemIncident }: Static<typeof unwrittenLine>) {
+async function raise(db: Kysely<DB>, { time, unwrittenSystemIncident: logged }: Static<typeof unwrittenLine>) {
+  const { kind, reference, requestedBy, sessionLabId, step, recordId, errorClass, sqlstate, constraintName } = logged;
+  const incident = { kind, reference, requestedBy, sessionLabId, step, recordId, errorClass, sqlstate, constraintName };
   try {
     const { numInsertedOrUpdatedRows } = await audited(db, RAISE_SERVICE, async (tx) => {
       await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
       return tx
         .insertInto('systemIncident')
-        .values({ ...unwrittenSystemIncident, loggedAt: sql<Date>`to_timestamp(${time}::double precision / 1000)` })
+        .values({ ...incident, loggedAt: sql<Date>`to_timestamp(${time}::double precision / 1000)` })
         .onConflict((conflict) => conflict.column('reference').doNothing())
         .executeTakeFirstOrThrow();
     });
