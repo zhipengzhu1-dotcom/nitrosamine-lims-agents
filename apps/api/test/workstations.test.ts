@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { audited } from '@lims/db';
-import { type Route, type RouteInput, routes, stepRoute } from '@lims/domain';
+import { type Route, type RouteInput, routes, stepNames, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
 import { type Account, type Answer, Client, ok, refusedWith, startApi } from './harness.ts';
 
@@ -95,13 +95,33 @@ describe('registering a Workstation', () => {
       const answers: Answer<Route>[] = [
         await client.call(routes.registerWorkstation, registration),
         await client.call(routes.workstations),
+        await client.call(routes.registerRoom, { name: `Room by ${name}`, reason: 'Register a Room' }),
         await client.call(routes.enrolWorkstation, { workstationId: workstation.id, reason: 'Enrol the bench PC' }),
       ];
       for (const answer of answers)
-        assert.equal(refusedWith(answer, 'role'), 'registering and enrolling Workstations is an Admin action', name);
+        assert.equal(
+          refusedWith(answer, 'role'),
+          'registering Rooms and Workstations and enrolling browsers is an Admin action',
+          name,
+        );
       assert.equal(client.jar.get('lims_device'), undefined, `${name} got no device token`);
     }
     assert.deepEqual(await api.superuser.selectFrom('workstation').selectAll().orderBy('id').execute(), before);
+  });
+
+  it('an Admin registers a Room of the Lab with a reason, and a second Room of the same name is refused', async () => {
+    const room = ok(await admin.call(routes.registerRoom, { name: 'Balance Room (fictional)', reason: 'New Room' }));
+    assert.equal(room.name, 'Balance Room (fictional)');
+    const entry = await api.superuser
+      .selectFrom('auditEntry')
+      .select(['chain', 'actor', 'role', 'reason'])
+      .where('tableName', '=', 'room')
+      .where(sql<boolean>`new_row ->> 'id' = ${room.id}`)
+      .executeTakeFirstOrThrow();
+    assert.deepEqual(entry, { chain: api.labId, actor: `person:${ada.username}`, role: 'Admin', reason: 'New Room' });
+    assert.ok(ok(await admin.call(routes.workstations)).rooms.some((r) => r.id === room.id));
+    const twice = await admin.call(routes.registerRoom, { name: room.name, reason: 'Again' });
+    assert.equal(refusedWith(twice, 'guard'), `a Room named ${room.name} is already registered in this Lab`);
   });
 
   it('a Room of no Lab of the Admin and a second Workstation of the same name are refused', async () => {
@@ -204,6 +224,10 @@ describe('the device token', () => {
       body: JSON.stringify({ workstationId: workstation.id, reason: 'Enrol the bench PC' }),
     });
     const body = await res.text();
+    const cookie = res.headers.getSetCookie().find((c) => c.startsWith('lims_device=')) ?? '';
+    for (const attribute of ['HttpOnly', 'SameSite=Strict', 'Path=/', `Max-Age=${400 * 24 * 60 * 60}`])
+      assert.ok(cookie.split('; ').includes(attribute), `the device cookie is ${attribute}`);
+    assert.ok(!cookie.includes('Secure'), 'not Secure on an API built without secure cookies');
     const [, token = ''] = /lims_device=([^;]+)/.exec(res.headers.getSetCookie().join('\n')) ?? [];
     assert.match(token, /^[\w-]{43}$/, 'a 256-bit token in the cookie');
     assert.ok(!body.includes(token), 'not in the reply body');
@@ -242,13 +266,12 @@ describe('Lock and Switch user', () => {
     assert.ok(test, 'the Lab has a Test to read');
 
     assert.deepEqual(ok(await browser.call(routes.lock)), { locked: true });
-    const locked = [
-      await browser.call(routes.me),
-      await browser.call(routes.tests),
-      await browser.call(routes.test, { id: test.id }),
-      await browser.call(routes.lookups),
-      await browser.call(stepRoute('receive'), { commitKey: randomUUID(), testId: test.id, input: {} }),
-    ];
+    const servedWhileLocked = new Set<Route>([routes.login, routes.lock, routes.unlock, routes.logout]);
+    const everyOther = [...Object.values(routes), ...stepNames.map((name) => stepRoute(name))].filter(
+      (route) => !servedWhileLocked.has(route),
+    );
+    const locked: Answer<Route>[] = [];
+    for (const route of everyOther) locked.push(await browser.send(route, { id: test.id, table: 'test' }));
     for (const answer of locked)
       assert.equal(
         refusedWith(answer, 'sessionLocked'),
@@ -265,6 +288,7 @@ describe('Lock and Switch user', () => {
       .where('id', '=', ana.id)
       .executeTakeFirstOrThrow();
     assert.equal(person.failedLogins, 2, 'a wrong password at unlock counts toward lockout');
+    assert.equal(ok(await browser.call(routes.lock)).locked, true, 'locking a locked session changes nothing');
 
     assert.equal(ok(await browser.call(routes.unlock, { password: ana.password })).person.id, ana.id);
     assert.ok(
@@ -278,6 +302,8 @@ describe('Lock and Switch user', () => {
       [
         ['SignInSucceeded', workstation.id, session?.id],
         ['Lock', workstation.id, session?.id],
+        ['UnlockFailed', workstation.id, session?.id],
+        ['UnlockFailed', workstation.id, session?.id],
         ['Unlock', workstation.id, session?.id],
       ],
     );
@@ -292,6 +318,39 @@ describe('Lock and Switch user', () => {
     assert.deepEqual(
       (await eventsOf(ana.id)).map((e) => e.kind),
       ['SignInSucceeded', 'Lock'],
+    );
+  });
+
+  it('a locked session can sign out, which ends it with a sign-out Access Event', async () => {
+    const ana = await api.addPerson(`ana.locked-out-${randomUUID()}`, ['Analyst']);
+    const browser = await api.login(ana);
+    ok(await browser.call(routes.lock));
+    assert.deepEqual(ok(await browser.call(routes.logout)), { ended: true });
+    refusedWith(await browser.call(routes.me), 'noSession');
+    assert.deepEqual(
+      (await eventsOf(ana.id)).map((e) => e.kind),
+      ['SignInSucceeded', 'Lock', 'SignOut'],
+    );
+  });
+
+  it('a sign-in over a session already past its idle limit ends it without a takeover Access Event', async () => {
+    const ana = await api.addPerson(`ana.expired-${randomUUID()}`, ['Analyst']);
+    const rui = await api.addPerson(`rui.next-morning-${randomUUID()}`, ['Reviewer']);
+    const browser = await api.login(ana);
+    await api.superuser
+      .updateTable('session')
+      .set({ lastSeenAt: sql`now() - interval '9 hours'` })
+      .where('personId', '=', ana.id)
+      .execute();
+    await signInOn(browser, rui);
+    assert.deepEqual(
+      (await sessionsOf(ana.id)).map((s) => s.ended),
+      [true],
+    );
+    assert.deepEqual(
+      (await eventsOf(ana.id)).map((e) => e.kind),
+      ['SignInSucceeded'],
+      'no Takeover of a session that had already ended',
     );
   });
 

@@ -895,7 +895,7 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { session_id: id.session },
       constraint: 'access_event_session_check',
     },
-    ...(['SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'Takeover'] as const).map((kind) => ({
+    ...(['SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'] as const).map((kind) => ({
       name: `an Access Event of kind ${kind} without a session is refused`,
       table: 'lims.access_event' as const,
       change: { kind, failure_reason: null, ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }) },

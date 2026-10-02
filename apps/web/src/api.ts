@@ -63,9 +63,14 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
 
 /** Locks the session, then shows the lock screen with the server's words once a read is refused as locked; Switch user opens it on the sign-in form. */
 export async function lock(mode: LockMode): Promise<void> {
-  await api(routes.lock);
   nextLockMode = mode;
-  await api(routes.me).catch(() => {});
+  await api(routes.lock).catch((e: unknown) => {
+    nextLockMode = 'unlock';
+    throw e;
+  });
+  await api(routes.me).catch((e: unknown) => {
+    if (!(e instanceof Refused && e.kind === 'sessionLocked')) throw e;
+  });
 }
 
 export async function signOut(): Promise<void> {

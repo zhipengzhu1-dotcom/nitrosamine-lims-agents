@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "Lock" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock";
+export type AccessEventKind = "Lock" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]

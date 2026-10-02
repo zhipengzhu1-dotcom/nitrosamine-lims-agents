@@ -245,6 +245,7 @@ export type Workstation = Static<typeof workstation>;
 const workstations = Type.Object({ rooms: Type.Array(room), workstations: Type.Array(workstation) });
 const workstationRegistration = Type.Object({ name: text, roomId: uuid, browserPolicy: text, reason: text }, closed);
 const enrolment = Type.Object({ workstationId: uuid, reason: text }, closed);
+const roomRegistration = Type.Object({ name: text, reason: text }, closed);
 const stepEnvelope = Type.Object({
   commitKey: uuid,
   testId: Type.Optional(uuid),
@@ -299,6 +300,7 @@ export const routes = {
   lock: route('POST', '/api/lock', { body: noBody }, Type.Object({ locked: Type.Literal(true) })),
   unlock: route('POST', '/api/unlock', { body: reauthentication }, actorContext),
   workstations: route('GET', '/api/workstations', {}, workstations),
+  registerRoom: route('POST', '/api/rooms', { body: roomRegistration }, room),
   registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
   enrolWorkstation: route('POST', '/api/workstations/enrol', { body: enrolment }, workstation),
   me: route('GET', '/api/me', {}, actorContext),

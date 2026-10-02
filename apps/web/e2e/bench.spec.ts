@@ -52,7 +52,7 @@ test('on an enrolled bench browser, Lock hides the records until the same person
 
   await page.getByRole('button', { name: 'Lock', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Locked' })).toBeVisible();
-  await expect(page.getByText('This screen is locked; Ana Ferreira unlocks it', { exact: false })).toBeVisible();
+  await expect(page.getByText(/this screen is locked; Ana Ferreira unlocks it/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Tests' })).toHaveCount(0);
   await expect(page.locator('.rail')).toHaveCount(0);
 

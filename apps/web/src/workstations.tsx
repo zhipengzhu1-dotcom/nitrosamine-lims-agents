@@ -25,6 +25,20 @@ function registration(onDone: () => Promise<void>): RailAction {
   };
 }
 
+function roomRegistration(onDone: () => Promise<void>): RailAction {
+  return {
+    label: 'Register Room',
+    context: 'A Room of this Lab where Workstations stand',
+    fields: [{ name: 'name', label: 'Room name', kind: 'text' }, reason],
+    signs: null,
+    async run(input) {
+      const room = await api(routes.registerRoom, { name: input.name ?? '', reason: input.reason ?? '' });
+      await onDone();
+      return `Room ${room.name} registered in the Audit Trail.`;
+    },
+  };
+}
+
 function enrolment(workstation: Workstation, onDone: () => Promise<void>): RailAction {
   return {
     label: 'Enrol this browser',
@@ -41,13 +55,18 @@ function enrolment(workstation: Workstation, onDone: () => Promise<void>): RailA
 
 export function WorkstationsPage({ me }: { me: ActorContext }) {
   const { data, error, reload } = useApi(routes.workstations);
-  const [chosen, setChosen] = useState<Workstation | null>(null);
+  const [chosen, setChosen] = useState<Workstation | 'room' | null>(null);
   const fresh = useFresh(data, (d) => d.workstations.map((w) => `${w.id}:${w.enrolled}`));
-  const enrolled = async () => {
+  const done = async () => {
     await reload();
     setChosen(null);
   };
-  const action = data ? (chosen ? enrolment(chosen, enrolled) : registration(reload)) : null;
+  const pick = () => {
+    if (chosen === 'room') return roomRegistration(done);
+    return chosen ? enrolment(chosen, done) : registration(reload);
+  };
+  const action = data ? pick() : null;
+  const isChosen = (w: Workstation) => typeof chosen === 'object' && chosen?.id === w.id;
   return (
     <Shell me={me} active="workstations" action={action}>
       <h1>Workstations</h1>
@@ -59,6 +78,18 @@ export function WorkstationsPage({ me }: { me: ActorContext }) {
         .
       </p>
       {error && <p className="note--bad">{error}</p>}
+      {data && (
+        <p>
+          <button
+            type="button"
+            className="btn"
+            aria-pressed={chosen === 'room'}
+            onClick={() => setChosen(chosen === 'room' ? null : 'room')}
+          >
+            {chosen === 'room' ? 'Register a Workstation instead' : 'Register a Room'}
+          </button>
+        </p>
+      )}
       {data && (
         <table className="stack">
           <thead>
@@ -81,10 +112,10 @@ export function WorkstationsPage({ me }: { me: ActorContext }) {
                   <button
                     type="button"
                     className="btn"
-                    aria-pressed={chosen?.id === w.id}
-                    onClick={() => setChosen(chosen?.id === w.id ? null : w)}
+                    aria-pressed={isChosen(w)}
+                    onClick={() => setChosen(isChosen(w) ? null : w)}
                   >
-                    {chosen?.id === w.id ? 'Chosen to enrol' : 'Choose to enrol'}
+                    {isChosen(w) ? 'Chosen to enrol' : 'Choose to enrol'}
                   </button>
                 </td>
               </tr>

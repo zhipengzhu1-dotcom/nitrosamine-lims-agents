@@ -41,10 +41,11 @@ const listed = (scope: Scope) =>
       sql<boolean>`workstation.device_token_hash is not null`.as('enrolled'),
     ]);
 
-/** Registers, lists and enrols Workstations in the Admin's Lab. The device token leaves the API only as the cookie, and is stored only as its hash. */
+/** Registers Rooms, and registers, lists and enrols Workstations, in the Admin's Lab. The device token leaves the API only as the cookie, and is stored only as its hash. */
 export function workstationRoutes(app: App, db: Kysely<DB>): void {
   const asAdmin = (actor: ActorContext) => {
-    if (!actor.roles.includes('Admin')) refuse('role', 'registering and enrolling Workstations is an Admin action');
+    if (!actor.roles.includes('Admin'))
+      refuse('role', 'registering Rooms and Workstations and enrolling browsers is an Admin action');
     return labScope(db, actor);
   };
   const one = (scope: Scope, id: string) => listed(scope).where('workstation.id', '=', id).executeTakeFirstOrThrow();
@@ -57,6 +58,19 @@ export function workstationRoutes(app: App, db: Kysely<DB>): void {
         rooms: await scope.from('room').select(['id', 'name']).orderBy('name').execute(),
         workstations: await listed(scope).orderBy('workstation.name').execute(),
       };
+    },
+  });
+
+  app.route({
+    ...routes.registerRoom,
+    handler: async (req) => {
+      const scope = asAdmin(req.actor);
+      const { name, reason } = req.body;
+      if (await scope.from('room').select('id').where('name', '=', name).executeTakeFirst())
+        refuse('guard', `a Room named ${name} is already registered in this Lab`);
+      return scope.write(reason, 'Admin', (q) =>
+        q.insert('room', { name }).returning(['id', 'name']).executeTakeFirstOrThrow(),
+      );
     },
   });
 

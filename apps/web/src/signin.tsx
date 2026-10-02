@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { type ActorContext, routes } from '@lims/domain';
-import { api, type LockMode } from './api.ts';
+import { api, type LockMode, signOut } from './api.ts';
 import { TopBar } from './rail.tsx';
 
 export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorContext) => void }) {
@@ -89,7 +89,7 @@ export function LockScreen({
         <form key={mode} className="signin card" onSubmit={submit} aria-labelledby="lock-title">
           <fieldset className="lock__set" disabled={busy}>
             <h1 id="lock-title">{mode === 'unlock' ? 'Locked' : 'Switch user'}</h1>
-            <p className="muted">{`${message.charAt(0).toUpperCase()}${message.slice(1)}.`}</p>
+            <p className="muted">{message}.</p>
             {mode === 'switch' && (
               <label>
                 Username
@@ -119,6 +119,9 @@ export function LockScreen({
               onClick={() => choose(mode === 'unlock' ? 'switch' : 'unlock')}
             >
               {mode === 'unlock' ? 'Switch user' : 'Back to unlock'}
+            </button>
+            <button type="button" className="rbtn rbtn--plain" onClick={() => void signOut()}>
+              Sign out
             </button>
           </fieldset>
         </form>

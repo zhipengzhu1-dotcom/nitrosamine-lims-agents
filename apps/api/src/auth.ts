@@ -80,7 +80,10 @@ async function countFailure(tx: Transaction<DB>, personId: string) {
     .executeTakeFirstOrThrow();
 }
 
-/** Proves the person of the session again, to sign or to unlock: a wrong password refuses as badCredentials, counts toward lockout, and a lockout it applies is an Access Event. */
+/**
+ * Proves the person of the session again, to sign or to unlock: a wrong password refuses as badCredentials, counts
+ * toward lockout, and writes `failureEvent` when given; a lockout it applies is an Access Event.
+ */
 export async function reauthenticate(
   db: Kysely<DB>,
   { actor, session }: SignedIn,
@@ -88,6 +91,7 @@ export async function reauthenticate(
   purpose: string,
   role: string,
   sourceAddress: string,
+  failureEvent?: 'UnlockFailed',
 ): Promise<void> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', actor.person.id).executeTakeFirstOrThrow();
   const as = (reason: string) => ({ actor: `person:${person.username}`, role, reason });
@@ -101,19 +105,24 @@ export async function reauthenticate(
   }
   await audited(db, as('Failed authentication'), async (tx) => {
     const { lockedNow } = await countFailure(tx, person.id);
-    if (lockedNow)
-      await record(tx, {
-        kind: 'Lockout',
-        subjectId: person.id,
-        roles: actor.roles,
-        sourceAddress,
-        sessionLabId: session.labId,
-        sessionId: session.id,
-        workstationId: session.workstationId,
-      });
+    const event = {
+      subjectId: person.id,
+      roles: actor.roles,
+      sourceAddress,
+      sessionLabId: session.labId,
+      sessionId: session.id,
+      workstationId: session.workstationId,
+    };
+    if (failureEvent) await record(tx, { kind: failureEvent, ...event });
+    if (lockedNow) await record(tx, { kind: 'Lockout', ...event });
   });
   notValid();
 }
+
+/** A session past its idle or absolute limit, or whose person's account is locked, has ended even before the sweep reaches it. */
+const expired = sql<boolean>`person.locked_at is not null
+  or session.last_seen_at < now() - ${IDLE_LIMIT_MS} * interval '1 millisecond'
+  or session.created_at < now() - ${ABSOLUTE_LIMIT_MS} * interval '1 millisecond'`.as('expired');
 
 /**
  * Builds the ActorContext from the session cookie. Reads the session tables directly: no context exists yet to scope by.
@@ -140,9 +149,7 @@ export async function actorFor(
         'session.id',
         'session.workstationId',
         sql<boolean>`session.locked_at is not null`.as('locked'),
-        sql<boolean>`person.locked_at is not null
-          or session.last_seen_at < now() - ${IDLE_LIMIT_MS} * interval '1 millisecond'
-          or session.created_at < now() - ${ABSOLUTE_LIMIT_MS} * interval '1 millisecond'`.as('expired'),
+        expired,
         'person.id as personId',
         'person.username',
         'person.displayName',
@@ -166,7 +173,8 @@ export async function actorFor(
       'sessionLocked',
       `this screen is locked; ${session.displayName} unlocks it with their password, or another person signs in with Switch user`,
     );
-  await db.updateTable('session').set({ lastSeenAt: sql`now()` }).where('id', '=', session.id).execute();
+  if (!session.locked)
+    await db.updateTable('session').set({ lastSeenAt: sql`now()` }).where('id', '=', session.id).execute();
   const { workstationName, roomName } = session;
   return {
     actor: {
@@ -188,11 +196,12 @@ function typedUserIdDigest(key: Buffer, typed: string) {
   return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: typed.length };
 }
 
-const liveSession = async (db: Kysely<DB>, token: string | undefined) =>
+const openSession = async (db: Kysely<DB>, token: string | undefined) =>
   token
     ? db
         .selectFrom('session')
-        .select(['labId', 'id', 'personId'])
+        .innerJoin('person', 'person.id', 'session.personId')
+        .select(['session.labId', 'session.id', 'session.personId', 'session.workstationId', expired])
         .where('tokenHash', '=', hashToken(token))
         .where('endedAt', 'is', null)
         .executeTakeFirst()
@@ -256,7 +265,7 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
         return REFUSAL[failure]();
       }
 
-      const earlier = await liveSession(db, req.cookies[SESSION_COOKIE]);
+      const earlier = await openSession(db, req.cookies[SESSION_COOKIE]);
       const earlierRoles = earlier ? await rolesIn(db, earlier.personId, earlier.labId) : [];
       const token = randomBytes(32).toString('base64url');
       const lockedMeanwhile = await audited(db, SIGN_IN_SERVICE, async (tx) => {
@@ -264,7 +273,7 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
           .selectFrom('person')
           .select('lockedAt')
           .where('id', '=', person.id)
-          .forUpdate()
+          .forNoKeyUpdate()
           .executeTakeFirstOrThrow();
         if (lockedAt) {
           await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...subject });
@@ -272,14 +281,14 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
         }
         if (person.failedLogins > 0)
           await tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', person.id).execute();
-        if (earlier && (await endSession(tx, earlier)))
+        if (earlier && (await endSession(tx, earlier)) && !earlier.expired)
           await record(tx, {
             kind: 'Takeover',
             subjectId: earlier.personId,
             takenById: person.id,
             roles: earlierRoles,
             sourceAddress,
-            workstationId,
+            workstationId: earlier.workstationId,
             sessionLabId: earlier.labId,
             sessionId: earlier.id,
           });
@@ -345,18 +354,21 @@ export function logoutRoute(app: App, db: Kysely<DB>): void {
 
 /**
  * Lock and unlock, served on a locked session too. Lock hides the session behind sessionLocked; only the same person's
- * password unlocks it, and a wrong one counts toward lockout as a failed signing does. Each change is an Access Event.
+ * password unlocks it, and a wrong one is an Access Event that counts toward lockout. Each change is an Access Event.
  */
 export function lockRoutes(app: App, db: Kysely<DB>): void {
-  const setLocked = (tx: Transaction<DB>, session: SessionKey, locked: boolean) =>
-    tx
+  // Postgres 18's old.locked_at tells whether this very update changed the lock, so a repeat writes no second event.
+  const setLocked = async (tx: Transaction<DB>, session: SessionKey, locked: boolean) => {
+    const row = await tx
       .updateTable('session')
-      .set({ lockedAt: locked ? sql`now()` : null })
+      .set({ lockedAt: locked ? sql`coalesce(locked_at, now())` : null })
       .where('labId', '=', session.labId)
       .where('id', '=', session.id)
-      .where('lockedAt', locked ? 'is' : 'is not', null)
-      .executeTakeFirst()
-      .then((r) => r.numUpdatedRows > 0n);
+      .where('endedAt', 'is', null)
+      .returning(sql<boolean>`(old.locked_at is null) <> (new.locked_at is null)`.as('changed'))
+      .executeTakeFirst();
+    return row ? row.changed : refuse('noSession', 'the session has ended; sign in again');
+  };
 
   app.route({
     ...routes.lock,
@@ -376,6 +388,7 @@ export function lockRoutes(app: App, db: Kysely<DB>): void {
         'Unlock',
         NO_ROLE,
         req.ip,
+        'UnlockFailed',
       );
       await onOwnSession(db, req)('Unlock', 'Unlock', req.ip, (tx) => setLocked(tx, req.sessionKey, false));
       return req.actor;

@@ -4,6 +4,7 @@ set local role lims_owner;
 alter type lims.access_event_kind add value 'Lock';
 alter type lims.access_event_kind add value 'Unlock';
 alter type lims.access_event_kind add value 'Takeover';
+alter type lims.access_event_kind add value 'UnlockFailed';
 alter type lims.sign_in_failure add value 'NotInWorkstationLab';
 
 -- The Room record that the Equipment ticket (#129) extends with its Checks and storage locations.
@@ -38,7 +39,7 @@ alter table lims.access_event
   add foreign key (workstation_id) references lims.workstation (id),
   drop constraint access_event_session_kind_check,
   add constraint access_event_session_kind_check check (
-    (session_id is not null or kind::text not in ('SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'Takeover'))
+    (session_id is not null or kind::text not in ('SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'))
     and (session_id is null or kind <> 'SignInFailed')
   ),
   add constraint access_event_takeover_check check ((kind::text = 'Takeover') = (taken_by_id is not null));

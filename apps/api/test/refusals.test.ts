@@ -62,6 +62,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
     browserPolicy: 'Managed Chrome',
     reason: 'Register a bench PC',
   }),
+  registerRoom: entry(routes.registerRoom, { name: 'Balance Room (fictional)', reason: 'Register a Room' }),
   enrolWorkstation: entry(routes.enrolWorkstation, { workstationId: randomUUID(), reason: 'Enrol the bench PC' }),
   unlock: entry(routes.unlock, { password: 'not-the-password' }),
   lock: entry(routes.lock, {}),
