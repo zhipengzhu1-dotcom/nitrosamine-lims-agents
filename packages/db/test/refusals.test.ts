@@ -48,6 +48,7 @@ const id = {
   room: randomUUID(),
   otherLabRoom: randomUUID(),
   workstation: randomUUID(),
+  lockedOut: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -70,6 +71,17 @@ const fixture: [string, Row][] = [
   ],
   ['lims.person', { id: id.admin, username: 'refusal.admin', display_name: 'Refusal Admin' }],
   ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
+  [
+    'lims.person',
+    {
+      id: id.lockedOut,
+      username: 'refusal.locked',
+      display_name: 'Locked Person',
+      password_hash: 'not-a-real-hash',
+      locked_at: '2026-10-01T12:00:00Z',
+    },
+  ],
+  ['lims.access_event', { kind: 'Lockout', subject_id: id.lockedOut, source_address: '192.0.2.1', roles: '{}' }],
   ['lims.method', { id: id.method, code: 'RF-MTH-0001', version: '1', title: 'NDMA by LC-MS/MS (fictional)' }],
   [
     'lims.submission',
@@ -809,6 +821,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.access_event',
       change: labSwitch,
       constraint: 'access_event_previous_session_key',
+    },
+    {
+      name: 'a second Lockout Access Event for the same person and instant, one lock, is refused',
+      table: 'lims.access_event',
+      change: { kind: 'Lockout', failure_reason: null, subject_id: id.lockedOut },
+      constraint: 'access_event_one_lockout_per_lock',
     },
     {
       name: 'a second Sample with the same number in one Lab is refused',
@@ -2504,7 +2522,7 @@ describe('a Signature is written only by the signing function, which refuses eve
     });
 });
 
-it('every constraint and trigger of a freshly migrated database has a refusing test', async () => {
+it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
     ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
@@ -2550,6 +2568,12 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
     `select n.nspname || '.' || c.relname || '.' || k.conname as rule
        from pg_constraint k join pg_class c on c.oid = k.conrelid join pg_namespace n on n.oid = c.relnamespace
       where n.nspname in ('lims', 'public')
+     union all
+     select n.nspname || '.' || c.relname || '.' || i.relname
+       from pg_index x join pg_class i on i.oid = x.indexrelid join pg_class c on c.oid = x.indrelid
+       join pg_namespace n on n.oid = c.relnamespace
+      where x.indisunique and n.nspname in ('lims', 'public')
+        and not exists (select from pg_constraint k where k.conindid = x.indexrelid and k.contype in ('p', 'u', 'x'))
      union all
      select n.nspname || '.' || c.relname || '.' || t.tgname
        from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
