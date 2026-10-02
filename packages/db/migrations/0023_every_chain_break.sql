@@ -65,19 +65,33 @@ alter type lims.incident_state add value 'Closed';
 -- A chain-verify System Incident records one break, or every break after the first ones a verification records one by
 -- one: its first and last entries, how many breaks, and their fingerprint (one break's, or a digest of all of theirs).
 -- One break opens one incident however often it is verified, and a break tampered with again opens another, so the
--- key adds the fingerprint. Incidents opened before this migration have no fingerprint and stay as they are; the check
--- holds for every incident opened from now on.
+-- key adds the fingerprint. Every incident opened from now on records all three, which require_break enforces on
+-- insert; one opened before this migration has none of them, and the row check accepts that shape so that its state
+-- can still move. Its break is opened again, with a fingerprint, on the next verification.
 alter table lims.system_incident
   add column fingerprint  bytea,
   add column last_failure bigint,
   add column break_count  integer check (break_count >= 1),
   add constraint system_incident_break_check check (
-    (chain is null) = (fingerprint is null)
-    and (chain is null) = (last_failure is null)
-    and (chain is null) = (break_count is null)
+    (fingerprint is null) = (last_failure is null)
+    and (fingerprint is null) = (break_count is null)
+    and (chain is not null or fingerprint is null)
     and last_failure >= first_failure
-  ) not valid,
+  ),
   drop constraint system_incident_chain_first_failure_key,
   add constraint system_incident_chain_break_key unique (chain, first_failure, fingerprint);
+
+create function lims.require_break() returns trigger
+language plpgsql as $$
+begin
+  if new.chain is not null and new.fingerprint is null then
+    raise exception 'a chain-verify System Incident records its break''s fingerprint, last entry and count'
+      using errcode = '23514';
+  end if;
+  return new;
+end $$;
+
+create trigger require_break before insert on lims.system_incident
+  for each row execute function lims.require_break();
 
 grant insert (fingerprint, last_failure, break_count) on lims.system_incident to lims_app;

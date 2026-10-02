@@ -418,7 +418,7 @@ const failureOf = ({ entry, kind, through, breaks }: Omit<ChainBreakFound, 'inci
     Changed: `entry ${entry} fails to verify`,
     Missing: through === entry ? `entry ${entry} is missing` : `entries ${entry} to ${through} are missing`,
     HeadMoved: `the chain head does not match entry ${String(BigInt(entry) - 1n)}`,
-    More: `${breaks} more breaks, from entry ${entry} to entry ${through}`,
+    More: `${breaks} more ${breaks === 1 ? 'break' : 'breaks'}, from entry ${entry} to entry ${through}`,
   })[kind];
 
 /** A break as the screen reads it before its Status: where the chain fails and the System Incident that records it. */

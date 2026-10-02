@@ -97,7 +97,7 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
             select seq, kind, through, 1 as breaks, fingerprint from found where n <= ${BREAKS_ONE_BY_ONE}
             union all
             select min(seq), 'More', max(through), count(*)::int,
-              sha256(string_agg(int8send(seq) || fingerprint, ''::bytea order by seq))
+              sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq))
             from found where n > ${BREAKS_ONE_BY_ONE} having count(*) > 0
           )
           select json_agg(json_build_object(

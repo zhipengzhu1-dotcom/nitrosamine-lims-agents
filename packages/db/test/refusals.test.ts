@@ -1461,7 +1461,6 @@ describe('the database refuses a value outside its allowed set', () => {
     ),
     ...(
       [
-        ['with no fingerprint', { fingerprint: null }],
         ['with no last entry', { last_failure: null }],
         ['with no count of breaks', { break_count: null }],
         ['whose last entry is before its first', { first_failure: 7, last_failure: 6 }],
@@ -1474,6 +1473,12 @@ describe('the database refuses a value outside its allowed set', () => {
         constraint: 'system_incident_break_check',
       }),
     ),
+    {
+      name: 'an unexpected-failure System Incident with a last failing entry is refused',
+      table: 'lims.system_incident',
+      change: { last_failure: 7 },
+      constraint: 'system_incident_break_check',
+    },
     {
       name: 'an unexpected-failure System Incident with a break fingerprint is refused',
       table: 'lims.system_incident',
@@ -2068,6 +2073,33 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
         ['LA002', "a System Incident's recorded facts are never changed"],
         column,
       );
+    }
+  });
+
+  const unrecordedBreak = `insert into lims.system_incident (kind, reference, requested_by, chain, first_failure)
+                           values ('ChainVerifyFailure', 'RF00000M', $1, $2, 4)`;
+  covered.add('lims.system_incident.require_break');
+  it("a new chain-verify System Incident without its break's fingerprint, last entry and count is refused", async () => {
+    const error = await refusalOf(unrecordedBreak, [id.person, id.lab]);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', "a chain-verify System Incident records its break's fingerprint, last entry and count"],
+    );
+  });
+
+  it('a chain-verify System Incident opened before breaks carried a fingerprint can still move to Closed', async () => {
+    await client.query('begin');
+    try {
+      await client.query('set local session_replication_role = replica');
+      await client.query(unrecordedBreak, [id.person, id.lab]);
+      await client.query('set local session_replication_role = origin');
+      await client.query(AUDIT_CONTEXT);
+      const { rowCount } = await client.query(
+        `update lims.system_incident set state = 'Closed' where reference = 'RF00000M'`,
+      );
+      assert.equal(rowCount, 1);
+    } finally {
+      await client.query('rollback');
     }
   });
 });

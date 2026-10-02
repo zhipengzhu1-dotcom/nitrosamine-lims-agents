@@ -788,3 +788,24 @@ it('after the database owner changes every entry of a long chain, Verify chain a
   assert.equal(alarmsFor([recorded.incident]).length, 1);
   assert.equal((await chainIncidents(lab.labId)).length, 102);
 });
+
+it('Verify chain records 100 breaks one by one, and a 101st as one more break', async () => {
+  const lab = await labOfItsOwn('HUN', 150);
+  const change = (through: number) =>
+    tamper([
+      sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq <= ${through}`,
+    ]);
+  await change(100);
+  const hundred = (await lab.verify()).breaks;
+  assert.equal(hundred.length, 100);
+  assert.equal(hundred.at(-1)?.failure, 'entry 100 fails to verify');
+
+  await change(101);
+  const more = (await lab.verify()).breaks;
+  assert.deepEqual(
+    more.slice(0, 100).map((b) => b.incident),
+    hundred.map((b) => b.incident),
+  );
+  assert.equal(more.length, 101);
+  assert.equal(more[100]?.failure, '1 more break, from entry 101 to entry 101');
+});
