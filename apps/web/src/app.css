@@ -144,6 +144,60 @@ p {
   overflow-x: auto;
   scrollbar-width: none;
 }
+/* A phone's tab bar always overflows. Chromium leaves a resized bar that no longer overflows in the end state, which fades the first tab, so wider screens get no fade. */
+@media (max-width: 640px) {
+  .top nav {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #000 var(--more-before),
+      #000 calc(100% - var(--more-after)),
+      transparent
+    );
+  }
+  @supports (animation-timeline: scroll()) {
+    .top nav {
+      animation: more-tabs linear both;
+      animation-timeline: scroll(self inline);
+    }
+  }
+  /* Without scroll-driven animations the right edge always fades, and a spacer lets the last tab scroll clear of it. */
+  @supports not (animation-timeline: scroll()) {
+    .top nav {
+      --more-after: 72px;
+    }
+    .top nav::after {
+      content: "";
+      flex: none;
+      width: 72px;
+    }
+  }
+}
+@property --more-before {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --more-after {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes more-tabs {
+  from {
+    --more-before: 0px;
+    --more-after: 72px;
+  }
+  8%,
+  92% {
+    --more-before: 72px;
+    --more-after: 72px;
+  }
+  to {
+    --more-before: 72px;
+    --more-after: 0px;
+  }
+}
 .top nav a {
   display: flex;
   align-items: center;
@@ -680,6 +734,7 @@ td a,
   max-width: 560px;
 }
 .card {
+  min-width: 0;
   background: var(--sheet);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -703,6 +758,11 @@ select {
   border: 1px solid var(--edge);
   border-radius: 8px;
   font: 400 16px var(--font);
+}
+/* WebKit counts a select's chosen text as overflow past its box, which widens the sheet; contain it. Chromium ends the text with an ellipsis, WebKit clips it. */
+select {
+  contain: paint;
+  text-overflow: ellipsis;
 }
 .who__name {
   font-size: 24px;
@@ -1000,6 +1060,16 @@ a.btn {
   }
   .sheet__foot .rbtn {
     flex: 1;
+  }
+  /* A legend that wraps to two lines would sit across the card's top border, so it moves inside the card. */
+  .card legend {
+    float: left;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 0;
+  }
+  .card legend ~ * {
+    clear: left;
   }
   .rail__session {
     order: 3;
