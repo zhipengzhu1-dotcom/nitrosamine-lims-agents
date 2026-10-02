@@ -75,7 +75,43 @@ const slashedOutsideIdentifiers = (page: Page) =>
       .map((el) => `${el.tagName.toLowerCase()}.${el.className}`),
   );
 
-test('with the signing sheet open at phone and desktop width, no visible text is below 12 px and every field has a visible label and 16 px text', async ({
+/**
+ * Whether the glyph, drawn as an identifier at 96 px, has ink at its centre. A zero with a slash or a dot has;
+ * the letter O has not, so a marked zero cannot be read as O.
+ */
+async function identifierCentreInked(page: Page, glyph: string): Promise<boolean> {
+  await page.evaluate((text) => {
+    const code = document.createElement('code');
+    code.className = 'hash';
+    code.dataset.probe = '';
+    code.textContent = text;
+    code.style.cssText =
+      'position:fixed;top:0;left:0;z-index:2147483647;font-size:96px;line-height:1;color:#000;background:#fff;padding:0 16px';
+    document.body.append(code);
+  }, glyph);
+  const probe = page.locator('code[data-probe]');
+  const png = await probe.screenshot({ animations: 'disabled' });
+  await probe.evaluate((el) => el.remove());
+  return page.evaluate(async (base64) => {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.codePointAt(0) ?? 0);
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('no 2D canvas to read the probe');
+    ctx.drawImage(bitmap, 0, 0);
+    const [w, h] = [bitmap.width, bitmap.height];
+    const { data } = ctx.getImageData(
+      Math.floor(w * 0.45),
+      Math.floor(h * 0.4),
+      Math.ceil(w * 0.1),
+      Math.ceil(h * 0.2),
+    );
+    for (let i = 0; i < data.length; i += 4) if ((data[i] ?? 255) < 128) return true;
+    return false;
+  }, png.toString('base64'));
+}
+
+test('with the signing sheet open at the device, phone and desktop width, no visible text is below 12 px and every field has a visible label and 16 px text', async ({
   page,
 }) => {
   await openASubmittedTestAsReviewer(page);
@@ -86,12 +122,19 @@ test('with the signing sheet open at phone and desktop width, no visible text is
     'Fictional data only',
   );
   await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
-  for (const size of [PHONE, DESKTOP]) {
+  for (const size of [page.viewportSize() ?? DESKTOP, PHONE, DESKTOP]) {
     await page.setViewportSize(size);
     const at = `at ${size.width}x${size.height}`;
     expect(await textBelow12px(page), `no visible text below 12 px ${at}`).toEqual([]);
+    await expect(
+      sheet.getByLabel('User ID (type it to sign)'),
+      `the sheet shows its User ID field ${at}`,
+    ).toBeVisible();
+    await expect(
+      sheet.getByLabel('Password (type it again to sign)'),
+      `the sheet shows its Password field ${at}`,
+    ).toBeVisible();
     const shown = await visibleFields(page);
-    expect(shown.length, `the sheet shows its credential fields ${at}`).toBeGreaterThan(0);
     for (const { field, label, size: fontSize } of shown) {
       expect(label, `${field} has a visible label ${at}`).not.toBe('');
       expect(fontSize, `${field} keeps 16 px text ${at}`).toBe('16px');
@@ -123,7 +166,13 @@ test('digits in prose are plain, digits in table cells, values and times line up
     'font-variant-numeric',
     /tabular-nums/,
   );
+  await expect(page.locator('.entry__seq').first(), 'an Audit Trail entry number').toHaveCSS(
+    'font-variant-numeric',
+    /tabular-nums/,
+  );
   await expect(page.locator('code.hash').first(), 'a hash').toHaveCSS('font-variant-numeric', /slashed-zero/);
+  expect(await identifierCentreInked(page, 'O'), 'the letter O in an identifier is hollow').toBe(false);
+  expect(await identifierCentreInked(page, '0'), 'a zero in an identifier is slashed or dotted').toBe(true);
   expect(await slashedOutsideIdentifiers(page), 'only identifiers slash their zeros on the Test page').toEqual([]);
 
   await page.getByRole('link', { name: 'Tests' }).click();

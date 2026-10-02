@@ -44,14 +44,16 @@ export async function submittedTest(page: Page, description: string): Promise<st
   const lookups = async (): Promise<RouteReply<typeof routes.lookups>> =>
     (await page.request.get('/api/lookups')).json();
   await signInByApi(page, 'cora.customer');
-  const { methods } = await lookups();
-  const { testId } = await step('submit', { input: { methodId: methods[0]?.id, description } });
+  const [method] = (await lookups()).methods;
+  if (!method) throw new Error('the lookups offer no Method to submit a Test under');
+  const { testId } = await step('submit', { input: { methodId: method.id, description } });
   await signInByApi(page, 'samir.custodian');
   await step('receive', { testId, input: {} });
   await signInByApi(page, 'lena.manager');
   const { analysts } = await lookups();
   const ana = analysts.find((a) => a.displayName === 'Ana Ferreira');
-  await step('assign', { testId, input: { assigneeId: ana?.id } });
+  if (!ana) throw new Error('the lookups offer no Analyst named Ana Ferreira');
+  await step('assign', { testId, input: { assigneeId: ana.id } });
   await signInByApi(page, 'ana.analyst');
   const { recordVersion, statement }: RouteReply<typeof routes.test> = await (
     await page.request.get(`/api/tests/${testId}`)

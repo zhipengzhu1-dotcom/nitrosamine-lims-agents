@@ -22,7 +22,7 @@
   --bad: #b3261e;
   --bad-tint: #fce8e5;
   --font: "Segoe UI", system-ui, sans-serif;
-  --mono: Consolas, ui-monospace, monospace;
+  --mono: Consolas, ui-monospace, Menlo, monospace;
   --top-h: 48px;
   --rail-h: 76px;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -60,6 +60,9 @@ a {
 button {
   user-select: none;
   -webkit-user-select: none;
+}
+small {
+  font-size: 12px;
 }
 code {
   font-family: var(--mono);
@@ -561,6 +564,7 @@ td a,
   color: var(--on-bench-2);
 }
 .who__clock time,
+.entry__seq,
 .entry__time {
   font-variant-numeric: tabular-nums;
 }
@@ -814,9 +818,6 @@ select {
 }
 .meaning b {
   font-size: 22px;
-}
-.meaning small {
-  font-size: 12px;
 }
 
 .signin {

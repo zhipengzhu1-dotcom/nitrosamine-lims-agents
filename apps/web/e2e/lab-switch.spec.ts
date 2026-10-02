@@ -90,7 +90,7 @@ test('on a browser enrolled in one Lab, Switch Lab gives its reason beside the d
   await expect(reason).toBeVisible();
   await expect(button).toBeDisabled();
   await expect(button).toHaveAccessibleDescription('There is no other Lab to work in.');
-  for (const size of [PHONE, DESKTOP]) {
+  for (const size of [page.viewportSize() ?? DESKTOP, PHONE, DESKTOP]) {
     await page.setViewportSize(size);
     const [said, row] = [await reason.boundingBox(), await button.boundingBox()];
     if (!said || !row) throw new Error('the reason or the button is not on screen');
