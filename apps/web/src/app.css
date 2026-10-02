@@ -637,7 +637,6 @@ td a,
   cursor: pointer;
   transition:
     transform var(--dur-press) var(--ease-out),
-    filter var(--dur-press) var(--ease-out),
     opacity var(--dur-enter) var(--ease-out);
 }
 @starting-style {
@@ -655,9 +654,9 @@ td a,
     filter: brightness(1.08);
   }
 }
+/* The press scales only. A filter transition on the press crashes Playwright's Linux WebKit renderer (WPE SIGSEGV). */
 .rbtn:active:not(:disabled) {
   transform: scale(0.97);
-  filter: brightness(0.92);
 }
 .rbtn:disabled {
   opacity: 0.6;
@@ -1043,6 +1042,10 @@ a.btn {
   .stack tbody,
   .stack tr {
     display: block;
+  }
+  /* The table contains its hidden head: placed from the page instead, the head sits below the frame on a long record and lets the page scroll under the sheet. */
+  .stack {
+    position: relative;
   }
   .stack thead {
     position: absolute;

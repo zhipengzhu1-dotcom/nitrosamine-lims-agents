@@ -32,7 +32,7 @@ const railSays = (page: Page, text: string | RegExp) => expect(page.getByRole('s
  */
 async function pressedTransform(page: Page): Promise<string> {
   const save = page.getByRole('button', { name: 'Save preferences' });
-  const look = () => save.evaluate((b) => `${getComputedStyle(b).transform}|${getComputedStyle(b).filter}`);
+  const look = () => save.evaluate((b) => getComputedStyle(b).transform);
   const steady = async () => {
     let before = '';
     await expect
@@ -54,8 +54,8 @@ async function pressedTransform(page: Page): Promise<string> {
   if (!box) throw new Error('Save preferences is not on screen');
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await expect.poll(() => save.evaluate((b) => getComputedStyle(b).filter), 'the press is held').not.toBe('none');
-  const [transform = ''] = (await steady()).split('|');
+  await expect.poll(() => save.evaluate((b) => b.matches(':active')), 'the press is held').toBe(true);
+  const transform = await steady();
   await page.mouse.up();
   await expect(save, 'the save of the unchanged setting is answered').toBeEnabled();
   return transform;
