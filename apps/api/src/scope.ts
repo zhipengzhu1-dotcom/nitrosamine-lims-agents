@@ -26,7 +26,10 @@ type CompanyTable =
   | 'lab'
   | 'identityVerification'
   | 'credentialLink'
-  | 'signatureStatement';
+  | 'signatureStatement'
+  | 'releaseLogEntry'
+  | 'serviceIdentity'
+  | 'deployment';
 type LabTable = Exclude<keyof DB, CompanyTable | 'accessEvent' | 'auditEntry' | 'session' | 'systemIncident'>;
 
 function inLab(q: Kysely<DB>, labId: string) {
@@ -68,6 +71,8 @@ function inLab(q: Kysely<DB>, labId: string) {
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot type an update of a generic Lab table; ofLab filters it
       (q.updateTable(table) as unknown as UpdateQueryBuilder<DB, T, T, UpdateResult>).where(ofLab(table)),
     company,
+    /** Reads the Record Versions of company records, which carry no Lab. */
+    companyVersions: () => q.selectFrom('recordVersion').where('labId', 'is', null),
   };
 }
 

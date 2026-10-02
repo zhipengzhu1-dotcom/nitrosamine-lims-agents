@@ -70,7 +70,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   app.setNotFoundHandler(() => refuse('notFound', 'The LIMS has no such route.'));
   if (options.logVolume) checkLogVolume(app, db, options.logVolume);
   loginRoutes(app, db, options.accessEventKey, options.secureCookie, limits);
-  sessionRoutes(app, db, limits, options.release);
+  sessionRoutes(app, db, limits, options.login, options.release);
   if (options.sweepEveryMs !== null) scheduleExpirySweep(app, db, limits, options.sweepEveryMs);
   return app;
 }

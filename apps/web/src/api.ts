@@ -136,6 +136,11 @@ export const signIn = (credentials: RouteInput<typeof routes.login>[0]) =>
 export const resume = () => startSession(() => api(routes.me));
 
 /** Whole seconds until the session ends, or null when no one is signed in. */
+/** True while the deployment answers that its data class is fictional, so the banner never shows on a real deployment. */
+export function useFictional(): boolean {
+  return useApi(routes.deployment).data?.dataClass === 'fictional';
+}
+
 export const useSecondsLeft = () =>
   useSyncExternalStore(
     (watch) => {

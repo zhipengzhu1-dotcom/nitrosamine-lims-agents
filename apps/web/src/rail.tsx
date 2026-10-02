@@ -20,7 +20,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
+import { api, type LockMode, lock, Refused, signOut, useApi, useFictional, useSecondsLeft } from './api.ts';
 import { reducedMotion } from './motion.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room';
@@ -282,11 +282,12 @@ export function Shell({
 }
 
 export function TopBar({ lab, children }: { lab?: Lab; children?: ReactNode }) {
+  const fictional = useFictional();
   return (
     <header className="top">
       <span className="brand">{lab && <b title={lab.name}>{lab.code}</b>}Nitrosamine LIMS</span>
       {children}
-      <span className="fict">Fictional data only</span>
+      {fictional && <span className="fict">Fictional data only</span>}
     </header>
   );
 }
@@ -457,6 +458,7 @@ function Rail({
 
   const direct = action && !action.fields.length && !action.signs;
   const shown = sheet?.action;
+  const fictional = useFictional();
   return (
     <>
       {shown && (
@@ -476,7 +478,7 @@ function Rail({
           <fieldset className="sheet__set" disabled={busy}>
             <h2 id="sheet-title">
               {shown.signs ? `Sign ${shown.signs.meaning}` : shown.label}
-              <span className="fict">Fictional data only</span>
+              {fictional && <span className="fict">Fictional data only</span>}
             </h2>
             <div className="sheet__body">
               {shown.fields.length > 0 && (
