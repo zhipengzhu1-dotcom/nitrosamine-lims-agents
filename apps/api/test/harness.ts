@@ -225,7 +225,7 @@ export async function startApi(name: string) {
     startAnotherApi: (options: ListenOptions = {}) => listen(db, options),
     untilWaitingOnLocks,
     /**
-     * Lands a lock on `account` that commits while `press` waits on a lock: the person row is locked out and the
+     * Lands a Lockout on `account` that commits while `press` waits on a lock: the person row is locked out and the
      * Signature table held in one open transaction, so a signing that never waits on the person row reads it unlocked
      * and waits at its Signature insert instead, inside the window between that read and its commit.
      */
