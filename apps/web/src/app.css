@@ -805,15 +805,18 @@ td a,
   padding: 16px;
   margin: 0;
 }
-/* Inside the card at every size: a legend that wraps to two lines would sit across the card's top border. */
 .card legend {
+  font-weight: 700;
+}
+/* A legend that wraps to two lines would sit across the card's top border, so it moves inside the card. The sheet's
+   field card names its Test and Sample, which wrap even on a desktop, so its legend moves at every size. */
+fieldset.card > legend {
   float: left;
   width: 100%;
   margin-bottom: 8px;
   padding: 0;
-  font-weight: 700;
 }
-.card legend ~ * {
+fieldset.card > legend ~ * {
   clear: left;
 }
 label {
@@ -1161,8 +1164,9 @@ a.btn {
   }
 }
 
-/* A window held sideways and under 500px tall (a phone, or a short desktop window) is too short for a sheet between
-   the top bar and the rail. Landscape only: an upright Android phone with its keyboard up is also under 500px tall. */
+/* A landscape window under 500px tall (a phone held sideways, or a short desktop window) is too short for a sheet
+   between the top bar and the rail. Landscape keeps most upright Android phones out while their keyboard is up; a
+   small one whose keyboard leaves a wider-than-tall window still gets this layout. */
 @media (max-height: 500px) and (orientation: landscape) {
   .sheet {
     grid-row: top / rail;
@@ -1185,6 +1189,15 @@ a.btn {
   .frame:has(> .sheet:not([data-closing])) :is(.rail__session, .who a) {
     visibility: hidden;
     transition: visibility 0s var(--dur-sheet-in);
+  }
+  .card legend {
+    float: left;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 0;
+  }
+  .card legend ~ * {
+    clear: left;
   }
 }
 
