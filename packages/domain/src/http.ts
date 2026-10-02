@@ -40,6 +40,8 @@ const text = Type.String({ minLength: 1, maxLength: 200 });
 /** A decimal as typed. */
 export const decimalPattern = '-?[0-9]+(\\.[0-9]+)?';
 const decimal = Type.String({ pattern: `^${decimalPattern}$` });
+/** A System Incident's reference: eight Crockford base32 characters, which a person can read aloud. */
+export const referencePattern = '[0-9A-HJKMNP-TV-Z]{8}';
 const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
@@ -52,12 +54,31 @@ export const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' })
 const nullable = <S extends TSchema>(schema: S) => Type.Union([schema, Type.Null()]);
 const closed = { additionalProperties: false } as const;
 
+const lab = Type.Object({ id: uuid, code: Type.String(), name: Type.String() });
+export type Lab = Static<typeof lab>;
 const actorContext = Type.Object({
   person: Type.Object({ id: uuid, username: Type.String(), displayName: Type.String(), customerId: nullable(uuid) }),
-  lab: Type.Object({ id: uuid, code: Type.String(), name: Type.String() }),
+  lab,
   roles: Type.Array(role),
+  /** The Workstation the session's browser is enrolled as, or null for an unregistered device. */
+  workstation: nullable(Type.Object({ name: Type.String(), room: Type.String() })),
 });
 export type ActorContext = Static<typeof actorContext>;
+/**
+ * How long the session lasts from this answer: `idleLeftMs` if no request follows, `absoluteLeftMs` at most, and
+ * `idleLimitMs` from each request that follows.
+ * Durations, not instants, so the web counts down without comparing its clock with the server's.
+ */
+const sessionClock = Type.Object({
+  idleLimitMs: Type.Integer({ minimum: 1 }),
+  idleLeftMs: Type.Integer({ minimum: 0 }),
+  absoluteLeftMs: Type.Integer({ minimum: 0 }),
+});
+export type SessionClock = Static<typeof sessionClock>;
+/** What a person is told when the API refuses a session that has ended; the web shows it as the API sends it. */
+export const SESSION_ENDED = 'Your session has ended. Sign in again.';
+const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock });
+export type SignedInView = Static<typeof signedIn>;
 const testRow = Type.Object({
   id: uuid,
   state: testState,
@@ -236,6 +257,35 @@ const chainVerification = Type.Object({
 export type ChainVerification = Static<typeof chainVerification>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
+const systemIncident = Type.Object({
+  reference: Type.String({ pattern: `^${referencePattern}$` }),
+  kind: Type.Enum({
+    UnexpectedFailure: 'UnexpectedFailure',
+    UnraisableLogLine: 'UnraisableLogLine',
+    Lockout: 'Lockout',
+    SignInBurstFromAddress: 'SignInBurstFromAddress',
+    SignInBurstOnUnknownUserId: 'SignInBurstOnUnknownUserId',
+    RepeatedSignInOnLockedAccount: 'RepeatedSignInOnLockedAccount',
+  } as const satisfies { [K in db.IncidentKind]: K }),
+  state: Type.Enum({ Open: 'Open' } as const satisfies { [K in db.IncidentState]: K }),
+  /** The failing step and error class of a failure of the LIMS; null for a sign-in incident. */
+  step: nullable(Type.String()),
+  recordId: nullable(uuid),
+  requestedBy: nullable(uuid),
+  sessionLabId: nullable(uuid),
+  errorClass: nullable(Type.String()),
+  /** What a sign-in incident names: the account, the source address, or the hex HMAC of an unknown user ID. */
+  subjectId: nullable(uuid),
+  sourceAddress: nullable(Type.String()),
+  typedUserIdHmac: nullable(sha256Hex),
+  sqlstate: nullable(Type.String()),
+  constraintName: nullable(Type.String()),
+  /** The database's insert time. */
+  openedAt: instant,
+  /** For an incident the database could not write at the time, the instant its log line was written, from the API host's clock. */
+  loggedAt: nullable(instant),
+});
+export type SystemIncident = Static<typeof systemIncident>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** What a committed step answers, and what a retry of the same press answers again. */
 export type StepTaken = Static<typeof stepTaken>;
@@ -244,8 +294,9 @@ export type StepTaken = Static<typeof stepTaken>;
  * a body with a field its closed schema does not name, whatever else is wrong with it; `malformed` is any other
  * request Fastify refuses before the handler runs (a schema fault, unparseable JSON, a wrong media type, too large).
  * `badCredentials` is the one answer to every sign-in failure;
- * `accountLocked`, and `role` for an account with no Lab, come only after the right password. `noSession` covers no session presented and a session that
- * has ended. `stale` asks the person to reload; `state` says the step does not apply. `keyReused` is a Commit Key sent again
+ * `accountLocked`, `labNotChosen` for a sign-in that names no Lab, and `role` for a Lab where the person holds no
+ * Membership, come only after the right password. `noSession` covers no session presented and a session that
+ * has ended. `sessionLocked` answers every request on a locked session except lock, unlock, sign-out and a sign-in over it. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
  * with a different step or input, or from another session. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
@@ -254,7 +305,9 @@ export const refusalKinds = [
   'unknownField',
   'malformed',
   'badCredentials',
+  'labNotChosen',
   'noSession',
+  'sessionLocked',
   'accountLocked',
   'role',
   'guard',
@@ -271,11 +324,31 @@ export const isRefusalKind = (value: unknown): value is RefusalKind => refusalKi
 export const refusalBody = Type.Object({ kind: Type.Enum(refusalKinds), message: Type.String() });
 export type RefusalBody = Static<typeof refusalBody>;
 
-const credentials = Type.Object({ username: text, password: text }, closed);
+/** A sign-in names its Lab; the schema lets it out so that the API can answer `labNotChosen` after the password. */
+const signIn = Type.Object({ username: text, password: text, labId: Type.Optional(uuid) }, closed);
+const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, closed);
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
 const reauthentication = Type.Object({ password: text }, closed);
+const room = Type.Object({ id: uuid, name: Type.String() });
+const workstation = Type.Object({
+  id: uuid,
+  name: Type.String(),
+  room: Type.String(),
+  browserPolicy: Type.String(),
+  enrolled: Type.Boolean(),
+});
+export type Workstation = Static<typeof workstation>;
+const workstations = Type.Object({
+  rooms: Type.Array(room),
+  workstations: Type.Array(workstation),
+  /** The Workstation this browser's device token enrols it as now, which the next sign-in on it carries. */
+  thisBrowser: nullable(workstation),
+});
+const workstationRegistration = Type.Object({ name: text, roomId: uuid, browserPolicy: text, reason: text }, closed);
+const enrolment = Type.Object({ workstationId: uuid, reason: text }, closed);
+const roomRegistration = Type.Object({ name: text, reason: text }, closed);
 const stepEnvelope = Type.Object({
   commitKey: uuid,
   testId: Type.Optional(uuid),
@@ -325,9 +398,24 @@ function route<
 
 /** Every route the API serves besides the steps. */
 export const routes = {
-  login: route('POST', '/api/login', { body: credentials }, actorContext),
+  labs: route('GET', '/api/labs', {}, Type.Array(lab)),
+  login: route('POST', '/api/login', { body: signIn }, signedIn),
+  switchLab: route('POST', '/api/lab-switch', { body: labSwitch }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
-  me: route('GET', '/api/me', {}, actorContext),
+  lock: route(
+    'POST',
+    '/api/lock',
+    { body: noBody },
+    Type.Object({ locked: Type.Literal(true), message: Type.String() }),
+  ),
+  unlock: route('POST', '/api/unlock', { body: reauthentication }, signedIn),
+  workstations: route('GET', '/api/workstations', {}, workstations),
+  registerRoom: route('POST', '/api/rooms', { body: roomRegistration }, room),
+  registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
+  enrolWorkstation: route('POST', '/api/workstations/enrol', { body: enrolment }, workstation),
+  me: route('GET', '/api/me', {}, signedIn),
+  /** Reads how long the session has left without counting as activity, for the web's countdown. */
+  session: route('GET', '/api/session', {}, sessionClock),
   lookups: route('GET', '/api/lookups', {}, lookups),
   tests: route('GET', '/api/tests', {}, Type.Array(testRow)),
   test: route('GET', '/api/tests/:id', { params: byId }, testView),
@@ -371,6 +459,12 @@ export const routes = {
     '/api/credentials',
     { body: Type.Object({ token: Type.String({ minLength: 1, maxLength: 100 }), password: text }, closed) },
     Type.Object({ username: Type.String() }),
+  ),
+  incident: route(
+    'GET',
+    '/api/incidents/:reference',
+    { params: Type.Object({ reference: Type.String({ pattern: `^${referencePattern}$` }) }) },
+    systemIncident,
   ),
 } satisfies Record<string, Route>;
 

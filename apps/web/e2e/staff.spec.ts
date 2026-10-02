@@ -14,6 +14,7 @@ test('the Admin records an Identity Verification, creates the account and grants
   };
 
   await page.goto('/');
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill('ada.admin');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -73,6 +74,7 @@ test('the Admin records an Identity Verification, creates the account and grants
   const signIn = page.getByRole('link', { name: 'Sign in' });
   expect((await signIn.boundingBox())?.height, 'a gloved finger can press it').toBeGreaterThanOrEqual(44);
   await signIn.click();
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill('nell-chose-this');
   await page.getByRole('button', { name: 'Sign in' }).click();

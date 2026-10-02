@@ -1,4 +1,8 @@
 import { databaseUrl, dbConfig } from '@lims/db';
+import type { Login } from './auth.ts';
+
+/** How often the API runs the expiry sweep. */
+export const SWEEP_EVERY_MS = 60_000;
 
 export interface ApiConfig {
   databaseUrl: string;
@@ -7,9 +11,11 @@ export interface ApiConfig {
   logFile: string | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
+  trustedProxies: string[];
+  login: Login;
 }
 
-const API_SETTINGS = ['LIMS_LOG', 'LIMS_LOG_FILE', 'LIMS_ACCESS_EVENT_KEY'];
+const API_SETTINGS = ['LIMS_LOG', 'LIMS_LOG_FILE', 'LIMS_ACCESS_EVENT_KEY', 'LIMS_TRUSTED_PROXIES', 'LIMS_LOGIN'];
 
 function port(value: string | undefined): number {
   if (value === undefined) return 3000;
@@ -25,6 +31,12 @@ function accessEventKey(value: string | undefined): Buffer {
       'LIMS_ACCESS_EVENT_KEY must hold the Access Event HMAC key: at least 64 hex digits, such as `openssl rand -hex 32` prints',
     );
   return Buffer.from(value, 'hex');
+}
+
+function login(value: string | undefined): Login {
+  if (value === undefined) return 'demo';
+  if (value === 'demo' || value === 'decided') return value;
+  throw new Error(`LIMS_LOGIN must be decided or demo, not ${JSON.stringify(value)}`);
 }
 
 /** Reads the API's environment once, at start: a missing or malformed value stops the process here. */
@@ -45,5 +57,10 @@ export function apiConfig(): ApiConfig {
     logFile,
     secureCookie,
     accessEventKey: accessEventKey(env.LIMS_ACCESS_EVENT_KEY),
+    trustedProxies: (env.LIMS_TRUSTED_PROXIES ?? '')
+      .split(',')
+      .map((proxy) => proxy.trim())
+      .filter(Boolean),
+    login: login(env.LIMS_LOGIN),
   };
 }

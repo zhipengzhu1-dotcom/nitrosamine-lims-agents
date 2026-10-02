@@ -18,7 +18,8 @@ const as = {
 
 const dbNow = async () =>
   (await sql<{ now: Date }>`select clock_timestamp() as now`.execute(api.superuser)).rows[0]?.now;
-const signIn = (username: string, password: string) => new Client(api.base).call(routes.login, { username, password });
+const signIn = (username: string, password: string) =>
+  new Client(api.base).call(routes.login, { username, password, labId: api.labId });
 const setPassword = (token: string, password: string) =>
   new Client(api.base).call(routes.setPasswordThroughLink, { token, password });
 

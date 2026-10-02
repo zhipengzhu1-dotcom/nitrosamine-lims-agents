@@ -386,6 +386,12 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
     { kind: 'SignInSucceeded', sessionId: session.id, roles: ['Analyst'] },
     { kind: 'Lockout', sessionId: session.id, roles: ['Analyst'] },
   ]);
+  const incidents = await api.superuser
+    .selectFrom('systemIncident')
+    .select('kind')
+    .where('subjectId', '=', signer.id)
+    .execute();
+  assert.deepEqual(incidents, [{ kind: 'Lockout' }], 'the lockout at signing opens a System Incident');
   const roles = await api.superuser
     .selectFrom('auditEntry')
     .select('role')

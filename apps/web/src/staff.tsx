@@ -8,7 +8,7 @@ import {
 } from '@lims/domain';
 import { type FormEvent, useRef, useState } from 'react';
 import { api, Refused, useApi, useFresh } from './api.ts';
-import { Shell, TopBar, words } from './rail.tsx';
+import { Shell, words } from './rail.tsx';
 import { time } from './time.ts';
 
 interface Outcome {
@@ -23,7 +23,7 @@ function unanswered(err: unknown): string {
 }
 
 /** A form whose submit button stays inert from the first press until the server answers, and which shows that answer. */
-function useCommit() {
+export function useCommit() {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const inFlight = useRef(false);
@@ -55,7 +55,7 @@ function useCommit() {
   return { busy, commit, shown };
 }
 
-const field = (form: FormData, name: string) => {
+export const field = (form: FormData, name: string) => {
   const value = form.get(name);
   return typeof value === 'string' ? value : '';
 };
@@ -352,58 +352,5 @@ export function StaffPage({ me }: { me: ActorContext }) {
         {data && <ChangePrintedName people={data.people} onDone={reload} />}
       </div>
     </Shell>
-  );
-}
-
-/** Where a person opens their one-time link and chooses their own password. Needs no session. */
-export function WelcomePage({ token }: { token: string }) {
-  const { busy, commit, shown } = useCommit();
-  const [username, setUsername] = useState<string | null>(null);
-  return (
-    <div className="frame frame--bare">
-      <TopBar />
-      <main className="plane">
-        {username ? (
-          <section className="signin card">
-            <h1>Password set</h1>
-            <p role="status">
-              Your password is set for <code>{username}</code>. This link no longer works.
-            </p>
-            <a className="btn" href="/">
-              Sign in
-            </a>
-          </section>
-        ) : (
-          <form
-            className="signin card"
-            onSubmit={(e) =>
-              commit(e, async (form) => {
-                const password = field(form, 'password');
-                if (password !== field(form, 'confirm')) throw new Error('the two passwords differ');
-                const set = await api(routes.setPasswordThroughLink, { token, password });
-                setUsername(set.username);
-                history.replaceState(null, '', location.pathname);
-                return '';
-              })
-            }
-          >
-            <h1>Choose your password</h1>
-            <p className="muted">Only you see the password you choose. The Admin never does.</p>
-            <label>
-              New password
-              <input name="password" type="password" required autoComplete="new-password" />
-            </label>
-            <label>
-              New password again
-              <input name="confirm" type="password" required autoComplete="new-password" />
-            </label>
-            {shown}
-            <button type="submit" className="rbtn" disabled={busy}>
-              Set my password
-            </button>
-          </form>
-        )}
-      </main>
-    </div>
   );
 }

@@ -3,14 +3,16 @@ import type { DB } from '@lims/db';
 import type { RefusalKind } from '@lims/domain';
 import type { FastifyError, FastifyReply, FastifyRequest, FastifySchemaValidationError } from 'fastify';
 import type { Kysely } from 'kysely';
-import { openSystemIncident } from './incident.ts';
+import { openSystemIncident, referenceOf } from './incident.ts';
 
 /** Every refusal kind's status, chosen here and nowhere else. */
 const STATUS: { readonly [K in RefusalKind]: number } = {
   unknownField: 400,
   malformed: 400,
   badCredentials: 401,
+  labNotChosen: 400,
   noSession: 401,
+  sessionLocked: 423,
   role: 403,
   guard: 403,
   notFound: 404,
@@ -50,11 +52,9 @@ function refusedByFastify(error: FastifyError): Refused | null {
   return null;
 }
 
-const READ_ALOUD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
 /** Eight Crockford base32 characters from 40 random bits, so a reference is unlikely to repeat, even across restarts of the API. */
 export function requestReference(): string {
-  return Array.from(randomBytes(8), (byte) => READ_ALOUD.charAt(byte % 32)).join('');
+  return referenceOf(randomBytes(8));
 }
 
 /** Every non-2xx body is written here: a refusal with its kind's status, or a failure that opens a System Incident and is answered with its reference only. */
