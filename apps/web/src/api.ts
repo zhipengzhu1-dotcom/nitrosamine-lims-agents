@@ -6,7 +6,6 @@ import {
   type RouteInput,
   type RouteReply,
   routes,
-  SESSION_ENDED,
   type SignedInView,
 } from '@lims/domain';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -61,12 +60,27 @@ function setSecondsLeft(left: number | null) {
   for (const watch of watchers) watch();
 }
 
+/** Longer than any request takes, so that by then the server's own count has run out too. */
+const END_GRACE_MS = 5000;
+let asking = false;
+
+/**
+ * Counts down, and once the page's count has run out by more than END_GRACE_MS asks the server. Only the server's
+ * refusal ends the session on screen; if the server still answers, the count restarts from its reply.
+ */
 function tick() {
   if (!session) return;
+  const now = pageNow();
   const endsAt = Math.min(session.lastSentAt + session.idleLimitMs, session.absoluteEndsAt);
-  const left = Math.max(0, Math.ceil((endsAt - pageNow()) / 1000));
-  if (left === 0) return endSession(SESSION_ENDED);
-  setSecondsLeft(left);
+  setSecondsLeft(Math.max(0, Math.ceil((endsAt - now) / 1000)));
+  if (now < endsAt + END_GRACE_MS || asking) return;
+  asking = true;
+  // A noSession refusal ends the session in call(); any other failure is asked again on the next tick.
+  resume()
+    .catch(() => {})
+    .finally(() => {
+      asking = false;
+    });
 }
 
 function endSession(message: string) {

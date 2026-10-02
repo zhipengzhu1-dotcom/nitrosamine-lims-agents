@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { pathOf, type Route, routes } from '@lims/domain';
+import { pathOf, type Route, routes, SESSION_ENDED } from '@lims/domain';
 import { sql } from 'kysely';
 import { LOCKOUT_AFTER_FAILURES, SESSION_COOKIE, SESSION_LIMITS } from '../src/auth.ts';
 import { Client, ok, refusedWith, startApi } from './harness.ts';
@@ -38,7 +38,7 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th failed login locks the account and ends its 
   const firstLock = (await lockedAt()) ?? assert.fail('the account is locked');
   const locked = await new Client(api.base).call(routes.login, { username: ada.username, password: ada.password });
   assert.equal(refusedWith(locked, 'accountLocked'), 'this account is locked');
-  assert.equal(refusedWith(await session.call(routes.me), 'noSession'), 'the session has ended; sign in again');
+  assert.equal(refusedWith(await session.call(routes.me), 'noSession'), SESSION_ENDED);
 
   assert.equal(
     refusedWith(await fail(), 'badCredentials'),
@@ -67,7 +67,7 @@ it('a session ends when idle too long, when too old, and on logout', async () =>
     .execute();
   assert.equal((await sessions.out.call(routes.logout)).status, 200);
 
-  const ended = 'the session has ended; sign in again';
+  const ended = SESSION_ENDED;
   for (const [name, client, message] of [
     ['idle', sessions.idle, ended],
     ['old', sessions.old, ended],

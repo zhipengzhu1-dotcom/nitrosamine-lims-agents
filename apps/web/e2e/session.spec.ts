@@ -1,7 +1,32 @@
-import { expect, test } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { SESSION_ENDED } from '@lims/domain';
+import { expect, type Page, test } from '@playwright/test';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
-test('the Bench Rail counts down to the idle end, restarts on activity, and returns to sign-in when the session ends', async ({
+const database = execFileSync(process.execPath, ['../../packages/db/src/checkout.ts', 'database', 'lims_e2e'], {
+  encoding: 'utf8',
+}).trim();
+
+/** Puts this page's session past the demo idle limit on the server, as nine hours without a request would. */
+async function idleOnTheServer(page: Page) {
+  const token = (await page.context().cookies()).find((c) => c.name === 'lims_session')?.value;
+  if (!token) throw new Error('the page holds no session cookie');
+  execFileSync(
+    '../../scripts/pg.sh',
+    ['psql', '-d', database, '-qtA', '-v', `hash=${createHash('sha256').update(token).digest('hex')}`],
+    {
+      input: `update lims.session set last_seen_at = last_seen_at - interval '9 hours'
+               where token_hash = decode(:'hash', 'hex');`,
+      encoding: 'utf8',
+    },
+  );
+}
+
+const answered = (page: Page, status: number) =>
+  page.waitForResponse((res) => res.url().endsWith('/api/me') && res.status() === status);
+
+test('the Bench Rail counts down to the idle end, and returns to sign-in only when the server says the session has ended', async ({
   page,
 }) => {
   await page.clock.install();
@@ -21,7 +46,18 @@ test('the Bench Rail counts down to the idle end, restarts on activity, and retu
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
   await expect(countdown, 'a request restarts the idle count').toHaveText(/^Session ends in (8:00:00|7:59:\d\d)$/);
 
-  await page.clock.fastForward('08:00:00');
+  const kept = answered(page, 200);
+  await page.clock.fastForward('08:00:10');
+  await kept;
+  await expect(countdown, 'the server still holds the session, so the count restarts').toHaveText(
+    /^Session ends in (8:00:00|7:59:\d\d)$/,
+  );
+  await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
+
+  await idleOnTheServer(page);
+  const ended = answered(page, 401);
+  await page.clock.fastForward('08:00:10');
+  await ended;
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveText('the session has ended; sign in again');
+  await expect(page.getByRole('alert')).toHaveText(SESSION_ENDED);
 });
