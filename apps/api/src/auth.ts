@@ -45,7 +45,7 @@ const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', re
 const SWEEP_SERVICE: AuditContext = {
   actor: 'svc:session-sweep',
   role: 'system',
-  reason: 'End sessions past their limit',
+  reason: 'End lapsed sessions',
 };
 
 const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
@@ -255,8 +255,8 @@ const lockedMessage = (displayName: string) =>
   `this screen is locked; ${displayName} unlocks it with their password, or another person signs in with Switch user`;
 
 /**
- * Builds the ActorContext from the session cookie, and counts the request as activity. A session past its end is
- * refused and left for the sweep, which records its expiry. A locked session is refused as sessionLocked, with no
+ * Builds the ActorContext from the session cookie, and counts the request as activity. A lapsed session (past its end,
+ * or its person locked out) is ended at its lapse and refused. A locked session is refused as sessionLocked, with no
  * record content and without counting as activity, unless `whileLocked` serves the lock screen. Reads the session
  * tables directly: no context exists yet to scope by.
  */
@@ -308,11 +308,11 @@ export async function actorFor(
   if (!session) return refuse('noSession', 'sign in first');
   if (session.endedAt) return refuse('noSession', SESSION_ENDED);
   const key = { labId: session.labId, id: session.id, workstationId: session.workstationId };
-  if (session.lockedAt) {
-    await endSession(db, key, limits);
+  const lapsed = async () => {
+    await endLapsedSessions(db, limits, key);
     return refuse('noSession', SESSION_ENDED);
-  }
-  if (!session.live) return refuse('noSession', SESSION_ENDED);
+  };
+  if (session.lockedAt || !session.live) return lapsed();
   if (session.locked && !whileLocked) refuse('sessionLocked', lockedMessage(session.displayName));
   let { idleLeftMs, absoluteLeftMs }: { idleLeftMs: number; absoluteLeftMs: number | null } = session;
   if (!session.locked) {
@@ -322,7 +322,7 @@ export async function actorFor(
     absoluteLeftMs = rows[0]?.absoluteLeftMs ?? null;
     idleLeftMs = limits.idleMs;
   }
-  if (absoluteLeftMs === null) return refuse('noSession', SESSION_ENDED);
+  if (absoluteLeftMs === null) return lapsed();
   const { workstationName, roomName } = session;
   return {
     actor: {
@@ -341,14 +341,26 @@ export async function actorFor(
   };
 }
 
-/** Ends every session past its idle or absolute limit, each with its expiry Access Event at the instant it ended. Running it again ends none twice. */
-export async function endExpiredSessions(db: Kysely<DB>, limits: SessionLimits): Promise<void> {
-  await audited(db, SWEEP_SERVICE, (tx) =>
-    sql`select lims.end_expired_sessions(${interval(limits.idleMs)}, ${interval(limits.absoluteMs)})`.execute(tx),
+/**
+ * Ends every lapsed session, or only the one `key` names, at the instant it lapsed: its person's Lockout, or else its
+ * idle or absolute end, with the expiry Access Event stamped there. Running it again ends none twice.
+ */
+export async function endLapsedSessions(
+  db: Kysely<DB>,
+  limits: SessionLimits,
+  key?: Pick<SessionKey, 'labId' | 'id'>,
+): Promise<void> {
+  await audited(
+    db,
+    SWEEP_SERVICE,
+    (tx) =>
+      sql`select lims.end_lapsed_sessions(${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}, ${key?.labId ?? null}::uuid, ${key?.id ?? null}::uuid)`.execute(
+        tx,
+      ),
   );
 }
 
-/** Ends a session that has not reached its end, and says whether it did; a session past its end is left to the sweep, which records its expiry. */
+/** Ends a session that has not lapsed, and says whether it did; a lapsed one ends at its lapse, as `endLapsedSessions` does. */
 async function endSession(
   q: Kysely<DB>,
   key: Pick<SessionKey, 'labId' | 'id'>,
@@ -370,7 +382,7 @@ async function endSession(
 export function scheduleExpirySweep(app: App, db: Kysely<DB>, limits: SessionLimits, everyMs: number): void {
   let running: Promise<void> | null = null;
   const sweep = setInterval(() => {
-    running ??= endExpiredSessions(db, limits)
+    running ??= endLapsedSessions(db, limits)
       .catch((err: Error) => openJobIncident(db, app.log, { reference: requestReference(), step: 'expirySweep' }, err))
       .finally(() => {
         running = null;
@@ -402,7 +414,8 @@ const browserSession = async (db: Kysely<DB>, token: string | undefined) =>
  * Every sign-in attempt, refused or not, writes its Access Event in a transaction of its own that commits. An enrolled
  * browser's sign-in carries its Workstation and opens in the Workstation's Lab. A sign-in over a live session on the
  * same browser (Switch user) ends it with a takeover Access Event in the same transaction; the takeover names the
- * earlier session's Workstation. A session already past its end is left to the sweep.
+ * earlier session's Workstation. An earlier session that has lapsed ends at its lapse instead, with no takeover. A
+ * countdown check that finds its session lapsed ends it the same way.
  */
 export function loginRoutes(
   app: App,
@@ -542,19 +555,26 @@ export function loginRoutes(
       if (!token) return refuse('noSession', 'sign in first');
       const idle = interval(limits.idleMs);
       const absolute = interval(limits.absoluteMs);
-      const left = await db
+      const session = await db
         .selectFrom('session')
         .innerJoin('person', 'person.id', 'session.personId')
         .select([
+          'session.labId',
+          'session.id',
+          sql<boolean>`person.locked_at is null and lims.session_end(last_seen_at, created_at, ${idle}, ${absolute}) > now()`.as(
+            'live',
+          ),
           sql<number>`(extract(epoch from last_seen_at + ${idle} - now()) * 1000)::integer`.as('idleLeftMs'),
           sql<number>`(extract(epoch from created_at + ${absolute} - now()) * 1000)::integer`.as('absoluteLeftMs'),
         ])
         .where('tokenHash', '=', hashToken(token))
         .where('session.endedAt', 'is', null)
-        .where('person.lockedAt', 'is', null)
-        .where(sql<boolean>`lims.session_end(last_seen_at, created_at, ${idle}, ${absolute}) > now()`)
         .executeTakeFirst();
-      return left ? { idleLimitMs: limits.idleMs, ...left } : refuse('noSession', SESSION_ENDED);
+      if (!session) return refuse('noSession', SESSION_ENDED);
+      const { labId, id, live, idleLeftMs, absoluteLeftMs } = session;
+      if (live) return { idleLimitMs: limits.idleMs, idleLeftMs, absoluteLeftMs };
+      await endLapsedSessions(db, limits, { labId, id });
+      return refuse('noSession', SESSION_ENDED);
     },
   });
 }

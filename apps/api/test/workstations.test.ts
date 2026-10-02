@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { audited } from '@lims/db';
 import { type Route, type RouteInput, routes, stepNames, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { endExpiredSessions, SESSION_LIMITS } from '../src/auth.ts';
+import { endLapsedSessions, SESSION_LIMITS } from '../src/auth.ts';
 import { type Account, type Answer, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_workstations_test');
@@ -367,7 +367,7 @@ describe('Lock and Switch user', () => {
     refusedWith(await browser.call(routes.unlock, { password: 'not-the-password' }), 'badCredentials');
     await api.advanceClock(ana, SESSION_LIMITS.decided.idleMs + 60_000);
     refusedWith(await browser.call(routes.unlock, { password: ana.password }), 'noSession');
-    await endExpiredSessions(api.db, SESSION_LIMITS.decided);
+    await endLapsedSessions(api.db, SESSION_LIMITS.decided);
     assert.deepEqual(
       (await eventsOf(ana.id)).map((e) => e.kind).sort(),
       ['IdleExpiry', 'Lock', 'SignInSucceeded', 'UnlockFailed'],

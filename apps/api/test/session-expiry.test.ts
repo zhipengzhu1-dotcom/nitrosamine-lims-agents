@@ -4,14 +4,14 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { routes, SESSION_ENDED } from '@lims/domain';
 import { audited } from '@lims/db';
 import { sql } from 'kysely';
-import { endExpiredSessions, SESSION_LIMITS } from '../src/auth.ts';
+import { endLapsedSessions, LOCKOUT_AFTER_FAILURES, SESSION_LIMITS } from '../src/auth.ts';
 import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_session_expiry_test');
 const { idleMs, absoluteMs } = SESSION_LIMITS.decided;
 const MINUTE_MS = 60_000;
 
-const sweep = () => endExpiredSessions(api.db, SESSION_LIMITS.decided);
+const sweep = () => endLapsedSessions(api.db, SESSION_LIMITS.decided);
 
 const sessionOf = (account: Account) =>
   api.superuser
@@ -107,41 +107,125 @@ it('running the sweep again writes no second expiry Access Event for the same se
   assert.deepEqual(await expiriesOf(person), first);
 });
 
-it('a request on a session past its limit, before the sweep reaches it, is refused as an ended session', async () => {
-  const person = await api.addPerson('expiry.unswept', ['Analyst']);
-  const client = await api.login(person);
-  await api.advanceClock(person, idleMs + MINUTE_MS);
-  const { lastSeenAt } = await sessionOf(person);
+const lockOut = async (account: Account) => {
+  const stranger = new Client(api.base);
+  for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
+    refusedWith(
+      await stranger.call(routes.login, { username: account.username, password: 'not-the-password', labId: api.labId }),
+      'badCredentials',
+    );
+  const lockout = await api.superuser
+    .selectFrom('accessEvent')
+    .select('at')
+    .where('subjectId', '=', account.id)
+    .where('kind', '=', 'Lockout')
+    .executeTakeFirst();
+  return lockout?.at ?? assert.fail('a Lockout Access Event');
+};
 
-  assert.equal(refusedWith(await client.call(routes.me), 'noSession'), SESSION_ENDED);
-  const refused = await sessionOf(person);
-  assert.deepEqual(
-    [refused.lastSeenAt, refused.endedAt],
-    [lastSeenAt, null],
-    'the refusal neither counts as activity nor ends the session',
-  );
-  assert.deepEqual(await expiriesOf(person), [], 'the refusal leaves the record to the sweep');
+for (const [limit, kind, lastFor] of [
+  ['idle', 'IdleExpiry', 0],
+  ['absolute', 'AbsoluteExpiry', absoluteMs - MINUTE_MS],
+] as const)
+  it(`a request on a session past its ${limit} limit ends it with one ${kind} Access Event at the computed instant, and neither the sweep nor a second request writes another`, async () => {
+    const person = await api.addPerson(`expiry.request-${limit}`, ['Analyst']);
+    const client = await api.login(person);
+    for (let elapsed = 0; elapsed < lastFor; elapsed += 10 * MINUTE_MS) {
+      await api.advanceClock(person, 10 * MINUTE_MS);
+      ok(await client.call(routes.me));
+    }
+    await api.advanceClock(person, idleMs + MINUTE_MS);
+    const { createdAt, lastSeenAt } = await sessionOf(person);
+    const end = Math.min(lastSeenAt.getTime() + idleMs, createdAt.getTime() + absoluteMs);
 
-  await sweep();
-  assert.deepEqual(
-    (await expiriesOf(person)).map((e) => e.at.getTime()),
-    [lastSeenAt.getTime() + idleMs],
-    'the sweep still stamps the computed instant',
+    assert.equal(refusedWith(await client.call(routes.me), 'noSession'), SESSION_ENDED);
+    const ended = await sessionOf(person);
+    assert.equal(ended.lastSeenAt.getTime(), lastSeenAt.getTime(), 'the refusal does not count as activity');
+    assert.equal(ended.endedAt?.getTime(), end, 'the session ended at its computed end');
+    const [event, ...others] = await expiriesOf(person);
+    assert.deepEqual(others, [], 'one expiry Access Event');
+    const { id, at, ...recorded } = event ?? assert.fail('an expiry Access Event');
+    assert.deepEqual(recorded, {
+      kind,
+      sessionLabId: ended.labId,
+      sessionId: ended.id,
+      sourceAddress: null,
+      roles: ['Analyst'],
+    });
+    assert.equal(at.getTime(), end, 'stamped at the computed end, not at the request');
+    const entry = await api.superuser
+      .selectFrom('auditEntry')
+      .select(['actor', 'role'])
+      .where(sql<boolean>`new_row ->> 'id' = ${id}`)
+      .executeTakeFirstOrThrow();
+    assert.deepEqual(entry, { actor: 'svc:session-sweep', role: 'system' }, 'written as the sweep writes it');
+
+    await sweep();
+    refusedWith(await client.call(routes.me), 'noSession');
+    assert.deepEqual(await expiriesOf(person), [event]);
+  });
+
+it('a request racing the sweep for the same lapsed session leaves one expiry Access Event', async () => {
+  const people = await Promise.all(
+    Array.from({ length: 5 }, (_, i) => api.addPerson(`expiry.race-${i}`, ['Analyst'])),
   );
+  const clients = await Promise.all(people.map((person) => api.login(person)));
+  for (const person of people) await api.advanceClock(person, idleMs + MINUTE_MS);
+
+  const answers = await Promise.all([...clients.map((client) => client.call(routes.me)), sweep()]);
+  for (const answer of answers.slice(0, -1)) refusedWith(answer as Awaited<ReturnType<Client['call']>>, 'noSession');
+  for (const person of people)
+    assert.deepEqual(
+      (await expiriesOf(person)).map((e) => e.kind),
+      ['IdleExpiry'],
+    );
 });
 
-it("a locked person's session past its limit is left to the sweep, which records its expiry", async () => {
-  const person = await api.addPerson('expiry.locked', ['Analyst']);
+it("the countdown's check on a lapsed session ends it with its expiry Access Event", async () => {
+  const person = await api.addPerson('expiry.countdown', ['Analyst']);
   const client = await api.login(person);
-  await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Lock a test person' }, (tx) =>
-    tx.updateTable('person').set({ lockedAt: sql`now()` }).where('id', '=', person.id).execute(),
-  );
   await api.advanceClock(person, idleMs + MINUTE_MS);
   const { lastSeenAt } = await sessionOf(person);
 
+  assert.equal(refusedWith(await client.call(routes.session), 'noSession'), SESSION_ENDED);
+  assert.deepEqual(
+    (await expiriesOf(person)).map((e) => [e.kind, e.at.getTime()]),
+    [['IdleExpiry', lastSeenAt.getTime() + idleMs]],
+  );
+  assert.equal((await sessionOf(person)).endedAt?.getTime(), lastSeenAt.getTime() + idleMs);
+});
+
+it("a session whose person is locked out ends at the Lockout's instant, with no expiry Access Event", async () => {
+  const person = await api.addPerson('expiry.lockout', ['Analyst']);
+  const client = await api.login(person);
+  const lockedOutAt = await lockOut(person);
+
   assert.equal(refusedWith(await client.call(routes.me), 'noSession'), SESSION_ENDED);
-  assert.equal((await sessionOf(person)).endedAt, null);
+  assert.equal((await sessionOf(person)).endedAt?.getTime(), lockedOutAt.getTime());
+  await api.advanceClock(person, idleMs + MINUTE_MS);
   await sweep();
+  assert.deepEqual(await expiriesOf(person), []);
+});
+
+it("the sweep ends a locked-out person's session at the Lockout's instant, before any request finds it", async () => {
+  const person = await api.addPerson('expiry.lockout-swept', ['Analyst']);
+  await api.login(person);
+  const lockedOutAt = await lockOut(person);
+
+  await sweep();
+  assert.equal((await sessionOf(person)).endedAt?.getTime(), lockedOutAt.getTime());
+  assert.deepEqual(await expiriesOf(person), []);
+});
+
+it("a locked person's session that lapsed before the lock ends at its own end, with its expiry Access Event", async () => {
+  const person = await api.addPerson('expiry.locked', ['Analyst']);
+  const client = await api.login(person);
+  await api.advanceClock(person, idleMs + MINUTE_MS);
+  const { lastSeenAt } = await sessionOf(person);
+  await lockOut(person);
+
+  assert.equal(refusedWith(await client.call(routes.me), 'noSession'), SESSION_ENDED);
+  assert.equal((await sessionOf(person)).endedAt?.getTime(), lastSeenAt.getTime() + idleMs);
   assert.deepEqual(
     (await expiriesOf(person)).map((e) => [e.kind, e.at.getTime()]),
     [['IdleExpiry', lastSeenAt.getTime() + idleMs]],
@@ -180,7 +264,7 @@ it('the sweep refuses limits other than the decided or demo ones, so no caller e
   const person = await api.addPerson('expiry.early', ['Analyst']);
   const client = await api.login(person);
   await assert.rejects(
-    endExpiredSessions(api.db, { idleMs: 1, absoluteMs: absoluteMs }),
+    endLapsedSessions(api.db, { idleMs: 1, absoluteMs: absoluteMs }),
     (err: { code?: string }) => err.code === 'LA003',
   );
   assert.deepEqual(await expiriesOf(person), []);
@@ -188,7 +272,7 @@ it('the sweep refuses limits other than the decided or demo ones, so no caller e
 });
 
 it('the sweep takes every login configuration the API offers', async () => {
-  for (const limits of Object.values(SESSION_LIMITS)) await endExpiredSessions(api.db, limits);
+  for (const limits of Object.values(SESSION_LIMITS)) await endLapsedSessions(api.db, limits);
 });
 
 it("the API's database role cannot move or end a session itself, so it cannot choose when an expiry is stamped or skip it", async () => {
@@ -231,7 +315,7 @@ it('a sweep that fails opens a System Incident, and the next sweep records the e
       .where('step', '=', 'expirySweep')
       .execute();
   const sweepAs = (grant: 'grant' | 'revoke') =>
-    sql`${sql.raw(grant)} execute on function lims.end_expired_sessions(interval, interval) ${sql.raw(grant === 'grant' ? 'to' : 'from')} lims_app`.execute(
+    sql`${sql.raw(grant)} execute on function lims.end_lapsed_sessions(interval, interval, uuid, uuid) ${sql.raw(grant === 'grant' ? 'to' : 'from')} lims_app`.execute(
       api.superuser,
     );
 
