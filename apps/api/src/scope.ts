@@ -27,13 +27,37 @@ type CompanyTable =
   | 'identityVerification'
   | 'credentialLink'
   | 'signatureStatement';
-type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session' | 'systemIncident'>;
+type LabTable = Exclude<keyof DB, CompanyTable | 'accessEvent' | 'auditEntry' | 'session' | 'systemIncident'>;
 
 function inLab(q: Kysely<DB>, labId: string) {
   const ofLab = (table: LabTable) => sql<boolean>`${sql.ref(`${table}.labId`)} = ${labId}`;
   // Typed without the Lab tables, so a Lab row can only be reached through the filtered builders below.
   const company: Kysely<Pick<DB, CompanyTable>> = q;
   return {
+    /**
+     * Reads the Access Events this Lab sees: those of its sessions, a Lab Switch out of one of them, those of no
+     * session, and every Lockout, which ends the person's sessions in every Lab.
+     */
+    accessEvents: () =>
+      q
+        .selectFrom('accessEvent')
+        .where((eb) =>
+          eb.or([
+            eb('sessionLabId', '=', labId),
+            eb('previousSessionLabId', '=', labId),
+            eb('sessionLabId', 'is', null),
+            eb('kind', '=', 'Lockout'),
+          ]),
+        ),
+    /** Reads this Lab's sessions as `session`, without the token hash, so no reader can learn what proves one. */
+    sessions: () =>
+      q.selectFrom(
+        q
+          .selectFrom('session')
+          .select(['id', 'personId', 'workstationId', 'createdAt', 'lastSeenAt', 'endedAt'])
+          .where('labId', '=', labId)
+          .as('session'),
+      ),
     from: <T extends LabTable>(table: T) =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot type a select from a generic Lab table; ofLab filters it
       (q.selectFrom(table) as unknown as SelectQueryBuilder<DB, T, {}>).where(ofLab(table)),

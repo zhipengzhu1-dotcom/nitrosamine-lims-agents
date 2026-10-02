@@ -409,6 +409,16 @@ th {
   height: 44px;
   font-size: 13px;
 }
+/* A link in running text or a table cell, tall enough for a gloved finger. */
+.tap {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+.ended {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
 .raw {
   width: min(720px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);

@@ -306,6 +306,14 @@ export async function reauthenticate(
 
 const interval = (ms: number) => sql<string>`${ms} * interval '1 millisecond'`;
 
+/**
+ * When the joined `session` row ended, or, if nothing has ended it yet, when it lapses under its joined `person` row's
+ * lock: so a session that a Lockout ended reads as ended at the Lockout's instant before any request or sweep has noticed.
+ */
+export const sessionEnd = (limits: SessionLimits) =>
+  sql<Date>`coalesce(session.ended_at, lims.session_lapse(session.last_seen_at, session.created_at, person.locked_at,
+    ${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}))`;
+
 const lockedMessage = (displayName: string): Sentence =>
   `This screen is locked. ${displayName} unlocks it with their password, or another person signs in with Switch user.`;
 
@@ -678,7 +686,10 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
   });
 
   // Postgres 18's old.locked_at tells whether this very update changed the lock, so a repeat writes no second event.
+  // The company chain, which the Access Event below needs, is taken before the session row, the order end_session takes,
+  // so a Lock and a sign-out on one session cannot each hold what the other waits for.
   const setLocked = async (tx: Transaction<DB>, session: SessionKey, locked: boolean) => {
+    await sql`select lims.lock_chains('company')`.execute(tx);
     const row = await tx
       .updateTable('session')
       .set({ lockedAt: locked ? sql`coalesce(locked_at, now())` : null })

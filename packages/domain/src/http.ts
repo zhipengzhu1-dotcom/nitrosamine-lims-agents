@@ -238,6 +238,63 @@ const identityVerification = Type.Object({
 export type IdentityVerification = Static<typeof identityVerification>;
 /** The Lab's staff, and the Identity Verifications its Admins recorded that no account names yet. */
 const staff = Type.Object({ people: Type.Array(staffPerson), awaitingAccount: Type.Array(identityVerification) });
+/** Every Access Event kind but Lockout, which alone lists the sessions it ended. */
+const accessEventKindButLockout = Type.Enum({
+  SignInSucceeded: 'SignInSucceeded',
+  SignInFailed: 'SignInFailed',
+  SignOut: 'SignOut',
+  IdleExpiry: 'IdleExpiry',
+  AbsoluteExpiry: 'AbsoluteExpiry',
+  Lock: 'Lock',
+  Unlock: 'Unlock',
+  UnlockFailed: 'UnlockFailed',
+  Takeover: 'Takeover',
+  LabSwitch: 'LabSwitch',
+  LabSwitchFailed: 'LabSwitchFailed',
+  ReauthenticationFailed: 'ReauthenticationFailed',
+  PasswordSet: 'PasswordSet',
+} as const satisfies { [K in Exclude<db.AccessEventKind, 'Lockout'>]: K });
+const signInFailure = Type.Enum({
+  UnknownUserId: 'UnknownUserId',
+  WrongPassword: 'WrongPassword',
+  WrongPasswordOnLockedAccount: 'WrongPasswordOnLockedAccount',
+  AccountLocked: 'AccountLocked',
+  NoCredential: 'NoCredential',
+  NoLab: 'NoLab',
+  NoLabChosen: 'NoLabChosen',
+  NoMembership: 'NoMembership',
+  NotInWorkstationLab: 'NotInWorkstationLab',
+  OtherUserId: 'OtherUserId',
+  SessionEnded: 'SessionEnded',
+  WrongUserId: 'WrongUserId',
+} as const satisfies { [K in db.SignInFailure]: K });
+/** A session a Lockout ended, at the Lockout's instant: when it was signed in, and on which Workstation. */
+const endedSession = Type.Object({ id: uuid, signedInAt: instant, workstation: nullable(Type.String()) });
+export type EndedSession = Static<typeof endedSession>;
+const listedEvent = {
+  id: uuid,
+  at: instant,
+  /** The Workstation it came from, if that is one of this Lab's. */
+  workstation: nullable(Type.String()),
+  sourceAddress: nullable(Type.String()),
+  failureReason: nullable(signInFailure),
+};
+/** One of a person's Access Events; a Lockout lists the sessions in this Lab that it ended. */
+const listedAccessEvent = Type.Union([
+  Type.Object({ ...listedEvent, kind: Type.Literal('Lockout'), endedSessions: Type.Array(endedSession) }),
+  Type.Object({ ...listedEvent, kind: accessEventKindButLockout }),
+]);
+export type ListedAccessEvent = Static<typeof listedAccessEvent>;
+/**
+ * A person's Access Events as this Lab's Admin reads them, newest first: those of sessions in this Lab, those of no
+ * session, and every Lockout. `earlierNotListed` says that older ones exist beyond the oldest listed.
+ */
+const personAccessEvents = Type.Object({
+  person: Type.Object({ id: uuid, printedName: Type.String(), username: Type.String() }),
+  events: Type.Array(listedAccessEvent),
+  earlierNotListed: Type.Boolean(),
+});
+export type PersonAccessEvents = Static<typeof personAccessEvents>;
 /** The roles an Admin grants. Platform Operator is held outside the LIMS, and Customer Users get portal accounts. */
 export const grantableRoles = ['SampleCustodian', 'Analyst', 'Reviewer', 'QA', 'LabManager', 'Admin'] as const;
 /** The one-time link's token goes to the person, who sets their own password with it; the LIMS keeps only its hash. */
@@ -570,6 +627,7 @@ export const routes = {
     accountCreated,
   ),
   issueLink: route('POST', '/api/staff/links', { body: Type.Object({ personId: uuid }, closed) }, accountCreated),
+  accessEvents: route('GET', '/api/staff/:id/access-events', { params: byId }, personAccessEvents),
   grantMembership: route(
     'POST',
     '/api/staff/memberships',

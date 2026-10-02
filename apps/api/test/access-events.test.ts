@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import { it } from 'node:test';
+import { setTimeout as pause } from 'node:timers/promises';
 import { audited, type Role } from '@lims/db';
 import { routes } from '@lims/domain';
 import { sql } from 'kysely';
-import { LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
+import { LOCKOUT_AFTER_FAILURES, SESSION_LIMITS } from '../src/auth.ts';
+import { labScope } from '../src/scope.ts';
 import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_access_events_test');
 const SYSTEM = { actor: 'svc:test', role: 'system', reason: 'Arrange an Access Event test' };
+const ada = await api.login(api.person('ada'));
 
 const signIn = (username: string, password: string) =>
   new Client(api.base).call(routes.login, { username, password, labId: api.labId });
@@ -285,4 +288,196 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong password writes one lockout Access Eve
     'Lockout',
     'WrongPasswordOnLockedAccount',
   ]);
+});
+
+const sessionsOf = (account: Account) =>
+  api.superuser
+    .selectFrom('session')
+    .select(['id', 'labId', 'endedAt'])
+    .where('personId', '=', account.id)
+    .orderBy('createdAt')
+    .execute();
+const lockOut = async (account: Account) => {
+  for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
+    refusedWith(await signIn(account.username, 'not-the-password'), 'badCredentials');
+};
+
+it("under a Lockout, the Admin sees each of the person's sessions in this Lab that it ended, whether or not a request has noticed yet", async () => {
+  const person = await api.addPerson('access.log-lockout', ['Analyst']);
+  await audited(api.superuser, SYSTEM, (tx) =>
+    tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
+  );
+  await api.login(person);
+  await api.advanceClock(person, SESSION_LIMITS.decided.idleMs + 60_000);
+  ok(await (await api.login(person)).call(routes.logout));
+  const noticed = await api.login(person);
+  await api.login(person);
+  await api.login(person, api.qcLabId);
+  await lockOut(person);
+  refusedWith(await noticed.call(routes.me), 'noSession');
+
+  const [idleBefore, signedOut, ended, notYetNoticed, inQc] = await sessionsOf(person);
+  assert.ok(idleBefore && signedOut?.endedAt && ended?.endedAt && notYetNoticed && inQc, 'five sessions');
+  assert.equal(idleBefore.endedAt, null, 'no request or sweep has ended the session idle before the Lockout');
+  assert.equal(notYetNoticed.endedAt, null, 'no request or sweep has ended the second live session yet');
+  const { person: listed, events, earlierNotListed } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  assert.deepEqual(listed, { id: person.id, printedName: person.username, username: person.username });
+  assert.equal(earlierNotListed, false);
+  const lockout = events.find((e) => e.kind === 'Lockout');
+  assert.ok(lockout?.kind === 'Lockout', 'the Lockout is listed');
+  assert.deepEqual(
+    lockout.endedSessions.map((s) => [s.id, s.workstation]),
+    [
+      [ended.id, null],
+      [notYetNoticed.id, null],
+    ],
+    'the sessions in this Lab live at the Lockout, not one idle or signed out before it, nor the one in the QC Lab',
+  );
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    [
+      'Lockout',
+      ...Array.from({ length: LOCKOUT_AFTER_FAILURES }, () => 'SignInFailed'),
+      'SignInSucceeded',
+      'SignInSucceeded',
+      'SignOut',
+      'SignInSucceeded',
+      'SignInSucceeded',
+    ],
+    'newest first, with no event of the session in the QC Lab',
+  );
+});
+
+it("a person's Access Events are read only by this Lab's Admin, and only for this Lab's staff", async () => {
+  const person = await api.addPerson('access.log-who', ['Analyst']);
+  const quinn = await api.login(api.person('quinn'));
+  refusedWith(await quinn.call(routes.accessEvents, { id: person.id }), 'role');
+  refusedWith(await ada.call(routes.accessEvents, { id: api.person('cora').id }), 'notFound');
+});
+
+it("the Admin's list of a person's Access Events stops at the newest 100, and says that earlier ones exist", async () => {
+  const person = await api.addPerson('access.log-many', ['Analyst']);
+  await audited(api.superuser, SYSTEM, (tx) =>
+    tx
+      .insertInto('accessEvent')
+      .values(
+        Array.from({ length: 101 }, () => ({
+          kind: 'SignInFailed' as const,
+          failureReason: 'WrongPassword' as const,
+          subjectId: person.id,
+          sourceAddress: '192.0.2.1',
+          roles: ['Analyst' as const],
+        })),
+      )
+      .execute(),
+  );
+  const { events, earlierNotListed } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  assert.equal(events.length, 100);
+  assert.equal(earlierNotListed, true);
+});
+
+/** Waits until a backend in this test's database waits on a lock, or `request` settles, for at most about two seconds. */
+async function blockedOrSettled(request: Promise<unknown>): Promise<void> {
+  const settled = request.then(
+    () => true,
+    () => true,
+  );
+  for (let polls = 0; polls < 100; polls++) {
+    const { rows } = await sql<{ waiting: boolean }>`select exists (
+        select from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'
+      ) as waiting`.execute(api.superuser);
+    if (rows[0]?.waiting || (await Promise.race([settled, pause(20, false)]))) return;
+  }
+}
+
+it('a sign-out that meets a Lockout not yet committed ends its session at the Lockout, which lists it, and records no sign-out', async () => {
+  const person = await api.addPerson('access.signout-race', ['Analyst']);
+  const client = await api.login(person);
+  let signingOut: Promise<unknown> = Promise.resolve();
+  await audited(api.db, SYSTEM, async (tx) => {
+    await tx
+      .updateTable('person')
+      .set({ failedLogins: LOCKOUT_AFTER_FAILURES, lockedAt: sql`clock_timestamp()` })
+      .where('id', '=', person.id)
+      .execute();
+    await tx
+      .insertInto('accessEvent')
+      .values({ kind: 'Lockout', subjectId: person.id, sourceAddress: '192.0.2.1', roles: ['Analyst'] })
+      .execute();
+    signingOut = client.call(routes.logout);
+    await blockedOrSettled(signingOut);
+  });
+  await signingOut;
+
+  const { lockedAt } = await api.superuser
+    .selectFrom('person')
+    .select('lockedAt')
+    .where('id', '=', person.id)
+    .executeTakeFirstOrThrow();
+  const [session] = await sessionsOf(person);
+  assert.ok(session && lockedAt);
+  assert.deepEqual(session.endedAt, lockedAt, 'the session ended at the Lockout, not at the sign-out after it');
+  const { events } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  const lockout = events.find((e) => e.kind === 'Lockout');
+  assert.ok(lockout?.kind === 'Lockout');
+  assert.deepEqual(
+    lockout.endedSessions.map((s) => s.id),
+    [session.id],
+  );
+  assert.ok(!events.some((e) => e.kind === 'SignOut'), 'no sign-out is recorded for a session the Lockout ended');
+});
+
+it('a Lock waits for the company chain before it holds its session, the order a sign-out takes, so the two cannot deadlock', async () => {
+  const person = await api.addPerson('access.lock-order', ['Analyst']);
+  const client = await api.login(person);
+  const [session] = await sessionsOf(person);
+  assert.ok(session);
+  let locking: Promise<unknown> = Promise.resolve();
+  let sessionHeld = false;
+  await audited(api.db, SYSTEM, async (tx) => {
+    await sql`select lims.lock_chains('company')`.execute(tx);
+    locking = client.call(routes.lock).then((answer) => ok(answer));
+    await blockedOrSettled(locking);
+    try {
+      await sql`select from lims.session where id = ${session.id} for update nowait`.execute(api.superuser);
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === '55P03')) throw error;
+      sessionHeld = true;
+    }
+  });
+  await locking;
+  assert.equal(sessionHeld, false, 'the Lock did not hold the session while it waited for the chain');
+});
+
+it("the Lab scope reads no other Lab's Access Events or sessions, and no session's token hash", async () => {
+  const person = await api.addPerson('access.scope', ['Analyst']);
+  await audited(api.superuser, SYSTEM, (tx) =>
+    tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
+  );
+  await api.login(person, api.qcLabId);
+  const scope = labScope(api.db, ok(await ada.call(routes.me)));
+
+  assert.deepEqual(
+    await scope.accessEvents().select('kind').where('subjectId', '=', person.id).execute(),
+    [],
+    'the sign-in to the QC Lab is out of reach',
+  );
+  assert.deepEqual(await scope.sessions().selectAll().where('session.personId', '=', person.id).execute(), []);
+  const [own] = await scope.sessions().selectAll().where('session.personId', '=', api.person('ada').id).execute();
+  assert.ok(own, "the Admin's own session here is in reach");
+  assert.ok(!('tokenHash' in own), 'without its token hash');
+});
+
+it('the Lab a person switched out of sees the Lab Switch that ended its session', async () => {
+  const person = await api.addPerson('access.log-switch', ['Analyst']);
+  await audited(api.superuser, SYSTEM, (tx) =>
+    tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
+  );
+  const client = await api.login(person);
+  ok(await client.call(routes.switchLab, { username: person.username, password: person.password, labId: api.qcLabId }));
+  const { events } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    ['LabSwitch', 'SignInSucceeded'],
+  );
 });
