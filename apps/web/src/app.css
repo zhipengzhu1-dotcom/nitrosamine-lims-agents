@@ -188,43 +188,33 @@ p {
   }
 }
 /* Without scroll-state queries, only a phone's bar fades, because it always overflows. A scroll timeline keeps its end state when a resize makes the bar fit, which would fade the first tab. */
-@supports not (container-type: scroll-state) {
-  @media (max-width: 640px) {
-    @supports (animation-timeline: scroll()) {
-      .top nav::before {
-        animation: more-before linear both;
-        animation-timeline: scroll(nearest inline);
-      }
-      .top nav::after {
-        animation: more-after linear both;
-        animation-timeline: scroll(nearest inline);
-      }
+@media (max-width: 640px) {
+  @supports (not (container-type: scroll-state)) and (animation-timeline: scroll()) {
+    .top nav::before,
+    .top nav::after {
+      animation: more-tabs linear both;
+      animation-timeline: scroll(nearest inline);
     }
-    /* Without scroll timelines the right edge always fades, and the veil takes its own room so the last tab scrolls clear of it. */
-    @supports not (animation-timeline: scroll()) {
-      .top nav::after {
-        margin-left: 0;
-        opacity: 1;
-      }
+    .top nav::after {
+      animation-direction: reverse;
+    }
+  }
+  /* Without scroll timelines the right edge always fades, and the veil takes its own room so the last tab scrolls clear of it. */
+  @supports not ((container-type: scroll-state) or (animation-timeline: scroll())) {
+    .top nav::after {
+      margin-left: 0;
+      opacity: 1;
     }
   }
 }
-@keyframes more-before {
+/* The left veil's opacity over the bar's scroll; the right veil plays it backwards. */
+@keyframes more-tabs {
   from {
     opacity: 0;
   }
   8%,
   to {
     opacity: 1;
-  }
-}
-@keyframes more-after {
-  from,
-  92% {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
   }
 }
 .top nav a {
@@ -237,6 +227,11 @@ p {
   font-weight: 600;
   text-decoration: none;
   border-bottom: 3px solid transparent;
+}
+/* A tab reached from the keyboard draws above the fade, so its label and focus ring show in full. */
+.top nav a:focus-visible {
+  position: relative;
+  z-index: 1;
 }
 .top nav a.active {
   color: var(--ink);
