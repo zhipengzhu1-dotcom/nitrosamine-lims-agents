@@ -6,6 +6,7 @@ import {
   type RouteInput,
   type RouteReply,
   routes,
+  type SessionClock,
   type SignedInView,
 } from '@lims/domain';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -45,11 +46,11 @@ function pageNow(): number {
 }
 
 /**
- * The session's end by the page's clock. Each reply restarts the idle count from when its request left, which is no
- * later than the server restarts its own, so the page never shows a session the server has ended. Only a reply
- * restarts it: a refusal or a failure may not have reached the session.
+ * The session's ends by the page's clock. Each reply to a person's request restarts the idle count from when the
+ * request left, which is no later than the server restarts its own. Only such a reply restarts it: a refusal or a
+ * failure may not have reached the session, and the countdown's own check does not count as activity.
  */
-let session: { idleLimitMs: number; absoluteEndsAt: number; lastSentAt: number } | null = null;
+let session: { idleLimitMs: number; idleEndsAt: number; absoluteEndsAt: number } | null = null;
 let secondsLeft: number | null = null;
 let ticker = 0;
 const watchers = new Set<() => void>();
@@ -64,20 +65,32 @@ function setSecondsLeft(left: number | null) {
 const END_GRACE_MS = 5000;
 let askedAt: number | null = null;
 
+function setClock(sentAt: number, { idleLimitMs, idleLeftMs, absoluteLeftMs }: SessionClock) {
+  session = { idleLimitMs, idleEndsAt: sentAt + idleLeftMs, absoluteEndsAt: sentAt + absoluteLeftMs };
+}
+
+/** Asks how long the session has left, without touching it, and counts down from the answer. */
+async function check(): Promise<void> {
+  const sentAt = pageNow();
+  const clock = await api(routes.session);
+  if (session) setClock(sentAt, clock);
+}
+
 /**
- * Counts down, and once the page's count has run out by more than END_GRACE_MS asks the server. Only the server's
- * refusal ends the session on screen; if the server still answers, the count restarts from its reply.
+ * Counts down, and once the page's count has run out by more than END_GRACE_MS asks the server without touching the
+ * session. Only the server's refusal ends the session on screen; if the server still holds it, for instance because
+ * another tab was used, the count restarts from what the server says is left.
  */
 function tick() {
   if (!session) return;
   const now = pageNow();
-  const endsAt = Math.min(session.lastSentAt + session.idleLimitMs, session.absoluteEndsAt);
+  const endsAt = Math.min(session.idleEndsAt, session.absoluteEndsAt);
   setSecondsLeft(Math.max(0, Math.ceil((endsAt - now) / 1000)));
   if (now < endsAt + END_GRACE_MS || (askedAt !== null && now < askedAt + END_GRACE_MS)) return;
   askedAt = now;
   // A noSession refusal ends the session in call(). Any other failure is asked again a grace period later, and is
   // rethrown with its context, so it reaches the console instead of vanishing.
-  resume().catch((err: unknown) => {
+  check().catch((err: unknown) => {
     if (err instanceof Refused && err.kind === 'noSession') return;
     throw new Error('could not ask the LIMS whether the session has ended', { cause: err });
   });
@@ -93,8 +106,7 @@ function endSession(message: string) {
 async function startSession(request: () => Promise<SignedInView>): Promise<SignedInView> {
   const sentAt = pageNow();
   const view = await request();
-  const { idleLimitMs, absoluteLeftMs } = view.session;
-  session = { idleLimitMs, absoluteEndsAt: sentAt + absoluteLeftMs, lastSentAt: sentAt };
+  setClock(sentAt, view.session);
   clearInterval(ticker);
   ticker = window.setInterval(tick, 1000);
   tick();
@@ -141,7 +153,8 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
     throw refused;
   }
   if (refused) throw refused;
-  if (session) session.lastSentAt = Math.max(session.lastSentAt, sentAt);
+  if (session && route.url !== routes.session.url)
+    session.idleEndsAt = Math.max(session.idleEndsAt, sentAt + session.idleLimitMs);
   // oxlint-disable-next-line typescript/consistent-type-assertions -- a wire body has no static type; the API serializes every 2xx through this route's reply schema, and the web does not repeat the check
   return json as RouteReply<R>;
 }

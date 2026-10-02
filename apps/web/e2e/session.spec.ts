@@ -29,7 +29,7 @@ async function idleOnTheServer(page: Page) {
 const FULL_COUNT = /^Session ends in (8:00:00|7:59:\d\d)$/;
 
 const answered = (page: Page, status: number) =>
-  page.waitForResponse((res) => res.url().endsWith('/api/me') && res.status() === status);
+  page.waitForResponse((res) => res.url().endsWith('/api/session') && res.status() === status);
 
 test('the Bench Rail counts down to the idle end, and returns to sign-in only when the server says the session has ended', async ({
   page,
@@ -54,7 +54,10 @@ test('the Bench Rail counts down to the idle end, and returns to sign-in only wh
   const kept = answered(page, 200);
   await page.clock.fastForward('08:00:10');
   await kept;
-  await expect(countdown, 'the server still holds the session, so the count restarts').toHaveText(FULL_COUNT);
+  await expect(
+    countdown,
+    'the server still holds the session, so the count restarts from what it says is left',
+  ).toHaveText(FULL_COUNT);
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
 
   await idleOnTheServer(page);

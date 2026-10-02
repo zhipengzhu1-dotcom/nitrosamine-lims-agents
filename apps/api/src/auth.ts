@@ -187,7 +187,7 @@ export async function actorFor(db: Kysely<DB>, token: string | undefined, limits
       roles: await rolesIn(db, session.personId, session.labId),
     },
     session: key,
-    clock: { idleLimitMs: limits.idleMs, absoluteLeftMs },
+    clock: { idleLimitMs: limits.idleMs, idleLeftMs: limits.idleMs, absoluteLeftMs },
   };
 }
 
@@ -232,7 +232,7 @@ function typedUserIdDigest(key: Buffer, typed: string) {
   return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: typed.length };
 }
 
-/** Signs a person in. Every attempt, refused or not, writes its Access Event in a transaction of its own that commits. */
+/** Signs a person in, and reads how long a session has left without touching it. Every sign-in attempt, refused or not, writes its Access Event in a transaction of its own that commits. */
 export function loginRoutes(
   app: App,
   db: Kysely<DB>,
@@ -308,6 +308,28 @@ export function loginRoutes(
       reply.setCookie(SESSION_COOKIE, token);
       const { actor, clock } = await actorFor(db, token, limits);
       return { ...actor, session: clock };
+    },
+  });
+  app.route({
+    ...routes.session,
+    handler: async (req) => {
+      const token = req.cookies[SESSION_COOKIE];
+      if (!token) return refuse('noSession', 'sign in first');
+      const idle = interval(limits.idleMs);
+      const absolute = interval(limits.absoluteMs);
+      const left = await db
+        .selectFrom('session')
+        .innerJoin('person', 'person.id', 'session.personId')
+        .select([
+          sql<number>`(extract(epoch from last_seen_at + ${idle} - now()) * 1000)::integer`.as('idleLeftMs'),
+          sql<number>`(extract(epoch from created_at + ${absolute} - now()) * 1000)::integer`.as('absoluteLeftMs'),
+        ])
+        .where('tokenHash', '=', hashToken(token))
+        .where('session.endedAt', 'is', null)
+        .where('person.lockedAt', 'is', null)
+        .where(sql<boolean>`lims.session_end(last_seen_at, created_at, ${idle}, ${absolute}) > now()`)
+        .executeTakeFirst();
+      return left ? { idleLimitMs: limits.idleMs, ...left } : refuse('noSession', SESSION_ENDED);
     },
   });
 }

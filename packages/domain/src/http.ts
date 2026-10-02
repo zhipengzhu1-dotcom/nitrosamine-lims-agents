@@ -56,11 +56,13 @@ const actorContext = Type.Object({
 });
 export type ActorContext = Static<typeof actorContext>;
 /**
- * How long the session lasts from this answer: `idleLimitMs` if no request follows, and `absoluteLeftMs` at most.
+ * How long the session lasts from this answer: `idleLeftMs` if no request follows, `absoluteLeftMs` at most, and
+ * `idleLimitMs` from each request that follows.
  * Durations, not instants, so the web counts down without comparing its clock with the server's.
  */
 const sessionClock = Type.Object({
   idleLimitMs: Type.Integer({ minimum: 1 }),
+  idleLeftMs: Type.Integer({ minimum: 0 }),
   absoluteLeftMs: Type.Integer({ minimum: 0 }),
 });
 export type SessionClock = Static<typeof sessionClock>;
@@ -231,6 +233,8 @@ export const routes = {
   login: route('POST', '/api/login', { body: credentials }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
   me: route('GET', '/api/me', {}, signedIn),
+  /** Reads how long the session has left without counting as activity, for the web's countdown. */
+  session: route('GET', '/api/session', {}, sessionClock),
   lookups: route('GET', '/api/lookups', {}, lookups),
   tests: route('GET', '/api/tests', {}, Type.Array(testRow)),
   test: route('GET', '/api/tests/:id', { params: byId }, testView),

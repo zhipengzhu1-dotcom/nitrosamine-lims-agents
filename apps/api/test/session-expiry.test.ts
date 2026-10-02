@@ -251,3 +251,24 @@ it('a sweep that fails opens a System Incident, and the next sweep records the e
     ['IdleExpiry'],
   );
 });
+
+it("the countdown's check reads the time left without counting as activity, so a second tab cannot keep a session alive", async () => {
+  const person = await api.addPerson('expiry.peek', ['Analyst']);
+  const tabA = await api.login(person);
+  const tabB = new Client(api.base);
+  tabB.cookie = tabA.cookie;
+  await api.advanceClock(person, 10 * MINUTE_MS);
+  const { lastSeenAt } = await sessionOf(person);
+
+  const left = ok(await tabB.call(routes.session));
+  assert.equal(left.idleLimitMs, idleMs);
+  assert.ok(
+    left.idleLeftMs <= 5 * MINUTE_MS && left.idleLeftMs > 4 * MINUTE_MS,
+    `five minutes of idle time left, not ${left.idleLeftMs} ms`,
+  );
+  assert.deepEqual((await sessionOf(person)).lastSeenAt, lastSeenAt, 'the check did not touch the session');
+
+  await api.advanceClock(person, 6 * MINUTE_MS);
+  assert.equal(refusedWith(await tabB.call(routes.session), 'noSession'), SESSION_ENDED);
+  assert.equal(refusedWith(await tabA.call(routes.me), 'noSession'), SESSION_ENDED, 'ended at the idle limit');
+});
