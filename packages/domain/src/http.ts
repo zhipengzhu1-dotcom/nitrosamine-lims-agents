@@ -337,17 +337,36 @@ const lookups = Type.Object({
   methods: Type.Array(Type.Object({ id: uuid, code: Type.String(), version: Type.String(), title: Type.String() })),
   analysts: Type.Array(Type.Object({ id: uuid, displayName: Type.String() })),
 });
-/** How a recomputed chain stands: Intact through its last entry, or Broken at its first failure. */
+/** How a recomputed chain stands: Intact through its last entry, or Broken from its first break on. */
 export const chainVerdict = Type.Union([Type.Literal('Intact'), Type.Literal('Broken')]);
 export type ChainVerdict = Static<typeof chainVerdict>;
+/** Where a System Incident stands: Open until its actions are recorded and acknowledged, then Closed. */
+const incidentState = Type.Enum({
+  Open: 'Open',
+  Acknowledged: 'Acknowledged',
+  Closed: 'Closed',
+} as const satisfies { [K in db.IncidentState]: K });
+export type IncidentState = Static<typeof incidentState>;
+/**
+ * One break chain verification found: its first entry that fails to verify (one past the last for a moved head), and
+ * the System Incident that records it in the state it is in now. The same break names the same incident on every
+ * verification, whatever its state; a break at another entry, or one tampered with again, has its own. Past the first
+ * 100 breaks of a chain, one more names every break after them, with their count.
+ */
+const chainBreak = Type.Object({
+  entry: seq,
+  failure: Type.String(),
+  incident: Type.String({ pattern: `^${referencePattern}$` }),
+  incidentState,
+});
+export type ChainBreak = Static<typeof chainBreak>;
 const chainVerification = Type.Object({
   chain: chainKind,
   verdict: chainVerdict,
   lastEntry: seq,
   intactThrough: seq,
-  firstFailure: nullable(seq),
-  /** The System Incident a break opened, the same on every verification that finds the same first failing entry. */
-  incident: nullable(Type.String({ pattern: `^${referencePattern}$` })),
+  /** Every break, in entry order; none when the chain is Intact. */
+  breaks: Type.Array(chainBreak),
   report: Type.String(),
 });
 export type ChainVerification = Static<typeof chainVerification>;
@@ -395,7 +414,7 @@ const systemIncident = Type.Object({
     RepeatedSignInOnLockedAccount: 'RepeatedSignInOnLockedAccount',
     ChainVerifyFailure: 'ChainVerifyFailure',
   } as const satisfies { [K in db.IncidentKind]: K }),
-  state: Type.Enum({ Open: 'Open' } as const satisfies { [K in db.IncidentState]: K }),
+  state: incidentState,
   /** The failing step and error class of a failure of the LIMS; null for a sign-in incident. */
   step: nullable(Type.String()),
   recordId: nullable(uuid),
@@ -406,9 +425,15 @@ const systemIncident = Type.Object({
   subjectId: nullable(uuid),
   sourceAddress: nullable(Type.String()),
   typedUserIdHmac: nullable(sha256Hex),
-  /** What a chain-verify failure names: the chain as the Audit Trail names it ('company' or the Lab's ID), and its first failing entry. */
+  /**
+   * What a chain-verify failure names: the chain as the Audit Trail names it ('company' or the Lab's ID), the first and
+   * last entries its breaks cover, and how many breaks it records (one, or every break after the first 100). The last
+   * two are null on an incident opened before they were recorded.
+   */
   chain: nullable(Type.Union([Type.Literal('company'), uuid])),
   firstFailure: nullable(seq),
+  lastFailure: nullable(seq),
+  breakCount: nullable(Type.Integer({ minimum: 1 })),
   sqlstate: nullable(Type.String()),
   constraintName: nullable(Type.String()),
   /** The database's insert time. */

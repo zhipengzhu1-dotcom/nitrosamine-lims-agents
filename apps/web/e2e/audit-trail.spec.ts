@@ -210,15 +210,79 @@ test('QA verifying a broken chain sees Broken beside that chain, in its own glyp
   const { methods } = await (await page.request.get('/api/lookups')).json();
   await page.goto(`/#/trails/method/${methods[0].id}`);
   await page.getByRole('button', { name: 'Verify chain' }).click();
-  const chains = page.locator('.chains li');
-  await expect(chains).toHaveText([
-    /^Lab chain Broken entry 1 fails to verify; intact through entry 0; recorded as System Incident \w{8}$/,
-    /^Company chain Intact verified through entry \d+$/,
-  ]);
-  const [broken, intact] = [chains.first().locator('.status'), chains.last().locator('.status')];
+  const chains = page.locator('.chains > li');
+  await expect(chains).toHaveCount(2);
+  await expect(chains.first()).toContainText(/^Lab chain Broken intact through entry 0/);
+  await expect(chains.first().locator('.breaks li').first()).toHaveText(
+    /^entry 1 fails to verify, recorded as System Incident \w{8} Open$/,
+  );
+  await expect(chains.last()).toHaveText(/^Company chain Intact verified through entry \d+$/);
+  const [broken, intact] = [chains.first().locator('.status').first(), chains.last().locator('.status')];
   await expect(broken).toHaveCSS('color', 'rgb(179, 38, 30)');
   await expect(intact).toHaveCSS('color', INTACT_COLOUR);
   await expect(broken.locator('path')).toHaveAttribute('d', 'M4 4l8 8M12 4l-8 8');
   await expect(intact.locator('path')).toHaveAttribute('d', TICK);
+  await signOut(page);
+});
+
+/** Writes one more entry on the QC Lab's chain and alters it, so this run has a break of its own; returns its entry. */
+function breakANewQcEntry(): string {
+  giveQaTheQcLabAndAlterItsChain();
+  const printed = execFileSync(
+    '../../scripts/pg.sh',
+    ['psql', '-qAt', '-v', 'ON_ERROR_STOP=1', '--single-transaction', '-d', E2E_DATABASE],
+    {
+      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
+                     set_config('lims.reason', 'Write an entry on the QC Lab chain to break (e2e)', true);
+              update lims.lab set name = name where code = 'QC';
+              set local session_replication_role = replica;
+              update lims.audit_entry set reason = 'Altered behind the chain (e2e)'
+               where chain = (select lab_id::text from lims.lab where code = 'QC')
+                 and seq = (select max(seq) from lims.audit_entry
+                             where chain = (select lab_id::text from lims.lab where code = 'QC'))
+              returning seq;`,
+      stdio: ['pipe', 'pipe', 'inherit'],
+    },
+  );
+  return printed.toString().trim().split('\n').at(-1) ?? '';
+}
+
+function closeQcIncidentAt(entry: string) {
+  execFileSync(
+    '../../scripts/pg.sh',
+    ['psql', '-q', '-v', 'ON_ERROR_STOP=1', '-v', `entry=${entry}`, '--single-transaction', '-d', E2E_DATABASE],
+    {
+      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
+                     set_config('lims.reason', 'Close a System Incident (e2e)', true);
+              update lims.system_incident set state = 'Closed'
+               where chain = (select lab_id::text from lims.lab where code = 'QC') and first_failure = :entry;`,
+      stdio: ['pipe', 'ignore', 'inherit'],
+    },
+  );
+}
+
+test('QA verifying a chain whose break has a Closed System Incident still sees Broken, with that incident marked Closed', async ({
+  page,
+}) => {
+  const entry = breakANewQcEntry();
+  expect(entry).toMatch(/^\d+$/);
+  await page.goto('/');
+  await signIn(page, 'quinn.qa', /QC Laboratory/);
+  const { methods } = await (await page.request.get('/api/lookups')).json();
+  await page.goto(`/#/trails/method/${methods[0].id}`);
+  const verify = page.getByRole('button', { name: 'Verify chain' });
+  const own = page
+    .locator('.chains > li')
+    .first()
+    .locator('.breaks li', { hasText: `entry ${entry} fails` });
+
+  await verify.click();
+  await expect(own).toHaveText(new RegExp(`^entry ${entry} fails to verify, recorded as System Incident \\w{8} Open$`));
+  const incident = /System Incident (\w{8})/.exec((await own.textContent()) ?? '')?.[1];
+
+  closeQcIncidentAt(entry);
+  await verify.click();
+  await expect(own).toHaveText(`entry ${entry} fails to verify, recorded as System Incident ${incident} Closed`);
+  await expect(page.locator('.chains > li').first().locator('.status').first()).toHaveText('Broken');
   await signOut(page);
 });
