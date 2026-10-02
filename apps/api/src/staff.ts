@@ -67,13 +67,12 @@ async function issueLink(q: WriteQueries, personId: string) {
 const LISTED_ACCESS_EVENTS = 100;
 
 /**
- * The person's newest Access Events that this Lab sees: those of its sessions, those of no session, and every Lockout,
- * which lists the sessions here that it ended, at its instant, whether or not a request or the sweep has ended them yet.
+ * The person's newest Access Events that this Lab sees, each Lockout listing the sessions here that it ended, at its
+ * instant, whether or not a request or the sweep has ended them yet.
  */
 async function accessEventsOf(scope: Scope, personId: string, limits: SessionLimits) {
-  const labId = scope.ctx.lab.id;
-  const rows = await scope.company
-    .selectFrom('accessEvent')
+  const rows = await scope
+    .accessEvents()
     .select([
       'id',
       'kind',
@@ -83,13 +82,12 @@ async function accessEventsOf(scope: Scope, personId: string, limits: SessionLim
       'failureReason',
     ])
     .where('subjectId', '=', personId)
-    .where((eb) => eb.or([eb('sessionLabId', '=', labId), eb('sessionLabId', 'is', null), eb('kind', '=', 'Lockout')]))
     .orderBy('at', 'desc')
     .orderBy('id')
     .limit(LISTED_ACCESS_EVENTS + 1)
     .execute();
   const ended = await scope
-    .from('session')
+    .sessions()
     .innerJoin('person', 'person.id', 'session.personId')
     .innerJoin('accessEvent as lockout', (join) =>
       join

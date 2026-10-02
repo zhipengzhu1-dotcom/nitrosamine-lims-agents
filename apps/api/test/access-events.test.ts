@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import { it } from 'node:test';
+import { setTimeout as pause } from 'node:timers/promises';
 import { audited, type Role } from '@lims/db';
 import { routes } from '@lims/domain';
 import { sql } from 'kysely';
 import { LOCKOUT_AFTER_FAILURES, SESSION_LIMITS } from '../src/auth.ts';
+import { labScope } from '../src/scope.ts';
 import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_access_events_test');
@@ -372,4 +374,88 @@ it("the Admin's list of a person's Access Events stops at the newest 100, and sa
   const { events, earlierNotListed } = ok(await ada.call(routes.accessEvents, { id: person.id }));
   assert.equal(events.length, 100);
   assert.equal(earlierNotListed, true);
+});
+
+/** Waits until a backend in this test's database waits on a lock, or `request` settles, for at most about two seconds. */
+async function blockedOrSettled(request: Promise<unknown>): Promise<void> {
+  const settled = request.then(
+    () => true,
+    () => true,
+  );
+  for (let polls = 0; polls < 100; polls++) {
+    const { rows } = await sql<{ waiting: boolean }>`select exists (
+        select from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'
+      ) as waiting`.execute(api.superuser);
+    if (rows[0]?.waiting || (await Promise.race([settled, pause(20, false)]))) return;
+  }
+}
+
+it('a sign-out that meets a Lockout not yet committed ends its session at the Lockout, which lists it, and records no sign-out', async () => {
+  const person = await api.addPerson('access.signout-race', ['Analyst']);
+  const client = await api.login(person);
+  let signingOut: Promise<unknown> = Promise.resolve();
+  await audited(api.db, SYSTEM, async (tx) => {
+    await tx
+      .updateTable('person')
+      .set({ failedLogins: LOCKOUT_AFTER_FAILURES, lockedAt: sql`clock_timestamp()` })
+      .where('id', '=', person.id)
+      .execute();
+    await tx
+      .insertInto('accessEvent')
+      .values({ kind: 'Lockout', subjectId: person.id, sourceAddress: '192.0.2.1', roles: ['Analyst'] })
+      .execute();
+    signingOut = client.call(routes.logout);
+    await blockedOrSettled(signingOut);
+  });
+  await signingOut;
+
+  const { lockedAt } = await api.superuser
+    .selectFrom('person')
+    .select('lockedAt')
+    .where('id', '=', person.id)
+    .executeTakeFirstOrThrow();
+  const [session] = await sessionsOf(person);
+  assert.ok(session && lockedAt);
+  assert.deepEqual(session.endedAt, lockedAt, 'the session ended at the Lockout, not at the sign-out after it');
+  const { events } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  const lockout = events.find((e) => e.kind === 'Lockout');
+  assert.ok(lockout?.kind === 'Lockout');
+  assert.deepEqual(
+    lockout.endedSessions.map((s) => s.id),
+    [session.id],
+  );
+  assert.ok(!events.some((e) => e.kind === 'SignOut'), 'no sign-out is recorded for a session the Lockout ended');
+});
+
+it("the Lab scope reads no other Lab's Access Events or sessions, and no session's token hash", async () => {
+  const person = await api.addPerson('access.scope', ['Analyst']);
+  await audited(api.superuser, SYSTEM, (tx) =>
+    tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
+  );
+  await api.login(person, api.qcLabId);
+  const scope = labScope(api.db, ok(await ada.call(routes.me)));
+
+  assert.deepEqual(
+    await scope.accessEvents().select('kind').where('subjectId', '=', person.id).execute(),
+    [],
+    'the sign-in to the QC Lab is out of reach',
+  );
+  assert.deepEqual(await scope.sessions().selectAll().where('session.personId', '=', person.id).execute(), []);
+  const [own] = await scope.sessions().selectAll().where('session.personId', '=', api.person('ada').id).execute();
+  assert.ok(own, "the Admin's own session here is in reach");
+  assert.ok(!('tokenHash' in own), 'without its token hash');
+});
+
+it('the Lab a person switched out of sees the Lab Switch that ended its session', async () => {
+  const person = await api.addPerson('access.log-switch', ['Analyst']);
+  await audited(api.superuser, SYSTEM, (tx) =>
+    tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
+  );
+  const client = await api.login(person);
+  ok(await client.call(routes.switchLab, { username: person.username, password: person.password, labId: api.qcLabId }));
+  const { events } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    ['LabSwitch', 'SignInSucceeded'],
+  );
 });
