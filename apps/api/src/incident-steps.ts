@@ -103,17 +103,27 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
     )
     .innerJoin('lab', 'lab.labId', 'signature.labId')
     .select([
+      'signature.meaning',
       'signature.printedName as signer',
       'signature.username',
       'signature.role',
       'signature.signedAt',
       onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('lab.time_zone')).as('signedAtLab'),
+      'recordVersion.version',
+      'recordVersion.canonicalForm',
+      sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
+      sql<boolean>`record_version.content_hash <> lims.incident_content_hash(record_version.record_id)`.as('unsigned'),
     ])
     .where('recordVersion.recordTable', '=', 'system_incident')
     .where('recordVersion.recordId', '=', row.id)
     .where('signature.meaning', '=', 'Acknowledged')
     .orderBy('signature.signedAt')
-    .executeTakeFirst();
+    .executeTakeFirst()
+    .then((signed) => {
+      if (!signed) return null;
+      const { version, canonicalForm, contentHash, ...signature } = signed;
+      return { ...signature, record: 'System Incident', recordVersion: { version, canonicalForm, contentHash } };
+    });
   const {
     id,
     impactAnswer,
@@ -140,7 +150,7 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
     correctiveAction: recorded(correctiveAction, correctiveUsername, correctiveName, correctiveActionAt),
     recordVersion: { version, canonicalForm: 1, contentHash: hash },
     statement: await statementInForce(db),
-    acknowledged: acknowledged ?? null,
+    acknowledged,
   };
   return { id, view };
 }

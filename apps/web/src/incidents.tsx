@@ -15,6 +15,7 @@ import { api, useApi, useFresh } from './api.ts';
 import { type Field, type RailAction, Shell, Status, words } from './rail.tsx';
 import { Split } from './split.tsx';
 import { type Column, StackTable } from './stack.tsx';
+import { unsignedNotice } from './tests.tsx';
 import { time, When } from './time.tsx';
 
 const incidentUi: { [K in IncidentStepName]: { label: string; fields: readonly Field[]; done: string } } = {
@@ -132,7 +133,13 @@ function IncidentRecord({
   };
   const action = view && next ? incidentAction(next, view, done) : null;
   const frame = (record: ReactNode) => (
-    <Shell me={me} active="incidents" action={action} railKey={reference}>
+    <Shell
+      me={me}
+      active="incidents"
+      action={action}
+      notice={view?.acknowledged ? unsignedNotice([view.acknowledged]) : undefined}
+      railKey={reference}
+    >
       <Split list={list} record={record} closeHref="#/incidents" />
     </Shell>
   );
@@ -141,6 +148,7 @@ function IncidentRecord({
     <>
       <h1 className="record-head">
         {view.reference} <Status key={view.state} mark={view.state} fresh={freshState.has(view.state)} />
+        {view.acknowledged?.unsigned && <Status mark="Signatures unsigned" />}
       </h1>
       <dl className="facts">
         <dt>Kind</dt>
@@ -191,9 +199,17 @@ function IncidentRecord({
         <dt>Acknowledged</dt>
         {view.acknowledged ? (
           <dd>
-            <span className="sig">Acknowledged</span> by {view.acknowledged.signer} ({view.acknowledged.username},{' '}
-            {words(view.acknowledged.role)}),{' '}
+            <span className="sig-line">
+              <span className="sig">Acknowledged</span>
+              {view.acknowledged.unsigned && <Status mark="Unsigned" />}
+            </span>{' '}
+            by {view.acknowledged.signer} ({view.acknowledged.username}, {words(view.acknowledged.role)}),{' '}
             <When at={view.acknowledged.signedAt} atLab={view.acknowledged.signedAtLab} />
+            <br />
+            <small className="muted">
+              Record Version {view.acknowledged.recordVersion.version} ·{' '}
+              <code className="hash">{view.acknowledged.recordVersion.contentHash}</code>
+            </small>
           </dd>
         ) : (
           <dd className="muted">not signed</dd>

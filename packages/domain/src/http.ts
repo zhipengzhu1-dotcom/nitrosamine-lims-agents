@@ -127,7 +127,10 @@ const signature = Type.Object({
   /** The signed record's glossary noun, such as "Test Report". */
   record: Type.String(),
   recordVersion: recordVersionRef,
-  /** True once the record has a Record Version later than the one this Signature was given on. */
+  /**
+   * True once the record no longer holds the content this Signature was given on: a Lab record has a Record Version
+   * later than the signed one, or a System Incident's content hashes differently from its signed Record Version.
+   */
   unsigned: Type.Boolean(),
 });
 export type Signature = Static<typeof signature>;
@@ -459,16 +462,8 @@ const systemIncident = Type.Object({
    */
   recordVersion: recordVersionRef,
   statement: signatureStatement,
-  /** The Acknowledged Signature, once given. */
-  acknowledged: nullable(
-    Type.Object({
-      signer: Type.String(),
-      username: Type.String(),
-      role,
-      signedAt: instant,
-      signedAtLab: Type.String(),
-    }),
-  ),
+  /** The Acknowledged Signature, once given, with the Record Version it was given on and whether it still binds. */
+  acknowledged: nullable(signature),
 });
 export type SystemIncident = Static<typeof systemIncident>;
 /** One line of the System Incident list: enough to pick one out. */

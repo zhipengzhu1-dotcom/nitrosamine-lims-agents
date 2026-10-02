@@ -362,6 +362,38 @@ it('a corrective action recorded between the signing sheet loading and the signi
   assert.equal(ok(await acknowledge(as.ada, reference, ada)).state, 'Acknowledged');
 });
 
+it('a System Incident whose content changes after the Acknowledged signing returns that Signature as unsigned', async () => {
+  const reference = await failedIncident();
+  ok(await answer(as.quinn, reference, 'Yes'));
+  ok(await immediate(as.ada, reference, 'Reran the entry.'));
+  ok(await corrective(as.ada, reference, 'Added a check.'));
+  const signed = ok(await acknowledge(as.ada, reference, ada));
+  assert.partialDeepStrictEqual(signed.acknowledged, {
+    meaning: 'Acknowledged',
+    record: 'System Incident',
+    recordVersion: { version: 1, canonicalForm: 1, contentHash: signed.recordVersion.contentHash },
+    unsigned: false,
+  });
+  // The triggers freeze every column after the signing, so only the database owner, past them, can change the content.
+  await api.superuser.transaction().execute(async (tx) => {
+    await sql`set local session_replication_role = replica`.execute(tx);
+    await sql`update lims.system_incident set corrective_action = 'Added a check and a test.'
+      where reference = ${reference}`.execute(tx);
+  });
+  const changed = await view(as.ada, reference);
+  assert.equal(changed.acknowledged?.unsigned, true, 'the Signature no longer binds the content');
+  assert.equal(
+    changed.acknowledged?.recordVersion.contentHash,
+    signed.recordVersion.contentHash,
+    'the Signature keeps the hash it was given on',
+  );
+  assert.notEqual(
+    changed.recordVersion.contentHash,
+    signed.recordVersion.contentHash,
+    'the content now hashes differently',
+  );
+});
+
 it('the open System Incident list is read by Admin and QA, newest first, and by no other role', async () => {
   const older = await failedIncident();
   const newer = await failedIncident();

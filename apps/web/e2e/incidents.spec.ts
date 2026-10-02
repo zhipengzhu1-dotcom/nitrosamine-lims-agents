@@ -123,4 +123,20 @@ test('QA answers an incident from the list, then the Admin records the actions, 
     ),
     'the database holds the Closed incident with its Acknowledged Signature',
   ).toBe('Closed|No|Acknowledged|Admin');
+
+  await expect(page.locator('dl.facts dt:text-is("Acknowledged") + dd .status')).toHaveCount(0);
+  psql(
+    `begin;
+     set local session_replication_role = replica;
+     update lims.system_incident set corrective_action = 'Altered behind the triggers (e2e)' where reference = :'reference';
+     commit;`,
+    { reference },
+  );
+  await page.reload();
+  await expect(page.getByRole('heading', { name: new RegExp(`^${reference} `) }).locator('.status')).toHaveText([
+    'Closed',
+    'Signatures unsigned',
+  ]);
+  await expect(page.locator('dl.facts dt:text-is("Acknowledged") + dd .status')).toHaveText('Unsigned');
+  await railSays(page, 'Unsigned: Acknowledged. The record changed after signing.');
 });
