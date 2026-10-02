@@ -558,12 +558,17 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
         <button
           type="button"
           className="rail__toggle"
+          aria-label={`${me.person.displayName}, your session`}
+          aria-describedby="rail-clock"
           aria-expanded={sessionOpen}
-          aria-controls="rail-who rail-session"
+          aria-controls={me.workstation ? 'rail-who rail-sign-out' : 'rail-who rail-switch-lab rail-sign-out'}
           onClick={() => setSessionOpen((open) => !open)}
         >
-          <b>{me.person.displayName}</b>
-          <SessionCountdown />
+          <span className="rail__name">
+            <b>{me.person.displayName}</b>
+            <span className="rail__chevron" />
+          </span>
+          <SessionCountdown id="rail-clock" />
         </button>
         <div id="rail-who" className="who">
           <b>
@@ -599,6 +604,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
           {!me.workstation && (
             <button
               type="button"
+              id="rail-switch-lab"
               className="rbtn rbtn--quiet rail__out rail__folded"
               onClick={() => {
                 location.hash = '#/switch-lab';
@@ -613,7 +619,12 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
           <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void lockAs('unlock')}>
             Lock
           </button>
-          <button type="button" className="rbtn rbtn--quiet rail__out rail__folded" onClick={() => void signOut()}>
+          <button
+            type="button"
+            id="rail-sign-out"
+            className="rbtn rbtn--quiet rail__out rail__folded"
+            onClick={() => void signOut()}
+          >
             Sign out
           </button>
         </fieldset>
@@ -624,12 +635,12 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
 
 const twoDigits = (n: number) => String(n).padStart(2, '0');
 
-function SessionCountdown() {
+function SessionCountdown({ id }: { id?: string }) {
   const left = useSecondsLeft();
   if (left === null) return null;
   const [h, m, s] = [Math.floor(left / 3600), Math.floor(left / 60) % 60, left % 60];
   return (
-    <span className="who__clock">
+    <span id={id} className="who__clock">
       Session ends in <time>{h > 0 ? `${h}:${twoDigits(m)}:${twoDigits(s)}` : `${m}:${twoDigits(s)}`}</time>
     </span>
   );

@@ -28,13 +28,11 @@ export const test = playwright.extend<{ apiLog: void }>({
 export const PHONE = { width: 390, height: 844 };
 export const DESKTOP = { width: 1360, height: 900 };
 export const TABLET = { width: 820, height: 1180 };
-/** The widest screen the web lays out as an upright phone (app.css `max-width: 640px`). */
-export const PHONE_MAX_WIDTH = 640;
-
-/** Opens the Bench Rail's session block where an upright phone folds it; wider screens always show it. */
+/** Opens the Bench Rail's session block where an upright phone folds it; wider screens show no toggle and always show the block. */
 export async function openSessionBlock(page: Page) {
-  if ((page.viewportSize()?.width ?? Infinity) > PHONE_MAX_WIDTH) return;
+  await page.locator('footer.rail').waitFor();
   const toggle = page.locator('.rail__toggle');
+  if (!(await toggle.isVisible())) return;
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 

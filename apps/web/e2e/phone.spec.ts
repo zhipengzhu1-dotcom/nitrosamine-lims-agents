@@ -141,9 +141,43 @@ test('with no sheet open, the Bench Rail takes at most 22% of the phone and its 
   await railWithinShare(page, "the Reviewer's Test, with a two-line context line and the Review commit button");
 });
 
+test('on the narrowest phone the folded rail shows the whole session countdown and the session block mark beside Switch user and Lock', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await signInAsCustomer(page);
+  const clock = page.locator('.rail__toggle .who__clock');
+  await expect(clock).toContainText(/Session ends in \d/);
+  const [clipped, mark, toggleRight, switchLeft] = await page
+    .locator('.rail__toggle')
+    .evaluate((toggle: HTMLElement) => {
+      const countdown = toggle.querySelector<HTMLElement>('.who__clock') ?? toggle;
+      const chevron = toggle.querySelector<HTMLElement>('.rail__chevron');
+      const switchUser = [...document.querySelectorAll<HTMLElement>('.rail__session .rbtn')].find(
+        (b) => b.textContent === 'Switch user',
+      );
+      const box = chevron?.getBoundingClientRect();
+      return [
+        countdown.scrollWidth > countdown.clientWidth || toggle.scrollWidth > toggle.clientWidth,
+        box ? { width: box.width, right: box.right } : { width: 0, right: Infinity },
+        toggle.getBoundingClientRect().right,
+        switchUser?.getBoundingClientRect().left ?? 0,
+      ];
+    });
+  expect(clipped, 'the countdown fits inside the session block button').toBe(false);
+  expect(toggleRight, 'the session block button ends before Switch user begins').toBeLessThanOrEqual(switchLeft);
+  expect(mark.width, 'the mark that the name opens the session block is drawn').toBeGreaterThan(0);
+  expect(mark.right, 'a shortened name keeps the mark inside the button').toBeLessThanOrEqual(toggleRight);
+  for (const name of ['Switch user', 'Lock']) await laidOutAtLeast(page.getByRole('button', { name, exact: true }), 44);
+});
+
 test('the phone rail keeps Switch user and Lock in one tap and Sign out in the session block', async ({ page }) => {
   await signInAsCustomer(page);
-  const session = page.getByRole('button', { name: /^Cora .* Session ends in/ });
+  const session = page.getByRole('button', { name: 'Cora Lindqvist, your session', exact: true });
+  await expect(
+    session,
+    'the session block button tells the time left without it being its name',
+  ).toHaveAccessibleDescription(/^Session ends in \d/);
   const signOut = page.getByRole('button', { name: 'Sign out' });
   await laidOutAtLeast(session, 44);
   for (const name of ['Switch user', 'Lock']) await laidOutAtLeast(page.getByRole('button', { name, exact: true }), 44);
