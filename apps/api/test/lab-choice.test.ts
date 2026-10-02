@@ -267,3 +267,28 @@ it('a Lab switch without a session is refused as noSession', async () => {
   );
   assert.deepEqual(await eventsOf(person.id), []);
 });
+
+it('of two Lab switches from one session at once, one switches and the other is refused as stale and recorded', async () => {
+  const person = await inBothLabs('choice.race');
+  const client = new Client(api.base);
+  ok(await signIn(person, api.labId, client));
+  const body = { username: person.username, password: person.password, labId: api.qcLabId };
+
+  const answers = await Promise.all([client.call(routes.switchLab, body), client.call(routes.switchLab, body)]);
+
+  assert.deepEqual(answers.map((a) => (a.kind === 'reply' ? 'reply' : a.body.kind)).sort(), ['reply', 'stale']);
+  assert.deepEqual(
+    (await sessionsOf(person.id)).map((s) => [s.labId, s.endedAt === null]),
+    [
+      [api.labId, false],
+      [api.qcLabId, true],
+    ],
+  );
+  assert.deepEqual(
+    (await eventsOf(person.id))
+      .slice(1)
+      .map((e) => `${e.kind} ${e.failureReason}`)
+      .sort((a, b) => a.localeCompare(b)),
+    ['LabSwitch null', 'LabSwitchFailed SessionEnded'],
+  );
+});

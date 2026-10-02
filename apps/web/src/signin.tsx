@@ -9,18 +9,21 @@ function CredentialsForm({
   title,
   intro,
   labs,
+  except,
   commit,
   notice = '',
   onSubmit,
 }: {
   title: string;
   intro?: string;
-  labs: Lab[] | undefined;
+  labs: { data?: Lab[] | undefined; error?: string | undefined };
+  except?: string;
   commit: string;
   notice?: string;
   onSubmit: (credentials: Credentials) => Promise<unknown>;
 }) {
   const [error, setError] = useState(notice);
+  const offered = labs.data?.filter((lab) => lab.id !== except);
   const [busy, setBusy] = useState(false);
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -42,7 +45,9 @@ function CredentialsForm({
         {intro && <p className="muted">{intro}</p>}
         <fieldset className="labs">
           <legend>Lab</legend>
-          {labs?.map((lab) => (
+          {labs.error && <p className="note--bad">{labs.error}</p>}
+          {offered?.length === 0 && <p className="muted">There is no other Lab to work in.</p>}
+          {offered?.map((lab) => (
             <label key={lab.id} className="labs__option">
               <input type="radio" name="labId" value={lab.id} required />
               <span>
@@ -64,7 +69,7 @@ function CredentialsForm({
             {error}
           </p>
         )}
-        <button type="submit" className="rbtn" aria-busy={busy}>
+        <button type="submit" className="rbtn" aria-busy={busy} disabled={!offered?.length}>
           {commit}
         </button>
       </fieldset>
@@ -80,7 +85,7 @@ export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorConte
       <main className="plane">
         <CredentialsForm
           title="Sign in"
-          labs={labs.data}
+          labs={labs}
           commit="Sign in"
           notice={notice}
           onSubmit={(c) => api(routes.login, c).then(onIn)}
@@ -97,7 +102,8 @@ export function LabSwitchPage({ me }: { me: ActorContext }) {
       <CredentialsForm
         title="Switch Lab"
         intro={`You work in ${me.lab.name}. Sign in again with your username and password to work in another Lab.`}
-        labs={labs.data?.filter((lab) => lab.id !== me.lab.id)}
+        labs={labs}
+        except={me.lab.id}
         commit="Switch Lab"
         onSubmit={switchLab}
       />

@@ -40,6 +40,8 @@ const REFUSAL: { readonly [F in SignInFailure]: () => never } = {
   NoLab: () => refuse('role', 'this account belongs to no Lab'),
   NoLabChosen: () => refuse('labNotChosen', 'choose the Lab to work in'),
   NoMembership: () => refuse('role', 'you hold no Membership in that Lab'),
+  SessionEnded: () =>
+    refuse('stale', 'this session has already moved to another Lab or ended; reload to see where you work'),
 };
 
 const record = (tx: Transaction<DB>, event: AccessEvent) => tx.insertInto('accessEvent').values(event).execute();
@@ -96,6 +98,20 @@ async function countFailure(tx: Transaction<DB>, personId: string) {
       sql<boolean>`old.locked_at is null and new.locked_at is not null`.as('lockedNow'),
     ])
     .executeTakeFirstOrThrow();
+}
+
+/** Counts a wrong credential toward the lockout and records it, with any Lockout it applies, in the caller's transaction. */
+async function recordWrongCredential(
+  tx: Transaction<DB>,
+  kind: 'SignInFailed' | 'LabSwitchFailed',
+  event: Omit<AccessEvent, 'kind' | 'failureReason'> & { subjectId: string },
+  wrong: 'WrongPassword' | 'OtherUserId',
+): Promise<SignInFailure> {
+  const { wasLocked, lockedNow } = await countFailure(tx, event.subjectId);
+  const reason = wrong === 'WrongPassword' && wasLocked ? 'WrongPasswordOnLockedAccount' : wrong;
+  await record(tx, { ...event, kind, failureReason: reason });
+  if (lockedNow) await record(tx, { ...event, kind: 'Lockout' });
+  return reason;
 }
 
 /** Locks the person's row for the session about to open; answers true, and resets nothing, if a lock landed since the password was checked. */
@@ -252,11 +268,7 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
             await record(tx, { kind: 'SignInFailed', failureReason: refusal, ...subject });
             return refusal;
           }
-          const { wasLocked, lockedNow } = await countFailure(tx, person.id);
-          const reason = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
-          await record(tx, { kind: 'SignInFailed', failureReason: reason, ...subject });
-          if (lockedNow) await record(tx, { kind: 'Lockout', ...subject });
-          return reason;
+          return recordWrongCredential(tx, 'SignInFailed', subject, 'WrongPassword');
         });
         return REFUSAL[failure]();
       }
@@ -331,23 +343,21 @@ export function sessionRoutes(app: App, db: Kysely<DB>): void {
             await record(tx, { kind: 'LabSwitchFailed', failureReason: choice.refused, ...inSession });
             return choice.refused;
           }
-          const { wasLocked, lockedNow } = await countFailure(tx, person.id);
-          const wrongPassword = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
-          const reason = sameUserId ? wrongPassword : 'OtherUserId';
-          await record(tx, { kind: 'LabSwitchFailed', failureReason: reason, ...inSession });
-          if (lockedNow) await record(tx, { kind: 'Lockout', ...inSession });
-          return reason;
+          return recordWrongCredential(tx, 'LabSwitchFailed', inSession, sameUserId ? 'WrongPassword' : 'OtherUserId');
         });
         return REFUSAL[failure]();
       }
 
       const token = randomBytes(32).toString('base64url');
-      const outcome = await audited(db, as, async (tx): Promise<SignInFailure | 'SessionEnded' | 'Switched'> => {
+      const outcome = await audited(db, as, async (tx): Promise<'AccountLocked' | 'SessionEnded' | 'Switched'> => {
         if (await resetFailuresUnlessLocked(tx, person.id)) {
           await record(tx, { kind: 'LabSwitchFailed', failureReason: 'AccountLocked', ...inSession });
           return 'AccountLocked';
         }
-        if (!(await endSession(tx, session))) return 'SessionEnded';
+        if (!(await endSession(tx, session))) {
+          await record(tx, { kind: 'LabSwitchFailed', failureReason: 'SessionEnded', ...inSession });
+          return 'SessionEnded';
+        }
         const opened = await openSession(tx, person.id, choice.labId, token);
         await record(tx, {
           kind: 'LabSwitch',
@@ -361,7 +371,6 @@ export function sessionRoutes(app: App, db: Kysely<DB>): void {
         });
         return 'Switched';
       });
-      if (outcome === 'SessionEnded') return refuse('noSession', 'the session has ended; sign in again');
       if (outcome !== 'Switched') return REFUSAL[outcome]();
       reply.setCookie(SESSION_COOKIE, token);
       return (await actorFor(db, token)).actor;

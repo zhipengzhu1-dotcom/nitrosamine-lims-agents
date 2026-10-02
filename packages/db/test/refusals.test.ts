@@ -132,6 +132,19 @@ const fixture: [string, Row][] = [
       roles: '{Analyst}',
     },
   ],
+  [
+    'lims.access_event',
+    {
+      kind: 'LabSwitch',
+      subject_id: id.person,
+      source_address: '192.0.2.1',
+      session_lab_id: id.lab,
+      session_id: id.session,
+      previous_session_lab_id: id.otherLab,
+      previous_session_id: id.otherSession,
+      roles: '{Analyst}',
+    },
+  ],
 ];
 const labSwitch: Row = {
   kind: 'LabSwitch',
@@ -495,6 +508,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       constraint: 'submission_number_key',
     },
     {
+      name: 'a second Lab switch out of the same session is refused',
+      table: 'lims.access_event',
+      change: labSwitch,
+      constraint: 'access_event_previous_session_key',
+    },
+    {
       name: 'a second Sample with the same number in one Lab is refused',
       table: 'lims.sample',
       change: { number: 'RF-S-2026-000001' },
@@ -711,7 +730,7 @@ describe('the database refuses a reference to a row that does not exist', () => 
       name: 'a Lab switch Access Event from a session that does not exist is refused',
       table: 'lims.access_event',
       change: { ...labSwitch, previous_session_id: missing },
-      constraint: 'access_event_previous_session_lab_id_previous_session_id_s_fkey',
+      constraint: 'access_event_previous_session_fkey',
     },
   ]);
 
@@ -852,6 +871,23 @@ describe('the database refuses a value outside its allowed set', () => {
       table: 'lims.access_event',
       change: { kind: 'LabSwitchFailed', failure_reason: null, session_lab_id: id.lab, session_id: id.session },
       constraint: 'access_event_failure_check',
+    },
+    {
+      name: 'a failed sign-in Access Event with a reason only a Lab switch has is refused',
+      table: 'lims.access_event',
+      change: { failure_reason: 'OtherUserId' },
+      constraint: 'access_event_failure_kind_check',
+    },
+    {
+      name: 'a failed Lab switch Access Event with a reason only a sign-in has is refused',
+      table: 'lims.access_event',
+      change: {
+        kind: 'LabSwitchFailed',
+        failure_reason: 'NoLabChosen',
+        session_lab_id: id.lab,
+        session_id: id.session,
+      },
+      constraint: 'access_event_failure_kind_check',
     },
     {
       name: 'a Lab switch Access Event that names no previous session is refused',
