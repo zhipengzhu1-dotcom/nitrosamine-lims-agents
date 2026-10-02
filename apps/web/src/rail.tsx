@@ -21,7 +21,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
-import { CodeField, useSecondFactor } from './form.tsx';
+import { CodeField, useLoginPolicy } from './form.tsx';
 import { reducedMotion } from './motion.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room';
@@ -62,10 +62,14 @@ export const stepUi: {
 type SignedMeaning = NonNullable<(typeof steps)[StepName]['signs']>;
 
 /** What the signature sheet and the Test Report say a signing re-enters, under this login. */
-export const signingNote = (secondFactor: boolean) =>
+const signingNote = (secondFactor: boolean) =>
   secondFactor
     ? 'A signing re-enters the user ID, the password and a fresh code from the authenticator.'
     : 'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
+
+/** The signing note once the login policy is known, the failure if it could not be read, and nothing while it is read. */
+export const signingNoteOf = (policy: ReturnType<typeof useLoginPolicy>) =>
+  policy.secondFactor === undefined ? (policy.error ?? '') : signingNote(policy.secondFactor);
 
 export interface SigningView {
   recordVersion: RecordVersionRef;
@@ -331,7 +335,8 @@ function Rail({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
-  const secondFactor = useSecondFactor();
+  const policy = useLoginPolicy();
+  const secondFactor = policy.secondFactor === true;
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
   const [refusal, setRefusal] = useState<Note | null>(null);
@@ -411,7 +416,7 @@ function Rail({
   const closed = () => setSheet((s) => (s?.closing ? null : s));
 
   async function commit(a: RailAction) {
-    if (inFlight.current) return;
+    if (inFlight.current || (a.signs && policy.secondFactor === undefined)) return;
     inFlight.current = true;
     setBusy(true);
     onCommitting(true);
@@ -586,13 +591,18 @@ function Rail({
             </div>
             <div className="sheet__foot">
               <p key={refusal?.n} id="sheet-line" className={`sheet__line ${refusal ? 'refusal' : ''}`}>
-                <span hidden={refusal !== null}>{shown.signs ? signingNote(secondFactor) : shown.context}</span>
+                <span hidden={refusal !== null}>{shown.signs ? signingNoteOf(policy) : shown.context}</span>
                 {refusal && <span>{refusal.text}</span>}
               </p>
               <button type="button" className="rbtn rbtn--quiet" onClick={() => close(false)}>
                 Cancel
               </button>
-              <button type="submit" className="rbtn" aria-busy={busy}>
+              <button
+                type="submit"
+                className="rbtn"
+                aria-busy={busy}
+                disabled={shown.signs !== null && policy.secondFactor === undefined}
+              >
                 {shown.signs ? `Sign as ${shown.signs.meaning}` : shown.label}
               </button>
             </div>

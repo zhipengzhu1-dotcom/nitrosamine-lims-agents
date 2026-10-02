@@ -1,13 +1,13 @@
 import { type ActorContext, routes } from '@lims/domain';
 import { useApi } from './api.ts';
-import { useSecondFactor } from './form.tsx';
-import { Shell, Status, signingNote } from './rail.tsx';
+import { useLoginPolicy } from './form.tsx';
+import { Shell, Status, signingNoteOf } from './rail.tsx';
 import { Signatures, unsignedNotice } from './tests.tsx';
 import { When } from './time.tsx';
 
 export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
   const { data, error } = useApi(routes.report, { id });
-  const secondFactor = useSecondFactor();
+  const policy = useLoginPolicy();
   return (
     <Shell me={me} active="tests" action={null} notice={data && unsignedNotice(data.signatures)}>
       {error && <p className="note--bad">{error}</p>}
@@ -65,7 +65,7 @@ export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
           )}
           <p className="muted">Printed as entered. No Specification or limit is applied in this version.</p>
           <h2>Signatures</h2>
-          <p className="fict">{signingNote(secondFactor)}</p>
+          <p className="fict">{signingNoteOf(policy)}</p>
           <Signatures rows={data.signatures} />
         </article>
       )}

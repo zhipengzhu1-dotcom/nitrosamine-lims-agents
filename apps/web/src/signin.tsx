@@ -14,7 +14,7 @@ import {
   useApi,
 } from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
-import { CodeField, field, useCommit, useSecondFactor } from './form.tsx';
+import { CodeField, field, useCommit, useLoginPolicy } from './form.tsx';
 
 type Credentials = RouteInput<typeof routes.switchLab>[0];
 
@@ -42,10 +42,11 @@ function CredentialsForm({
   const noOtherLab = offered?.length === 0;
   const reasonId = useId();
   const [busy, setBusy] = useState(false);
-  const secondFactor = useSecondFactor();
+  const policy = useLoginPolicy();
+  const secondFactor = policy.secondFactor === true;
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (busy) return;
+    if (busy || policy.secondFactor === undefined) return;
     const form = new FormData(e.currentTarget);
     const field = (name: string) => {
       const value = form.get(name);
@@ -89,6 +90,7 @@ function CredentialsForm({
           <input name="password" type="password" required autoComplete="current-password" />
         </label>
         {secondFactor && <CodeField />}
+        {policy.error && <p className="note--bad">{policy.error}</p>}
         {error && (
           <p className="note--bad" role="alert">
             {error}
@@ -103,7 +105,7 @@ function CredentialsForm({
           type="submit"
           className="rbtn"
           aria-busy={busy}
-          disabled={!offered?.length}
+          disabled={!offered?.length || policy.secondFactor === undefined}
           aria-describedby={noOtherLab ? reasonId : undefined}
         >
           {commit}
@@ -116,7 +118,7 @@ function CredentialsForm({
 
 export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorContext) => void }) {
   const labs = useApi(routes.labs);
-  const secondFactor = useSecondFactor();
+  const { secondFactor } = useLoginPolicy();
   return (
     <div className="frame frame--bare">
       <TopBar />
@@ -212,11 +214,12 @@ export function LockScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const labs = useApi(routes.labs);
-  const secondFactor = useSecondFactor();
+  const policy = useLoginPolicy();
+  const secondFactor = policy.secondFactor === true;
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (busy) return;
+    if (busy || policy.secondFactor === undefined) return;
     const form = new FormData(e.currentTarget);
     setBusy(true);
     setError('');
@@ -267,12 +270,13 @@ export function LockScreen({
                 <input name="password" type="password" required autoComplete="current-password" />
               </label>
               {secondFactor && <CodeField />}
+              {policy.error && <p className="note--bad">{policy.error}</p>}
               {error && (
                 <p className="note--bad" role="alert">
                   {error}
                 </p>
               )}
-              <button type="submit" className="rbtn" aria-busy={busy}>
+              <button type="submit" className="rbtn" aria-busy={busy} disabled={policy.secondFactor === undefined}>
                 Unlock
               </button>
               {otherWay}
@@ -287,7 +291,7 @@ export function LockScreen({
 /** Where a person opens their one-time link and chooses their own password. Needs no session. */
 export function WelcomePage({ token }: { token: string }) {
   const { busy, commit, shown } = useCommit();
-  const secondFactor = useSecondFactor();
+  const { secondFactor } = useLoginPolicy();
   const [username, setUsername] = useState<string | null>(null);
   return (
     <div className="frame frame--bare">
