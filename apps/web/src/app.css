@@ -105,7 +105,7 @@ p {
 
 .frame {
   display: grid;
-  grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
+  grid-template: "top" auto "main" minmax(0, 1fr) "rail" auto / minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
   /* Hidden would still scroll: typing in a sheet still sliding in pulled the frame up and the rail over the sheet. */
@@ -113,12 +113,13 @@ p {
 }
 .frame > .plane,
 .sheet {
-  grid-area: 2 / 1;
+  grid-area: main;
 }
 .frame--bare {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template: "top" auto "main" minmax(0, 1fr) / minmax(0, 1fr);
 }
 .top {
+  grid-area: top;
   display: flex;
   align-items: center;
   gap: 24px;
@@ -309,6 +310,92 @@ th {
 }
 .trail__tools input[type="search"] {
   min-width: 220px;
+}
+
+.worklist__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+.worklist__tools > label {
+  flex: 1 1 220px;
+  max-width: 360px;
+  margin: 0;
+}
+.pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pipeline .pipe {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--sheet);
+  font-size: 13px;
+  cursor: pointer;
+}
+.pipe input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+.pipe b {
+  font-variant-numeric: tabular-nums;
+}
+.pipe:has(input:checked) {
+  border-color: var(--act);
+  box-shadow: inset 0 0 0 1px var(--act);
+  background: color-mix(in srgb, var(--act) 8%, var(--sheet));
+}
+.row--open td {
+  background: color-mix(in srgb, var(--act) 8%, var(--sheet));
+}
+.row--open a {
+  font-weight: 700;
+}
+.split__list td a {
+  white-space: nowrap;
+}
+
+.split__close {
+  margin-bottom: 8px;
+}
+.split__list {
+  display: none;
+}
+/* At desktop width each side scrolls on its own, so choosing another record keeps the list where it was. */
+@media (min-width: 901px) {
+  .plane:has(> .split) {
+    padding: 0;
+    overflow: hidden;
+  }
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    height: 100%;
+  }
+  .split__list {
+    display: block;
+  }
+  .split > section {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 16px 24px;
+  }
+  .split__record {
+    border-left: 1px solid var(--line);
+  }
 }
 .verify {
   display: flex;
@@ -564,8 +651,7 @@ td a,
 }
 
 .rail {
-  /* Placed, not auto-placed: a phone's open sheet spans row 3 too, and an auto-placed rail would open a second column. */
-  grid-area: 3 / 1;
+  grid-area: rail;
   z-index: 2;
   min-height: var(--rail-h);
   display: flex;
@@ -817,6 +903,17 @@ td a,
 }
 .card legend {
   font-weight: 700;
+}
+/* A legend that wraps to two lines would sit across the card's top border, so it moves inside the card. The sheet's
+   field card names its Test and Sample, which wrap even on a desktop, so its legend moves at every size. */
+fieldset.card > legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 0;
+}
+fieldset.card > legend ~ * {
+  clear: left;
 }
 label {
   display: flex;
@@ -1122,13 +1219,9 @@ a.btn {
   }
   .sheet {
     --foot-h: 156px;
-    grid-row: 2 / 4;
+    grid-row: main / rail;
     z-index: 3;
     padding: 12px 12px 0;
-  }
-  .frame:has(> .sheet:not([data-closing])) .rail__session {
-    visibility: hidden;
-    transition: visibility 0s var(--dur-sheet-in);
   }
   .sheet h2 {
     flex-wrap: wrap;
@@ -1147,16 +1240,6 @@ a.btn {
   .sheet__foot .rbtn {
     flex: 1;
   }
-  /* A legend that wraps to two lines would sit across the card's top border, so it moves inside the card. */
-  .card legend {
-    float: left;
-    width: 100%;
-    margin-bottom: 8px;
-    padding: 0;
-  }
-  .card legend ~ * {
-    clear: left;
-  }
   .rail__session {
     order: 3;
     flex-basis: 100%;
@@ -1174,6 +1257,43 @@ a.btn {
   }
   .report {
     padding: 16px;
+  }
+}
+
+/* A landscape window under 500px tall (a phone held sideways, or a short desktop window) is too short for a sheet
+   between the top bar and the rail. Landscape keeps most upright Android phones out while their keyboard is up; a
+   small one whose keyboard leaves a wider-than-tall window still gets this layout. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .sheet {
+    grid-row: top / rail;
+    z-index: 3;
+  }
+  .sheet__body {
+    align-items: start;
+  }
+  .sheet__foot {
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  .frame:has(> .sheet:not([data-closing])) .top {
+    visibility: hidden;
+    transition: visibility 0s var(--dur-sheet-in);
+  }
+}
+
+/* A phone, upright or sideways, where an open sheet covers the rail. */
+@media (max-width: 640px), (max-height: 500px) and (orientation: landscape) {
+  .frame:has(> .sheet:not([data-closing])) :is(.rail__session, .who a) {
+    visibility: hidden;
+    transition: visibility 0s var(--dur-sheet-in);
+  }
+  .card legend {
+    float: left;
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 0;
+  }
+  .card legend ~ * {
+    clear: left;
   }
 }
 

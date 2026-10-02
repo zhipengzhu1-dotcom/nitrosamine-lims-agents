@@ -216,20 +216,23 @@ export async function signOut(): Promise<void> {
   if (session) endSession('');
 }
 
-/** Reads a route for a component. `reload` settles once the page holds the server's new answer, so a commit can wait until what it changed is on screen. */
+/**
+ * Reads a route for a component, and never returns an answer for another path than the one asked for. `reload` settles
+ * once the page holds the server's new answer, so a commit can wait until what it changed is on screen.
+ */
 export function useApi<R extends Route>(
   route: R,
   ...request: RouteInput<R>
 ): { data?: RouteReply<R>; error?: string; reload: () => Promise<void> } {
-  const [state, setState] = useState<{ data?: RouteReply<R>; error?: string }>({});
+  const [state, setState] = useState<{ path?: string; data?: RouteReply<R>; error?: string }>({});
   const [version, setVersion] = useState(0);
   const waiting = useRef<(() => void)[]>([]);
   const path = pathOf(route, request[0]);
   useEffect(() => {
     let live = true;
     call(route, path).then(
-      (data) => live && setState({ data }),
-      (e: unknown) => live && setState({ error: failureText(e) }),
+      (data) => live && setState({ path, data }),
+      (e: unknown) => live && setState({ path, error: failureText(e) }),
     );
     return () => {
       live = false;
@@ -243,16 +246,20 @@ export function useApi<R extends Route>(
       waiting.current.push(settle);
       setVersion((v) => v + 1);
     });
-  return { ...state, reload };
+  return state.path === path ? { ...state, reload } : { reload };
 }
 
-/** The keys the latest server answer holds that the one before it on this page did not. A first answer holds nothing new. */
+/**
+ * The keys the latest server answer holds that the one before it on this page did not. A first answer holds nothing
+ * new, and neither does the first answer for another path, so a record opened next never replays the last one's motion.
+ */
 export function useFresh<T>(answer: T | undefined, keys: (answer: T) => string[]): ReadonlySet<string> {
   const [last, setLast] = useState(answer);
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
   if (answer !== last) {
     setLast(answer);
-    if (last !== undefined && answer !== undefined) {
+    if (answer === undefined) setFresh(new Set());
+    else if (last !== undefined) {
       const before = new Set(keys(last));
       setFresh(new Set(keys(answer).filter((k) => !before.has(k))));
     }
