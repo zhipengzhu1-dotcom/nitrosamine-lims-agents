@@ -12,10 +12,11 @@ unset LIMS_ACCESS_EVENT_KEY LIMS_LOGIN LIMS_LOG_FILE
 WEB_PORT=${WEB_PORT:-5173}
 
 scripts/pg.sh start >/dev/null
+if [ -n "$log_file" ]; then mkdir -p "$(dirname "$log_file")"; fi
 if [ "${1:-}" = --scratch ]; then
   LIMS_DB=$(node packages/db/src/checkout.ts database "$LIMS_DB")
   PGOPTIONS=--client-min-messages=warning scripts/pg.sh psql -qc "drop database if exists \"$LIMS_DB\" with (force)"
-  if [ -n "$log_file" ]; then mkdir -p "$(dirname "$log_file")" && : >"$log_file"; fi
+  if [ -n "$log_file" ]; then : >"$log_file"; fi
 fi
 node packages/db/src/migrate.ts
 if [ "$(scripts/pg.sh psql -d "$LIMS_DB" -tAc 'select count(*) from lims.lab')" = 0 ]; then
