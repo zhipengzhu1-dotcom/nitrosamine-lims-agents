@@ -310,6 +310,91 @@ th {
 .trail__tools input[type="search"] {
   min-width: 220px;
 }
+
+.worklist__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+.worklist__tools label {
+  flex: 1 1 220px;
+  max-width: 360px;
+  margin: 0;
+}
+.pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pipe {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+  font: 600 13px var(--font);
+  cursor: pointer;
+}
+.pipe b {
+  font-variant-numeric: tabular-nums;
+}
+.pipe[aria-pressed="true"] {
+  border-color: var(--act);
+  box-shadow: inset 0 0 0 1px var(--act);
+  background: color-mix(in srgb, var(--act) 8%, var(--sheet));
+}
+.row--open td {
+  background: color-mix(in srgb, var(--act) 8%, var(--sheet));
+}
+.row--open a {
+  font-weight: 700;
+}
+
+/* A list with a record open: each side scrolls on its own, so choosing another record keeps the list where it was. */
+.plane:has(> .split) {
+  padding: 0;
+  overflow: hidden;
+}
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  height: 100%;
+}
+.split > section {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px 24px;
+}
+.split__record {
+  border-left: 1px solid var(--line);
+}
+.split__close {
+  margin-bottom: 8px;
+}
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .split__list {
+    display: none;
+  }
+  .split__record {
+    border-left: 0;
+  }
+}
+@media (max-width: 640px) {
+  .split > section {
+    padding: 12px;
+  }
+}
 .verify {
   display: flex;
   flex-wrap: wrap;

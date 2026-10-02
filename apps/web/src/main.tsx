@@ -11,7 +11,7 @@ import { type Module, modules } from './rail.tsx';
 import './app.css';
 
 type Route =
-  | { page: 'tests' }
+  | { page: 'tests'; open: string | null }
   | { page: 'test'; id: string }
   | { page: 'report'; id: string }
   | { page: 'switchLab' }
@@ -23,6 +23,7 @@ type Route =
 
 function parse(hash: string): Route {
   const [, a, id, b] = hash.split('/');
+  if (a === 'tests' && id && b === 'beside') return { page: 'tests', open: id };
   if (a === 'tests' && id) return b === 'report' ? { page: 'report', id } : { page: 'test', id };
   if (a === 'switch-lab') return { page: 'switchLab' };
   if (a === 'preferences') return { page: 'preferences' };
@@ -30,7 +31,7 @@ function parse(hash: string): Route {
   if (a === 'trails' && isAuditedTable(id) && b) return { page: 'trail', table: id, id: b };
   if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
-  return module ? { page: 'module', module } : { page: 'tests' };
+  return module ? { page: 'module', module } : { page: 'tests', open: null };
 }
 
 function useRoute(): Route {
@@ -81,7 +82,7 @@ function App() {
 function page(route: Route, me: ActorContext) {
   switch (route.page) {
     case 'tests':
-      return <Worklist me={me} />;
+      return <Worklist me={me} open={route.open} />;
     case 'test':
       return <TestPage key={route.id} me={me} id={route.id} />;
     case 'report':

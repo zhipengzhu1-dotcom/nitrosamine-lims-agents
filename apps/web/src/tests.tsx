@@ -1,46 +1,143 @@
-import { type ActorContext, type Result, routes, type Signature, steps, type TestRow } from '@lims/domain';
-import { useCallback, useState } from 'react';
+import {
+  type ActorContext,
+  type Result,
+  routes,
+  type Signature,
+  steps,
+  type TestRow,
+  type TestState,
+} from '@lims/domain';
+import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
-import { Shell, Status, stepAction, words } from './rail.tsx';
+import { Shell, Status, stateOrder, stepAction, words } from './rail.tsx';
+import { Split } from './split.tsx';
 import { type Column, StackTable } from './stack.tsx';
 import { When } from './time.tsx';
 import { TestTrail } from './trail.tsx';
 const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on Sample ${t.sampleNumber}`;
+const methodLine = (t: TestRow) => `${t.methodCode} v${t.methodVersion}`;
 
 const noTests: TestRow[] = [];
-const worklistColumns: Column<TestRow>[] = [
-  { head: 'Sample', cell: (t) => <a href={`#/tests/${t.id}`}>{t.sampleNumber}</a> },
+const worklistColumns = (open: string | null): Column<TestRow>[] => [
+  {
+    head: 'Sample',
+    cell: (t) => (
+      <a href={`#/tests/${t.id}/beside`} aria-current={t.id === open ? 'true' : undefined}>
+        {t.sampleNumber}
+      </a>
+    ),
+  },
   { head: 'Description', cell: (t) => t.description },
   { head: 'Customer', cell: (t) => t.customer },
-  { head: 'Method', cell: (t) => `${t.methodCode} v${t.methodVersion}` },
+  { head: 'Method', cell: methodLine },
   { head: 'State', cell: (t) => <Status state={t.state} /> },
   { head: 'Analyst', cell: (t) => t.assignee },
   { head: 'Received', cell: (t) => t.receivedAt && <When at={t.receivedAt} atLab={t.receivedAtLab} /> },
 ];
+const besideHeads = new Set(['Sample', 'State', 'Received']);
 
-export function Worklist({ me }: { me: ActorContext }) {
+const searchText = (t: TestRow) =>
+  [t.sampleNumber, t.description, t.customer, methodLine(t), t.methodTitle].join('\n').toLowerCase();
+
+/** The Test states the found Tests are in, each with its count. A state no found Test is in is hidden unless chosen. */
+function Pipeline({
+  found,
+  chosen,
+  onChoose,
+}: {
+  found: readonly TestRow[];
+  chosen: TestState | null;
+  onChoose: (state: TestState | null) => void;
+}) {
+  const counts = stateOrder.map((state) => ({ state, n: found.filter((t) => t.state === state).length }));
+  return (
+    <div className="pipeline" role="group" aria-label="Filter by Test state">
+      <button type="button" className="pipe" aria-pressed={chosen === null} onClick={() => onChoose(null)}>
+        All <b>{found.length}</b>
+      </button>
+      {counts
+        .filter(({ state, n }) => n > 0 || state === chosen)
+        .map(({ state, n }) => (
+          <button
+            key={state}
+            type="button"
+            className="pipe"
+            aria-pressed={chosen === state}
+            onClick={() => onChoose(state)}
+          >
+            <Status state={state} /> <b>{n}</b>
+          </button>
+        ))}
+    </div>
+  );
+}
+
+/** The Lab's Tests, filtered by state and search. `open` is the Test shown beside the list. */
+export function Worklist({ me, open }: { me: ActorContext; open: string | null }) {
   const { data: tests, error, reload } = useApi(routes.tests);
   const freshTests = useFresh(tests, (rows) => rows.map((t) => t.id));
+  const [chosen, setChosen] = useState<TestState | null>(null);
+  const [search, setSearch] = useState('');
+  const needle = search.trim().toLowerCase();
+  const found = useMemo(
+    () => (tests ?? noTests).filter((t) => needle === '' || searchText(t).includes(needle)),
+    [tests, needle],
+  );
+  const shown = useMemo(() => (chosen ? found.filter((t) => t.state === chosen) : found), [found, chosen]);
+  const columns = useMemo(() => worklistColumns(open).filter((c) => !open || besideHeads.has(c.head)), [open]);
+  const Title = open ? 'h2' : 'h1';
+  const list = (
+    <>
+      <Title className="worklist__head">Tests</Title>
+      {error && <p className="note--bad">{error}</p>}
+      <div className="worklist__tools">
+        <Pipeline found={found} chosen={chosen} onChoose={setChosen} />
+        <label>
+          Search Tests
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </label>
+      </div>
+      <StackTable
+        columns={columns}
+        rows={shown}
+        rowKey={(t) => t.id}
+        rowClass={(t) =>
+          [freshTests.has(t.id) ? 'row--fresh' : '', t.id === open ? 'row--open' : ''].join(' ').trim() || undefined
+        }
+      />
+      {tests?.length === 0 ? (
+        <p className="muted">No Tests yet.</p>
+      ) : (
+        tests && shown.length === 0 && <p className="muted">No Test matches.</p>
+      )}
+    </>
+  );
+  if (open) return <TestPage me={me} id={open} list={list} afterStep={reload} />;
   const action = me.roles.includes(steps.submit.role)
     ? stepAction('submit', null, ['A new Submission with one Sample and one Test'], reload)
     : null;
   return (
     <Shell me={me} active="tests" action={action}>
-      <h1>Tests</h1>
-      {error && <p className="note--bad">{error}</p>}
-      <StackTable
-        columns={worklistColumns}
-        rows={tests ?? noTests}
-        rowKey={(t) => t.id}
-        rowClass={(t) => (freshTests.has(t.id) ? 'row--fresh' : undefined)}
-      />
-      {tests?.length === 0 && <p className="muted">No Tests yet.</p>}
+      {list}
     </Shell>
   );
 }
 
-export function TestPage({ me, id }: { me: ActorContext; id: string }) {
-  const { data: view, error, reload } = useApi(routes.test, { id });
+/** A Test alone, or beside the Worklist's `list`, which `afterStep` refetches once a step on the Test commits. */
+export function TestPage({
+  me,
+  id,
+  list,
+  afterStep,
+}: {
+  me: ActorContext;
+  id: string;
+  list?: ReactNode;
+  afterStep?: () => Promise<void>;
+}) {
+  const { data: answer, error, reload } = useApi(routes.test, { id });
+  // Beside the Worklist this page stays mounted when another Test opens, so the answer for the Test before is not shown.
+  const view = answer?.test.id === id ? answer : undefined;
   const [reloadTrail, setReloadTrail] = useState<() => Promise<void>>(() => async () => {});
   const onTrailReload = useCallback((fn: () => Promise<void>) => setReloadTrail(() => fn), []);
   const freshState = useFresh(view, (v) => [v.test.state]);
@@ -51,20 +148,20 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         id,
         [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])],
         async () => {
-          await Promise.all([reload(), reloadTrail()]);
+          await Promise.all([reload(), reloadTrail(), afterStep?.()]);
         },
         view.recordVersion && view.statement ? { recordVersion: view.recordVersion, statement: view.statement } : null,
       )
     : null;
-  if (!view)
-    return (
-      <Shell me={me} active="tests" action={null}>
-        {error ? <p className="note--bad">{error}</p> : null}
-      </Shell>
-    );
+  const frame = (record: ReactNode) => (
+    <Shell me={me} active="tests" action={action} notice={view && unsignedNotice(view.signatures)} record={id}>
+      {list ? <Split list={list} record={record} close="#/tests" /> : record}
+    </Shell>
+  );
+  if (!view) return frame(error ? <p className="note--bad">{error}</p> : null);
   const { test, result, report } = view;
-  return (
-    <Shell me={me} active="tests" action={action} notice={unsignedNotice(view.signatures)}>
+  return frame(
+    <>
       <h1 className="record-head">
         {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
         {view.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
@@ -122,8 +219,8 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
       ) : (
         <Signatures rows={view.signatures} fresh={freshSignatures} />
       )}
-      {me.person.customerId === null && <TestTrail me={me} id={id} onReload={onTrailReload} />}
-    </Shell>
+      {me.person.customerId === null && <TestTrail key={id} me={me} id={id} onReload={onTrailReload} />}
+    </>,
   );
 }
 
