@@ -14,7 +14,7 @@ import {
 } from '@lims/domain';
 import { sql } from 'kysely';
 import { Value } from 'typebox/value';
-import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_audit_export_test');
 const write = <T>(reason: string, fn: Parameters<typeof audited<T>>[2]) =>
@@ -62,7 +62,7 @@ const result = {
 };
 
 async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
-  const signature = signer && { password: signer.password };
+  const signature = signer && (await signatureOf(client, testId, signer));
   ok(await client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) }));
 }
 
@@ -114,6 +114,7 @@ it("QA's export for one Customer holds the entries of its Submissions, Samples, 
     'Test Report',
     'Record Version',
     'Signature',
+    'Re-authentication',
   ])
     assert.ok(kinds.has(kind), `the export holds ${kind} entries`);
   assert.ok(data.entries.some((e) => e.record.table === 'test' && e.record.id === mine.testId));

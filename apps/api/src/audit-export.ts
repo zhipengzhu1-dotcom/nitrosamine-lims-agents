@@ -60,7 +60,7 @@ async function recordsByCustomer(scope: Scope) {
     scope.from('result').select(['id', 'testId']).execute(),
     scope.from('testReport').select(['id', 'number', 'testId']).execute(),
     scope.from('recordVersion').select(['id', 'recordId']).execute(),
-    scope.from('signature').select(['id', 'recordVersionId']).execute(),
+    scope.from('signature').select(['id', 'recordVersionId', 'reauthenticationId', 'sessionId']).execute(),
     scope.company.selectFrom('customer').select(['id', 'name']).execute(),
     scope.company.selectFrom('submission').select(['id', 'number', 'customerId']).execute(),
     scope.company
@@ -95,7 +95,12 @@ async function recordsByCustomer(scope: Scope) {
   for (const r of results) own(r.id, owner.get(r.testId));
   for (const r of reports) own(r.id, owner.get(r.testId), r.number);
   for (const v of versions) own(v.id, owner.get(v.recordId));
-  for (const s of signatures) own(s.id, owner.get(s.recordVersionId));
+  for (const s of signatures) {
+    const by = owner.get(s.recordVersionId);
+    own(s.id, by);
+    if (s.reauthenticationId !== null) own(s.reauthenticationId, by);
+    if (s.sessionId !== null && by !== undefined) of.get(by)?.identifiers.push(s.sessionId);
+  }
   for (const s of submissions) of.get(s.customerId)?.identifiers.push(s.id, s.number);
   for (const u of users) {
     const customer = u.customerId === null ? undefined : of.get(u.customerId);

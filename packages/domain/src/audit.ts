@@ -153,6 +153,8 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       data_sha256: { label: 'SHA-256 of the data file' },
       pdf_sha256: { label: 'SHA-256 of the PDF' },
       generated_at: { label: 'Generated at' },
+    },
+  },
   signing_role: {
     kind: 'Signing role',
     chain: 'company',

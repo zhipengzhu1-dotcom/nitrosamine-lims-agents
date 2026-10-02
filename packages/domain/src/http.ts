@@ -499,6 +499,7 @@ export const routes = {
     '/api/audit-exports',
     { body: Type.Object({ customerId: uuid, format: auditExportFormat }, closed) },
     auditExport,
+  ),
   staff: route('GET', '/api/staff', {}, staff),
   recordIdentityVerification: route(
     'POST',

@@ -252,6 +252,9 @@ const fixture: [string, Row][] = [
       entry_count: 12,
       data_sha256: Buffer.alloc(32, 5),
       pdf_sha256: Buffer.alloc(32, 6),
+    },
+  ],
+  [
     'lims.access_event',
     {
       kind: 'LabSwitch',
