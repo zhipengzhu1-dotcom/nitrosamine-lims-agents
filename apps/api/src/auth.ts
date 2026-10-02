@@ -184,21 +184,16 @@ async function recordWrongCredential(
   return reason;
 }
 
-/** A transaction that reaches the person table: a whole one, or the company queries of a Lab write. */
-type PersonTransaction = Kysely<DB> | Kysely<Pick<DB, 'person'>>;
-
 /** Locks the person's row until the transaction ends, without blocking a key-share lock from a step that holds the company chain; answers true, and resets nothing, if a lock landed since the password was checked. */
-async function resetFailuresUnlessLocked(tx: PersonTransaction, personId: string): Promise<boolean> {
-  const people: Kysely<Pick<DB, 'person'>> = tx;
-  const { lockedAt, failedLogins } = await people
+async function resetFailuresUnlessLocked(tx: Transaction<DB>, personId: string): Promise<boolean> {
+  const { lockedAt, failedLogins } = await tx
     .selectFrom('person')
     .select(['lockedAt', 'failedLogins'])
     .where('id', '=', personId)
     .forNoKeyUpdate()
     .executeTakeFirstOrThrow();
   if (lockedAt) return true;
-  if (failedLogins > 0)
-    await people.updateTable('person').set({ failedLogins: 0 }).where('id', '=', personId).execute();
+  if (failedLogins > 0) await tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', personId).execute();
   return false;
 }
 
@@ -233,20 +228,44 @@ export function sourceAddressOf(req: {
   return mapped && isIP(mapped) === 4 ? mapped : address;
 }
 
+/** A password `reauthenticate` proved; only this module makes one, so a write cannot claim a proof it was not given. */
+class Reauthenticated {
+  declare private readonly madeByReauthenticate: never;
+  readonly personId: string;
+  /** The Access Event that records the write refused because a Lockout landed after the password was checked. */
+  readonly refusedByLockout: AccessEvent;
+  constructor(personId: string, refusedByLockout: AccessEvent) {
+    this.personId = personId;
+    this.refusedByLockout = refusedByLockout;
+  }
+}
+export type { Reauthenticated };
+
 /**
- * Holds the re-authenticated person's row until the transaction the re-authentication enables commits, so a Lockout
- * lands wholly before that transaction or wholly after it. Refuses as accountLocked if one landed since the password was
- * checked; otherwise clears the failure count. Call it first in that transaction, before any audit chain is taken.
+ * Runs `write` in one audited transaction that first holds the re-authenticated person's row until it commits, so a
+ * Lockout lands wholly before the write or wholly after it, and clears the failure count. A Lockout that landed since
+ * the password was checked refuses the write as accountLocked and records the refusal as an Access Event, as sign-in does.
  */
-export async function holdReauthenticated(tx: PersonTransaction, personId: string): Promise<void> {
-  if (await resetFailuresUnlessLocked(tx, personId)) refuse('accountLocked', 'this account is locked');
+export async function auditedAfterReauthentication<R>(
+  db: Kysely<DB>,
+  ctx: AuditContext,
+  reauthenticated: Reauthenticated | undefined,
+  write: (tx: Transaction<DB>) => Promise<R>,
+): Promise<R> {
+  if (!reauthenticated) return audited(db, ctx, write);
+  const done = await audited(db, ctx, async (tx) => {
+    if (!(await resetFailuresUnlessLocked(tx, reauthenticated.personId))) return { written: await write(tx) };
+    await record(tx, reauthenticated.refusedByLockout);
+    return null;
+  });
+  return done ? done.written : refuse('accountLocked', 'this account is locked');
 }
 
 /**
  * Proves the person of the session again, to sign or to unlock: the password must be theirs, and a typed user ID, when
- * given, must be theirs too. Success writes nothing: the transaction it enables starts with `holdReauthenticated`. A
- * failure refuses as badCredentials, counts toward the lockout and writes `failureEvent` when given, with why for a
- * failed re-authentication; a lockout it applies is an Access Event.
+ * given, must be theirs too. Success writes nothing and answers a `Reauthenticated` for the write it enables, which
+ * `auditedAfterReauthentication` holds. A failure refuses as badCredentials, counts toward the lockout and writes
+ * `failureEvent`, with why for a failed re-authentication; a lockout it applies is an Access Event.
  */
 export async function reauthenticate(
   db: Kysely<DB>,
@@ -254,34 +273,36 @@ export async function reauthenticate(
   typed: { password: string; username?: string },
   role: Role | typeof NEEDS_NO_ROLE,
   sourceAddress: string,
-  failureEvent?: 'UnlockFailed' | 'ReauthenticationFailed',
-): Promise<void> {
+  failureEvent: 'UnlockFailed' | 'ReauthenticationFailed',
+): Promise<Reauthenticated> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', actor.person.id).executeTakeFirstOrThrow();
   const theirs = typed.username === undefined || typed.username === person.username;
   const proven = await verifyPassword(
     typed.password,
     theirs && person.passwordHash ? person.passwordHash : TIMING_DECOY_HASH,
   );
-  if (theirs && proven && person.passwordHash) return;
+  const event = {
+    subjectId: person.id,
+    roles: actor.roles,
+    sourceAddress,
+    sessionLabId: session.labId,
+    sessionId: session.id,
+    workstationId: session.workstationId,
+  };
+  const failed = (failureReason: SignInFailure): AccessEvent =>
+    failureEvent === 'ReauthenticationFailed'
+      ? { ...event, kind: failureEvent, failureReason }
+      : { ...event, kind: failureEvent };
+  if (theirs && proven && person.passwordHash) return new Reauthenticated(person.id, failed('AccountLocked'));
   await audited(db, { actor: `person:${person.username}`, role, reason: 'Failed authentication' }, async (tx) => {
     const { wasLocked, locksOut } = await countFailure(tx, person.id);
-    const event = {
-      subjectId: person.id,
-      roles: actor.roles,
-      sourceAddress,
-      sessionLabId: session.labId,
-      sessionId: session.id,
-      workstationId: session.workstationId,
-    };
-    if (failureEvent === 'ReauthenticationFailed') {
-      let failureReason: SignInFailure = 'WrongUserId';
-      if (theirs) failureReason = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
-      await record(tx, { kind: failureEvent, failureReason, ...event });
-    } else if (failureEvent) await record(tx, { kind: failureEvent, ...event });
+    let failureReason: SignInFailure = 'WrongUserId';
+    if (theirs) failureReason = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
+    await record(tx, failed(failureReason));
     if (locksOut) await lockOut(tx, event);
   });
   if (typed.username === undefined) refuse('badCredentials', 'the password is not valid');
-  notValid();
+  return notValid();
 }
 
 const interval = (ms: number) => sql<string>`${ms} * interval '1 millisecond'`;
@@ -615,16 +636,20 @@ export function loginRoutes(
   });
 }
 
-/** Writes the person's own Access Event on their session when `change` applied, under no role of the Lab. */
+/**
+ * Writes the person's own Access Event on their session when `change` applied, under no role of the Lab; a change a
+ * re-authentication enables holds that person's row before anything else.
+ */
 function onOwnSession(
   db: Kysely<DB>,
   req: { actor: ActorContext; sessionKey: SessionKey } & Parameters<typeof sourceAddressOf>[0],
   kind: 'SignOut' | 'Lock' | 'Unlock',
   change: (tx: Transaction<DB>) => Promise<boolean>,
+  reauthenticated?: Reauthenticated,
 ) {
   const { actor, sessionKey: session } = req;
   const reason = kind === 'SignOut' ? 'Sign out' : kind;
-  return audited(db, asOwnAccount(actor.person.username, reason), async (tx) => {
+  return auditedAfterReauthentication(db, asOwnAccount(actor.person.username, reason), reauthenticated, async (tx) => {
     if (!(await change(tx))) return;
     await record(tx, {
       kind,
@@ -681,7 +706,7 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
     ...routes.unlock,
     handler: async (req) => {
       const signedIn = { actor: req.actor, session: req.sessionKey };
-      await reauthenticate(
+      const reauthenticated = await reauthenticate(
         db,
         signedIn,
         { password: req.body.password },
@@ -689,10 +714,7 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
         sourceAddressOf(req),
         'UnlockFailed',
       );
-      await onOwnSession(db, req, 'Unlock', async (tx) => {
-        await holdReauthenticated(tx, req.actor.person.id);
-        return setLocked(tx, req.sessionKey, false);
-      });
+      await onOwnSession(db, req, 'Unlock', (tx) => setLocked(tx, req.sessionKey, false), reauthenticated);
       return (await actorFor(db, req.cookies[SESSION_COOKIE], limits)).view;
     },
   });

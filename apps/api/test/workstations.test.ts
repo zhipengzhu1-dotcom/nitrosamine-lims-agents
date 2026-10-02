@@ -334,6 +334,12 @@ describe('Lock and Switch user', () => {
       ok(await browser.call(routes.tests)).some((t) => t.id === test.id),
       'reads return after unlock',
     );
+    const unlocked = await api.superuser
+      .selectFrom('person')
+      .select('failedLogins')
+      .where('id', '=', ana.id)
+      .executeTakeFirstOrThrow();
+    assert.equal(unlocked.failedLogins, 0, 'the unlock clears the failure count');
 
     const [session] = await sessionsOf(ana.id);
     assert.deepEqual(
@@ -348,7 +354,7 @@ describe('Lock and Switch user', () => {
     );
   });
 
-  it('a Lockout committed after the unlock password was checked refuses the unlock and keeps the failure count', async () => {
+  it('a Lockout committed after the unlock password was checked refuses the unlock as UnlockFailed and keeps the failure count', async () => {
     const ana = await api.addPerson(`ana.locked-out-at-unlock-${randomUUID()}`, ['Analyst']);
     const browser = await api.login(ana);
     ok(await browser.call(routes.lock));
@@ -365,7 +371,8 @@ describe('Lock and Switch user', () => {
     assert.equal(person.failedLogins, 1, 'a locked account keeps the failures that led to it');
     assert.deepEqual(
       (await eventsOf(ana.id)).map((e) => e.kind),
-      ['SignInSucceeded', 'Lock', 'UnlockFailed'],
+      ['SignInSucceeded', 'Lock', 'UnlockFailed', 'UnlockFailed'],
+      'the refused unlock is an Access Event, as a sign-in refused by a Lockout is',
     );
   });
 

@@ -227,7 +227,10 @@ export async function startApi(name: string) {
     /**
      * Lands a Lockout on `account` that commits while `press` waits on a lock: the person row is locked out and the
      * Signature table held in one open transaction, so a signing that never waits on the person row reads it unlocked
-     * and waits at its Signature insert instead, inside the window between that read and its commit.
+     * and waits at its Signature insert instead, inside the window between that read and its commit. An unlock takes no
+     * Signature, so code that never holds the person row waits only on its failure-count reset: the unlock case enters a
+     * wrong password first, leaving `failedLogins` at 1, so that such code waits too. Sets `locked_at` alone, with no
+     * Lockout Access Event.
      */
     async lockOutWhile<T>(account: Account, press: () => Promise<T>): Promise<T> {
       const as = { actor: 'svc:test', role: 'system', reason: 'Lock a person out while they press' } as const;
@@ -235,6 +238,8 @@ export async function startApi(name: string) {
         await sql`lock table lims.signature in exclusive mode`.execute(tx);
         await tx.updateTable('person').set({ lockedAt: sql`now()` }).where('id', '=', account.id).execute();
         const answer = press();
+        // A press left behind by a failed wait must not surface as an unhandled rejection.
+        answer.catch(() => {});
         await untilWaitingOnLocks(1);
         // Wrapped, so the transaction does not await an answer that waits on its own lock.
         return { answer };

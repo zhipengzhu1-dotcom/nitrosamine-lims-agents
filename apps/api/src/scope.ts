@@ -1,4 +1,4 @@
-import { audited, type DB } from '@lims/db';
+import type { DB } from '@lims/db';
 import { type ActorContext, type NumberedKind, type NumberTaken, type Role, recordNumber } from '@lims/domain';
 import {
   type Insertable,
@@ -9,6 +9,7 @@ import {
   type UpdateQueryBuilder,
   type UpdateResult,
 } from 'kysely';
+import { auditedAfterReauthentication, type Reauthenticated } from './auth.ts';
 
 type CompanyTable =
   | 'customer'
@@ -89,8 +90,14 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
         ],
       };
     },
-    write: <R>(reason: string, role: Role, fn: (q: WriteQueries) => Promise<R>) =>
-      audited(db, { actor: `person:${ctx.person.username}`, role, reason }, (tx) => fn(inWrite(tx, labId))),
+    /** One audited transaction; a write a re-authentication enables holds that person's row before anything else. */
+    write: <R>(reason: string, role: Role, fn: (q: WriteQueries) => Promise<R>, reauthenticated?: Reauthenticated) =>
+      auditedAfterReauthentication(
+        db,
+        { actor: `person:${ctx.person.username}`, role, reason },
+        reauthenticated,
+        (tx) => fn(inWrite(tx, labId)),
+      ),
   };
 }
 

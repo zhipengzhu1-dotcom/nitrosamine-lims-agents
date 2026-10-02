@@ -616,7 +616,7 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
   refusedWith(await client.call(routes.me), 'noSession');
 });
 
-it('a Lockout committed after the signing password was checked refuses the Signature and leaves the Test as it was', async () => {
+it('a Lockout committed after the signing password was checked refuses the Signature, records the refusal, and leaves the Test as it was', async () => {
   const signer = await api.addPerson('lea.analyst', ['Analyst'], { trained: true });
   const client = await api.login(signer);
   const id = await submitTestTo('Assigned', signer);
@@ -629,6 +629,17 @@ it('a Lockout committed after the signing password was checked refuses the Signa
 
   assert.equal(refusedWith(signing, 'accountLocked'), 'this account is locked');
   assert.deepEqual(await view(id), before, 'no Result, no Signature, and the Test still Assigned');
+  const refusal = await api.superuser
+    .selectFrom('accessEvent')
+    .select(['kind', 'failureReason'])
+    .where('subjectId', '=', signer.id)
+    .where('kind', '<>', 'SignInSucceeded')
+    .execute();
+  assert.deepEqual(
+    refusal,
+    [{ kind: 'ReauthenticationFailed', failureReason: 'AccountLocked' }],
+    'the refused signing is an Access Event, as a sign-in refused by a Lockout is',
+  );
 });
 
 it("a Customer User cannot read another Customer's Test", async () => {
