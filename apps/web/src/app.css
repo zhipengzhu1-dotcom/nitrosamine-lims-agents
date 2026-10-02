@@ -94,6 +94,10 @@ p {
 .muted {
   color: var(--ink-3);
 }
+/* A date, or a clock with its zone, never breaks inside itself. */
+.when {
+  white-space: nowrap;
+}
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -319,10 +323,14 @@ th {
 .verdict p {
   margin: 0;
 }
-.chains {
+.chains,
+.breaks {
   list-style: none;
   margin: 4px 0 0;
   padding: 0;
+}
+.breaks {
+  padding-left: 16px;
 }
 .entries {
   list-style: none;

@@ -21,7 +21,6 @@ export default defineConfig({
   projects: [
     { name: 'desktop', use: { viewport: { width: 1360, height: 900 } } },
     { name: 'iphone', use: devices['iPhone 16'] },
-    { name: 'ipad', use: devices['iPad (gen 11)'] },
     { name: 'pixel', use: devices['Pixel 9'] },
   ],
   webServer: {

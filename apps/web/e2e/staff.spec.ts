@@ -27,7 +27,8 @@ test('the Admin records an Identity Verification, creates the account and grants
   await page.getByRole('button', { name: 'Record the Identity Verification' }).click();
   await expect(
     page.getByRole('status').filter({ hasText: `Identity Verification of ${printedName} recorded` }),
-  ).toBeVisible();
+    'a company record time shows in UTC only',
+  ).toHaveText(/ recorded at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC\.$/);
 
   const account = page.getByRole('form', { name: `Account for ${printedName}` });
   await account.getByLabel('Username').fill(username);
@@ -57,7 +58,7 @@ test('the Admin records an Identity Verification, creates the account and grants
   await grant.getByLabel('Reason').fill('Try to make an Analyst an Admin');
   await grant.getByRole('button', { name: 'Grant' }).click();
   await expect(grant.getByRole('alert')).toHaveText(
-    'Refused: a person who holds Admin or Platform Operator holds no business role, in any Lab.',
+    'Refused: A person who holds Admin or Platform Operator holds no business role, in any Lab.',
   );
   await shot('05-refused-admin-apart');
 
@@ -86,7 +87,7 @@ test('the Admin records an Identity Verification, creates the account and grants
   await page.getByLabel('New password again').fill('someone-else');
   await page.getByRole('button', { name: 'Set my password' }).click();
   await expect(page.getByRole('alert')).toHaveText(
-    'Refused: this link has been used, replaced or has expired; ask the Admin for a new one.',
+    'Refused: This link has been used, replaced or has expired. Ask the Admin for a new one.',
   );
   await shot('08-link-used');
 });

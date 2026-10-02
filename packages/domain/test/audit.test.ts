@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Value } from 'typebox/value';
 import {
+  type BreakKind,
+  breakReport,
+  type ChainBreakFound,
   chainVerification,
   type ChainVerification,
   currentLabel,
@@ -15,69 +18,122 @@ import {
 
 const at = (s: string) => Value.Decode(instant, s);
 
-describe('a recomputed chain reads as how far it is intact', () => {
+describe('a recomputed chain reads as how far it is intact, and names each break with its System Incident', () => {
+  const open = (entry: string, incident: string, kind: BreakKind = 'Changed', through = entry, breaks = 1) => ({
+    entry,
+    incident,
+    incidentState: 'Open' as const,
+    kind,
+    through,
+    breaks,
+  });
+  const read = ({ entry, incident, incidentState }: ChainBreakFound, failure: string) => ({
+    entry,
+    incident,
+    incidentState,
+    failure,
+  });
   const cases: {
     name: string;
     last: string;
-    failure: string | null;
-    expected: Omit<ChainVerification, 'chain' | 'incident'>;
+    breaks: ChainBreakFound[];
+    expected: Omit<ChainVerification, 'chain'>;
   }[] = [
     {
       name: 'an untouched chain is intact through its last entry',
       last: '12',
-      failure: null,
+      breaks: [],
       expected: {
         verdict: 'Intact',
         lastEntry: '12',
         intactThrough: '12',
-        firstFailure: null,
+        breaks: [],
         report: 'verified through entry 12',
       },
     },
     {
       name: 'an empty chain is intact through entry 0',
       last: '0',
-      failure: null,
+      breaks: [],
       expected: {
         verdict: 'Intact',
         lastEntry: '0',
         intactThrough: '0',
-        firstFailure: null,
+        breaks: [],
         report: 'verified through entry 0',
       },
     },
     {
-      name: 'an altered entry is the first failure, and the chain is intact through the entry before it',
+      name: 'an altered entry is a break, and the chain is intact through the entry before it',
       last: '12',
-      failure: '5',
+      breaks: [open('5', 'RF000001')],
       expected: {
         verdict: 'Broken',
         lastEntry: '12',
         intactThrough: '4',
-        firstFailure: '5',
-        report: 'entry 5 fails to verify; intact through entry 4; recorded as System Incident RF000001',
+        breaks: [read(open('5', 'RF000001'), 'entry 5 fails to verify')],
+        report: 'intact through entry 4',
       },
     },
     {
-      name: 'a moved chain head fails after the last entry',
+      name: 'a moved chain head is a break after the last entry',
       last: '12',
-      failure: '13',
+      breaks: [open('13', 'RF000001', 'HeadMoved')],
       expected: {
         verdict: 'Broken',
         lastEntry: '12',
         intactThrough: '12',
-        firstFailure: '13',
-        report: 'the chain head does not match entry 12; intact through entry 12; recorded as System Incident RF000001',
+        breaks: [read(open('13', 'RF000001', 'HeadMoved'), 'the chain head does not match entry 12')],
+        report: 'intact through entry 12',
+      },
+    },
+    {
+      name: 'every break is named with its own System Incident in its state, and the first sets how far the chain is intact',
+      last: '12',
+      breaks: [{ ...open('3', 'RF000001'), incidentState: 'Closed' }, open('7', 'RF000002', 'Missing', '8')],
+      expected: {
+        verdict: 'Broken',
+        lastEntry: '12',
+        intactThrough: '2',
+        breaks: [
+          { entry: '3', incident: 'RF000001', incidentState: 'Closed', failure: 'entry 3 fails to verify' },
+          { entry: '7', incident: 'RF000002', incidentState: 'Open', failure: 'entries 7 to 8 are missing' },
+        ],
+        report: 'intact through entry 2',
+      },
+    },
+    {
+      name: 'the breaks after those recorded one by one read as how many there are and the entries they span',
+      last: '2000',
+      breaks: [open('1', 'RF000001'), open('101', 'RF000002', 'More', '2000', 1900)],
+      expected: {
+        verdict: 'Broken',
+        lastEntry: '2000',
+        intactThrough: '0',
+        breaks: [
+          read(open('1', 'RF000001'), 'entry 1 fails to verify'),
+          read(open('101', 'RF000002'), '1900 more breaks, from entry 101 to entry 2000'),
+        ],
+        report: 'intact through entry 0',
       },
     },
   ];
-  for (const c of cases) {
-    const incident = c.failure === null ? null : 'RF000001';
-    const broken = c.failure === null ? null : { firstFailure: c.failure, incident: 'RF000001' as const };
-    it(c.name, () =>
-      assert.deepEqual(chainVerification('lab', c.last, broken), { chain: 'lab', incident, ...c.expected }),
+  for (const c of cases)
+    it(c.name, () => assert.deepEqual(chainVerification('lab', c.last, c.breaks), { chain: 'lab', ...c.expected }));
+
+  it('a break reads as where the chain fails and its System Incident in its state', () => {
+    const [closed, head] = chainVerification('lab', '12', [
+      { ...open('3', 'RF000001'), incidentState: 'Closed' },
+      open('13', 'RF000002', 'HeadMoved'),
+    ]).breaks;
+    assert.deepEqual(
+      [closed, head].map((b) => b && breakReport(b)),
+      [
+        'entry 3 fails to verify, recorded as System Incident RF000001 (Closed)',
+        'the chain head does not match entry 12, recorded as System Incident RF000002 (Open)',
+      ],
     );
-  }
+  });
 });
 
 const LAB = 'a4d6a9d1-0000-4000-8000-000000000001';

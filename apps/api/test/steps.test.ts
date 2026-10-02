@@ -107,7 +107,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   assert.equal((await take(as.rui, 'review', id, {}, rui)).status, 200);
   assert.equal(
     refusedWith(await as.cora.call(routes.report, { id }), 'notFound'),
-    'this Test has no released Test Report',
+    'This Test has no released Test Report.',
     'no Test Report for the Customer before release',
   );
   const unreleased = await view(id, as.cora);
@@ -221,10 +221,10 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   );
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   assert.deepEqual(
-    verified.chains.map((c) => [c.chain, c.firstFailure]),
+    verified.chains.map((c) => [c.chain, c.breaks]),
     [
-      ['lab', null],
-      ['company', null],
+      ['lab', []],
+      ['company', []],
     ],
   );
   const { recent } = await api.db
@@ -314,7 +314,10 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
 
 it('a step by the wrong role is refused', async () => {
   const id = await submitTestTo('Requested');
-  assert.equal(refusedWith(await take(as.cora, 'receive', id), 'role'), 'receive is taken by the SampleCustodian role');
+  assert.equal(
+    refusedWith(await take(as.cora, 'receive', id), 'role'),
+    'The receive step is taken by the SampleCustodian role.',
+  );
   refusedWith(await take(as.ana, 'receive', id), 'role');
   assert.equal((await view(id)).test.state, 'Requested');
 });
@@ -343,7 +346,7 @@ it('the Analyst who signed Performed cannot review, and the Reviewer who reviewe
     input: {},
     signature: anySignature,
   });
-  assert.equal(refusedWith(selfReview, 'guard'), 'the Analyst who performed the Test cannot review it');
+  assert.equal(refusedWith(selfReview, 'guard'), 'The Analyst who performed the Test cannot review it.');
 
   assert.equal((await take(as.rhea, 'review', id, {}, rhea)).status, 200);
   const selfRelease = await as.rhea.call(stepRoute('release'), {
@@ -365,7 +368,7 @@ it('a signing with a wrong password is refused and changes nothing, and a signin
 
   assert.equal(
     refusedWith(await enter({ ...seen, password: 'not-the-password' }), 'badCredentials'),
-    'the user ID or password is not valid',
+    'The user ID or password is not valid.',
   );
   assert.deepEqual(
     await view(id),
@@ -375,7 +378,7 @@ it('a signing with a wrong password is refused and changes nothing, and a signin
   assert.equal((await enter(seen)).status, 200);
 
   ok(await as.wes.call(routes.logout));
-  assert.equal(refusedWith(await enter(seen), 'noSession'), 'sign in first');
+  assert.equal(refusedWith(await enter(seen), 'noSession'), 'Sign in first.');
 });
 
 it('a typed user ID that is not the session person is refused like a wrong password, and each failure is its own Access Event that counts toward the lockout', async () => {
@@ -396,12 +399,12 @@ it('a typed user ID that is not the session person is refused like a wrong passw
 
   assert.equal(
     refusedWith(await attempt({ ...seen, username: ana.username }), 'badCredentials'),
-    'the user ID or password is not valid',
+    'The user ID or password is not valid.',
   );
   assert.equal(await failures(), 1, "another person's user ID with the right password counts one failure");
   assert.equal(
     refusedWith(await attempt({ ...seen, password: 'wrong' }), 'badCredentials'),
-    'the user ID or password is not valid',
+    'The user ID or password is not valid.',
   );
   assert.equal(await failures(), 2);
   const { id: sessionId } = await api.superuser
@@ -439,7 +442,7 @@ it('a signing on sight of a signature statement version that is not in force is 
   });
   assert.equal(
     refusedWith(refused, 'signingRefused'),
-    'the signature statement changed since this screen loaded it; read it again before signing',
+    'The Signature Statement changed since this screen loaded it. Read it again before signing.',
   );
   assert.deepEqual((await view(id, as.ana)).signatures, [], 'nothing was signed');
   const { n } = await api.superuser
@@ -472,7 +475,7 @@ it('a signing on sight of a Record Version that is no longer the latest is refus
   });
   assert.equal(
     refusedWith(refused, 'recordChanged'),
-    'the Test changed since this screen loaded it; read it again before signing',
+    'The Test changed since this screen loaded it. Read it again before signing.',
   );
   const after = await view(id, as.rui);
   assert.deepEqual(
@@ -614,6 +617,60 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
     .execute();
   assert.deepEqual(roles, [{ role: steps.enterResult.role }], "the failures are recorded under the step's role");
   refusedWith(await client.call(routes.me), 'noSession');
+});
+
+it('a Lockout committed after the signing password was checked refuses the Signature, records the refusal without counting it, and leaves the Test as it was', async () => {
+  const signer = await api.addPerson('lea.analyst', ['Analyst'], { trained: true });
+  const client = await api.login(signer);
+  const id = await submitTestTo('Assigned', signer);
+  const before = await view(id);
+  const signature = await signatureOf(client, id, signer);
+  const press = (password: string) =>
+    client.call(stepRoute('enterResult'), {
+      commitKey: randomUUID(),
+      testId: id,
+      input: result,
+      signature: { ...signature, password },
+    });
+  refusedWith(await press('wrong'), 'badCredentials');
+
+  const signing = await api.lockOutWhile(signer, () => press(signature.password));
+
+  assert.equal(refusedWith(signing, 'accountLocked'), 'This account is locked.');
+  assert.deepEqual(await view(id), before, 'no Result, no Signature, and the Test still Assigned');
+  const failures = await api.superuser
+    .selectFrom('accessEvent')
+    .select(['kind', 'failureReason'])
+    .where('subjectId', '=', signer.id)
+    .where('kind', '<>', 'SignInSucceeded')
+    .orderBy('at')
+    .execute();
+  assert.deepEqual(
+    failures,
+    [
+      { kind: 'ReauthenticationFailed', failureReason: 'WrongPassword' },
+      { kind: 'ReauthenticationFailed', failureReason: 'AccountLocked' },
+    ],
+    'the refused signing is an Access Event, as a sign-in refused by a Lockout is',
+  );
+  const { failedLogins } = await api.superuser
+    .selectFrom('person')
+    .select('failedLogins')
+    .where('id', '=', signer.id)
+    .executeTakeFirstOrThrow();
+  assert.equal(failedLogins, 1, 'the refusal does not count toward the lockout again');
+  const reasons = await api.superuser
+    .selectFrom('auditEntry')
+    .select('reason')
+    .distinct()
+    .where('actor', '=', `person:${signer.username}`)
+    .where('tableName', '=', 'access_event')
+    .execute();
+  assert.deepEqual(
+    reasons,
+    [{ reason: 'Failed authentication' }],
+    'both refusals are recorded as failed authentication',
+  );
 });
 
 it("a Customer User cannot read another Customer's Test", async () => {

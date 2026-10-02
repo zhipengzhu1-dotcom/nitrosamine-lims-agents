@@ -6,7 +6,7 @@ import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
 import { staffRoutes } from './staff.ts';
-import { trailRoutes } from './trail.ts';
+import { onWallClock, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
@@ -17,6 +17,7 @@ function visibleTests(scope: Scope) {
     .innerJoin('submission', 'submission.id', 'sample.submissionId')
     .innerJoin('customer', 'customer.id', 'submission.customerId')
     .innerJoin('method', 'method.id', 'test.methodId')
+    .innerJoin('lab', 'lab.labId', 'test.labId')
     .leftJoin('person as assignee', 'assignee.id', 'test.assigneeId')
     .select([
       'test.id',
@@ -25,6 +26,7 @@ function visibleTests(scope: Scope) {
       'sample.number as sampleNumber',
       'sample.description',
       'sample.receivedAt',
+      onWallClock(sql.ref<Date | null>('sample.received_at'), sql.ref('lab.time_zone')).as('receivedAtLab'),
       'customer.name as customer',
       'method.code as methodCode',
       'method.version as methodVersion',
@@ -39,7 +41,8 @@ function visibleTests(scope: Scope) {
 
 async function testView(scope: Scope, id: string) {
   const test =
-    (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ?? refuse('notFound', 'no such Test');
+    (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ??
+    refuse('notFound', 'You can see no such Test.');
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
@@ -72,12 +75,14 @@ async function testView(scope: Scope, id: string) {
     signatures: withheld
       ? []
       : await signedVersions(scope)
+          .innerJoin('lab', 'lab.labId', 'signature.labId')
           .select([
             'signature.meaning',
             'signature.printedName as signer',
             'signature.username',
             'signature.role',
             'signature.signedAt',
+            onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('lab.time_zone')).as('signedAtLab'),
             'recordVersion.recordTable as record',
             'recordVersion.version',
             'recordVersion.canonicalForm',
@@ -143,7 +148,7 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
     handler: async (req) => {
       const scope = labScope(db, req.actor);
       const { report, test, result, signatures } = await testView(scope, req.params.id);
-      if (!report) return refuse('notFound', 'this Test has no released Test Report');
+      if (!report) return refuse('notFound', 'This Test has no released Test Report.');
       const { version, canonicalForm, contentHash } = await latestVersion(scope, 'test_report', report.id);
       return { report, recordVersion: { version, canonicalForm, contentHash }, test, result, signatures };
     },
@@ -153,7 +158,7 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
     ...routes.incident,
     handler: async (req) => {
       if (!req.actor.roles.some((role) => role === 'Admin' || role === 'QA'))
-        refuse('role', 'reading a System Incident is an Admin or QA action');
+        refuse('role', 'Reading a System Incident is an Admin or QA action.');
       return (
         (await db
           .selectFrom('systemIncident')
@@ -173,11 +178,13 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
             sql<string | null>`encode(typed_user_id_hmac, 'hex')`.as('typedUserIdHmac'),
             'chain',
             'firstFailure',
+            'lastFailure',
+            'breakCount',
             'openedAt',
             'loggedAt',
           ])
           .where('reference', '=', req.params.reference)
-          .executeTakeFirst()) ?? refuse('notFound', `no System Incident has the reference ${req.params.reference}`)
+          .executeTakeFirst()) ?? refuse('notFound', `No System Incident has the reference ${req.params.reference}.`)
       );
     },
   });

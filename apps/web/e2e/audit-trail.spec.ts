@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, submittedTest, test } from './walk.ts';
+import { expect, type Locator, type Page, submittedTest, test, utcThenLabClock } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string, lab = /R&D Laboratory/) {
@@ -36,7 +36,16 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
 
   await page.reload();
   await signIn(page, 'rui.reviewer');
+  const receivedOnWorklist = page.getByRole('row', { name: description }).locator('td[data-label="Received"]');
+  await expect(receivedOnWorklist, 'the Worklist shows Received in UTC, then on the Lab wall clock').toHaveText(
+    utcThenLabClock,
+  );
+  const received = await receivedOnWorklist.textContent();
   await openTheTest();
+  await expect(
+    page.locator('dl.facts dt:text-is("Received") + dd'),
+    'the Test page shows the same Received',
+  ).toHaveText(received ?? '');
   const trail = page.getByRole('region', { name: 'Audit Trail' });
   const entries = trail.getByRole('listitem');
   await expect(trail.getByRole('heading', { name: 'Audit Trail' })).toBeVisible();
@@ -91,6 +100,16 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await expect(signed.locator('dt:text-is("Signed at") + dd')).toHaveText(
     /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d -0[45]:00$/,
   );
+  const signedAt = await signed.locator('dt:text-is("Signed at") + dd').textContent();
+  await expect(
+    page.locator('td[data-label="Time"]'),
+    "the Signatures table's Time is the Audit Trail's Signed at, in UTC then on the Lab wall clock",
+  ).toHaveText([signedAt ?? '']);
+  const receipt = entries.filter({ has: page.locator('dt:text-is("Received")') });
+  await expect(
+    receipt.locator('dt:text-is("Received") + dd'),
+    "the trail's Received is the one the Test page shows",
+  ).toHaveText(`none → ${received}`);
   // The Signature entry above it also has long values (its copied hashes), so the Record Version is found by its content.
   const versioned = entries.filter({ has: page.locator('details.long', { hasText: '"analyte"' }) }).first();
   await expect(versioned).toContainText('Record Version');
@@ -191,15 +210,79 @@ test('QA verifying a broken chain sees Broken beside that chain, in its own glyp
   const { methods } = await (await page.request.get('/api/lookups')).json();
   await page.goto(`/#/trails/method/${methods[0].id}`);
   await page.getByRole('button', { name: 'Verify chain' }).click();
-  const chains = page.locator('.chains li');
-  await expect(chains).toHaveText([
-    /^Lab chain Broken entry 1 fails to verify; intact through entry 0; recorded as System Incident \w{8}$/,
-    /^Company chain Intact verified through entry \d+$/,
-  ]);
-  const [broken, intact] = [chains.first().locator('.status'), chains.last().locator('.status')];
+  const chains = page.locator('.chains > li');
+  await expect(chains).toHaveCount(2);
+  await expect(chains.first()).toContainText(/^Lab chain Broken intact through entry 0/);
+  await expect(chains.first().locator('.breaks li').first()).toHaveText(
+    /^entry 1 fails to verify, recorded as System Incident \w{8} Open$/,
+  );
+  await expect(chains.last()).toHaveText(/^Company chain Intact verified through entry \d+$/);
+  const [broken, intact] = [chains.first().locator('.status').first(), chains.last().locator('.status')];
   await expect(broken).toHaveCSS('color', 'rgb(179, 38, 30)');
   await expect(intact).toHaveCSS('color', INTACT_COLOUR);
   await expect(broken.locator('path')).toHaveAttribute('d', 'M4 4l8 8M12 4l-8 8');
   await expect(intact.locator('path')).toHaveAttribute('d', TICK);
+  await signOut(page);
+});
+
+/** Writes one more entry on the QC Lab's chain and alters it, so this run has a break of its own; returns its entry. */
+function breakANewQcEntry(): string {
+  giveQaTheQcLabAndAlterItsChain();
+  const printed = execFileSync(
+    '../../scripts/pg.sh',
+    ['psql', '-qAt', '-v', 'ON_ERROR_STOP=1', '--single-transaction', '-d', E2E_DATABASE],
+    {
+      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
+                     set_config('lims.reason', 'Write an entry on the QC Lab chain to break (e2e)', true);
+              update lims.lab set name = name where code = 'QC';
+              set local session_replication_role = replica;
+              update lims.audit_entry set reason = 'Altered behind the chain (e2e)'
+               where chain = (select lab_id::text from lims.lab where code = 'QC')
+                 and seq = (select max(seq) from lims.audit_entry
+                             where chain = (select lab_id::text from lims.lab where code = 'QC'))
+              returning seq;`,
+      stdio: ['pipe', 'pipe', 'inherit'],
+    },
+  );
+  return printed.toString().trim().split('\n').at(-1) ?? '';
+}
+
+function closeQcIncidentAt(entry: string) {
+  execFileSync(
+    '../../scripts/pg.sh',
+    ['psql', '-q', '-v', 'ON_ERROR_STOP=1', '-v', `entry=${entry}`, '--single-transaction', '-d', E2E_DATABASE],
+    {
+      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
+                     set_config('lims.reason', 'Close a System Incident (e2e)', true);
+              update lims.system_incident set state = 'Closed'
+               where chain = (select lab_id::text from lims.lab where code = 'QC') and first_failure = :entry;`,
+      stdio: ['pipe', 'ignore', 'inherit'],
+    },
+  );
+}
+
+test('QA verifying a chain whose break has a Closed System Incident still sees Broken, with that incident marked Closed', async ({
+  page,
+}) => {
+  const entry = breakANewQcEntry();
+  expect(entry).toMatch(/^\d+$/);
+  await page.goto('/');
+  await signIn(page, 'quinn.qa', /QC Laboratory/);
+  const { methods } = await (await page.request.get('/api/lookups')).json();
+  await page.goto(`/#/trails/method/${methods[0].id}`);
+  const verify = page.getByRole('button', { name: 'Verify chain' });
+  const own = page
+    .locator('.chains > li')
+    .first()
+    .locator('.breaks li', { hasText: `entry ${entry} fails` });
+
+  await verify.click();
+  await expect(own).toHaveText(new RegExp(`^entry ${entry} fails to verify, recorded as System Incident \\w{8} Open$`));
+  const incident = /System Incident (\w{8})/.exec((await own.textContent()) ?? '')?.[1];
+
+  closeQcIncidentAt(entry);
+  await verify.click();
+  await expect(own).toHaveText(`entry ${entry} fails to verify, recorded as System Incident ${incident} Closed`);
+  await expect(page.locator('.chains > li').first().locator('.status').first()).toHaveText('Broken');
   await signOut(page);
 });

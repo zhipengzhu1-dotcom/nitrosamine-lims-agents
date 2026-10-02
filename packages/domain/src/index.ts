@@ -4,3 +4,4 @@ export * from './steps.ts';
 export * from './numbers.ts';
 export * from './redaction.ts';
 export * from './staff.ts';
+export * from './sentence.ts';

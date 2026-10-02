@@ -1,7 +1,9 @@
 import {
   type ActorContext,
+  type ChainVerdict,
   decimalPattern,
   mayTake,
+  type IncidentState,
   type Lab,
   type RecordVersionRef,
   type Role,
@@ -82,12 +84,31 @@ const markLook = {
   Broken: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
   Unsigned: unsignedLook,
   'Signatures unsigned': unsignedLook,
-} as const;
+  Open: unsignedLook,
+  Acknowledged: {
+    tone: 'bad',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M8 5v3.5l2.5 1.5" />
+      </>
+    ),
+  },
+  Closed: {
+    tone: 'done',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M5.5 8.2l1.8 1.8 3.2-3.5" />
+      </>
+    ),
+  },
+} as const satisfies Record<ChainVerdict | IncidentState | 'Unsigned' | 'Signatures unsigned', unknown>;
 
 /**
- * A Test state with its track, or a mark with its glyph: a chain verdict, an unsigned Signature, or a record with an
- * unsigned Signature. `fresh` marks a state the server has just confirmed on this page: the word and glyph are final,
- * and an accent plays around them.
+ * A Test state with its track, or a mark with its glyph: a chain verdict, a System Incident's state, an unsigned
+ * Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
+ * the word and glyph are final, and an accent plays around them.
  */
 export function Status(props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook }) {
   if ('mark' in props) {
@@ -146,8 +167,9 @@ export function stepAction(
         ? { meaning: step.signs, what: ui.record ? [...what, ui.record] : what, role: step.role, ...signing }
         : null,
     async run(input, credentials) {
-      // Kept until the server answers, even across a reload, so the same press after no answer resends its Commit Key.
-      // The slot names the press by a digest, so no entries are kept in the browser.
+      // Kept, even across a reload, sign-in or refusal, until the LIMS answers that it recorded the press: no other answer
+      // proves the LIMS does not already hold it, and a new key would record it twice. A key the LIMS does not hold is
+      // claimed by the next press as if new. The slot names the press by a digest, so no entries are kept in the browser.
       const slot = await commitKeySlot(pressText(name, testId, input));
       const commitKey = sessionStorage.getItem(slot) ?? crypto.randomUUID();
       sessionStorage.setItem(slot, commitKey);
@@ -164,7 +186,6 @@ export function stepAction(
             },
           }),
       }).catch(async (e: unknown) => {
-        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(slot);
         // The record or the statement moved on: the page reads it again, so the next sheet shows what is current.
         if (e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) await onDone();
         throw e;
@@ -277,8 +298,8 @@ const EXIT_FALLBACK_MS = 400;
 function unansweredText(e: unknown, signs: boolean): string {
   if (!(e instanceof Refused))
     return `The LIMS did not answer. ${signs ? 'Type your password again and sign' : 'Press again'} with the same entries; they will not be saved twice.`;
-  if (e.kind === 'failure') return `Not finished: ${e.message}.`;
-  return `Refused: ${e.message}.${signs ? ' Nothing has been signed.' : ''}`;
+  if (e.kind === 'failure') return `Not finished: ${e.message}`;
+  return `Refused: ${e.message}${signs ? ' Nothing has been signed.' : ''}`;
 }
 
 function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | null; notice?: string | undefined }) {
@@ -389,7 +410,14 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     try {
       await lock(mode);
     } catch (e) {
-      setNote({ text: `Refused: ${e instanceof Error ? e.message : String(e)}.`, tone: 'bad', n: ++count.current });
+      setNote({
+        text:
+          e instanceof Refused
+            ? `${e.kind === 'failure' ? 'Not finished' : 'Refused'}: ${e.message}`
+            : 'The LIMS did not answer. Press again.',
+        tone: 'bad',
+        n: ++count.current,
+      });
     } finally {
       inFlight.current = false;
       setLocking(false);
