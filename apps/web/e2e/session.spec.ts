@@ -40,7 +40,7 @@ test('the Bench Rail counts down to the idle end, and returns to sign-in only wh
   await page.getByLabel('Username').fill('quinn.qa');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  const countdown = page.locator('.rail .who__clock');
+  const countdown = page.locator('.rail .who__clock').filter({ visible: true });
   // The walk runs on the demo login, whose idle limit is 8 hours.
   await expect(countdown).toHaveText(/^Session ends in (8:00:00|7:59:5\d)$/);
   await expect(countdown).toBeVisible();
