@@ -291,6 +291,68 @@ it('enrolment refuses an unknown user ID, an account with no credential yet and 
   assert.deepEqual(await eventsOf(locked.id), [{ kind: 'SignInFailed', failureReason: 'AccountLocked' }]);
 });
 
+it('under the decided login, unlocking a locked session needs the password and a fresh code', async () => {
+  const { account, code } = await enrolled('ulla.unlock');
+  const client = new Client(decided.base);
+  ok(
+    await client.call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId: api.labId,
+      code: code(),
+    }),
+  );
+  ok(await client.call(routes.lock));
+  const wrong = code(1) === '000000' ? '111111' : '000000';
+  for (const typed of [{}, { code: wrong }, { code: code() }])
+    assert.equal(
+      refusedWith(await client.call(routes.unlock, { password: account.password, ...typed }), 'badCredentials'),
+      'The password or code is not valid.',
+    );
+  assert.equal(
+    ok(await client.call(routes.unlock, { password: account.password, code: code(1) })).person.id,
+    account.id,
+  );
+  assert.deepEqual((await eventsOf(account.id)).map((event) => event.kind).slice(-5), [
+    'Lock',
+    'UnlockFailed',
+    'UnlockFailed',
+    'UnlockFailed',
+    'Unlock',
+  ]);
+});
+
+it('under the decided login, a Lab switch needs the user ID, the password and a fresh code', async () => {
+  const { account, code } = await enrolled('sol.switch');
+  await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Add a Membership' }, (tx) =>
+    tx.insertInto('membership').values({ labId: api.qcLabId, personId: account.id, role: 'Reviewer' }).execute(),
+  );
+  const client = new Client(decided.base);
+  ok(
+    await client.call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId: api.labId,
+      code: code(),
+    }),
+  );
+  const toQc = (typed: { code?: string }) =>
+    client.call(routes.switchLab, {
+      username: account.username,
+      password: account.password,
+      labId: api.qcLabId,
+      ...typed,
+    });
+  assert.equal(refusedWith(await toQc({}), 'badCredentials'), NOT_VALID);
+  assert.equal(refusedWith(await toQc({ code: code() }), 'badCredentials'), NOT_VALID);
+  assert.equal(ok(await toQc({ code: code(1) })).lab.id, api.qcLabId);
+  assert.deepEqual((await eventsOf(account.id)).slice(-3), [
+    { kind: 'LabSwitchFailed', failureReason: 'WrongCode' },
+    { kind: 'LabSwitchFailed', failureReason: 'WrongCode' },
+    { kind: 'LabSwitch', failureReason: null },
+  ]);
+});
+
 it('a password under 15 characters or missing a character type is refused with a sentence; a password that meets the rule is set', async () => {
   const ada = await api.login(api.person('ada'));
   const verification = ok(
