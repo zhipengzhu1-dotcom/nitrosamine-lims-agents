@@ -341,7 +341,16 @@ function Rail({
   const statusLine = useRef<HTMLDivElement>(null);
   const opened = sheet !== null && !sheet.closing;
   const firstField = () => form.current?.querySelector<HTMLElement>('input, select');
+  const mounted = useRef(false);
 
+  // A rail left mid-commit, by Back or a new record, frees the plane, and its late answer cannot free the next rail's.
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      onCommitting(false);
+    };
+  }, [onCommitting]);
   useEffect(() => {
     if (!returnFocus.current || opened) return;
     returnFocus.current = false;
@@ -419,7 +428,7 @@ function Rail({
     } finally {
       inFlight.current = false;
       setBusy(false);
-      onCommitting(false);
+      if (mounted.current) onCommitting(false);
       setPassword('');
     }
   }

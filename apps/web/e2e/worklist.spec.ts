@@ -121,7 +121,7 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
   await expect(page.getByRole('heading', { name: 'Tests' }), 'the Test link still opens the Test alone').toHaveCount(0);
 });
 
-test('beside the Worklist, a step keeps its Test open until the answer, and its success motion stays with it', async ({
+test('beside the Worklist, a step holds the list until its answer and no longer, and its success motion stays with it', async ({
   page,
 }) => {
   test.skip(test.info().project.name !== 'desktop', 'the Worklist stays beside the Test only on a desktop');
@@ -172,4 +172,26 @@ test('beside the Worklist, a step keeps its Test open until the answer, and its 
     page.locator('.split__record').locator('.status--fresh, .row--fresh'),
     'returning to a Test plays no success motion for a step it took earlier',
   ).toHaveCount(0);
+
+  await page.unroute('**/api/steps/receive');
+  const heldAgain = Promise.withResolvers<void>();
+  await page.route('**/api/steps/receive', async (route) => {
+    await heldAgain.promise;
+    await route.continue();
+  });
+  await second.click();
+  await expect(record).toContainText('Requested');
+  const secondSample = (await second.textContent()) ?? '';
+  const sentAgain = page.waitForRequest('**/api/steps/receive');
+  await page.getByRole('button', { name: 'Receive' }).click();
+  await sentAgain;
+  await page.goBack();
+  await expect(record).not.toContainText(secondSample);
+  const answered = page.waitForResponse('**/api/steps/receive');
+  heldAgain.resolve();
+  await answered;
+  await second.click();
+  await expect(record, 'once a step left by Back has its answer, the list opens a Test again').toContainText(
+    `${secondSample} Ready`,
+  );
 });
