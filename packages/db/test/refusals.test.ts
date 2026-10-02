@@ -52,6 +52,13 @@ const id = {
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
 const deviceToken = Buffer.alloc(32, 2);
+/** What a chain-verify System Incident records of the one break at `entry`. */
+const oneBreak = (entry: number) => ({
+  first_failure: entry,
+  last_failure: entry,
+  break_count: 1,
+  fingerprint: Buffer.alloc(32, 7),
+});
 const zeros = Buffer.alloc(32);
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest();
 const fixtureContent = Buffer.from('{"id":"fixture"}');
@@ -227,6 +234,9 @@ const fixture: [string, Row][] = [
       session_lab_id: id.lab,
       chain: id.lab,
       first_failure: 7,
+      last_failure: 7,
+      break_count: 1,
+      fingerprint: Buffer.alloc(32, 7),
     },
   ],
   [
@@ -895,10 +905,10 @@ describe('the database refuses a duplicate of a unique value', () => {
       constraint: 'system_incident_reference_key',
     },
     {
-      name: 'a second chain-verify System Incident for the same chain and first failing entry is refused',
+      name: 'a second chain-verify System Incident for the same break, at the same entry with the same fingerprint, is refused',
       table: 'lims.system_incident',
-      change: { kind: 'ChainVerifyFailure', step: null, error_class: null, chain: id.lab, first_failure: 7 },
-      constraint: 'system_incident_chain_first_failure_key',
+      change: { kind: 'ChainVerifyFailure', step: null, error_class: null, chain: id.lab, ...oneBreak(7) },
+      constraint: 'system_incident_chain_break_key',
     },
     {
       name: 'a second Commit Key with the same key in one Lab is refused, from the same session or another, so a press commits once',
@@ -1399,7 +1409,7 @@ describe('the database refuses a value outside its allowed set', () => {
       step: null,
       error_class: null,
     }),
-    incidentFacts('an unexpected-failure System Incident that names a chain', { chain: id.lab, first_failure: 7 }),
+    incidentFacts('an unexpected-failure System Incident that names a chain', { chain: id.lab, ...oneBreak(7) }),
     incidentFacts('a chain-verify System Incident that names no chain', {
       kind: 'ChainVerifyFailure',
       step: null,
@@ -1408,13 +1418,15 @@ describe('the database refuses a value outside its allowed set', () => {
     incidentFacts('a chain-verify System Incident with a failing step', {
       kind: 'ChainVerifyFailure',
       chain: 'company',
-      first_failure: 3,
+      ...oneBreak(3),
     }),
     incidentFacts('a chain-verify System Incident that names no first failing entry', {
       kind: 'ChainVerifyFailure',
       step: null,
       error_class: null,
       chain: 'company',
+      ...oneBreak(3),
+      first_failure: null,
     }),
     incidentFacts('a chain-verify System Incident with no requesting person', {
       kind: 'ChainVerifyFailure',
@@ -1422,7 +1434,7 @@ describe('the database refuses a value outside its allowed set', () => {
       error_class: null,
       requested_by: null,
       chain: 'company',
-      first_failure: 3,
+      ...oneBreak(3),
     }),
     ...[
       ...['Company', 'lab', 'A4D6A9D1-0000-4000-8000-000000000001', 'a4d6a9d1-0000-4000-8000-00000000000'].map(
@@ -1436,10 +1448,56 @@ describe('the database refuses a value outside its allowed set', () => {
       ([what, column, chain, entry]): Case => ({
         name: `${what} is refused: ${JSON.stringify(column === 'chain' ? chain : entry)}`,
         table: 'lims.system_incident',
-        change: { kind: 'ChainVerifyFailure', step: null, error_class: null, chain, first_failure: entry },
+        change: {
+          kind: 'ChainVerifyFailure',
+          step: null,
+          error_class: null,
+          chain,
+          ...oneBreak(1),
+          first_failure: entry,
+        },
         constraint: `system_incident_${column}_check`,
       }),
     ),
+    ...(
+      [
+        ['with no last entry', { last_failure: null }],
+        ['with no count of breaks', { break_count: null }],
+        ['whose last entry is before its first', { first_failure: 7, last_failure: 6 }],
+      ] as const
+    ).map(
+      ([what, change]): Case => ({
+        name: `a chain-verify System Incident ${what} is refused`,
+        table: 'lims.system_incident',
+        change: { kind: 'ChainVerifyFailure', step: null, error_class: null, chain: id.lab, ...oneBreak(7), ...change },
+        constraint: 'system_incident_break_check',
+      }),
+    ),
+    {
+      name: 'an unexpected-failure System Incident with a last failing entry is refused',
+      table: 'lims.system_incident',
+      change: { last_failure: 7 },
+      constraint: 'system_incident_break_check',
+    },
+    {
+      name: 'an unexpected-failure System Incident with a break fingerprint is refused',
+      table: 'lims.system_incident',
+      change: { fingerprint: Buffer.alloc(32, 7) },
+      constraint: 'system_incident_break_check',
+    },
+    {
+      name: 'a chain-verify System Incident that records no breaks is refused',
+      table: 'lims.system_incident',
+      change: {
+        kind: 'ChainVerifyFailure',
+        step: null,
+        error_class: null,
+        chain: id.lab,
+        ...oneBreak(7),
+        break_count: 0,
+      },
+      constraint: 'system_incident_break_count_check',
+    },
     incidentFacts('a locked-account System Incident that also names an address', {
       kind: 'RepeatedSignInOnLockedAccount',
       subject_id: id.person,
@@ -2015,6 +2073,33 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
         ['LA002', "a System Incident's recorded facts are never changed"],
         column,
       );
+    }
+  });
+
+  const unrecordedBreak = `insert into lims.system_incident (kind, reference, requested_by, chain, first_failure)
+                           values ('ChainVerifyFailure', 'RF00000M', $1, $2, 4)`;
+  covered.add('lims.system_incident.require_break');
+  it("a new chain-verify System Incident without its break's fingerprint, last entry and count is refused", async () => {
+    const error = await refusalOf(unrecordedBreak, [id.person, id.lab]);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', "a chain-verify System Incident records its break's fingerprint, last entry and count"],
+    );
+  });
+
+  it('a chain-verify System Incident opened before breaks carried a fingerprint can still move to Closed', async () => {
+    await client.query('begin');
+    try {
+      await client.query('set local session_replication_role = replica');
+      await client.query(unrecordedBreak, [id.person, id.lab]);
+      await client.query('set local session_replication_role = origin');
+      await client.query(AUDIT_CONTEXT);
+      const { rowCount } = await client.query(
+        `update lims.system_incident set state = 'Closed' where reference = 'RF00000M'`,
+      );
+      assert.equal(rowCount, 1);
+    } finally {
+      await client.query('rollback');
     }
   });
 });

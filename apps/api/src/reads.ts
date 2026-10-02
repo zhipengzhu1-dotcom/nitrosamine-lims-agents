@@ -178,6 +178,8 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
             sql<string | null>`encode(typed_user_id_hmac, 'hex')`.as('typedUserIdHmac'),
             'chain',
             'firstFailure',
+            'lastFailure',
+            'breakCount',
             'openedAt',
             'loggedAt',
           ])

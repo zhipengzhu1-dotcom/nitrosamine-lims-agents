@@ -5,6 +5,7 @@ import {
   type AuditedTable,
   auditedRecords,
   type AuditTrailVerification,
+  breakLine,
   isTestState,
   type ShownValue,
   routes,
@@ -168,6 +169,15 @@ function VerifyChain() {
               {answer.found.chains.map((c) => (
                 <li key={c.chain}>
                   {chainWords[c.chain]} <Status mark={c.verdict} /> {c.report}
+                  {c.breaks.length > 0 && (
+                    <ul className="breaks">
+                      {c.breaks.map((b) => (
+                        <li key={b.entry}>
+                          {breakLine(b)} <Status mark={b.incidentState} />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               ))}
             </ul>
