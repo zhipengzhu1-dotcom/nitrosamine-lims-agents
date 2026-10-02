@@ -25,16 +25,19 @@ const setPassword = (token: string, password: string) =>
 let next = 0;
 async function newStarter(printedName = 'Nell Newcomer') {
   next += 1;
-  const check = ok(
+  const verification = ok(
     await as.ada.call(routes.recordIdentityVerification, {
       printedName,
       evidence: 'Passport seen in person (fictional)',
     }),
   );
   const created = ok(
-    await as.ada.call(routes.createAccount, { identityVerificationId: check.id, username: `nell.newcomer${next}` }),
+    await as.ada.call(routes.createAccount, {
+      identityVerificationId: verification.id,
+      username: `nell.newcomer${next}`,
+    }),
   );
-  return { check, ...created };
+  return { verification, ...created };
 }
 
 const entriesFor = (table: string, id: string) =>
@@ -65,25 +68,25 @@ it('creating a staff account with no Identity Verification on record is refused 
 
 it('an Identity Verification records the checker, what was checked and database time, on the company chain', async () => {
   const before = await dbNow();
-  const check = ok(
+  const verification = ok(
     await as.ada.call(routes.recordIdentityVerification, {
       printedName: 'Iris Checked',
       evidence: 'Driving licence seen in person (fictional)',
     }),
   );
   const after = await dbNow();
-  assert.equal(check.printedName, 'Iris Checked');
-  assert.equal(check.evidence, 'Driving licence seen in person (fictional)');
-  assert.equal(check.checkedBy, 'Ada Novak');
+  assert.equal(verification.printedName, 'Iris Checked');
+  assert.equal(verification.evidence, 'Driving licence seen in person (fictional)');
+  assert.equal(verification.checkedBy, 'Ada Novak');
   const stored = await api.superuser
     .selectFrom('identityVerification')
     .selectAll()
-    .where('id', '=', check.id)
+    .where('id', '=', verification.id)
     .executeTakeFirstOrThrow();
   assert.equal(stored.checkedBy, ada.id);
   assert.equal(stored.checkedInLabId, api.labId);
   assert.ok(before && after && stored.checkedAt >= before && stored.checkedAt <= after, 'checked at database time');
-  const [entry, ...others] = await entriesFor('identity_verification', check.id);
+  const [entry, ...others] = await entriesFor('identity_verification', verification.id);
   assert.deepEqual(others, []);
   assert.deepEqual(
     [entry?.actor, entry?.role, entry?.reason, entry?.chain],
@@ -92,8 +95,8 @@ it('an Identity Verification records the checker, what was checked and database 
 });
 
 it('an account created after its Identity Verification gets its first credentials only through a single-use link', async () => {
-  const { check, person, link } = await newStarter();
-  assert.equal(person.printedName, check.printedName, 'the account takes the printed name that was checked');
+  const { verification, person, link } = await newStarter();
+  assert.equal(person.printedName, verification.printedName, 'the account takes the printed name that was checked');
   assert.equal(person.credentialSet, false);
   assert.ok(person.identityVerifiedAt);
   ok(await as.ada.call(routes.grantMembership, { personId: person.id, role: 'Analyst', reason: 'New starter' }));
@@ -123,7 +126,7 @@ it('a one-time link works once: a second use is refused and leaves the password 
   ok(await as.ada.call(routes.grantMembership, { personId: person.id, role: 'Reviewer', reason: 'New starter' }));
   ok(await setPassword(link.token, 'first-choice'));
   const message = refusedWith(await setPassword(link.token, 'second-choice'), 'badCredentials');
-  assert.equal(message, 'this link has been used or has expired; ask the Admin for a new one');
+  assert.equal(message, 'this link has been used, replaced or has expired; ask the Admin for a new one');
   refusedWith(await signIn(person.username, 'second-choice'), 'badCredentials');
   ok(await signIn(person.username, 'first-choice'));
   refusedWith(await setPassword('not-a-link-the-lims-issued', 'third-choice'), 'badCredentials');
@@ -150,11 +153,11 @@ it('no reply to the Admin contains a password, a password hash or a second-facto
     replies.push(reply);
     return reply;
   };
-  const check = keep(
+  const verification = keep(
     ok(await as.ada.call(routes.recordIdentityVerification, { printedName: 'Pia Private', evidence: 'ID card seen' })),
   );
   const { person, link } = keep(
-    ok(await as.ada.call(routes.createAccount, { identityVerificationId: check.id, username: 'pia.private' })),
+    ok(await as.ada.call(routes.createAccount, { identityVerificationId: verification.id, username: 'pia.private' })),
   );
   keep(ok(await as.ada.call(routes.grantMembership, { personId: person.id, role: 'QA', reason: 'New starter' })));
   ok(await setPassword(link.token, 'pia-secret-password'));
@@ -213,12 +216,12 @@ it('a Membership with no reason, or a blank one, is refused', async () => {
 });
 
 it('every staff-account route refuses a person who is not an Admin', async () => {
-  const { check, person } = await newStarter();
+  const { verification, person } = await newStarter();
   for (const client of [as.cora, as.samir, as.lena, as.ana, as.quinn]) {
     refusedWith(await client.call(routes.staff), 'role');
     refusedWith(await client.call(routes.recordIdentityVerification, { printedName: 'X Y', evidence: 'ID' }), 'role');
     refusedWith(
-      await client.call(routes.createAccount, { identityVerificationId: check.id, username: 'not.by.admin' }),
+      await client.call(routes.createAccount, { identityVerificationId: verification.id, username: 'not.by.admin' }),
       'role',
     );
     refusedWith(
@@ -246,9 +249,9 @@ it('a business role for an Admin, or Admin for a holder of a business role, is r
 });
 
 it('an Identity Verification gives one account, and a username is given once', async () => {
-  const { check, person } = await newStarter();
+  const { verification, person } = await newStarter();
   refusedWith(
-    await as.ada.call(routes.createAccount, { identityVerificationId: check.id, username: 'second.account' }),
+    await as.ada.call(routes.createAccount, { identityVerificationId: verification.id, username: 'second.account' }),
     'state',
   );
   const other = ok(await as.ada.call(routes.recordIdentityVerification, { printedName: 'Twin', evidence: 'ID card' }));
@@ -337,4 +340,43 @@ it('the Admin sees this Lab’s staff with their roles, and checked people still
   assert.ok(awaitingAccount.some((c) => c.id === waiting.id));
   const ana = people.find((p) => p.username === 'ana.analyst');
   assert.deepEqual([ana?.roles, ana?.credentialSet], [['Analyst'], true]);
+});
+
+it('a grant to a person who is not among this Lab’s staff, or of a role already held, is refused with a kind and opens no System Incident', async () => {
+  const before = await api.superuser.selectFrom('systemIncident').select('id').execute();
+  refusedWith(
+    await as.ada.call(routes.grantMembership, { personId: randomUUID(), role: 'QA', reason: 'Typo' }),
+    'notFound',
+  );
+  const { person } = await newStarter();
+  ok(await as.ada.call(routes.grantMembership, { personId: person.id, role: 'QA', reason: 'New starter' }));
+  assert.equal(
+    refusedWith(
+      await as.ada.call(routes.grantMembership, { personId: person.id, role: 'QA', reason: 'Again' }),
+      'state',
+    ),
+    `${person.printedName} already holds QA in this Lab`,
+  );
+  assert.deepEqual(await api.superuser.selectFrom('systemIncident').select('id').execute(), before);
+});
+
+it('a new one-time link replaces the earlier one, and none is issued once the person has set a password', async () => {
+  const { person, link: first } = await newStarter();
+  refusedWith(await as.lena.call(routes.issueLink, { personId: person.id }), 'role');
+  const { link: second } = ok(await as.ada.call(routes.issueLink, { personId: person.id }));
+  refusedWith(await setPassword(first.token, 'from-the-old-link'), 'badCredentials');
+  ok(await setPassword(second.token, 'from-the-new-link'));
+  refusedWith(await as.ada.call(routes.issueLink, { personId: person.id }), 'state');
+  const issued = await api.superuser
+    .selectFrom('auditEntry')
+    .select(['actor', 'reason'])
+    .where('tableName', '=', 'credential_link')
+    .where('op', '=', 'INSERT')
+    .where(sql`new_row->>'person_id'`, '=', person.id)
+    .orderBy('seq')
+    .execute();
+  assert.deepEqual(issued, [
+    { actor: 'person:ada.admin', reason: 'Create a staff account' },
+    { actor: 'person:ada.admin', reason: 'Issue a new one-time link' },
+  ]);
 });

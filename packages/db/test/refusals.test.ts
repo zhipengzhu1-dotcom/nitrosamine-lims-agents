@@ -1321,7 +1321,9 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
   });
   it('two Labs granting Admin and a business role to one person at once: the second waits and is refused', async () => {
     const other = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    const watcher = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
     await other.connect();
+    await watcher.connect();
     const fresh = randomUUID();
     try {
       await client.query('begin');
@@ -1334,18 +1336,35 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
       await client.query('begin');
       await client.query(AUDIT_CONTEXT);
       await client.query(grant, [id.lab, fresh, 'Admin']);
+      const { rows } = await other.query<{ pid: number }>('select pg_backend_pid() as pid');
       await other.query('begin');
       await other.query(AUDIT_CONTEXT);
+      const answered = { yet: false };
       const second = other.query(grant, [id.otherLab, fresh, 'Analyst']).then(
-        () => assert.fail('the database granted a business role to a person being made Admin'),
-        (e: unknown) => (e instanceof pg.DatabaseError ? e : assert.fail(String(e))),
+        () => {
+          answered.yet = true;
+          return assert.fail('the database granted a business role to a person being made Admin');
+        },
+        (e: unknown) => {
+          answered.yet = true;
+          return e instanceof pg.DatabaseError ? e : assert.fail(String(e));
+        },
       );
+      const waiting = async () =>
+        (
+          await watcher.query(`select wait_event_type = 'Lock' as waits from pg_stat_activity where pid = $1`, [
+            rows[0]?.pid,
+          ])
+        ).rows[0]?.waits === true;
+      while (!answered.yet && !(await waiting()));
+      assert.equal(answered.yet, false, 'the second grant answered before the first committed');
       await client.query('commit');
       const error = await second;
       assert.deepEqual([error.code, error.message], ['LA008', apart]);
     } finally {
       await other.query('rollback');
       await other.end();
+      await watcher.end();
     }
   });
 

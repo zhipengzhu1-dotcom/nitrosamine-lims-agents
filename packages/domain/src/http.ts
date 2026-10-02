@@ -350,6 +350,7 @@ export const routes = {
     { body: Type.Object({ identityVerificationId: uuid, username }, closed) },
     accountCreated,
   ),
+  issueLink: route('POST', '/api/staff/links', { body: Type.Object({ personId: uuid }, closed) }, accountCreated),
   grantMembership: route(
     'POST',
     '/api/staff/memberships',

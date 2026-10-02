@@ -66,7 +66,7 @@ _Avoid_: Permission, group, access
 
 **Printed name**:
 The name a person's Signatures and records show. The Admin may change it with a reason; each Signature keeps the printed name as signed. Unlike the username, which never changes.
-_Avoid_: Display name, full name
+_Avoid_: Full name, signing name
 
 **One-time link**:
 The link through which a person sets their own password, so that the Admin never sees or sets it. It works once and expires; the LIMS keeps only a hash of it.

@@ -60,19 +60,19 @@ const field = (form: FormData, name: string) => {
   return typeof value === 'string' ? value : '';
 };
 
-function RecordCheck({ onDone }: { onDone: () => Promise<void> }) {
+function RecordVerification({ onDone }: { onDone: () => Promise<void> }) {
   const { busy, commit, shown } = useCommit();
   return (
     <form
       className="card"
       onSubmit={(e) =>
         commit(e, async (form) => {
-          const check = await api(routes.recordIdentityVerification, {
+          const verification = await api(routes.recordIdentityVerification, {
             printedName: field(form, 'printedName'),
             evidence: field(form, 'evidence'),
           });
           await onDone();
-          return `Identity Verification of ${check.printedName} recorded at ${time(check.checkedAt)}.`;
+          return `Identity Verification of ${verification.printedName} recorded at ${time(verification.checkedAt)}.`;
         })
       }
     >
@@ -87,7 +87,7 @@ function RecordCheck({ onDone }: { onDone: () => Promise<void> }) {
       </label>
       {shown}
       <button type="submit" className="btn" disabled={busy}>
-        Record the check
+        Record the Identity Verification
       </button>
     </form>
   );
@@ -100,21 +100,21 @@ interface Link {
 }
 
 function CreateAccount({
-  check,
+  verification,
   onCreated,
 }: {
-  check: IdentityVerification;
+  verification: IdentityVerification;
   onCreated: (link: Link) => Promise<void>;
 }) {
   const { busy, commit, shown } = useCommit();
   return (
     <form
       className="card"
-      aria-label={`Account for ${check.printedName}`}
+      aria-label={`Account for ${verification.printedName}`}
       onSubmit={(e) =>
         commit(e, async (form) => {
           const { person, link } = await api(routes.createAccount, {
-            identityVerificationId: check.id,
+            identityVerificationId: verification.id,
             username: field(form, 'username'),
           });
           await onCreated({ printedName: person.printedName, ...link });
@@ -123,10 +123,10 @@ function CreateAccount({
       }
     >
       <p>
-        <b>{check.printedName}</b>
+        <b>{verification.printedName}</b>
         <br />
         <span className="muted">
-          {check.evidence}, checked by {check.checkedBy} at {time(check.checkedAt)}
+          {verification.evidence}, checked by {verification.checkedBy} at {time(verification.checkedAt)}
         </span>
       </p>
       <label>
@@ -250,6 +250,28 @@ function ChangePrintedName({ people, onDone }: { people: readonly StaffPerson[];
   );
 }
 
+/** For an account whose person has not set a password yet: a fresh one-time link, which replaces the earlier one. */
+function NewLink({ person, onIssued }: { person: StaffPerson; onIssued: (link: Link) => void }) {
+  const { busy, commit, shown } = useCommit();
+  return (
+    <form
+      aria-label={`New one-time link for ${person.printedName}`}
+      onSubmit={(e) =>
+        commit(e, async () => {
+          const { link } = await api(routes.issueLink, { personId: person.id });
+          onIssued({ printedName: person.printedName, ...link });
+          return 'Not set yet; a new link is shown above.';
+        })
+      }
+    >
+      {shown ?? 'Not set yet'}
+      <button type="submit" className="btn btn--small" disabled={busy}>
+        New one-time link
+      </button>
+    </form>
+  );
+}
+
 export function StaffPage({ me }: { me: ActorContext }) {
   const { data, error, reload } = useApi(routes.staff);
   const fresh = useFresh(data, (d) => d.people.map((p) => `${p.id}:${p.roles.join()}:${p.printedName}`));
@@ -259,7 +281,7 @@ export function StaffPage({ me }: { me: ActorContext }) {
     <Shell me={me} active="staff" action={null}>
       <h1>Staff accounts</h1>
       {error && <p className="note--bad">{error}</p>}
-      <RecordCheck onDone={reload} />
+      <RecordVerification onDone={reload} />
       {link && (
         <section className="card" aria-label="One-time link">
           <h2>One-time link for {link.printedName}</h2>
@@ -278,10 +300,10 @@ export function StaffPage({ me }: { me: ActorContext }) {
       {data && data.awaitingAccount.length > 0 && (
         <section>
           <h2>Checked, awaiting an account</h2>
-          {data.awaitingAccount.map((check) => (
+          {data.awaitingAccount.map((verification) => (
             <CreateAccount
-              key={check.id}
-              check={check}
+              key={verification.id}
+              verification={verification}
               onCreated={async (created) => {
                 await reload();
                 setLink(created);
@@ -313,7 +335,7 @@ export function StaffPage({ me }: { me: ActorContext }) {
                   <code>{p.username}</code>
                 </td>
                 <td data-label="Roles">{p.roles.map(words).join(', ') || 'No Membership yet'}</td>
-                <td data-label="Password">{p.credentialSet ? 'Set' : 'Not set yet'}</td>
+                <td data-label="Password">{p.credentialSet ? 'Set' : <NewLink person={p} onIssued={setLink} />}</td>
                 <td data-label="Identity verified">
                   {p.identityVerifiedAt ? time(p.identityVerifiedAt) : 'Not recorded (seeded demo account)'}
                 </td>
@@ -355,6 +377,7 @@ export function WelcomePage({ token }: { token: string }) {
                 if (password !== field(form, 'confirm')) throw new Error('the two passwords differ');
                 const set = await api(routes.setPasswordThroughLink, { token, password });
                 setUsername(set.username);
+                history.replaceState(null, '', location.pathname);
                 return '';
               })
             }

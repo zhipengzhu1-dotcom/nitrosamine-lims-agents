@@ -23,7 +23,7 @@ test('the Admin records an Identity Verification, creates the account and grants
 
   await page.getByLabel('Printed name', { exact: true }).fill(printedName);
   await page.getByLabel('What was checked').fill('Passport seen in person (fictional)');
-  await page.getByRole('button', { name: 'Record the check' }).click();
+  await page.getByRole('button', { name: 'Record the Identity Verification' }).click();
   await expect(
     page.getByRole('status').filter({ hasText: `Identity Verification of ${printedName} recorded` }),
   ).toBeVisible();
@@ -81,7 +81,7 @@ test('the Admin records an Identity Verification, creates the account and grants
   await page.getByLabel('New password again').fill('someone-else');
   await page.getByRole('button', { name: 'Set my password' }).click();
   await expect(page.getByRole('alert')).toHaveText(
-    'Refused: this link has been used or has expired; ask the Admin for a new one.',
+    'Refused: this link has been used, replaced or has expired; ask the Admin for a new one.',
   );
   await shot('08-link-used');
 });

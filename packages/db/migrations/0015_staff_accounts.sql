@@ -59,6 +59,8 @@ create trigger keep_identity before update on lims.person
 
 -- Admin and Platform Operator are held apart from every business role, per person across all Labs. The person row
 -- lock serialises two grants to one person, so two Labs cannot each grant one side at once.
+-- On update the row's own old role counts too, so a Membership never moves between Admin and a business role:
+-- the Admin grants the new role as a new Membership instead.
 create function lims.keep_administration_apart() returns trigger language plpgsql as $$
 declare
   administrative constant text[] := array['Admin', 'PlatformOperator'];
@@ -74,6 +76,16 @@ begin
 end $$;
 create trigger keep_administration_apart before insert or update on lims.membership
   for each row execute function lims.keep_administration_apart();
+
+-- The trigger guards new grants; a database that already holds both sides for one person is refused here instead.
+do $$ begin
+  if exists (select from lims.membership a join lims.membership b on b.person_id = a.person_id
+              where a.role::text in ('Admin', 'PlatformOperator')
+                and b.role::text not in ('Admin', 'PlatformOperator')) then
+    raise exception 'a person holds Admin or Platform Operator beside a business role; end one before migrating'
+      using errcode = 'LA008';
+  end if;
+end $$;
 
 -- A one-time link through which a person sets their own first password; only the token's hash is kept.
 create table lims.credential_link (
@@ -110,17 +122,23 @@ create trigger use_link_once before update or delete on lims.credential_link
 create trigger refuse_truncate before truncate on lims.credential_link
   for each statement execute function lims.refuse_change();
 
--- The only way a password reaches an existing account: the link is marked used and the password set in one
--- statement's transaction, so a link sets at most one password. Returns the person, or null for a link that is
--- unknown, used or expired.
-create function lims.set_password_through_link(link_token_hash bytea, new_password_hash text) returns uuid
+-- The only way a password reaches an existing account: the link is marked used and the first password set in one
+-- transaction, so a link sets at most one password. It takes the token itself, so the hash that the table and the
+-- Audit Trail hold redeems nothing, and only the person's latest link counts. Returns the person, or null for a
+-- link that is unknown, used, expired or superseded, or whose account already has a password.
+create function lims.set_password_through_link(link_token text, new_password_hash text) returns uuid
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
+  this_instant constant timestamptz := clock_timestamp();
   who uuid;
 begin
-  update lims.credential_link set used_at = clock_timestamp()
-   where token_hash = link_token_hash and used_at is null and clock_timestamp() < expires_at
-  returning person_id into who;
+  update lims.credential_link l set used_at = this_instant
+   where l.token_hash = sha256(convert_to(link_token, 'UTF8')) and l.used_at is null
+     and this_instant < l.expires_at
+     and not exists (select from lims.credential_link newer
+                      where newer.person_id = l.person_id and newer.issued_at > l.issued_at)
+     and exists (select from lims.person p where p.id = l.person_id and p.password_hash is null)
+  returning l.person_id into who;
   if who is not null then
     update lims.person set password_hash = new_password_hash where id = who;
   end if;
@@ -173,4 +191,4 @@ grant insert (printed_name, evidence, checked_by, checked_in_lab_id) on lims.ide
 grant insert (person_id, token_hash) on lims.credential_link to lims_app;
 revoke update on lims.person from lims_app;
 grant update (display_name, failed_logins, locked_at) on lims.person to lims_app;
-grant execute on function lims.set_password_through_link(bytea, text) to lims_app;
+grant execute on function lims.set_password_through_link(text, text) to lims_app;

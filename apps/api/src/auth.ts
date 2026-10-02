@@ -28,8 +28,12 @@ const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url
 
 const SIGN_OUT_NEEDS_NO_ROLE = 'none';
 
+/** The SHA-256 of a session or one-time link token: the only form in which the database holds either. */
 export const hashToken = (token: string) => createHash('sha256').update(token).digest();
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
+
+const LINK_NOT_VALID = () =>
+  refuse('badCredentials', 'this link has been used, replaced or has expired; ask the Admin for a new one');
 
 const REFUSAL: { readonly [F in SignInFailure]: () => never } = {
   UnknownUserId: notValid,
@@ -241,11 +245,19 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
       const { token, password } = req.body;
       if (password.length < MIN_PASSWORD_LENGTH)
         refuse('malformed', `a password needs at least ${MIN_PASSWORD_LENGTH} characters`);
+      const live = await db
+        .selectFrom('credentialLink')
+        .select('id')
+        .where('tokenHash', '=', hashToken(token))
+        .where('usedAt', 'is', null)
+        .where('expiresAt', '>', sql<Date>`clock_timestamp()`)
+        .executeTakeFirst();
+      if (!live) return LINK_NOT_VALID();
       const passwordHash = await hashPassword(password);
       const as = { ...SIGN_IN_SERVICE, reason: 'Set a password through a one-time link' };
       const set = await audited(db, as, async (tx) => {
         const { rows } = await sql<{ person: string | null }>`
-          select lims.set_password_through_link(${hashToken(token)}, ${passwordHash}) as person`.execute(tx);
+          select lims.set_password_through_link(${token}, ${passwordHash}) as person`.execute(tx);
         const personId = rows[0]?.person;
         if (!personId) return null;
         const labId = await lowestIdMembershipLab(tx, personId);
@@ -253,7 +265,7 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
         await record(tx, { kind: 'PasswordSet', subjectId: personId, roles, sourceAddress: req.ip });
         return tx.selectFrom('person').select('username').where('id', '=', personId).executeTakeFirstOrThrow();
       });
-      return set ?? refuse('badCredentials', 'this link has been used or has expired; ask the Admin for a new one');
+      return set ?? LINK_NOT_VALID();
     },
   });
 }
