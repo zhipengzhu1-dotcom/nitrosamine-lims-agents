@@ -5,7 +5,7 @@ A person picks a Lab (none is preselected), signs in with a username and passwor
 ## Sub-features
 
 - `signin-ok` signs in and shows the `Tests` worklist with the person's name in the rail.
-- `signin-refused` refuses a wrong password with `the credentials are not valid` in `role=alert`.
+- `signin-refused` refuses a wrong password with `the user ID or password is not valid` in `role=alert`.
 - `signin-session` keeps the person signed in across a reload.
 - `signout` ends the session and shows the `Sign in` heading.
 - `lab-choice` lists the seeded Labs `QC` and `RD` with no radio checked; a sign-in without a Lab cannot be sent, and the API answers one with `labNotChosen`.
@@ -24,7 +24,7 @@ Preconditions:
 
 - doctor.sh is all `ok:`.
 
-- **Refused.** Check the radio `R&D Laboratory`, fill `Username` with `ana.analyst` and `Password` with `wrong`, then press `Sign in`. `role=alert` reads `the credentials are not valid`, and `steps.log` shows `POST /api/login -> 401`. `select failed_logins from lims.person where username = 'ana.analyst'` reads `1`, and the newest `lims.audit_entry` row is `person` with reason `Failed authentication`.
+- **Refused.** Check the radio `R&D Laboratory`, fill `Username` with `ana.analyst` and `Password` with `wrong`, then press `Sign in`. `role=alert` reads `the user ID or password is not valid`, and `steps.log` shows `POST /api/login -> 401`. `select failed_logins from lims.person where username = 'ana.analyst'` reads `1`, and the newest `lims.audit_entry` row is `person` with reason `Failed authentication`.
 - **Signed in.** Run `await v.signIn('ana.analyst')`. The heading `Tests` is visible, and the rail shows `Ana Ferreira` with `Analyst · ana.analyst`. `failed_logins` is back to `0`.
 - **Session.** Run `await page.reload()`. The heading `Tests` is still there, and `GET /api/me -> 200`.
 - **Lab switch.** Run `await v.signIn('lena.manager')`, press `Switch Lab` in the rail, check `QC Laboratory`, fill `Username` and `Password`, and press the form's `Switch Lab`. The rail reads `QC · Lab Manager`. `select kind, previous_session_id is not null from lims.access_event order by at desc limit 1` reads `LabSwitch|t`.

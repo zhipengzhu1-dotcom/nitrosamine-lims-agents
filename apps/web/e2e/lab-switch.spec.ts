@@ -33,7 +33,7 @@ test('the sign-in screen offers each Lab with none selected, and the rail switch
 
   await credentials(page, /QC Laboratory/, 'not-the-password');
   await form.getByRole('button', { name: 'Switch Lab' }).click();
-  await expect(form.getByRole('alert')).toHaveText('the credentials are not valid');
+  await expect(form.getByRole('alert')).toHaveText('the user ID or password is not valid');
   await expect(rail, 'a refused switch leaves the session in its Lab').toContainText('RD · Lab Manager');
 
   await credentials(page, /QC Laboratory/);
