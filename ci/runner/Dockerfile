@@ -3,8 +3,7 @@
 FROM ghcr.io/actions/actions-runner:2.337.0@sha256:f5a0d9a3d857315f2aed7075a02a29f46927ad198221c3b1c66585ae9fe36c0d
 
 USER root
-# The pinned postgres:18.6 image is Debian trixie (glibc 2.41) and this one is Ubuntu 24.04 (glibc 2.39), so the
-# server comes from the same PGDG packages built for Ubuntu, pinned to the same release.
+# PGDG's build of PostgreSQL 18.6 for Ubuntu 24.04, held at that release.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends postgresql-common \
   && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \

@@ -13,7 +13,7 @@ CI's `check` and `e2e` jobs run on self-hosted GitHub Actions runners in Docker 
 
 The loop is the restart policy. A Docker restart policy restarts the same container, which keeps the last job's files and holds a registration that GitHub has already deleted.
 
-The image (`Dockerfile`) is GitHub's `ghcr.io/actions/actions-runner`, pinned by digest for linux/arm64, with PostgreSQL 18.6 from the PGDG packages. The jobs use no Docker of their own, so the image has no Docker socket and no service containers. A service container would publish its port on the Docker VM, where the runner container's `localhost` cannot reach it, and the socket would give every job control of the Mac's Docker.
+The image (`Dockerfile`) is GitHub's `ghcr.io/actions/actions-runner`, pinned by digest for linux/arm64, with PostgreSQL 18.6 from the PGDG packages, pinned by package version. CI's service container used to pin the `postgres:18.6` image by digest, but that image is Debian trixie (glibc 2.41), so its server binaries are built against a newer C library than this Ubuntu 24.04 image has (glibc 2.39). PGDG builds the same release for both. The jobs use no Docker of their own, so the image has no Docker socket and no service containers. A service container would publish its port on the Docker VM, where the runner container's `localhost` cannot reach it, and the socket would give every job control of the Mac's Docker.
 
 ## Before the first start
 
@@ -22,7 +22,7 @@ You need:
 - Docker Desktop running.
 - The GitHub CLI signed in as an admin of `zhipengzhu1-dotcom/09-28-2026-LIMS`. Check with `gh auth status`.
 
-The registration comes from `gh api` at each pass of the loop and passes to the container as an argument. It is never written to a file, and it works for one runner only.
+The registration comes from `gh api` at each pass of the loop and passes to the container as an argument. Nothing writes it to the repo or to a file on the Mac. While its container runs, Docker holds it in the container's configuration, `ps` and `docker inspect` show it, and the job can read it. That exposure is accepted because the registration admits one runner for one job, and the container's removal deletes it.
 
 ## Build the image
 
@@ -77,6 +77,8 @@ Update in the monthly patch round that ADR 0002 sets for image digests. GitHub r
    ```sh
    docker run --rm -u root lims-runner bash -c 'apt-get update -qq && apt-cache madison postgresql-18'
    ```
+
+   On 2026-10-02 PGDG still listed 18.3 and 18.4 beside 18.6, so a build keeps working after a newer release. If a pinned version ever leaves the list, PGDG keeps every version at `apt-archive.postgresql.org`.
 
 3. Merge the change through a pull request, then restart the runners on the new image:
 
