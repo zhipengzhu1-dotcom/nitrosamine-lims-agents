@@ -447,3 +447,39 @@ it('a CSV cell a spreadsheet would run as a formula starts with an apostrophe', 
   assert.ok(csv.includes(`"'=HYPERLINK(""https://example.invalid"",""open"")"`), 'the formula is quoted and inert');
   assert.ok(!/(^|,)"?=HYPERLINK/m.test(csv), 'no cell starts with the formula');
 });
+
+it('an export that finds a chain break names, in its data file and its PDF, the one System Incident that Verify chain and a second export name, requested by the exporting QA', async () => {
+  await submitted(as.cora);
+  const { seq } = await api.db
+    .selectFrom('auditEntry')
+    .select(sql<string>`seq::text`.as('seq'))
+    .where('chain', '=', api.labId)
+    .orderBy('seq', 'desc')
+    .limit(1)
+    .executeTakeFirstOrThrow();
+  await api.superuser.transaction().execute(async (tx) => {
+    await sql`set local session_replication_role = replica`.execute(tx);
+    await sql`update lims.audit_entry set reason = 'Routine update' where chain = ${api.labId} and seq = ${seq}`.execute(
+      tx,
+    );
+  });
+
+  const answer = await generate(northwindId);
+  const lab = dataOf(answer).chains[0];
+  const incident = lab?.incident ?? assert.fail('the break in the export names a System Incident');
+  assert.equal(lab?.verdict, 'Broken');
+  assert.equal(lab?.firstFailure, seq);
+  assert.ok(lab?.report.endsWith(`recorded as System Incident ${incident}`), lab?.report);
+  const pdf = Buffer.from(answer.files[1].base64, 'base64').toString('latin1');
+  assert.ok(pdf.includes(`recorded as System Incident ${incident}`), 'the PDF names the System Incident');
+
+  assert.equal(dataOf(await generate(northwindId)).chains[0]?.incident, incident, 'a second export');
+  assert.equal(ok(await as.quinn.call(routes.verifyAuditTrail)).chains[0]?.incident, incident, 'Verify chain');
+  const opened = await api.db
+    .selectFrom('systemIncident')
+    .select(['reference', 'firstFailure', 'requestedBy'])
+    .where('kind', '=', 'ChainVerifyFailure')
+    .where('chain', '=', api.labId)
+    .execute();
+  assert.deepEqual(opened, [{ reference: incident, firstFailure: seq, requestedBy: quinn.id }]);
+});

@@ -270,7 +270,7 @@ test('every font family the stylesheet names is loaded by the app or is a system
     }
     return { families, faces };
   });
-  const system = new Set(['Segoe UI', 'system-ui', 'sans-serif', 'Consolas', 'ui-monospace', 'monospace']);
+  const system = new Set(['Segoe UI', 'system-ui', 'sans-serif', 'Consolas', 'ui-monospace', 'Menlo', 'monospace']);
   expect(named.families.filter(Boolean).length, 'the stylesheet names its fonts').toBeGreaterThan(0);
   const unloaded = named.families.filter(
     (f) => f && !f.startsWith('var(') && !named.faces.includes(f) && !system.has(f),

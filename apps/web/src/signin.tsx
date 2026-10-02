@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useId, useState } from 'react';
 import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
 import {
   api,
@@ -36,6 +36,8 @@ function CredentialsForm({
 }) {
   const [error, setError] = useState(notice);
   const offered = labs.data?.filter((lab) => lab.id !== except);
+  const noOtherLab = offered?.length === 0;
+  const reasonId = useId();
   const [busy, setBusy] = useState(false);
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -55,19 +57,20 @@ function CredentialsForm({
       <fieldset disabled={busy}>
         <h1>{title}</h1>
         {intro && <p className="muted">{intro}</p>}
-        <fieldset className="labs">
-          <legend>Lab</legend>
-          {labs.error && <p className="note--bad">{labs.error}</p>}
-          {offered?.length === 0 && <p className="muted">There is no other Lab to work in.</p>}
-          {offered?.map((lab) => (
-            <label key={lab.id} className="labs__option">
-              <input type="radio" name="labId" value={lab.id} required />
-              <span>
-                <b>{lab.code}</b> {lab.name}
-              </span>
-            </label>
-          ))}
-        </fieldset>
+        {!noOtherLab && (
+          <fieldset className="labs">
+            <legend>Lab</legend>
+            {labs.error && <p className="note--bad">{labs.error}</p>}
+            {offered?.map((lab) => (
+              <label key={lab.id} className="labs__option">
+                <input type="radio" name="labId" value={lab.id} required />
+                <span>
+                  <b>{lab.code}</b> {lab.name}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        )}
         <label>
           Username
           <input name="username" required autoComplete="username" />
@@ -81,7 +84,18 @@ function CredentialsForm({
             {error}
           </p>
         )}
-        <button type="submit" className="rbtn" aria-busy={busy} disabled={!offered?.length}>
+        {noOtherLab && (
+          <p id={reasonId} className="muted">
+            There is no other Lab to work in.
+          </p>
+        )}
+        <button
+          type="submit"
+          className="rbtn"
+          aria-busy={busy}
+          disabled={!offered?.length}
+          aria-describedby={noOtherLab ? reasonId : undefined}
+        >
           {commit}
         </button>
       </fieldset>

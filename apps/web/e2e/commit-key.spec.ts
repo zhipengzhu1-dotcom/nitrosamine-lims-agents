@@ -13,18 +13,22 @@ async function fillSubmitSheet(page: Page, description: string, order: 'method f
   else await fillDescription().then(method);
 }
 
-async function signInDropOneSubmitAndReload(page: Page, description: string) {
+async function signInAsCora(page: Page) {
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
+  await page.getByLabel('Username').fill('cora.customer');
+  await page.getByLabel('Password').fill(DEMO_PASSWORD);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
+}
+
+async function signInAndDropOneSubmit(page: Page, description: string) {
   const commitKeys: string[] = [];
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/steps/submit'))
       commitKeys.push(request.postDataJSON().commitKey);
   });
   await page.goto('/');
-  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
-  await page.getByLabel('Username').fill('cora.customer');
-  await page.getByLabel('Password').fill(DEMO_PASSWORD);
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
+  await signInAsCora(page);
 
   await page.route('**/api/steps/submit', async (route) => {
     await route.fetch();
@@ -34,6 +38,11 @@ async function signInDropOneSubmitAndReload(page: Page, description: string) {
   await page.getByRole('button', { name: 'Submit' }).click();
   await expect(page.getByRole('status')).toContainText('The LIMS did not answer.');
   await page.unroute('**/api/steps/submit');
+  return commitKeys;
+}
+
+async function signInDropOneSubmitAndReload(page: Page, description: string) {
+  const commitKeys = await signInAndDropOneSubmit(page, description);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
   return commitKeys;
@@ -67,4 +76,24 @@ test('the same entries typed in another order after a dropped Submit and a reloa
   await expect(page.getByRole('row', { name: dropped }), 'the Submission is saved once').toHaveCount(1);
   expect(commitKeys, 'the press is resent with its Commit Key').toHaveLength(2);
   expect(new Set(commitKeys).size).toBe(1);
+});
+
+test('the same entries after a dropped Submit, a sign-out and a sign-in are told the press was already saved', async ({
+  page,
+}) => {
+  const dropped = sample('dropped reply');
+  const commitKeys = await signInAndDropOneSubmit(page, dropped);
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signInAsCora(page);
+
+  await fillSubmitSheet(page, dropped, 'method first');
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(page.getByRole('status')).toContainText(
+    'This press was already saved before the latest sign-in. Reload to see what was saved.',
+  );
+  expect(commitKeys, 'the press is resent with its Commit Key').toHaveLength(2);
+  expect(new Set(commitKeys).size).toBe(1);
+  await page.reload();
+  await expect(page.getByRole('row', { name: dropped }), 'the Submission is saved once').toHaveCount(1);
 });

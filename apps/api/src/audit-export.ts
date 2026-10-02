@@ -3,7 +3,6 @@ import type { DB } from '@lims/db';
 import {
   type AuditExportData,
   type AuditExportFormat,
-  chainVerification,
   describeTrail,
   type ExportedEntry,
   type Instant,
@@ -19,7 +18,7 @@ import type { App } from './app.ts';
 import { PDF_COLUMNS, textPdf } from './pdf.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { imagesFor, rawEntries, storedInstantsIn } from './trail.ts';
+import { chainVerifications, imagesFor, type RecomputedChain, rawEntries, storedInstantsIn } from './trail.ts';
 
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
 
@@ -234,8 +233,14 @@ const fileStem = (name: string, asOf: Instant) =>
       .toLowerCase() || 'customer'
   }-${asOf.slice(0, 10)}`;
 
-/** One Customer's Audit Export as one snapshot of the database holds it, other Customers' identifiers redacted. */
-async function exportData(scope: Scope, customerId: string): Promise<AuditExportData> {
+/**
+ * One Customer's Audit Export as one snapshot of the database holds it, other Customers' identifiers redacted, with
+ * the chains as that snapshot recomputes them.
+ */
+async function exportData(
+  scope: Scope,
+  customerId: string,
+): Promise<Omit<AuditExportData, 'chains'> & { recomputed: RecomputedChain[] }> {
   const customer =
     (await customersSeen(scope).where('id', '=', customerId).executeTakeFirst()) ??
     refuse('notFound', 'This Lab has no such Customer.');
@@ -281,15 +286,14 @@ async function exportData(scope: Scope, customerId: string): Promise<AuditExport
   const instants = await storedInstantsIn(scope, lab.timeZone, storedInstants(entries));
   const described = describeTrail(entries, images, labId, instants);
   const redact = redactionFor(mine.identifiers, others, referencedIds(described));
-  const data: AuditExportData = {
+  return {
     customer,
     lab: { code: lab.code, name: lab.name, zone: lab.timeZone },
     asOf,
     generatedBy: { label: scope.ctx.person.displayName, username: scope.ctx.person.username, role: 'QA' },
-    chains: verified.chains.map((c) => chainVerification(c.chain, c.lastEntry, c.firstFailure)),
+    recomputed: verified.chains,
     entries: described.map((e) => redact(e)),
   };
-  return data;
 }
 
 /** Only QA in this Lab lists Customers or exports, and every Audit Export is recorded on the Lab chain with its files' hashes. */
@@ -304,11 +308,16 @@ export function auditExportRoutes(app: App, db: Kysely<DB>): void {
     handler: async (req) => {
       const scope = qaScope(db, req);
       const { customerId, format } = req.body;
-      const data = await db
+      const { recomputed, entries, ...head } = await db
         .transaction()
         .setIsolationLevel('repeatable read')
         .setAccessMode('read only')
         .execute((tx) => exportData(labScope(tx, req.actor), customerId));
+      const data: AuditExportData = {
+        ...head,
+        chains: await chainVerifications(db, req.actor, recomputed),
+        entries,
+      };
       const { customer, asOf } = data;
       const stem = fileStem(customer.name, asOf);
       const formats: Record<AuditExportFormat, { name: string; mediaType: string; bytes: Buffer }> = {

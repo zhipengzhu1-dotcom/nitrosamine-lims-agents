@@ -172,6 +172,8 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
             'subjectId',
             sql<string | null>`host(source_address)`.as('sourceAddress'),
             sql<string | null>`encode(typed_user_id_hmac, 'hex')`.as('typedUserIdHmac'),
+            'chain',
+            'firstFailure',
             'openedAt',
             'loggedAt',
           ])

@@ -21,7 +21,7 @@ import {
 } from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
-import { reauthenticate, sourceAddressOf } from './auth.ts';
+import { type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
 
@@ -161,6 +161,7 @@ interface Seen {
 }
 
 interface Signing {
+  reauthenticated: Reauthenticated;
   meaning: Meaning;
   table: Signable;
   testId: string;
@@ -218,7 +219,7 @@ type KeptCommit = Pick<Selectable<DB['commitKey']>, 'sessionId' | 'requestHash' 
 
 function receiptOf(kept: KeptCommit, sessionId: string, requestHash: Buffer): StepTaken {
   if (kept.sessionId !== sessionId)
-    refuse('keyReused', 'This press was already saved under another sign-in. Reload to see what was saved.');
+    refuse('keyReused', 'This press was already saved before the latest sign-in. Reload to see what was saved.');
   if (!kept.requestHash.equals(requestHash))
     refuse('keyReused', 'This press was already saved with other entries. Reload to see what was saved.');
   return { testId: kept.testId, state: kept.state };
@@ -263,16 +264,16 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
       const signature = body.signature ?? refuse('malformed', `The ${name} step needs the signer's credentials.`);
       const testId = test?.id ?? refuse('malformed', `The ${name} step signs a Test, and this request names none.`);
       const seen = await seenVersion(scope, testId, signature);
-      await reauthenticate(
+      const reauthenticated = await reauthenticate(
         db,
         { actor, session: req.sessionKey },
         { username: signature.username, password: signature.password },
-        `Re-authenticate to sign ${name}`,
         step.role,
         sourceAddressOf(req),
         'ReauthenticationFailed',
       );
       signing = {
+        reauthenticated,
         meaning: step.signs,
         table: effect.signedRecord ?? 'test',
         testId,
@@ -284,28 +285,36 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
 
     const claim = { testId: test?.id ?? randomUUID(), state: step.to };
     const { testId } = claim;
-    const { receipt, replayed } = await scope.write(name, step.role, async (q) => {
-      // A press whose key another transaction holds waits here for that one to commit, then replays it.
-      const claimed = await q
-        .insert('commitKey', { key: body.commitKey, sessionId, requestHash, ...claim })
-        .onConflict((oc) => oc.doNothing())
-        .returning('key')
-        .executeTakeFirst();
-      if (!claimed)
-        return { receipt: receiptOf(await kept(q).executeTakeFirstOrThrow(), sessionId, requestHash), replayed: true };
-      if (test) {
-        const moved = await q
-          .update('test')
-          .set({ state: step.to })
-          .where('id', '=', testId)
-          .where('state', '=', test.state)
-          .executeTakeFirstOrThrow();
-        if (!moved.numUpdatedRows) refuse('stale', 'The Test has moved on. Reload it.');
-      }
-      await effect.write(q, actor, testId, body.input);
-      if (signing) await sign(q, actor, sessionId, signing);
-      return { receipt: claim, replayed: false };
-    });
+    const { receipt, replayed } = await scope.write(
+      name,
+      step.role,
+      async (q) => {
+        // A press whose key another transaction holds waits here for that one to commit, then replays it.
+        const claimed = await q
+          .insert('commitKey', { key: body.commitKey, sessionId, requestHash, ...claim })
+          .onConflict((oc) => oc.doNothing())
+          .returning('key')
+          .executeTakeFirst();
+        if (!claimed)
+          return {
+            receipt: receiptOf(await kept(q).executeTakeFirstOrThrow(), sessionId, requestHash),
+            replayed: true,
+          };
+        if (test) {
+          const moved = await q
+            .update('test')
+            .set({ state: step.to })
+            .where('id', '=', testId)
+            .where('state', '=', test.state)
+            .executeTakeFirstOrThrow();
+          if (!moved.numUpdatedRows) refuse('stale', 'The Test has moved on. Reload it.');
+        }
+        await effect.write(q, actor, testId, body.input);
+        if (signing) await sign(q, actor, sessionId, signing);
+        return { receipt: claim, replayed: false };
+      },
+      signing?.reauthenticated,
+    );
     req.log.info({ step: name, testId: receipt.testId }, replayed ? 'step replayed' : 'step taken');
     return receipt;
   });
