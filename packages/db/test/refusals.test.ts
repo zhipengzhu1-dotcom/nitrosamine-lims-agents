@@ -237,7 +237,7 @@ const tables = {
   'lims.person': {
     noun: 'person',
     row: { username: 'refusal.second', display_name: 'Second Person', password_hash: 'not-a-real-hash' },
-    notNull: ['id', 'username', 'display_name', 'failed_logins'],
+    notNull: ['id', 'username', 'display_name', 'failed_logins', 'reduced_motion'],
   },
   'lims.identity_verification': {
     noun: 'Identity Verification',

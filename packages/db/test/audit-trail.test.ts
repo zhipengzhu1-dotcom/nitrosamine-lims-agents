@@ -87,6 +87,7 @@ it('an Audit Trail row snapshot keeps the stored column names and leaves out the
     'id',
     'identity_verification_id',
     'locked_at',
+    'reduced_motion',
     'username',
   ]);
 });
