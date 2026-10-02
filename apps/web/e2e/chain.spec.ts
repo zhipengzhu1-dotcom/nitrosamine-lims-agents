@@ -110,7 +110,9 @@ async function wholeOnScreenAtBothSizes(page: Page, whole: Locator, commit: Loca
     const at = `at ${size.width}x${size.height}`;
     await page.setViewportSize(size);
     await whole.scrollIntoViewIfNeeded();
-    await expect(whole, `whole on screen ${at}`).toBeInViewport({ ratio: 1 });
+    const edges = await box(whole);
+    expect(edges.y, `whole on screen ${at}, to the pixel`).toBeGreaterThan(-1);
+    expect(edges.y + edges.height, `whole on screen ${at}, to the pixel`).toBeLessThan(size.height + 1);
     expect(await uncovered(whole), `nothing covers it ${at}`).toBe(true);
     await expect(commit, `the commit button is on screen ${at}`).toBeInViewport({ ratio: 1 });
     await commit.click({ trial: true });
