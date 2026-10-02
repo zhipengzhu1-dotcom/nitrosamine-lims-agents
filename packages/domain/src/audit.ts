@@ -129,6 +129,21 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       signed_at: { label: 'Signed at' },
     },
   },
+  audit_export: {
+    kind: 'Audit Export',
+    chain: 'lab',
+    label: (row, labelOf) => `for ${labelOf('customer', row.customer_id)}`,
+    fields: {
+      customer_id: { label: 'Customer', ref: 'customer' },
+      requested_by: { label: 'Requested by', ref: 'person' },
+      requested_role: { label: 'Requested as' },
+      format: { label: 'Format' },
+      entry_count: { label: 'Entries' },
+      data_sha256: { label: 'SHA-256 of the data file' },
+      pdf_sha256: { label: 'SHA-256 of the PDF' },
+      generated_at: { label: 'Generated at' },
+    },
+  },
 };
 
 /** Every table `auditedRecords` reads, in registry order. */

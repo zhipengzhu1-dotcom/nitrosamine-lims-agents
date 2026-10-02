@@ -48,12 +48,13 @@ const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
 const newId = sql<string>`new_row->>'id'`;
 const usernameOf = sql<string>`new_row->>'username'`;
 
-type Where = (eb: ExpressionBuilder<DB, 'auditEntry'>) => ExpressionWrapper<DB, 'auditEntry', SqlBool>;
+export type Where = (eb: ExpressionBuilder<DB, 'auditEntry'>) => ExpressionWrapper<DB, 'auditEntry', SqlBool>;
 
 const chainOf = (scope: Scope, table: AuditedTable) =>
   auditedRecords[table].chain === 'lab' ? scope.ctx.lab.id : 'company';
 
-async function rawEntries(scope: Scope, where: Where): Promise<TimedEntry[]> {
+/** The entries `where` picks from this Lab's chain and the company chain, as stored. */
+export async function rawEntries(scope: Scope, where: Where): Promise<TimedEntry[]> {
   const rows = await scope
     .trail()
     .select([
@@ -117,7 +118,7 @@ async function imagesWanted(scope: Scope, wanted: RecordIds[], usernames: string
 }
 
 /** Every image of every record the entries reference, following references until no label needs a record not yet loaded. */
-async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<RowImage[]> {
+export async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<RowImage[]> {
   const usernames = [...new Set(entries.map((e) => actorUsername(e.actor)).filter((u) => u !== null))];
   const loaded = new Map<AuditedTable, Set<string>>();
   const unloaded = (wanted: RecordIds[]) =>
@@ -187,6 +188,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'test_report':
     case 'record_version':
     case 'signature':
+    case 'audit_export':
       return true;
   }
 }

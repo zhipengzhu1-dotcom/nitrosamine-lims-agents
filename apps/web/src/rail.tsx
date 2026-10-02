@@ -150,6 +150,7 @@ export const modules = [
   },
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
+  { key: 'audit-export', name: 'Audit Export', holds: '' },
 ] as const;
 export type Module = (typeof modules)[number];
 type ModuleKey = Module['key'];

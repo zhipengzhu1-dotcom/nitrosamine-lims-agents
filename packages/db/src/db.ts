@@ -6,6 +6,7 @@ export type { DB };
 export { checkoutDatabase } from './checkout.ts';
 export { type DbConfig, dbConfig } from './config.ts';
 export type {
+  AuditExportFormat,
   IncidentKind,
   IncidentState,
   Json,
