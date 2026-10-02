@@ -15,7 +15,8 @@ const as = {
   samir: await api.login(api.person('samir')),
   lena: await api.login(api.person('lena')),
 };
-const NOT_VALID = 'The user ID or password is not valid.';
+/** The one sentence every credential failure under the decided login answers with, which names the code it asks for. */
+const NOT_VALID = 'The user ID, password or code is not valid.';
 
 /** Decodes an enrolment's text secret, the RFC 4648 base32 a person types into their authenticator. */
 function fromBase32(text: string): Buffer {
@@ -236,9 +237,12 @@ it('enrolment shows the secret as text and as a QR payload once; a second enrolm
   });
   refusedWith(second, 'state');
   assert.equal(JSON.stringify(second.body).includes(first.secret), false);
-  refusedWith(
-    await client.call(routes.enrolAuthenticator, { username: account.username, password: 'wrong-password' }),
-    'badCredentials',
+  assert.equal(
+    refusedWith(
+      await client.call(routes.enrolAuthenticator, { username: account.username, password: 'wrong-password' }),
+      'badCredentials',
+    ),
+    NOT_VALID,
   );
   assert.deepEqual(await eventsOf(account.id), [
     { kind: 'AuthenticatorEnrolled', failureReason: null },

@@ -91,7 +91,7 @@ test('a person enrols an authenticator from its QR code on a desktop or its type
   };
   const step = currentStep();
   await signIn(codeAt(typedKey, step - 5));
-  await expect(page.getByRole('alert')).toHaveText('The user ID or password is not valid.');
+  await expect(page.getByRole('alert')).toHaveText('The user ID, password or code is not valid.');
   await shot('03-stale-code-refused');
   await signIn(codeAt(typedKey, step));
   await expect(page.locator('footer.rail')).toBeVisible();

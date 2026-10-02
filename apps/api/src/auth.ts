@@ -73,10 +73,13 @@ const totpOf = (credentials: Credentials) => ({
 
 /**
  * The one sentence every credential failure answers with, so it never says which part failed; it names the user ID
- * when the person typed one.
+ * when the person typed one and the code when the login asks for one.
  */
 export function credentialsNotValid(policy: LoginPolicy, typed: 'userId' | 'password'): Sentence {
-  if (typed === 'userId') return 'The user ID or password is not valid.';
+  if (typed === 'userId')
+    return policy.secondFactor
+      ? 'The user ID, password or code is not valid.'
+      : 'The user ID or password is not valid.';
   return policy.secondFactor ? 'The password or code is not valid.' : 'The password is not valid.';
 }
 
@@ -131,26 +134,30 @@ export async function deviceOf(
     .where('deviceTokenHash', '=', hashToken(token))
     .executeTakeFirst();
 }
-const notValid = () => refuse('badCredentials', 'The user ID or password is not valid.');
 const linkNotValid = () =>
   refuse('badCredentials', 'This link has been used, replaced or has expired. Ask the Admin for a new one.');
 
-const REFUSAL: { readonly [F in SignInFailure]: (labName?: string) => never } = {
-  UnknownUserId: notValid,
-  WrongPassword: notValid,
-  WrongPasswordOnLockedAccount: notValid,
-  OtherUserId: notValid,
-  NoCredential: notValid,
-  AccountLocked: () => refuse('accountLocked', 'This account is locked.'),
-  NoLab: () => refuse('role', 'This account belongs to no Lab.'),
-  WrongUserId: notValid,
-  WrongCode: notValid,
-  NoAuthenticator: notValid,
-  NoLabChosen: () => refuse('labNotChosen', 'Choose the Lab to work in.'),
-  NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
-  NotInWorkstationLab: () => refuse('role', "You hold no Membership in this Workstation's Lab."),
-  SessionEnded: () =>
-    refuse('stale', 'This session has already moved to another Lab or ended. Reload to see where you work.'),
+type Refusals = { readonly [F in SignInFailure]: (labName?: string) => never };
+/** How each sign-in or Lab switch failure is refused under `policy`; a credential failure answers its one sentence. */
+const refusalsUnder = (policy: LoginPolicy): Refusals => {
+  const notValid = () => refuse('badCredentials', credentialsNotValid(policy, 'userId'));
+  return {
+    UnknownUserId: notValid,
+    WrongPassword: notValid,
+    WrongPasswordOnLockedAccount: notValid,
+    OtherUserId: notValid,
+    NoCredential: notValid,
+    AccountLocked: () => refuse('accountLocked', 'This account is locked.'),
+    NoLab: () => refuse('role', 'This account belongs to no Lab.'),
+    WrongUserId: notValid,
+    WrongCode: notValid,
+    NoAuthenticator: notValid,
+    NoLabChosen: () => refuse('labNotChosen', 'Choose the Lab to work in.'),
+    NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
+    NotInWorkstationLab: () => refuse('role', "You hold no Membership in this Workstation's Lab."),
+    SessionEnded: () =>
+      refuse('stale', 'This session has already moved to another Lab or ended. Reload to see where you work.'),
+  };
 };
 
 /** Writes one Access Event in the caller's transaction. */
@@ -551,6 +558,8 @@ export function loginRoutes(
   credentials: Credentials,
 ): void {
   const { policy: limits, pepper } = credentials;
+  const REFUSAL = refusalsUnder(limits);
+  const notValid = REFUSAL.WrongPassword;
   app.register(cookie, { parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: secureCookie } });
   app.route({
     ...routes.labs,
@@ -795,6 +804,8 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, credentials: Credenti
 /** Switching Lab moves the request's session, written under the person whose session it is. A session on a Workstation stays in the Workstation's Lab. */
 export function labSwitchRoute(app: App, db: Kysely<DB>, credentials: Credentials): void {
   const limits = credentials.policy;
+  const REFUSAL = refusalsUnder(limits);
+  const notValid = REFUSAL.WrongPassword;
   app.route({
     ...routes.switchLab,
     handler: async (req, reply) => {
