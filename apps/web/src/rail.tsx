@@ -90,10 +90,10 @@ async function entriesDigest(input: Record<string, string>) {
 }
 
 async function keptOrFreshCommitKey(press: string, input: Record<string, string>) {
-  const entries = await entriesDigest(input);
-  const [keptEntries, keptKey] = sessionStorage.getItem(press)?.split(' ') ?? [];
-  const commitKey = keptEntries === entries && keptKey ? keptKey : crypto.randomUUID();
-  sessionStorage.setItem(press, `${entries} ${commitKey}`);
+  const digest = await entriesDigest(input);
+  const [keptDigest, keptKey] = sessionStorage.getItem(press)?.split(' ') ?? [];
+  const commitKey = keptDigest === digest && keptKey ? keptKey : crypto.randomUUID();
+  sessionStorage.setItem(press, `${digest} ${commitKey}`);
   return commitKey;
 }
 
@@ -110,7 +110,8 @@ export function stepAction(
     context: what[0] ?? '',
     fields: ui.fields,
     signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
-    async run(input, password) {
+    async run(typed, password) {
+      const input = Object.fromEntries(Object.entries(typed).sort(([a], [b]) => (a < b ? -1 : 1)));
       const press = `commitKey:${name}:${testId ?? 'new'}`;
       const commitKey = await keptOrFreshCommitKey(press, input);
       await api(stepRoute(name), {
