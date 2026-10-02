@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
-import { checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
+import { checkoutDatabase, databaseUrl, dbServer } from '../src/db.ts';
 import { migrate, runnerLock } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 
 const repoMigrations = new URL('../migrations/', import.meta.url);
 const migrations = await sqlFiles(repoMigrations);
@@ -199,6 +199,24 @@ describe('the SHA-256 of each applied migration', () => {
     await writeFile(new URL('9999_probe.sql', folder), probe);
     assert.deepEqual(await migrate(server, database, folder), ['9999_probe.sql']);
     assert.deepEqual(await recorded(database), [...migrations, '9999_probe.sql']);
+  });
+
+  it('migrate refuses two files with one migration number, names both and creates no database', async () => {
+    const folder = await copyOfMigrations();
+    const database = checkoutDatabase('lims_migrate_clash');
+    await dropDatabase(database);
+    await writeFile(new URL('0005_clash.sql', folder), probe);
+    await writeFile(new URL('13_unpadded.sql', folder), probe);
+    await assert.rejects(migrate(server, database, folder), {
+      message:
+        /0005_clash\.sql and 0005_counters_and_transaction_ids\.sql; 0013_lab_switch\.sql and 13_unpadded\.sql share a migration number/,
+    });
+    const [exists] = await asSuperuser<{ count: string }>(
+      'postgres',
+      'select count(*) from pg_database where datname = $1',
+      [database],
+    );
+    assert.deepEqual(exists, { count: '0' });
   });
 
   it('migrate refuses when the file of an applied migration is missing, and names it', async () => {

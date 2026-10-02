@@ -54,9 +54,16 @@ function refuseStrays(env: NodeJS.ProcessEnv, known: readonly string[]): void {
     );
 }
 
-/** Reads the environment once, at a process's start: a LIMS_ variable that neither this nor `alsoReads` names, or a checkout with no PostgreSQL to reach, stops the process here. */
+/** The PostgreSQL server for a process that names no database, such as a test that creates its own: a LIMS_ variable that neither this nor `alsoReads` names, or a checkout with no PostgreSQL to reach, stops the process here. */
+export function dbServer(alsoReads: readonly string[] = []): string {
+  refuseStrays(process.env, [...DB_SETTINGS, ...alsoReads]);
+  return process.env.LIMS_PG || checkoutServer();
+}
+
+/** Reads the environment once, at a process's start: everything `dbServer` refuses, or no LIMS_DB, stops the process here, so no process falls back to a database it did not name. */
 export function dbConfig(alsoReads: readonly string[] = []): DbConfig {
-  const env = process.env;
-  refuseStrays(env, [...DB_SETTINGS, ...alsoReads]);
-  return { server: env.LIMS_PG || checkoutServer(), database: env.LIMS_DB ?? 'lims', demoPassword: env.DEMO_PASSWORD };
+  const server = dbServer(alsoReads);
+  const { LIMS_DB: database, DEMO_PASSWORD: demoPassword } = process.env;
+  if (!database) throw new Error('LIMS_DB is not set. Name the database this process uses, such as LIMS_DB=lims_dev.');
+  return { server, database, demoPassword };
 }

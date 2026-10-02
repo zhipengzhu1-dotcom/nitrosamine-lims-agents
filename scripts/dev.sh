@@ -15,7 +15,7 @@ scripts/pg.sh start >/dev/null
 if [ -n "$log_file" ]; then mkdir -p "$(dirname "$log_file")"; fi
 if [ "${1:-}" = --scratch ]; then
   LIMS_DB=$(node packages/db/src/checkout.ts database "$LIMS_DB")
-  PGOPTIONS=--client-min-messages=warning scripts/pg.sh psql -qc "drop database if exists \"$LIMS_DB\" with (force)"
+  PGOPTIONS=--client-min-messages=warning scripts/pg.sh psql -q -v ON_ERROR_STOP=1 -v db="$LIMS_DB" <<<'drop database if exists :"db" with (force)'
   if [ -n "$log_file" ]; then : >"$log_file"; fi
 fi
 node packages/db/src/migrate.ts
