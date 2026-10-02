@@ -149,13 +149,11 @@ export function latestVersion(q: LabQueries, table: Signable, recordId: string) 
     .executeTakeFirstOrThrow();
 }
 
-/** The Record Version the signer saw, resolved to its row before the transaction, and the hash as the screen showed it. */
 interface Seen {
   id: string;
   contentHash: string;
 }
 
-/** One signing to make inside the step's transaction, once the step's own writes are done. */
 interface Signing {
   meaning: Meaning;
   table: Signable;
@@ -165,11 +163,7 @@ interface Signing {
   release: string;
 }
 
-/**
- * Writes the re-authentication record and signs through lims.sign in the step's transaction, so the database holds
- * the only path to a Signature: the record ties the signing to this person, session and meaning, and the function
- * refuses unless what the signer saw is still the record's latest Record Version.
- */
+/** Signs through lims.sign, the only path to a Signature, against a re-authentication record written here. */
 async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signing: Signing) {
   const { meaning, table, testId, seen, statementVersion, release } = signing;
   const recordId =
@@ -186,7 +180,6 @@ async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signi
   );
 }
 
-/** The row of the Record Version the signer saw, with the hash as shown; refused as recordChanged when the Test has moved on since. */
 async function seenVersion(scope: LabQueries, testId: string, signature: SigningBody): Promise<Seen> {
   const latest = await latestVersion(scope, 'test', testId);
   if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
@@ -237,7 +230,15 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
       const signature = body.signature ?? refuse('malformed', `${name} needs the signer's credentials`);
       const testId = test?.id ?? refuse('malformed', `${name} signs a Test`);
       const seen = await seenVersion(scope, testId, signature);
-      await reauthenticate(db, { actor, session: req.sessionKey }, signature, name, step.role, sourceAddressOf(req));
+      await reauthenticate(
+        db,
+        { actor, session: req.sessionKey },
+        signature,
+        `Re-authenticate to sign ${name}`,
+        step.role,
+        sourceAddressOf(req),
+        'ReauthenticationFailed',
+      );
       signing = {
         meaning: step.signs,
         table: effect.signedRecord ?? 'test',

@@ -229,36 +229,40 @@ it("a record's trail labels a reference two deep, such as a Sample's Submission 
 });
 
 it("a company record out of this Lab's sight is not found: a person of another Lab, a Customer with no Sample here", async () => {
-  const other = await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Add another Lab' }, async (tx) => {
-    // Company rows first: a transaction locks the company chain before any Lab's (lims.lock_chains).
-    const { id: personId } = await tx
-      .insertInto('person')
-      .values({ username: 'olaf.other-lab', displayName: 'Olaf Other', passwordHash: 'not-a-real-hash' })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    const { id: customerId } = await tx
-      .insertInto('customer')
-      .values({ name: 'Unseen Customer (fictional)' })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    const { id: submissionId } = await tx
-      .insertInto('submission')
-      .values({ customerId, submittedBy: personId, number: 'SUB-2026-900002' })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    const { labId } = await tx
-      .insertInto('lab')
-      .values({ code: 'OL', name: 'Other Lab', timeZone: 'Europe/Zurich' })
-      .returning('labId')
-      .executeTakeFirstOrThrow();
-    await tx.insertInto('membership').values({ labId, personId, role: 'Analyst' }).execute();
-    const { id: sampleId } = await tx
-      .insertInto('sample')
-      .values({ labId, submissionId, number: 'OL-S-2026-000001', description: 'Capsules (fictional)' })
-      .returning('id')
-      .executeTakeFirstOrThrow();
-    return { personId, customerId, submissionId, sampleId };
-  });
+  const other = await audited(
+    api.superuser,
+    { actor: 'svc:test', role: 'system', reason: 'Add another Lab' },
+    async (tx) => {
+      // Company rows first: a transaction locks the company chain before any Lab's (lims.lock_chains).
+      const { id: personId } = await tx
+        .insertInto('person')
+        .values({ username: 'olaf.other-lab', displayName: 'Olaf Other', passwordHash: 'not-a-real-hash' })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      const { id: customerId } = await tx
+        .insertInto('customer')
+        .values({ name: 'Unseen Customer (fictional)' })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      const { id: submissionId } = await tx
+        .insertInto('submission')
+        .values({ customerId, submittedBy: personId, number: 'SUB-2026-900002' })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      const { labId } = await tx
+        .insertInto('lab')
+        .values({ code: 'OL', name: 'Other Lab', timeZone: 'Europe/Zurich' })
+        .returning('labId')
+        .executeTakeFirstOrThrow();
+      await tx.insertInto('membership').values({ labId, personId, role: 'Analyst' }).execute();
+      const { id: sampleId } = await tx
+        .insertInto('sample')
+        .values({ labId, submissionId, number: 'OL-S-2026-000001', description: 'Capsules (fictional)' })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      return { personId, customerId, submissionId, sampleId };
+    },
+  );
   refusedWith(await as.rui.call(routes.recordTrail, { table: 'person', id: other.personId }), 'notFound');
   refusedWith(await as.rui.call(routes.recordTrail, { table: 'customer', id: other.customerId }), 'notFound');
   refusedWith(await as.rui.call(routes.recordTrail, { table: 'submission', id: other.submissionId }), 'notFound');

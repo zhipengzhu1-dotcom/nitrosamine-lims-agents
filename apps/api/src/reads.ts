@@ -1,10 +1,11 @@
 import type { DB } from '@lims/db';
-import { nextStep, routes, type SignatureStatement, steps } from '@lims/domain';
+import { nextStep, routes, type SignatureStatement } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 import { factsFor, latestVersion, signedVersions } from './steps.ts';
+import { staffRoutes } from './staff.ts';
 import { trailRoutes } from './trail.ts';
 
 function visibleTests(scope: Scope) {
@@ -68,10 +69,9 @@ async function testView(scope: Scope, id: string) {
       : null,
     signatures: visibleToActor
       ? await signedVersions(scope)
-          .innerJoin('person', 'person.id', 'signature.personId')
           .select([
             'signature.meaning',
-            'person.displayName as signer',
+            'signature.printedName as signer',
             'signature.signedAt',
             'recordVersion.recordTable as record',
             'recordVersion.version',
@@ -94,11 +94,10 @@ async function testView(scope: Scope, id: string) {
           )
       : [],
     next,
-    statement: next !== null && steps[next].signs !== null ? await statementInForce(scope) : null,
+    statement: isCustomer ? null : await statementInForce(scope),
   };
 }
 
-/** The signature statement with the highest version: what the sheet shows and what lims.sign records. */
 function statementInForce(scope: Scope): Promise<SignatureStatement> {
   return scope.company
     .selectFrom('signatureStatement')
@@ -109,6 +108,7 @@ function statementInForce(scope: Scope): Promise<SignatureStatement> {
 
 export function readRoutes(app: App, db: Kysely<DB>): void {
   trailRoutes(app, db);
+  staffRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => ({ ...req.actor, session: req.sessionClock }) });
 
   app.route({

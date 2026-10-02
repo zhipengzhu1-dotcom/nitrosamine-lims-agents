@@ -13,7 +13,7 @@ let lastAddress = 0;
 const nextAddress = () => `2001:db8::${(++lastAddress).toString(16)}`;
 
 const signIn = (from: string, username: string, password: string) =>
-  new Client(api.base, from).call(routes.login, { username, password });
+  new Client(api.base, from).call(routes.login, { username, password, labId: api.labId });
 
 const { rows: rules } = await sql<{ kind: IncidentKind; attempts: number; withinMs: number }>`
   select kind, attempts, (extract(epoch from within) * 1000)::int as "withinMs" from lims.sign_in_burst_rule()`.execute(

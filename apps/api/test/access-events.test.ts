@@ -10,7 +10,8 @@ import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
 const api = await startApi('lims_api_access_events_test');
 const SYSTEM = { actor: 'svc:test', role: 'system', reason: 'Arrange an Access Event test' };
 
-const signIn = (username: string, password: string) => new Client(api.base).call(routes.login, { username, password });
+const signIn = (username: string, password: string) =>
+  new Client(api.base).call(routes.login, { username, password, labId: api.labId });
 
 const eventColumns = [
   'id',
@@ -48,7 +49,9 @@ it('a successful sign-in writes one Access Event on the company chain, with subj
   const person = await api.addPerson('access.success', ['Analyst', 'Reviewer']);
   const before = await dbNow();
   const client = new Client(api.base);
-  const me = ok(await client.call(routes.login, { username: person.username, password: person.password }));
+  const me = ok(
+    await client.call(routes.login, { username: person.username, password: person.password, labId: api.labId }),
+  );
   const after = await dbNow();
 
   const [event, ...others] = await eventsOf(person.id);
@@ -174,7 +177,7 @@ it('an unknown user ID is kept only as its keyed HMAC and its length, never as t
   assert.ok(!api.log().includes(typed), 'no log line holds the typed user ID');
 });
 
-it('roles are those in the session Lab after sign-in and in the default Lab before, none for an unknown ID, never authentication', async () => {
+it('roles are those held in the Lab the sign-in names, none for an unknown ID, never authentication', async () => {
   const otherLab = await audited(api.db, SYSTEM, (tx) =>
     tx
       .insertInto('lab')
@@ -183,7 +186,7 @@ it('roles are those in the session Lab after sign-in and in the default Lab befo
       .executeTakeFirstOrThrow(),
   );
   const person = await api.addPerson('access.roles', ['Analyst']);
-  await audited(api.db, SYSTEM, (tx) =>
+  await audited(api.superuser, SYSTEM, (tx) =>
     tx.insertInto('membership').values({ labId: otherLab.labId, personId: person.id, role: 'QA' }).execute(),
   );
   const customerOnly = await api.addPerson('access.customer', [], { customerId: await customerId() });
@@ -192,7 +195,8 @@ it('roles are those in the session Lab after sign-in and in the default Lab befo
   const me = ok(await signIn(person.username, person.password));
   refusedWith(await signIn(customerOnly.username, 'not-the-password'), 'badCredentials');
 
-  const expected: Role[] = me.lab.id === otherLab.labId ? ['QA'] : ['Analyst'];
+  const expected: Role[] = ['Analyst'];
+  assert.equal(me.lab.id, api.labId);
   assert.deepEqual(me.roles, expected);
   assert.deepEqual(
     (await eventsOf(person.id)).map((e) => [e.kind, e.roles]),
@@ -200,7 +204,7 @@ it('roles are those in the session Lab after sign-in and in the default Lab befo
       ['SignInFailed', expected],
       ['SignInSucceeded', expected],
     ],
-    'the default Lab before the session is the Lab the session opens',
+    'a failed and a successful sign-in to the same Lab record the same roles',
   );
   assert.deepEqual(
     (await eventsOf(customerOnly.id)).map((e) => e.roles),
@@ -225,7 +229,7 @@ async function customerId(): Promise<string> {
 it('sign-out writes a sign-out Access Event, and a read or a page refresh writes nothing', async () => {
   const person = await api.addPerson('access.signout', ['Reviewer']);
   const client = new Client(api.base);
-  ok(await client.call(routes.login, { username: person.username, password: person.password }));
+  ok(await client.call(routes.login, { username: person.username, password: person.password, labId: api.labId }));
   const writes = async () =>
     (
       await sql<{ events: number; entries: number }>`select
@@ -256,7 +260,7 @@ it('sign-out writes a sign-out Access Event, and a read or a page refresh writes
 it('a person whose Membership moved to another Lab during the session can still sign out, and the event records no roles', async () => {
   const person = await api.addPerson('access.removed', ['Analyst']);
   const client = await api.login(person);
-  await audited(api.db, SYSTEM, async (tx) => {
+  await audited(api.superuser, SYSTEM, async (tx) => {
     const elsewhere = await tx
       .insertInto('lab')
       .values({ code: 'ACMV', name: 'Lab the Membership moved to', timeZone: 'UTC' })

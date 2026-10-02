@@ -10,20 +10,10 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import {
-  actorFor,
-  type Login,
-  loginRoutes,
-  logoutRoute,
-  scheduleExpirySweep,
-  SESSION_COOKIE,
-  SESSION_LIMITS,
-  type SessionKey,
-} from './auth.ts';
+import { type Login, loginRoutes, scheduleExpirySweep, SESSION_LIMITS, type SessionKey } from './auth.ts';
 import { apiLogger, checkLogVolume, type LogSink, type LogVolume } from './log.ts';
-import { readRoutes } from './reads.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
-import { stepRoutes } from './steps.ts';
+import { sessionRoutes } from './session-routes.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -80,22 +70,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   app.setNotFoundHandler(() => refuse('notFound', 'no such route'));
   if (options.logVolume) checkLogVolume(app, db, options.logVolume);
   loginRoutes(app, db, options.accessEventKey, options.secureCookie, limits);
-  app.register(async (signedIn) => {
-    signedIn.decorateRequest('actor');
-    signedIn.decorateRequest('sessionKey');
-    signedIn.decorateRequest('sessionClock');
-    signedIn.addHook('onRequest', async (req) => {
-      ({
-        actor: req.actor,
-        session: req.sessionKey,
-        clock: req.sessionClock,
-      } = await actorFor(db, req.cookies[SESSION_COOKIE], limits));
-      req.requester = req.actor;
-    });
-    logoutRoute(signedIn, db, limits);
-    readRoutes(signedIn, db);
-    stepRoutes(signedIn, db, options.release);
-  });
+  sessionRoutes(app, db, limits, options.release);
   if (options.sweepEveryMs !== null) scheduleExpirySweep(app, db, limits, options.sweepEveryMs);
   return app;
 }

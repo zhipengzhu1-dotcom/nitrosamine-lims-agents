@@ -13,7 +13,6 @@ export interface ApiConfig {
   accessEventKey: Buffer;
   trustedProxies: string[];
   login: Login;
-  /** The app release every Signature records, until the Release Log (#102) names releases. */
   release: string;
 }
 

@@ -1,9 +1,7 @@
 set local role lims_owner;
 
--- The signature statement is QA-approved configuration (#45, small rule 6). A Signature records the version and hash
--- of the statement the signer saw. The statement is UTF-8 bytes and the hash is generated from them, as a Record
--- Version's content is; the unique key lets a Signature reference the hash it copies, so the copy cannot differ.
--- Version 1 is written here; a later version comes into force through a Release Log entry that QA signs Approved (#102).
+-- The signature statement is QA-approved configuration (#45, small rule 6). The unique key lets a Signature reference
+-- the hash it copies, so the copy cannot differ.
 create table lims.signature_statement (
   version        integer     primary key check (version >= 1),
   statement      bytea       not null,
@@ -12,10 +10,8 @@ create table lims.signature_statement (
   unique (version, statement_hash)
 );
 
--- The single-use re-authentication record. The API writes one in the transaction that signs, after it has checked the
--- typed user ID and the password, and the signing function signs only against one that this transaction wrote and
--- that no Signature holds yet. It is a Lab row, so it sits on the same chain as the Signature it enables, and its
--- session must belong to its person.
+-- The single-use re-authentication record is a Lab row, so it sits on the same chain as the Signature it enables and
+-- the step's transaction keeps the company-before-Lab lock order.
 create table lims.reauthentication (
   lab_id        uuid         not null references lims.lab,
   id            uuid         not null default gen_random_uuid(),
@@ -43,15 +39,11 @@ begin
   end loop;
 end $$;
 
--- What a Signature records besides its signer, meaning and Record Version (#13, #85 Signing): the printed name,
--- username and role as they were at signing, the hash and canonical form of the signed content, the statement shown,
--- the authenticator, the session and the app release. The hash and form are copied from the Record Version, the
--- statement hash from the statement, and the session, meaning and authenticator from the re-authentication record,
--- and each copy is a foreign key to the row it copies, so none can differ.
+-- The hash and form a Signature holds are copied from its Record Version, the statement hash from the statement, and
+-- the session, meaning and authenticator from its re-authentication record; each copy is a foreign key to the row it
+-- copies, so none can differ.
 alter table lims.record_version add unique (lab_id, id, content_hash, canonical_form);
 alter table lims.signature
-  add column printed_name        text,
-  add column username            text,
   add column role                lims.role,
   add column content_hash        bytea,
   add column canonical_form      integer,
@@ -72,7 +64,6 @@ alter table lims.signature
 
 select set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 'system', true),
        set_config('lims.reason', 'Seed signature statement 1 and record what each thin-slice Signature already held', true);
--- The statement is a company row and the backfill writes to every Lab's chain, so all are declared before the first write.
 do $$ begin
   perform lims.lock_chains(variadic array['company'] || coalesce((select array_agg(lab_id::text) from lims.lab), '{}'));
 end $$;
@@ -81,31 +72,24 @@ insert into lims.signature_statement (version, statement) values (1, convert_to(
   'I sign this record with the Signature Meaning shown, as the person named here. This Electronic Signature is the '
   'legally binding equivalent of my handwritten signature, and I cannot withdraw it.', 'UTF8'));
 
--- The thin slice's Signatures carried the signer's id, the meaning and the Record Version; the name and username are
--- the person's (a username never changes), the role is the one on the Audit Trail entry that wrote each, or the step
--- registry's role for the meaning where a service wrote it, and the hash and form are on the Record Version. This is the
--- one time these columns are written by a statement; the Audit Trail records it under svc:migrate. The statement, the
--- authenticator, the session, the release and the re-authentication record did not exist then and stay null on those
--- rows: the not-valid check below requires them on every Signature written from now on.
+-- The thin slice's Signatures take the role on the Audit Trail entry that wrote each, or the step registry's role for
+-- the meaning where a service wrote it. The statement, the authenticator, the session, the release and the
+-- re-authentication record did not exist then and stay null on those rows; the not-valid check requires them on every
+-- Signature written from now on.
 alter table lims.signature disable trigger refuse_change;
 update lims.signature s
-   set printed_name = p.display_name,
-       username = p.username,
-       role = coalesce(
+   set role = coalesce(
          (select e.role::lims.role from lims.audit_entry e
            where e.chain = s.lab_id::text and e.table_name = 'signature' and e.op = 'INSERT'
              and e.new_row ->> 'id' = s.id::text and e.role = any(enum_range(null::lims.role)::text[])),
          (case s.meaning when 'Performed' then 'Analyst' when 'Reviewed' then 'Reviewer' when 'Released' then 'QA' end)::lims.role),
        content_hash = v.content_hash,
        canonical_form = v.canonical_form
-  from lims.person p, lims.record_version v
- where p.id = s.person_id
-   and v.lab_id = s.lab_id and v.id = s.record_version_id;
+  from lims.record_version v
+ where v.lab_id = s.lab_id and v.id = s.record_version_id;
 alter table lims.signature enable trigger refuse_change;
 
 alter table lims.signature
-  alter column printed_name set not null,
-  alter column username set not null,
   alter column role set not null,
   alter column content_hash set not null,
   alter column canonical_form set not null,
@@ -114,8 +98,7 @@ alter table lims.signature
     and session_id is not null and app_release is not null and reauthentication_id is not null
   ) not valid;
 
--- Only lims.sign writes a Signature: it stamps this transaction with the re-authentication record it signs against
--- around its one insert, and this trigger refuses any insert that does not match the stamp.
+-- Only lims.sign writes a Signature: it stamps the transaction with the re-authentication record it signs against.
 create function lims.refuse_unsigned_insert() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 begin
@@ -128,17 +111,14 @@ end $$;
 create trigger sign_only before insert on lims.signature
   for each row execute function lims.refuse_unsigned_insert();
 
--- The one way a Signature is written (#45 gaps 3 and 9; #85 Signing). The signer is the transaction's actor, a person
--- holding the transaction's role in the Lab, not locked, with a credential of their own, signing on the request's
--- session (p_session_id) against a re-authentication record that this transaction wrote for that person, session and
--- meaning and that no Signature holds. The statement recorded is the one the signer saw (p_statement_version), which
--- must still be the one in force. The record signed is the latest
--- Record Version of (p_record_table, p_record_id). The signer saw p_seen_version with p_seen_hash: that row must hold
--- that hash, no other transaction may have versioned the seen record after it, and the signed record is the seen one
--- or one this transaction created, such as the Test Report a release issues. Rows this transaction wrote are told by
--- age(xmin) = 0, which holds for rows written at the transaction's top level, as the API writes them. The hash and
--- form written are the stored Record Version's, never a parameter. A session past its limit that the sweep has not
--- ended yet still counts as live here; actorFor refused the request before this point in that case.
+-- True for a row this transaction wrote at its top level: a row written inside a plpgsql exception block carries a
+-- subtransaction id and reads as another transaction's.
+create function lims.written_here(x xid) returns boolean
+language sql volatile as $$ select age(x) = 0 $$;
+
+-- The one way a Signature is written (#45 gaps 3 and 9; #85 Signing): the signer is the transaction's actor, and the
+-- record signed is the latest Record Version of (p_record_table, p_record_id), which is the one the signer saw or one
+-- this transaction created on sight of it, such as the Test Report a release issues.
 create function lims.sign(p_reauthentication_id uuid, p_session_id uuid, p_record_table text, p_record_id uuid,
                           p_seen_version uuid, p_seen_hash bytea, p_statement_version integer, p_meaning lims.meaning,
                           p_app_release text)
@@ -173,7 +153,7 @@ begin
   if proof.id is null then
     raise exception 'no re-authentication record: the signer has not re-entered their credentials' using errcode = 'LA010';
   end if;
-  if age(proof.xmin) <> 0 then
+  if not written_here(proof.xmin) then
     raise exception 'the re-authentication record was written by an earlier transaction' using errcode = 'LA010';
   end if;
   if proof.person_id <> signer.id then
@@ -206,7 +186,7 @@ begin
   end if;
   if exists (select from record_version v
               where v.lab_id = seen.lab_id and v.record_table = seen.record_table and v.record_id = seen.record_id
-                and v.version > seen.version and age(v.xmin) <> 0) then
+                and v.version > seen.version and not written_here(v.xmin)) then
     raise exception 'the record changed after the signer saw it; it must be read again before signing' using errcode = 'LA010';
   end if;
   select * into signed from record_version
@@ -218,7 +198,7 @@ begin
   if (signed.record_table, signed.record_id) <> (seen.record_table, seen.record_id)
      and exists (select from record_version v
                   where v.lab_id = signed.lab_id and v.record_table = signed.record_table and v.record_id = signed.record_id
-                    and age(v.xmin) <> 0) then
+                    and not written_here(v.xmin)) then
     raise exception 'the % signed is not the record shown, nor one this signing created', p_record_table using errcode = 'LA010';
   end if;
 
@@ -243,26 +223,31 @@ revoke execute on function lims.sign(uuid, uuid, text, uuid, uuid, bytea, intege
 grant execute on function lims.sign(uuid, uuid, text, uuid, uuid, bytea, integer, lims.meaning, text) to lims_app;
 
 -- A failed re-authentication at signing is an Access Event of its own kind, counted toward the lockout and the bursts
--- like a failed sign-in (#85 Access Events). WrongUserId is a typed user ID that is not the session's person.
+-- like a failed sign-in.
 alter type lims.access_event_kind add value 'ReauthenticationFailed';
 alter type lims.sign_in_failure add value 'WrongUserId';
 
--- The kinds are compared as text: a new enum value cannot be used in the transaction that adds it.
 alter table lims.access_event
   drop constraint access_event_session_kind_check,
   drop constraint access_event_failure_check,
+  drop constraint access_event_failure_kind_check,
   add constraint access_event_session_kind_check check (
     (session_id is not null
-     or kind::text not in ('SignInSucceeded', 'SignOut', 'IdleExpiry', 'AbsoluteExpiry', 'ReauthenticationFailed'))
-    and (session_id is null or kind::text <> 'SignInFailed')
+     or kind::text not in ('SignInSucceeded', 'SignOut', 'IdleExpiry', 'AbsoluteExpiry', 'LabSwitch', 'LabSwitchFailed',
+                           'Lock', 'Unlock', 'UnlockFailed', 'Takeover', 'ReauthenticationFailed'))
+    and (session_id is null or kind <> 'SignInFailed')
   ),
   add constraint access_event_failure_check check (
-    (kind::text in ('SignInFailed', 'ReauthenticationFailed')) = (failure_reason is not null)
-    and (failure_reason::text is distinct from 'WrongUserId' or kind::text = 'ReauthenticationFailed')
+    (kind::text in ('SignInFailed', 'LabSwitchFailed', 'ReauthenticationFailed')) = (failure_reason is not null)
+  ),
+  add constraint access_event_failure_kind_check check (
+    (failure_reason::text not in ('UnknownUserId', 'NoLabChosen') or kind = 'SignInFailed')
+    and (failure_reason::text not in ('OtherUserId', 'SessionEnded') or kind::text = 'LabSwitchFailed')
+    and (failure_reason::text <> 'WrongUserId' or kind::text = 'ReauthenticationFailed')
   );
 
--- The burst counts now cover both failure kinds. An index predicate cannot name the new kind in this transaction, and
--- an enum-to-text cast is not immutable, so the two indexes lose their predicate instead.
+-- The kinds are compared as text because a new enum value cannot be used in the transaction that adds it, and an
+-- index predicate cannot hold that cast, so the two failure indexes lose their predicate.
 drop index lims.access_event_failure_by_address;
 drop index lims.access_event_failure_by_subject;
 create index access_event_failure_by_address on lims.access_event (source_address, at);

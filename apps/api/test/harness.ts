@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { after } from 'node:test';
-import { audited, checkoutDatabase, createDb, type DB, databaseUrl, dbConfig, type Role } from '@lims/db';
+import { audited, checkoutDatabase, createDb, type DB, databaseUrl, dbServer, type Role } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
 import { migrate } from '@lims/db/migrate';
 import { type SeededAccount, seed } from '@lims/db/seed';
@@ -21,14 +21,16 @@ import { type AppOptions, buildApp } from '../src/app.ts';
 
 type LogSink = NonNullable<AppOptions['log']>;
 
-const { server } = dbConfig();
+const server = dbServer();
 
 /** The status each kind answers with, as the tests expect it; every refused answer is checked against this table. */
 const STATUS_OF: { readonly [K in RefusalKind]: number } = {
   unknownField: 400,
   malformed: 400,
   badCredentials: 401,
+  labNotChosen: 400,
   noSession: 401,
+  sessionLocked: 423,
   role: 403,
   guard: 403,
   notFound: 404,
@@ -50,7 +52,19 @@ type SeededName = SeededAccount['username'] extends infer U ? (U extends `${infe
 export type Answer<R extends Route> = Exclude<Reply<R>, { kind: 'breach' }>;
 
 export class Client {
-  cookie = '';
+  /** The browser's cookies: the session and, once the browser is enrolled, its device token. */
+  jar = new Map<string, string>();
+  get cookie(): string {
+    return [...this.jar].map(([name, value]) => `${name}=${value}`).join('; ');
+  }
+  set cookie(header: string) {
+    this.jar = new Map(
+      header.split('; ').flatMap((pair): [string, string][] => {
+        const at = pair.indexOf('=');
+        return at > 0 ? [[pair.slice(0, at), pair.slice(at + 1)]] : [];
+      }),
+    );
+  }
   base: string;
   /** The source address the test's proxy forwards, or none for the socket's own address. */
   from: string | null;
@@ -75,8 +89,9 @@ export class Client {
       ...(post ? { body: JSON.stringify(request ?? {}) } : {}),
     });
     for (const header of res.headers.getSetCookie()) {
-      const session = /^lims_session=[^;]*/.exec(header);
-      if (session) this.cookie = session[0];
+      const [, name = '', value = ''] = /^([^=]+)=([^;]*)/.exec(header) ?? [];
+      if (value) this.jar.set(name, value);
+      else this.jar.delete(name);
     }
     const answer = readReply(route, res.status, await res.json());
     if (answer.kind === 'breach') assert.fail(answer.problem);
@@ -92,7 +107,6 @@ export function ok<R extends Route>(answer: Answer<R>): RouteReply<R> {
     : assert.fail(`expected a reply, got ${answer.status} ${answer.body.kind}: ${answer.body.message}`);
 }
 
-/** What a signer sends from the signature sheet: their typed user ID and password, and the Record Version and statement the Test page showed them. */
 export async function signatureOf(client: Client, testId: string, account: Account): Promise<SigningBody> {
   const { recordVersion, statement } = ok(await client.call(routes.test, { id: testId }));
   const { version, contentHash } = recordVersion ?? assert.fail('a signer sees the Record Version of the Test');
@@ -113,7 +127,6 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
 }
 
 const accessEventKey = randomBytes(32);
-/** The app release the test API records on every Signature. */
 export const TEST_RELEASE = 'test-release';
 
 interface ListenOptions {
@@ -176,7 +189,10 @@ export async function startApi(name: string) {
     await db.destroy();
     await superuser.destroy();
   });
-  const { labId } = await db.selectFrom('lab').select('labId').executeTakeFirstOrThrow();
+  const labOf = async (code: string) =>
+    (await db.selectFrom('lab').select('labId').where('code', '=', code).executeTakeFirstOrThrow()).labId;
+  const labId = await labOf('RD');
+  const qcLabId = await labOf('QC');
   const { id: methodId } = await db.selectFrom('method').select('id').executeTakeFirstOrThrow();
 
   return {
@@ -188,6 +204,23 @@ export async function startApi(name: string) {
     log,
     logLines,
     startAnotherApi: (options: ListenOptions = {}) => listen(db, options),
+    /**
+     * Resolves once `sessions` backends of this database wait on a lock, polled on a connection of its own, because a
+     * transaction sees one frozen snapshot of `pg_stat_activity`; fails after about 10 s.
+     */
+    async untilWaitingOnLocks(sessions: number): Promise<void> {
+      for (let polls = 0; polls < 200; polls++) {
+        const { waiting } = await superuser
+          .selectNoFrom(
+            sql<number>`(select count(*)::int from pg_stat_activity
+              where datname = current_database() and wait_event_type = 'Lock')`.as('waiting'),
+          )
+          .executeTakeFirstOrThrow();
+        if (waiting >= sessions) return;
+        await sql`select pg_sleep(0.05)`.execute(superuser);
+      }
+      assert.fail(`${sessions} sessions never waited on a lock`);
+    },
     /** The clock seam: moves a person's open sessions `ms` into the past, as a clock advanced by `ms` would leave them. */
     async advanceClock(account: Account, ms: number): Promise<void> {
       const by = sql`${ms} * interval '1 millisecond'`;
@@ -199,13 +232,14 @@ export async function startApi(name: string) {
         .execute();
     },
     labId,
+    qcLabId,
     methodId,
     person(name: SeededName): Account {
       return seeded.find((a) => a.username.startsWith(`${name}.`)) ?? assert.fail(`no seeded person ${name}`);
     },
-    async login(account: Account): Promise<Client> {
+    async login(account: Account, lab = labId): Promise<Client> {
       const client = new Client(base);
-      ok(await client.call(routes.login, { username: account.username, password: account.password }));
+      ok(await client.call(routes.login, { username: account.username, password: account.password, labId: lab }));
       return client;
     },
     async addPerson(
@@ -214,7 +248,8 @@ export async function startApi(name: string) {
       opts: { trained?: boolean; customerId?: string } = {},
     ): Promise<Account> {
       const account = { username, password: `${username}-password-for-tests`, id: '' };
-      await audited(db, { actor: 'svc:test', role: 'system', reason: 'Add a test person' }, async (tx) => {
+      // The owner adds test people with passwords; the app role creates staff only on an Identity Verification.
+      await audited(superuser, { actor: 'svc:test', role: 'system', reason: 'Add a test person' }, async (tx) => {
         ({ id: account.id } = await tx
           .insertInto('person')
           .values({

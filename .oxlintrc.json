@@ -177,6 +177,30 @@
           }
         ]
       }
+    },
+    {
+      "files": ["apps/web/e2e/**/*.spec.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@lims/*/src", "@lims/*/src/**", "**/packages/*/src/**", "**/apps/*/src/**"],
+                "message": "Import another package through its exports map, not its src/ path."
+              },
+              {
+                "group": ["@lims/*", "!@lims/domain"],
+                "message": "The web imports @lims/domain only."
+              },
+              {
+                "group": ["@playwright/test"],
+                "message": "Import test and expect from ./walk.ts, which attaches the API log to a walk that fails."
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

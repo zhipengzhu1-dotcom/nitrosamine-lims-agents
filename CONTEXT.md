@@ -60,6 +60,18 @@ _Avoid_: Administrator, superuser, IT
 Whoever runs the server and database outside the system. Independent of the Lab, holds no business role, and has no access to records through the system.
 _Avoid_: Admin, host, IT
 
+**Membership**:
+A person's role in one Lab, granted by the Admin with a reason. A person holds a role only in a Lab where they have a Membership for it, and someone holding Admin or Platform Operator in any Lab holds no business role in any Lab.
+_Avoid_: Permission, group, access
+
+**Printed name**:
+The name a person's Signatures and records show. The Admin may change it with a reason; each Signature keeps the printed name as signed. Unlike the username, which never changes.
+_Avoid_: Full name, signing name
+
+**One-time link**:
+The link through which a person sets their own password, so that the Admin never sees or sets it. It works once and expires; the LIMS keeps only a hash of it.
+_Avoid_: Invitation, reset email, activation code
+
 ### Sample chain
 
 **Submission**:
@@ -497,11 +509,15 @@ The permanent, system-generated history of every change to records, accounts and
 _Avoid_: Log, history, change log
 
 **Access Event**:
-The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock, lockout, takeover, Lab switch, failed Re-authentication at signing, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
+The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock (succeeded or failed), lockout, takeover, Lab switch, failed Re-authentication at signing, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
 _Avoid_: Login log, session log, access log
 
+**Lab switch**:
+Moving a signed-in person's work from one Lab to another in which they hold a Membership. It needs the full re-authentication of a sign-in, nothing is chosen for them, and from then on they see only the new Lab's records. It is an Access Event, and a failed one counts toward the lockout.
+_Avoid_: Change Lab, Lab login, context switch
+
 **Workstation**:
-A bench PC the Admin has registered with its name, Lab and Room, which every session and Access Event from it carries. A device that is not registered shows as an unregistered device; the portal and desk PCs may be used that way.
+A bench PC the Admin has registered with its name, Lab, Room and browser policy (the managed browser settings it runs, as the Admin describes them), and whose browser the Admin has enrolled with a device token. Every session and Access Event from that browser carries it, and a session on it opens in its Lab. A device that is not registered shows as an unregistered device; the portal and desk PCs may be used that way.
 _Avoid_: Terminal, client, kiosk
 
 **Commit Key**:
@@ -537,7 +553,7 @@ The record that gives a QA person the authority to sign Approved on Authorisatio
 _Avoid_: Designation, delegation, QA authorisation
 
 **Identity Verification**:
-The recorded check of who a person is (who checked, what, and when), made before their first credential is issued and again before a replacement authenticator is enrolled. It is one of the four facts that enable signing.
+The recorded check of who a person is (which Admin checked, what, and when), made before their first credential is issued and again before a replacement authenticator is enrolled. It is one of the four facts that enable signing.
 _Avoid_: ID check, onboarding, vetting
 
 **Return**:

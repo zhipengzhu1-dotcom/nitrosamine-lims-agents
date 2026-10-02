@@ -10,7 +10,15 @@ import {
   type UpdateResult,
 } from 'kysely';
 
-type CompanyTable = 'customer' | 'person' | 'method' | 'submission' | 'lab' | 'signatureStatement';
+type CompanyTable =
+  | 'customer'
+  | 'person'
+  | 'method'
+  | 'submission'
+  | 'lab'
+  | 'identityVerification'
+  | 'credentialLink'
+  | 'signatureStatement';
 type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session' | 'systemIncident'>;
 
 function inLab(q: Kysely<DB>, labId: string) {

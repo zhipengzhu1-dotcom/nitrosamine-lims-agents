@@ -54,7 +54,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 - Write migrations forward-only. Fix a mistake with a new migration, never by editing one that is on `main`, because a database that already applied the old file would then differ from the repo.
 - Make every rule that the database can enforce a constraint or a trigger, so that the database refuses bad data even when the API is wrong.
 - Write SQL with lowercase keywords, singular snake_case table names and schema-qualified names, so that each migration reads like the ones before it.
-- Send SQL from TypeScript only through Kysely or its `sql` tag with parameters, never through string concatenation, because concatenated SQL is how injection happens.
+- Bind every value in SQL as a parameter (through Kysely, its `sql` tag, a `$1` placeholder or a psql `-v` variable), never by concatenation or a template literal, because concatenated SQL is how injection happens. Quote an identifier, which cannot be a parameter, with `sql.id`, `pg.escapeIdentifier` or psql's `:"name"`. `packages/db/test/interpolated-sql.test.ts` catches only the `sql.raw` and `psql -c` forms, so a review checks the rest, such as a `query()` built from a template literal.
 
 ## Tests use the real database and the real API
 
