@@ -110,7 +110,8 @@ export async function openJobIncident(
 /**
  * Opens one System Incident for a break that chain verification found, naming the chain as the Audit Trail does and
  * its first failing entry, with the verifying QA as the requesting person; a later verification of the same break
- * answers that incident's reference and opens no other.
+ * answers that incident's reference and opens no other. A failure to write it fails the verification, whose 500 opens
+ * a System Incident of its own, so a break is never shown without a record.
  */
 export async function openChainIncident(
   db: Kysely<DB>,
@@ -119,6 +120,7 @@ export async function openChainIncident(
   firstFailure: string,
 ): Promise<string> {
   return audited(db, INCIDENT_SERVICE, async (tx) => {
+    await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
     await tx
       .insertInto('systemIncident')
       .values({

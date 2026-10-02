@@ -282,7 +282,7 @@ const systemIncident = Type.Object({
   sourceAddress: nullable(Type.String()),
   typedUserIdHmac: nullable(sha256Hex),
   /** What a chain-verify failure names: the chain as the Audit Trail names it ('company' or the Lab's ID), and its first failing entry. */
-  chain: nullable(Type.String()),
+  chain: nullable(Type.Union([Type.Literal('company'), uuid])),
   firstFailure: nullable(seq),
   sqlstate: nullable(Type.String()),
   constraintName: nullable(Type.String()),

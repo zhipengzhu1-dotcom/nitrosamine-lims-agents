@@ -247,11 +247,11 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
       if (!req.actor.roles.includes('QA')) refuse('role', 'verifying the Audit Trail is a QA action');
       const { at, chains } = await labScope(db, req.actor).verifyAuditTrail();
       const verified = [];
-      for (const { chain, name, lastEntry, firstFailure } of chains) {
+      for (const { chain, chainId, lastEntry, firstFailure } of chains) {
         const broken =
           firstFailure === null
             ? null
-            : { firstFailure, incident: await openChainIncident(db, req.actor, name, firstFailure) };
+            : { firstFailure, incident: await openChainIncident(db, req.actor, chainId, firstFailure) };
         verified.push(chainVerification(chain, lastEntry, broken));
       }
       return { at, chains: verified };

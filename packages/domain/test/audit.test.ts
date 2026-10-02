@@ -58,7 +58,7 @@ describe('a recomputed chain reads as how far it is intact', () => {
   ];
   for (const c of cases) {
     const incident = c.failure === null ? null : 'RF000001';
-    const broken = c.failure === null ? null : { firstFailure: c.failure, incident: 'RF000001' };
+    const broken = c.failure === null ? null : { firstFailure: c.failure, incident: 'RF000001' as const };
     it(c.name, () =>
       assert.deepEqual(chainVerification('lab', c.last, broken), { chain: 'lab', incident, ...c.expected }),
     );

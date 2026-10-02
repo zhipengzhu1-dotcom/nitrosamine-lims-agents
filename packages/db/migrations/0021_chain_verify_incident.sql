@@ -5,7 +5,9 @@ alter type lims.incident_kind add value 'ChainVerifyFailure';
 -- A chain-verify failure names the chain as the Audit Trail does ('company' or the Lab's ID, in a column not named
 -- lab_id, so capture() keeps the incident on the company chain) and the first entry that fails to verify. One break
 -- opens one incident however often it is verified: the pair is unique, and other kinds leave both null. The QA who
--- verified is its requesting person.
+-- verified is its requesting person. The chain is checked by shape, not by a foreign key to audit_chain, whose
+-- key-share lock would take a Lab chain before the company chain that capture() locks next. The kinds are compared as
+-- text because a new enum value cannot be used in the transaction that adds it.
 alter table lims.system_incident
   add column chain         text   check (chain = 'company'
                                          or chain ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
