@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
-import { dbConfig } from './config.ts';
+import { seedConfig } from './config.ts';
 import { hashPassword } from './credentials.ts';
 import { audited, createDb, type DB, databaseUrl } from './db.ts';
 
@@ -91,14 +91,10 @@ export async function seed(
 }
 
 if (import.meta.main) {
-  // LIMS_PASSWORD_PEPPER, the API's hex pepper, is given when the seeded accounts are to sign in under the decided login.
-  const { server, database, demoPassword } = dbConfig(['LIMS_PASSWORD_PEPPER']);
-  const pepper = process.env.LIMS_PASSWORD_PEPPER;
-  if (pepper !== undefined && !/^([0-9a-f]{2}){32,}$/i.test(pepper))
-    throw new Error('LIMS_PASSWORD_PEPPER must hold the password pepper: at least 64 hex digits');
+  const { server, database, demoPassword, passwordPepper } = seedConfig();
   const db = createDb(databaseUrl(server, database, 'lims_app'));
   try {
-    const accounts = await seed(db, demoPassword, pepper === undefined ? undefined : Buffer.from(pepper, 'hex'));
+    const accounts = await seed(db, demoPassword, passwordPepper);
     console.table(accounts.map((a) => ({ username: a.username, role: a.role })));
     const [first] = accounts;
     if (!first) throw new Error('the seed made no accounts');
