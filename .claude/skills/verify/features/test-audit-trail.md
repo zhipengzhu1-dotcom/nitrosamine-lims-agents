@@ -11,7 +11,7 @@ Every Test page that a Lab person opens ends with its Audit Trail: one time-orde
 - `trail-long-values` collapses a value longer than 48 characters, such as the signed Record Version, behind a summary that expands in place.
 - `trail-raw` opens the stored entry (`Raw entry N`) in a dialog with its `old_row`, `new_row`, `prev_hash` and `hash`.
 - `trail-record-link` opens a cited record's own trail from a link in an entry.
-- `trail-verify` lets QA recompute both chains and reads `intact through entry N` for each.
+- `trail-verify` lets QA recompute both chains and reads one line per chain: `<Chain> chain Intact verified through entry N`, or `Broken` with the first entry that fails.
 - `trail-customer-hidden` shows a Customer the Test without the Audit Trail, and `/api/tests/<id>/trail` refuses a Customer with 403 `role`.
 
 ## How to get to it (user POV)
@@ -30,7 +30,7 @@ Preconditions:
 - **After.** The panel has new entries without a reload, tinted for a moment (`entry--fresh`). The last ones name the person's printed name, their role in words (`Lab Manager`) and the step as the reason. One of them shows `State` with `<old> → <new>`. For `receive` there are two: the Test with `State Requested → Ready` and the Sample with `Received`.
 - **Search.** Fill `Search the trail` with a printed name and count the entries; clear it and the count returns. Choose `Newest first` in `Order` and the first entry is the latest.
 - **Long value and raw.** On a Test past Enter Result, the Signature entry holds `details.long`; click its `summary` and the signed Record Version shows in full. Press `Raw entry N`; the `dialog` shows the stored entry with a 64-hex `hash`. `Close` it.
-- **Verify.** As `quinn.qa`, press `Verify chain` in the panel. `steps.log` shows `POST /api/audit/verify -> 200`, and `.verdict` reads `Recomputed at <YYYY-MM-DD hh:mm:ss> UTC: Lab chain intact through entry N; Company chain intact through entry M. Not anchored off-server (demo).` N equals `select max(seq) from lims.audit_entry where chain = (select lab_id::text from lims.lab)`.
+- **Verify.** As `quinn.qa`, press `Verify chain` in the panel. `steps.log` shows `POST /api/audit/verify -> 200`, and `.verdict` reads `Recomputed at <YYYY-MM-DD hh:mm:ss> UTC. Not anchored off-server (demo).`, and `.chains li` reads `Lab chain Intact verified through entry N` and `Company chain Intact verified through entry M`. N equals `select max(seq) from lims.audit_entry where chain = (select lab_id::text from lims.lab)`.
 - **Customer.** Sign in as `cora.customer` and open the Test. `getByRole('region', { name: 'Audit Trail' })` has a count of 0.
 - **Proof.** Run `select chain, seq, at, actor, role, reason, table_name, op from lims.audit_entry order by at desc limit 5`, and compare it with the raw entries. `chain.ts` saves the Test's whole trail as `audit-trail.tsv`.
 
