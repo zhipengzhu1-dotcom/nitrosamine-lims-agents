@@ -1,10 +1,10 @@
 # CI runners
 
-CI's `check` and `e2e` jobs run on self-hosted GitHub Actions runners in Docker on the owner's Mac, never on GitHub-hosted runners. `.github/workflows/ci.yml` sends both jobs to the runner labels `self-hosted` and `lims`. While no runner is online, a job waits in the queue.
+CI's `check` and `e2e` jobs run on self-hosted GitHub Actions runners in Docker on the owner's Mac, never on GitHub-hosted runners. `.github/workflows/ci.yml` sends the `check` job to the runner labels `self-hosted` and `lims-check`, and the `e2e` job to `self-hosted` and `lims-e2e`. While no runner is online, a job waits in the queue.
 
 ## How it works
 
-`scripts/ci-runner.sh start` starts two slots, `1` and `2`, so both jobs of a run can run at once. Each slot is a loop on the Mac:
+`scripts/ci-runner.sh start` starts two slots, `check` and `e2e`, one for each job, so both jobs of a run can run at once. A slot runs only its own job (see Resources). Each slot is a loop on the Mac:
 
 1. It asks GitHub for a just-in-time runner configuration with `gh api`. The configuration registers one ephemeral runner, `lims-runner-<slot>-<time>`, which takes one job and then deregisters.
 2. It starts a fresh container, `lims-runner-<slot>`, from the `lims-runner` image with that configuration as an argument.
@@ -88,4 +88,6 @@ Update in the monthly patch round that ADR 0002 sets for image digests. GitHub r
 
 ## Resources
 
-The Mac's Docker VM has 14 CPUs and about 8 GB of memory. One `check` job and one `e2e` job running at the same time fit in it. Each container gets 1 GB of shared memory (`--shm-size`) for PostgreSQL and the browsers.
+The Mac's Docker VM has 14 CPUs and about 8 GB of memory. On 2026-10-02 a `check` job and an `e2e` job ran side by side in two containers of this image and both passed: `check` peaked near 0.6 GB in 81 seconds and `e2e` near 4.3 GB in 186 seconds. Two `e2e` jobs at once, each capped at 3.5 GB, failed when the web server stopped mid-walk. So each job type has one slot, and a second `e2e` job waits for the first. Each container gets 1 GB of shared memory (`--shm-size`) for PostgreSQL and the browsers.
+
+The walk itself takes about 30 of the 186 seconds of an `e2e` job. The rest installs Node, the packages, the browsers and their system packages, because each job starts from a fresh container.
