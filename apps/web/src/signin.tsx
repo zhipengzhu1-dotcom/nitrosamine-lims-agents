@@ -2,7 +2,7 @@ import { type FormEvent, useState } from 'react';
 import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
 import { api, type LockMode, signIn, signOut, switchLab, unlock, useApi } from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
-import { field, useCommit } from './staff.tsx';
+import { field, useCommit } from './form.tsx';
 
 type Credentials = RouteInput<typeof routes.switchLab>[0];
 

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { expect, test } from '@playwright/test';
+import { expect, test } from './walk.ts';
 import { DEMO_PASSWORD, SHOTS } from '../playwright.config.ts';
 
 test('the Admin records an Identity Verification, creates the account and grants a Membership; the person sets their own password', async ({

@@ -100,6 +100,11 @@ it('an account created after its Identity Verification gets its first credential
   assert.equal(person.printedName, verification.printedName, 'the account takes the printed name that was checked');
   assert.equal(person.credentialSet, false);
   assert.ok(person.identityVerifiedAt);
+  assert.deepEqual(
+    [person.identityVerifiedBy, person.identityEvidence],
+    ['Ada Novak', 'Passport seen in person (fictional)'],
+    'the staff list says who checked the identity and what they checked',
+  );
   ok(await as.ada.call(routes.grantMembership, { personId: person.id, role: 'Analyst', reason: 'New starter' }));
 
   refusedWith(await signIn(person.username, 'any-password'), 'badCredentials');

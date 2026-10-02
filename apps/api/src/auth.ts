@@ -71,7 +71,7 @@ export async function deviceOf(
     .executeTakeFirst();
 }
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
-const LINK_NOT_VALID = () =>
+const linkNotValid = () =>
   refuse('badCredentials', 'this link has been used, replaced or has expired; ask the Admin for a new one');
 
 const REFUSAL: { readonly [F in SignInFailure]: (labName?: string) => never } = {
@@ -514,7 +514,7 @@ export function loginRoutes(
         .where('usedAt', 'is', null)
         .where('expiresAt', '>', sql<Date>`clock_timestamp()`)
         .executeTakeFirst();
-      if (!live) return LINK_NOT_VALID();
+      if (!live) return linkNotValid();
       const passwordHash = await hashPassword(password);
       const as = { ...SIGN_IN_SERVICE, reason: 'Set a password through a one-time link' };
       const set = await audited(db, as, async (tx) => {
@@ -532,7 +532,7 @@ export function loginRoutes(
         await record(tx, { kind: 'PasswordSet', subjectId: personId, roles, sourceAddress: sourceAddressOf(req) });
         return tx.selectFrom('person').select('username').where('id', '=', personId).executeTakeFirstOrThrow();
       });
-      return set ?? LINK_NOT_VALID();
+      return set ?? linkNotValid();
     },
   });
   app.route({
