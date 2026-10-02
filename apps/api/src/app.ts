@@ -20,7 +20,7 @@ import {
   SESSION_LIMITS,
   type SessionKey,
 } from './auth.ts';
-import { apiLogger, type LogSink } from './log.ts';
+import { apiLogger, checkLogVolume, type LogSink, type LogVolume } from './log.ts';
 import { readRoutes } from './reads.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
 import { stepRoutes } from './steps.ts';
@@ -55,6 +55,7 @@ export type App = FastifyInstance<
 
 export interface AppOptions {
   log: LogSink | null;
+  logVolume: LogVolume | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
   login: Login;
@@ -72,6 +73,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   app.setErrorHandler(answerThrown(db));
   app.decorateRequest('requester', null);
   app.setNotFoundHandler(() => refuse('notFound', 'no such route'));
+  if (options.logVolume) checkLogVolume(app, db, options.logVolume);
   loginRoutes(app, db, options.accessEventKey, options.secureCookie, limits);
   app.register(async (signedIn) => {
     signedIn.decorateRequest('actor');

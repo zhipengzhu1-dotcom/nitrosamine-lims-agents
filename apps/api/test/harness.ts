@@ -98,15 +98,17 @@ interface ListenOptions {
   log?: LogSink;
   login?: AppOptions['login'];
   sweepEveryMs?: number | null;
+  logVolume?: AppOptions['logVolume'];
 }
 
 async function listen(
   db: Kysely<DB>,
-  { secureCookie = false, log, login = 'decided', sweepEveryMs = null }: ListenOptions = {},
+  { secureCookie = false, log, login = 'decided', sweepEveryMs = null, logVolume = null }: ListenOptions = {},
 ) {
   const lines: string[] = [];
   const app = buildApp(db, {
     log: log ?? { write: (line) => lines.push(line) },
+    logVolume,
     secureCookie,
     accessEventKey,
     login,

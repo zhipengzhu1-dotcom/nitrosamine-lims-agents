@@ -39,6 +39,8 @@ const text = Type.String({ minLength: 1, maxLength: 200 });
 /** A decimal as typed. */
 export const decimalPattern = '-?[0-9]+(\\.[0-9]+)?';
 const decimal = Type.String({ pattern: `^${decimalPattern}$` });
+/** A System Incident's reference: eight Crockford base32 characters, which a person can read aloud. */
+export const referencePattern = '[0-9A-HJKMNP-TV-Z]{8}';
 const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
@@ -216,6 +218,26 @@ const chainVerification = Type.Object({
 export type ChainVerification = Static<typeof chainVerification>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
+const systemIncident = Type.Object({
+  reference: Type.String({ pattern: `^${referencePattern}$` }),
+  kind: Type.Enum({
+    UnexpectedFailure: 'UnexpectedFailure',
+    UnraisableLogLine: 'UnraisableLogLine',
+  } as const satisfies { [K in db.IncidentKind]: K }),
+  state: Type.Enum({ Open: 'Open' } as const satisfies { [K in db.IncidentState]: K }),
+  step: Type.String(),
+  recordId: nullable(uuid),
+  requestedBy: nullable(uuid),
+  sessionLabId: nullable(uuid),
+  errorClass: Type.String(),
+  sqlstate: nullable(Type.String()),
+  constraintName: nullable(Type.String()),
+  /** The database's insert time. */
+  openedAt: instant,
+  /** For an incident the database could not write at the time, the instant its log line was written, from the API host's clock. */
+  loggedAt: nullable(instant),
+});
+export type SystemIncident = Static<typeof systemIncident>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** What a committed step answers, and what a retry of the same press answers again. */
 export type StepTaken = Static<typeof stepTaken>;
@@ -322,6 +344,12 @@ export const routes = {
     trail,
   ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
+  incident: route(
+    'GET',
+    '/api/incidents/:reference',
+    { params: Type.Object({ reference: Type.String({ pattern: `^${referencePattern}$` }) }) },
+    systemIncident,
+  ),
 } satisfies Record<string, Route>;
 
 /** The route of one step, whose body requires a Commit Key, a testId when the step starts from a state, and a signature when it signs. */
