@@ -78,7 +78,7 @@ test('the same entries typed in another order after a dropped Submit and a reloa
   expect(new Set(commitKeys).size).toBe(1);
 });
 
-test('the same entries after a dropped Submit, a sign-out and a sign-in are a new press of the new sign-in', async ({
+test('the same entries after a dropped Submit, a sign-out and a sign-in are told the press was already saved', async ({
   page,
 }) => {
   const dropped = sample('dropped reply');
@@ -89,11 +89,11 @@ test('the same entries after a dropped Submit, a sign-out and a sign-in are a ne
 
   await fillSubmitSheet(page, dropped, 'method first');
   await page.getByRole('button', { name: 'Submit' }).click();
-  await expect(page.getByRole('status')).toContainText('now Requested');
-  expect(commitKeys, 'the new sign-in sent its own Commit Key').toHaveLength(2);
-  expect(new Set(commitKeys).size).toBe(2);
-  await expect(
-    page.getByRole('row', { name: dropped }),
-    'the earlier sign-in saved its press, and the new sign-in saved its own',
-  ).toHaveCount(2);
+  await expect(page.getByRole('status')).toContainText(
+    'this press was already saved before the latest sign-in; reload to see what was saved',
+  );
+  expect(commitKeys, 'the press is resent with its Commit Key').toHaveLength(2);
+  expect(new Set(commitKeys).size).toBe(1);
+  await page.reload();
+  await expect(page.getByRole('row', { name: dropped }), 'the Submission is saved once').toHaveCount(1);
 });

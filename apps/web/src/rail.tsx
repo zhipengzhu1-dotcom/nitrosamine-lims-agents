@@ -18,7 +18,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, commitKeySlot, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
+import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room';
 export interface Field<N extends string = string> {
@@ -122,6 +122,11 @@ export interface RailAction {
   run: (input: Record<string, string>, credentials: TypedCredentials | null) => Promise<string>;
 }
 
+async function commitKeySlot(press: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(press));
+  return `commitKey:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
 export function stepAction(
   name: StepName,
   testId: string | null,
@@ -141,6 +146,7 @@ export function stepAction(
         : null,
     async run(input, credentials) {
       // Kept until the server answers, even across a reload, so the same press after no answer resends its Commit Key.
+      // The slot names the press by a digest, so no entries are kept in the browser.
       const slot = await commitKeySlot(pressText(name, testId, input));
       const commitKey = sessionStorage.getItem(slot) ?? crypto.randomUUID();
       sessionStorage.setItem(slot, commitKey);

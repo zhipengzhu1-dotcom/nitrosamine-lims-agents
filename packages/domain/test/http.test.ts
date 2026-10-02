@@ -127,11 +127,6 @@ describe('pressText', () => {
       true,
     ],
     [
-      'an entry typed and then cleared, which is an absent entry,',
-      pressText('submit', null, { ...entries, notebookRef: '' }),
-      true,
-    ],
-    [
       'other entries',
       pressText('submit', null, { ...entries, description: 'Metformin HCl, lot 2 (fictional)' }),
       false,
@@ -141,4 +136,9 @@ describe('pressText', () => {
   ];
   for (const [what, other, same] of cases)
     it(`names ${what} as ${same ? 'the same' : 'another'} press`, () => assert.equal(other === press, same));
+  it('names an entry typed and then cleared, which is an absent entry, as the same press', () =>
+    assert.equal(
+      pressText('submit', null, { ...entries, description: '' }),
+      pressText('submit', null, { methodId: entries.methodId }),
+    ));
 });
