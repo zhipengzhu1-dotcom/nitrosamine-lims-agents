@@ -1,6 +1,6 @@
 import { type ActorContext, routes } from '@lims/domain';
 import { useApi } from './api.ts';
-import { demoSigning, Shell } from './rail.tsx';
+import { demoSigning, Shell, Status } from './rail.tsx';
 import { Signatures, unsignedNotice } from './tests.tsx';
 import { time } from './time.ts';
 
@@ -17,6 +17,7 @@ export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
           </button>
           <h1>
             Test Report <span className="record-number">{data.report.number}</span>
+            {data.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
           </h1>
           <p>{me.lab.name}</p>
           <dl className="facts">
@@ -34,6 +35,10 @@ export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
             </dd>
             <dt>GxP Class</dt>
             <dd>{data.test.gxpClass} (demo: GMP controls are not built)</dd>
+            <dt>Record Version</dt>
+            <dd>
+              {data.recordVersion.version} · <code className="hash">{data.recordVersion.contentHash}</code>
+            </dd>
           </dl>
           <h2>Result</h2>
           {data.result && (

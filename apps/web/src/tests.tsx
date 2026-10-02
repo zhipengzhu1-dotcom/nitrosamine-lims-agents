@@ -67,6 +67,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
     <Shell me={me} active="tests" action={action} notice={unsignedNotice(view.signatures)}>
       <h1 className="record-head">
         {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
+        {view.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
       </h1>
       <dl className="facts">
         <dt>Sample</dt>
@@ -97,7 +98,9 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         )}
       </dl>
       <h2>Result</h2>
-      {result ? (
+      {view.withheld ? (
+        <p className="muted">The Result is not released yet. It shows here when the Test Report is released.</p>
+      ) : result ? (
         <dl className="facts">
           <dt>{result.analyte}</dt>
           <dd className="value">
@@ -114,7 +117,11 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         <p className="muted">No Result entered.</p>
       )}
       <h2>Signatures</h2>
-      <Signatures rows={view.signatures} fresh={freshSignatures} />
+      {view.withheld ? (
+        <p className="muted">The Signatures are not released yet. They show here with the Result.</p>
+      ) : (
+        <Signatures rows={view.signatures} fresh={freshSignatures} />
+      )}
       {me.person.customerId === null && <TestTrail me={me} id={id} onReload={onTrailReload} />}
     </Shell>
   );
@@ -135,17 +142,11 @@ const rowClass = (s: Signature, fresh?: ReadonlySet<string>) =>
 const signatureColumns: Column<Signature>[] = [
   {
     head: 'Meaning',
-    className: 'sig',
     cell: (s) => (
-      <>
-        {s.meaning}
-        {s.unsigned && (
-          <>
-            {' '}
-            <span className="unsigned">unsigned</span>
-          </>
-        )}
-      </>
+      <span className="sig-line">
+        <span className="sig">{s.meaning}</span>
+        {s.unsigned && <Status mark="Unsigned" />}
+      </span>
     ),
   },
   { head: 'Signed by', cell: (s) => `${s.signer} (${s.username}, ${words(s.role)})` },

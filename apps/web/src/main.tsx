@@ -6,7 +6,7 @@ import { Placeholder } from './placeholder.tsx';
 import { ReportPage } from './report.tsx';
 import { LabSwitchPage, LockScreen, PreferencesPage, SignIn, WelcomePage } from './signin.tsx';
 import { TestPage, Worklist } from './tests.tsx';
-import { TrailPage } from './trail.tsx';
+import { AuditExportPage, TrailPage } from './trail.tsx';
 import { type Module, modules } from './rail.tsx';
 import './app.css';
 
@@ -18,6 +18,7 @@ type Route =
   | { page: 'preferences' }
   | { page: 'welcome'; token: string }
   | { page: 'trail'; table: AuditedTable; id: string }
+  | { page: 'auditExport' }
   | { page: 'module'; module: Module };
 
 function parse(hash: string): Route {
@@ -27,6 +28,7 @@ function parse(hash: string): Route {
   if (a === 'preferences') return { page: 'preferences' };
   if (a === 'welcome' && id) return { page: 'welcome', token: id };
   if (a === 'trails' && isAuditedTable(id) && b) return { page: 'trail', table: id, id: b };
+  if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
   return module ? { page: 'module', module } : { page: 'tests' };
 }
@@ -90,6 +92,8 @@ function page(route: Route, me: ActorContext) {
       return <PreferencesPage me={me} />;
     case 'trail':
       return <TrailPage key={`${route.table}/${route.id}`} me={me} table={route.table} id={route.id} />;
+    case 'auditExport':
+      return <AuditExportPage me={me} />;
     case 'welcome':
       return <WelcomePage token={route.token} />;
     case 'module':

@@ -54,6 +54,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   switchLab: entry(routes.switchLab, { username: cora.username, password: 'not-the-password', labId: api.labId }),
   verifyAuditTrail: entry(routes.verifyAuditTrail, {}),
   setPreferences: entry(routes.setPreferences, { reducedMotion: true }),
+  auditExport: entry(routes.auditExport, { customerId: randomUUID(), format: 'JSON' }),
   submit: step('submit', {
     commitKey: randomUUID(),
     input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },

@@ -43,7 +43,7 @@ test('an unexpected failure shows its reference on the Bench Rail and plays no s
 
   const status = page.getByRole('status');
   await expect(status).toContainText(/^Not finished: .* reference [0-9A-HJKMNP-TV-Z]{8}\.$/);
-  const reference = /reference (\w{8})/.exec(await status.innerText())?.[1] ?? '';
+  const reference = /reference (\w{8})/.exec((await status.textContent()) ?? '')?.[1] ?? '';
   expect(
     psql(`select step from lims.system_incident where reference = :'reference';`, { reference }),
     'the reference names a System Incident',

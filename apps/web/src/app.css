@@ -101,6 +101,8 @@ p {
   grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
+  /* Hidden would still scroll: typing in a sheet still sliding in pulled the frame up and the rail over the sheet. */
+  overflow: clip;
 }
 .frame > .plane,
 .sheet {
@@ -289,8 +291,15 @@ th {
   flex-basis: 100%;
 }
 .verdict {
-  margin: 0;
   flex: 1 1 320px;
+}
+.verdict p {
+  margin: 0;
+}
+.chains {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
 }
 .entries {
   list-style: none;
@@ -419,14 +428,11 @@ td a,
   color: var(--sig);
   font-weight: 700;
 }
-.unsigned {
-  margin-left: 8px;
-  padding: 2px 6px;
-  border: 1.5px solid var(--bad);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--bad);
-  background: var(--bad-tint);
+.sig-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 .row--unsigned .sig {
   color: var(--ink-3);
@@ -453,6 +459,21 @@ td a,
 }
 .status--done {
   --accent: var(--ink);
+}
+.status--ok {
+  color: var(--ok);
+}
+.status--bad {
+  color: var(--bad);
+}
+.glyph {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .track i.on {
   background: var(--accent);
@@ -501,7 +522,8 @@ td a,
 }
 
 .rail {
-  grid-row: 3;
+  /* Placed, not auto-placed: a phone's open sheet spans row 3 too, and an auto-placed rail would open a second column. */
+  grid-area: 3 / 1;
   z-index: 2;
   min-height: var(--rail-h);
   display: flex;
@@ -549,6 +571,15 @@ td a,
   min-width: 0;
   font-size: 15px;
   font-weight: 700;
+}
+/* An open sheet shows its own line, so the rail's copy stays for screen readers only. */
+.frame:has(> .sheet:not([data-closing])) .rail__context .note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .note {
   margin: 0;
@@ -970,6 +1001,7 @@ a.btn {
     border-top: 1px solid var(--line);
   }
   .top nav a {
+    min-height: 44px;
     padding: 0 10px;
   }
   .plane {
@@ -1043,7 +1075,13 @@ a.btn {
   }
   .sheet {
     --foot-h: 156px;
+    grid-row: 2 / 4;
+    z-index: 3;
     padding: 12px 12px 0;
+  }
+  .frame:has(> .sheet:not([data-closing])) .rail__session {
+    visibility: hidden;
+    transition: visibility 0s var(--dur-sheet-in);
   }
   .sheet h2 {
     flex-wrap: wrap;
@@ -1053,7 +1091,7 @@ a.btn {
   .sheet__foot {
     flex-wrap: wrap;
     gap: 8px;
-    padding: 10px 0 12px;
+    padding: 10px 0 max(12px, env(safe-area-inset-bottom));
   }
   .sheet__line {
     --lines: 3;
@@ -1114,4 +1152,44 @@ a.btn {
     border: 0;
     max-width: none;
   }
+}
+
+.export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+}
+.export label {
+  margin: 0;
+  flex: 1 1 220px;
+}
+.export select {
+  width: 100%;
+}
+.export__done ul {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+.export__done li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.export__done a.btn {
+  display: inline-flex;
+  align-items: center;
+  height: auto;
+  min-height: 44px;
+  padding: 8px 16px;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.export__done code {
+  overflow-wrap: anywhere;
 }

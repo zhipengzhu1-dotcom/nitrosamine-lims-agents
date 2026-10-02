@@ -1,5 +1,7 @@
 import {
   type ActorContext,
+  type AuditExport,
+  type AuditExportFormat,
   type AuditedTable,
   auditedRecords,
   type AuditTrailVerification,
@@ -10,8 +12,8 @@ import {
   type TrailChange,
   type TrailEntry,
 } from '@lims/domain';
-import { useEffect, useRef, useState } from 'react';
-import { api, useApi, useFresh } from './api.ts';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { api, Refused, useApi, useFresh } from './api.ts';
 import { Shell, Status, words } from './rail.tsx';
 import { labTime, time } from './time.ts';
 
@@ -21,19 +23,31 @@ const chainWords = { lab: 'Lab chain', company: 'Company chain' } as const;
 const SHORT = 48;
 const NONE = 'none';
 
+const whenText = (at: string, atLab: string | null) => (atLab ? `${time(at)} · ${labTime(atLab)}` : time(at));
+const valueText = (value: ShownValue | null) =>
+  value === null ? NONE : value.instant ? whenText(value.instant.at, value.instant.atLab) : value.text;
+
+function When({ at, atLab }: { at: string; atLab: string | null }) {
+  return (
+    <>
+      {time(at)}
+      {atLab && <span className="muted"> · {labTime(atLab)}</span>}
+    </>
+  );
+}
+
 function searchText(e: TrailEntry): string {
   return [
     `#${e.seq}`,
     chainWords[e.chain],
-    time(e.at),
-    e.atLab ? labTime(e.atLab) : '',
+    whenText(e.at, e.atLab),
     e.actor.label,
     words(e.actor.role),
     action[e.op],
     e.reason,
     e.record.kind,
     e.record.label,
-    ...e.changes.flatMap((c) => [c.label, c.old?.text ?? NONE, c.new?.text ?? NONE]),
+    ...e.changes.flatMap((c) => [c.label, valueText(c.old), valueText(c.new)]),
   ]
     .join(' ')
     .toLowerCase();
@@ -43,6 +57,7 @@ function Value({ value, change, e }: { value: ShownValue | null; change: TrailCh
   if (value === null) return <i className="muted">{NONE}</i>;
   if (change.field === 'state' && e.record.table === 'test' && isTestState(value.text))
     return <Status state={value.text} />;
+  if (value.instant) return <When at={value.instant.at} atLab={value.instant.atLab} />;
   const text = value.ref ? (
     <a href={`#/trails/${value.ref.table}/${value.ref.id}`}>{value.text}</a>
   ) : (
@@ -65,8 +80,7 @@ function Entry({ e, root, fresh, onRaw }: { e: TrailEntry; root: Trail['record']
         <span className={`chain chain--${e.chain}`}>{chainWords[e.chain]}</span>
         <span className="entry__seq">#{e.seq}</span>
         <span className="entry__time">
-          {time(e.at)}
-          {e.atLab && <span className="muted"> · {labTime(e.atLab)}</span>}
+          <When at={e.at} atLab={e.atLab} />
         </span>
       </div>
       <p className="entry__line">
@@ -136,21 +150,15 @@ function RawDialog({ entry, onClose }: { entry: TrailEntry | null; onClose: () =
 function VerifyChain() {
   const inFlight = useRef(false);
   const [busy, setBusy] = useState(false);
-  const [verdict, setVerdict] = useState<{ text: string; tone: 'ok' | 'bad' } | null>(null);
+  const [answer, setAnswer] = useState<{ found: AuditTrailVerification } | { failed: string } | null>(null);
   async function verify() {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     try {
-      const found: AuditTrailVerification = await api(routes.verifyAuditTrail);
-      const broken = found.chains.some((c) => c.firstFailure !== null);
-      const chains = found.chains.map((c) => `${chainWords[c.chain]} ${c.report}`).join('; ');
-      setVerdict({
-        text: `Recomputed at ${time(found.at)}: ${chains}. Not anchored off-server (demo).`,
-        tone: broken ? 'bad' : 'ok',
-      });
+      setAnswer({ found: await api(routes.verifyAuditTrail) });
     } catch (error) {
-      setVerdict({ text: error instanceof Error ? error.message : 'the LIMS did not answer', tone: 'bad' });
+      setAnswer({ failed: error instanceof Error ? error.message : 'the LIMS did not answer' });
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -161,11 +169,21 @@ function VerifyChain() {
       <button type="button" className="btn" onClick={() => void verify()} disabled={busy} aria-busy={busy}>
         Verify chain
       </button>
-      {verdict && (
-        <p className={`verdict note--${verdict.tone}`} aria-live="polite">
-          {verdict.text}
-        </p>
-      )}
+      <div className="verdict" aria-live="polite">
+        {answer && 'failed' in answer && <p className="note--bad">{answer.failed}</p>}
+        {answer && 'found' in answer && (
+          <>
+            <p>Recomputed at {time(answer.found.at)}. Not anchored off-server (demo).</p>
+            <ul className="chains">
+              {answer.found.chains.map((c) => (
+                <li key={c.chain}>
+                  {chainWords[c.chain]} <Status mark={c.verdict} /> {c.report}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -184,7 +202,7 @@ export function TrailPanel({ me, trail }: { me: ActorContext; trail: Trail | und
         <h2>Audit Trail</h2>
         {trail && (
           <p className="muted">
-            {trail.entries.length} entries. Times in UTC
+            {needle === '' ? trail.entries.length : `${shown.length} of ${trail.entries.length}`} entries. Times in UTC
             {trail.entries.some((e) => e.atLab !== null) ? ` and in the Lab's zone, ${trail.labZone}` : ''}.
           </p>
         )}
@@ -248,6 +266,115 @@ export function TrailPage({ me, table, id }: { me: ActorContext; table: AuditedT
       </h1>
       {error && <p className="note--bad">{error}</p>}
       <TrailPanel me={me} trail={data} />
+    </Shell>
+  );
+}
+
+interface Download {
+  name: string;
+  sha256: string;
+  url: string;
+}
+
+function downloadOf(file: AuditExport['files'][number]): Download {
+  const bytes = Uint8Array.from(atob(file.base64), (ch) => ch.codePointAt(0) ?? 0);
+  return {
+    name: file.name,
+    sha256: file.sha256,
+    url: URL.createObjectURL(new Blob([bytes], { type: file.mediaType })),
+  };
+}
+
+export function AuditExportPage({ me }: { me: ActorContext }) {
+  const customers = useApi(routes.auditExportCustomers);
+  const [customerId, setCustomerId] = useState('');
+  const [format, setFormat] = useState<AuditExportFormat>('JSON');
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState('');
+  const [done, setDone] = useState<{ answer: AuditExport; downloads: Download[] } | null>(null);
+  const inFlight = useRef(false);
+  useEffect(() => () => done?.downloads.forEach((d) => URL.revokeObjectURL(d.url)), [done]);
+
+  async function generate(event: FormEvent) {
+    event.preventDefault();
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setRefusal('');
+    try {
+      const answer = await api(routes.auditExport, { customerId, format });
+      setDone({ answer, downloads: answer.files.map((f) => downloadOf(f)) });
+    } catch (error) {
+      setRefusal(
+        error instanceof Refused && error.kind !== 'failure'
+          ? `Refused: ${error.message}. No export was generated.`
+          : `Not finished: ${error instanceof Error ? error.message : 'the LIMS did not answer'}. Generate again to see what was recorded.`,
+      );
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Shell me={me} active="audit-export" action={null}>
+      <h1>Audit Export</h1>
+      <p className="muted">
+        One Customer&apos;s Audit Trail for a Customer audit: its Submissions, Samples, Tests and their records, with
+        the shared records they use. Another Customer&apos;s identifiers read [redacted]. Generating an export is
+        recorded in the Audit Trail.
+      </p>
+      {customers.error && <p className="note--bad">{customers.error}</p>}
+      {customers.data && (
+        <form className="export" onSubmit={(e) => void generate(e)}>
+          <label>
+            Customer
+            <select required value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+              <option value="" disabled>
+                Choose a Customer
+              </option>
+              {customers.data.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Format
+            <select value={format} onChange={(e) => setFormat(e.target.value === 'CSV' ? 'CSV' : 'JSON')}>
+              <option value="JSON">JSON, with a PDF</option>
+              <option value="CSV">CSV, with a PDF</option>
+            </select>
+          </label>
+          <button type="submit" className="rbtn" disabled={busy} aria-busy={busy}>
+            Generate export
+          </button>
+        </form>
+      )}
+      {refusal && (
+        <p className="note--bad" role="alert">
+          {refusal}
+        </p>
+      )}
+      {done && (
+        <section className="export__done" aria-label="Generated export">
+          <h2>For {done.answer.customer.name}</h2>
+          <p>
+            Generated {time(done.answer.generatedAt)}: {done.answer.entryCount} entries.
+          </p>
+          <ul>
+            {done.downloads.map((d) => (
+              <li key={d.name}>
+                <a className="btn" href={d.url} download={d.name}>
+                  Download {d.name}
+                </a>
+                <code>SHA-256 {d.sha256}</code>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </Shell>
   );
 }

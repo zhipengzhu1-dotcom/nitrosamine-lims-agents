@@ -38,7 +38,20 @@ test('the Submit sheet and its long Method name fit a 390 px phone with no sidew
   }
 });
 
-test('the tab bar fades where more tabs lie beyond, and the last tab scrolls clear of the fade', async ({ page }) => {
+test('an open sheet hides the session buttons and Cancel brings them back', async ({ page }) => {
+  await signInAsCustomer(page);
+  const signOut = page.getByRole('button', { name: 'Sign out' });
+  await expect(signOut, 'the rail offers Sign out before a sheet opens').toBeVisible();
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(page.locator('form.sheet')).toBeVisible();
+  await expect(signOut, 'the open sheet hides Sign out').toBeHidden();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(signOut, 'Sign out is back once the sheet closes').toBeVisible();
+});
+
+test('the tabs are 44 px touch targets, the bar fades where more tabs lie beyond, and the last tab scrolls clear of the fade', async ({
+  page,
+}) => {
   await signInAsCustomer(page);
   const nav = page.locator('.top nav');
   const clearOfFade = () =>
@@ -48,6 +61,8 @@ test('the tab bar fades where more tabs lie beyond, and the last tab scrolls cle
       return { fade, room: n.getBoundingClientRect().right - fade - last };
     });
   expect((await clearOfFade()).fade, 'the right edge fades while more tabs lie beyond it').toBeGreaterThan(0);
+  for (const tab of await nav.getByRole('link').all())
+    expect((await tab.boundingBox())?.height, 'each tab is a 44 px touch target').toBeGreaterThanOrEqual(44);
   await nav.evaluate((n) => n.scrollTo({ left: n.scrollWidth }));
   await expect
     .poll(async () => (await clearOfFade()).room, 'the last tab ends before the fade')

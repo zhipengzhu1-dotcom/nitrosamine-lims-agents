@@ -5,7 +5,6 @@ export interface Column<T> {
   head: string;
   /** The shorter name a phone prints beside the value once the table stacks; the head when absent. */
   label?: string;
-  className?: string;
   cell: (row: T) => ReactNode;
 }
 
@@ -36,7 +35,7 @@ export function StackTable<T>({
         {rows.map((row) => (
           <tr key={rowKey(row)} role="row" className={rowClass?.(row)}>
             {columns.map((c) => (
-              <td key={c.head} role="cell" className={c.className} data-label={c.label ?? c.head}>
+              <td key={c.head} role="cell" data-label={c.label ?? c.head}>
                 {c.cell(row)}
               </td>
             ))}
