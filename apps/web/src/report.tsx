@@ -17,7 +17,7 @@ export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
           </button>
           <h1>
             Test Report <span className="record-number">{data.report.number}</span>
-            {data.signatures.some((s) => s.unsigned) && <Status unsigned="record" />}
+            {data.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
           </h1>
           <p>{me.lab.name}</p>
           <dl className="facts">

@@ -31,6 +31,7 @@ async function unsignedBesideMeanings(page: Page) {
     const cell = signatureRow(page, meaning).locator('td[data-label="Meaning"]');
     const mark = cell.locator('.status');
     await expect(mark).toHaveText('Unsigned');
+    await expect(mark, `${meaning}'s mark is in the bad tone`).toHaveClass(/\bstatus--bad\b/);
     await expect(mark.locator('svg.glyph')).toHaveCount(1);
     const [word, status] = [await box(cell.locator('.sig')), await box(mark)];
     expect(

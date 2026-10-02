@@ -81,7 +81,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
     <Shell me={me} active="tests" action={action} notice={unsignedNotice(view.signatures)}>
       <h1>
         {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
-        {view.signatures.some((s) => s.unsigned) && <Status unsigned="record" />}
+        {view.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
       </h1>
       <dl className="facts">
         <dt>Sample</dt>
@@ -168,7 +168,7 @@ export function Signatures({ rows, fresh }: { rows: Signature[]; fresh?: Readonl
             <td data-label="Meaning">
               <span className="sig-line">
                 <span className="sig">{s.meaning}</span>
-                {s.unsigned && <Status unsigned="signature" />}
+                {s.unsigned && <Status mark="Unsigned" />}
               </span>
             </td>
             <td data-label="Signed by">

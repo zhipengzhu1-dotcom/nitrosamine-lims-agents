@@ -177,7 +177,7 @@ function VerifyChain() {
             <ul className="chains">
               {answer.found.chains.map((c) => (
                 <li key={c.chain}>
-                  {chainWords[c.chain]} <Status verdict={c.verdict} /> {c.report}
+                  {chainWords[c.chain]} <Status mark={c.verdict} /> {c.report}
                 </li>
               ))}
             </ul>
