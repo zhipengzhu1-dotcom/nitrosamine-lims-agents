@@ -878,11 +878,12 @@ export function labSwitchRoute(app: App, db: Kysely<DB>, credentials: Credential
           await record(tx, { kind: 'LabSwitchFailed', failureReason: 'AccountLocked', ...inSession });
           return 'AccountLocked';
         }
-        if (!(await spendCode(tx, person.id, checked))) return notValid();
         if (!(await endSession(tx, session, limits))) {
           await record(tx, { kind: 'LabSwitchFailed', failureReason: 'SessionEnded', ...inSession });
           return 'SessionEnded';
         }
+        // Spent only once the switch is sure to happen, so a session that ended first leaves the code for the next sign-in.
+        if (!(await spendCode(tx, person.id, checked))) return notValid();
         const opened = await openSession(tx, person.id, choice.labId, token, null);
         await record(tx, {
           kind: 'LabSwitch',

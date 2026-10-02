@@ -353,6 +353,48 @@ it('under the decided login, a Lab switch needs the user ID, the password and a 
   ]);
 });
 
+it('a Lab switch refused because the session had ended leaves its code unspent; the same code then signs the person in again', async () => {
+  const { account, code } = await enrolled('sid.switchended');
+  await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Add a Membership' }, (tx) =>
+    tx.insertInto('membership').values({ labId: api.qcLabId, personId: account.id, role: 'Reviewer' }).execute(),
+  );
+  const client = new Client(decided.base);
+  ok(
+    await client.call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId: api.labId,
+      code: code(),
+    }),
+  );
+  // The session is ended under the switch's feet: the person row is held until the switch waits on it, past the
+  // request's own touch of the session, then the session is ended and both commit.
+  const SYSTEM = { actor: 'svc:test', role: 'system', reason: 'End a session while its person switches Lab' } as const;
+  const { answer } = await audited(api.superuser, SYSTEM, async (tx) => {
+    await tx.updateTable('person').set({ failedLogins: sql`failed_logins` }).where('id', '=', account.id).execute();
+    const answer = client.call(routes.switchLab, {
+      username: account.username,
+      password: account.password,
+      labId: api.qcLabId,
+      code: code(1),
+    });
+    answer.catch(() => {});
+    await api.untilWaitingOnLocks(1);
+    await tx
+      .updateTable('session')
+      .set({ endedAt: sql`clock_timestamp()` })
+      .where('personId', '=', account.id)
+      .where('endedAt', 'is', null)
+      .execute();
+    return { answer };
+  });
+  refusedWith(await answer, 'stale');
+  assert.deepEqual((await eventsOf(account.id)).slice(-1), [
+    { kind: 'LabSwitchFailed', failureReason: 'SessionEnded' },
+  ]);
+  ok(await signIn(account, account.password, code(1)));
+});
+
 it('a Signature given under the decided login records that the password and a code proved the signer; under the demo login, the password alone', async () => {
   const { account, code } = await enrolled('pam.proof');
   const client = new Client(decided.base);
