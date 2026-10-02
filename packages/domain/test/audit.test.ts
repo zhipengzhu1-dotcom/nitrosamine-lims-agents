@@ -19,12 +19,13 @@ import {
 const at = (s: string) => Value.Decode(instant, s);
 
 describe('a recomputed chain reads as how far it is intact, and names each break with its System Incident', () => {
-  const open = (entry: string, incident: string, kind: BreakKind = 'Changed', through = entry) => ({
+  const open = (entry: string, incident: string, kind: BreakKind = 'Changed', through = entry, breaks = 1) => ({
     entry,
     incident,
     incidentState: 'Open' as const,
     kind,
     through,
+    breaks,
   });
   const read = ({ entry, incident, incidentState }: ChainBreakFound, failure: string) => ({
     entry,
@@ -99,6 +100,21 @@ describe('a recomputed chain reads as how far it is intact, and names each break
           { entry: '7', incident: 'RF000002', incidentState: 'Open', failure: 'entries 7 to 8 are missing' },
         ],
         report: 'intact through entry 2',
+      },
+    },
+    {
+      name: 'the breaks after those recorded one by one read as how many there are and the entries they span',
+      last: '2000',
+      breaks: [open('1', 'RF000001'), open('101', 'RF000002', 'More', '2000', 1900)],
+      expected: {
+        verdict: 'Broken',
+        lastEntry: '2000',
+        intactThrough: '0',
+        breaks: [
+          read(open('1', 'RF000001'), 'entry 1 fails to verify'),
+          read(open('101', 'RF000002'), '1900 more breaks, from entry 101 to entry 2000'),
+        ],
+        report: 'intact through entry 0',
       },
     },
   ];

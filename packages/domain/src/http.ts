@@ -288,7 +288,8 @@ export type IncidentState = Static<typeof incidentState>;
 /**
  * One break chain verification found: its first entry that fails to verify (one past the last for a moved head), and
  * the System Incident that records it in the state it is in now. The same break names the same incident on every
- * verification, whatever its state; a break at another entry has its own.
+ * verification, whatever its state; a break at another entry, or one tampered with again, has its own. Past the first
+ * 100 breaks of a chain, one more names every break after them, with their count.
  */
 const chainBreak = Type.Object({
   entry: seq,
@@ -362,9 +363,15 @@ const systemIncident = Type.Object({
   subjectId: nullable(uuid),
   sourceAddress: nullable(Type.String()),
   typedUserIdHmac: nullable(sha256Hex),
-  /** What a chain-verify failure names: the chain as the Audit Trail names it ('company' or the Lab's ID), and its first failing entry. */
+  /**
+   * What a chain-verify failure names: the chain as the Audit Trail names it ('company' or the Lab's ID), the first and
+   * last entries its breaks cover, and how many breaks it records (one, or every break after the first 100). The last
+   * two are null on an incident opened before they were recorded.
+   */
   chain: nullable(Type.Union([Type.Literal('company'), uuid])),
   firstFailure: nullable(seq),
+  lastFailure: nullable(seq),
+  breakCount: nullable(Type.Integer({ minimum: 1 })),
   sqlstate: nullable(Type.String()),
   constraintName: nullable(Type.String()),
   /** The database's insert time. */

@@ -263,12 +263,15 @@ export interface Submission {
 }
 
 export interface SystemIncident {
+  breakCount: number | null;
   chain: string | null;
   constraintName: string | null;
   errorClass: string | null;
+  fingerprint: Buffer | null;
   firstFailure: Int8 | null;
   id: Generated<string>;
   kind: IncidentKind;
+  lastFailure: Int8 | null;
   loggedAt: Timestamp | null;
   openedAt: Generated<Timestamp>;
   recordId: string | null;

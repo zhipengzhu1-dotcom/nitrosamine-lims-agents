@@ -536,14 +536,14 @@ async function labOfItsOwn(code: string, entries: number) {
     tx.insertInto('membership').values({ labId, personId: qa.id, role: 'QA' }).execute(),
   );
   const client = await api.login(qa, labId);
-  for (let n = 0; n < entries; n++)
-    await audited(api.superuser, owner, (tx) =>
-      tx
+  await audited(api.superuser, owner, async (tx) => {
+    for (let n = 0; n < entries; n++)
+      await tx
         .updateTable('lab')
         .set({ name: `${code} Lab, renamed ${n}` })
         .where('labId', '=', labId)
-        .execute(),
-    );
+        .execute();
+  });
   const alter = (seq: string) =>
     api.superuser.transaction().execute(async (tx) => {
       await sql`set local session_replication_role = replica`.execute(tx);
@@ -643,4 +643,148 @@ it('Verify chain on a break whose System Incident is Closed still reports the ch
   assert.partialDeepStrictEqual(opened, { entry: recurring, incidentState: 'Open' });
   assert.notEqual(opened?.incident, incident, 'the break at another entry is a new incident');
   assert.equal(alarmsFor([opened?.incident ?? '']).length, 1, 'and raises the alarm');
+});
+
+/** Changes the Audit Trail as the database owner can, past the triggers that refuse it. */
+type Change = ReturnType<typeof sql>;
+const tamper = (changes: Change[]) =>
+  api.superuser.transaction().execute(async (tx) => {
+    await sql`set local session_replication_role = replica`.execute(tx);
+    for (const change of changes) await change.execute(tx);
+  });
+
+const closeIncident = (reference: string) =>
+  audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Close a System Incident' }, (tx) =>
+    tx.updateTable('systemIncident').set({ state: 'Closed' }).where('reference', '=', reference).execute(),
+  );
+
+/** Changes the entry before `entry` and stores the hash its new content gives, so that only `entry`'s link breaks. */
+const recomputed = (labId: string, entry: string, reason: string) => [
+  sql`update lims.audit_entry set reason = ${reason} where chain = ${labId} and seq = ${entry}::bigint - 1`,
+  sql`update lims.audit_entry e set hash = sha256(e.prev_hash || lims.audit_entry_bytes(e))
+      where chain = ${labId} and seq = ${entry}::bigint - 1`,
+];
+
+const tamperedAgain: {
+  name: string;
+  code: string;
+  entry: (last: bigint) => bigint;
+  first: (labId: string, entry: string) => Change[];
+  again: (labId: string, entry: string) => Change[];
+}[] = [
+  {
+    name: 'the link of an entry already changed is altered too',
+    code: 'LNK',
+    entry: (last) => last - 2n,
+    first: (labId, entry) => [
+      sql`update lims.audit_entry set reason = 'Routine update' where chain = ${labId} and seq = ${entry}`,
+    ],
+    again: (labId, entry) => [
+      sql`update lims.audit_entry set prev_hash = sha256(prev_hash) where chain = ${labId} and seq = ${entry}`,
+    ],
+  },
+  {
+    name: 'a run of missing entries grows',
+    code: 'RUN',
+    entry: (last) => last - 3n,
+    first: (labId, entry) => [sql`delete from lims.audit_entry where chain = ${labId} and seq = ${entry}`],
+    again: (labId, entry) => [sql`delete from lims.audit_entry where chain = ${labId} and seq = ${entry}::bigint + 1`],
+  },
+  {
+    name: 'an entry is changed a second time',
+    code: 'TWC',
+    entry: (last) => last - 2n,
+    first: (labId, entry) => [
+      sql`update lims.audit_entry set reason = 'Routine update' where chain = ${labId} and seq = ${entry}`,
+    ],
+    again: (labId, entry) => [
+      sql`update lims.audit_entry set reason = 'Routine update, again' where chain = ${labId} and seq = ${entry}`,
+    ],
+  },
+  {
+    name: 'the entry before is changed and its hash recomputed a second time',
+    code: 'REC',
+    entry: (last) => last - 1n,
+    first: (labId, entry) => recomputed(labId, entry, 'Routine update'),
+    again: (labId, entry) => recomputed(labId, entry, 'Routine update, again'),
+  },
+  {
+    name: 'the chain head is moved again',
+    code: 'HED',
+    entry: (last) => last + 1n,
+    first: (labId) => [sql`update lims.audit_chain set head = sha256(head) where chain = ${labId}`],
+    again: (labId) => [sql`update lims.audit_chain set head = sha256(head) where chain = ${labId}`],
+  },
+];
+
+for (const { name, code, entry, first, again } of tamperedAgain)
+  it(`when ${name} at a break whose System Incident is Closed, Verify chain opens a new System Incident for the break and raises the alarm once`, async () => {
+    const lab = await labOfItsOwn(code, 6);
+    const at = String(entry(lab.last));
+    const breakAt = async () =>
+      (await lab.verify()).breaks.find((b) => b.entry === at) ?? assert.fail(`a break at entry ${at}`);
+    await tamper(first(lab.labId, at));
+    const recorded = (await breakAt()).incident;
+    await closeIncident(recorded);
+    assert.equal((await breakAt()).incident, recorded, 'the same break names its Closed incident');
+
+    await tamper(again(lab.labId, at));
+    const changed = await breakAt();
+    assert.notEqual(changed.incident, recorded, 'the break changed, so it has a new System Incident');
+    assert.equal(changed.incidentState, 'Open');
+    assert.equal(alarmsFor([changed.incident]).length, 1, 'which raises the alarm');
+    assert.equal((await breakAt()).incident, changed.incident, 'verifying again names the new incident');
+    assert.equal(alarmsFor([changed.incident]).length, 1, 'and raises no alarm again');
+    assert.partialDeepStrictEqual(ok(await as.quinn.call(routes.incident, { reference: recorded })), {
+      state: 'Closed',
+      firstFailure: at,
+    });
+  });
+
+it('after the database owner changes every entry of a long chain, Verify chain answers in time, records the first 100 breaks one by one and every break after them in one more System Incident with their count and range, each with one alarm; a further change among those after opens one new incident', async () => {
+  const lab = await labOfItsOwn('ALL', 2000);
+  await tamper([sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId}`]);
+  const last = String(lab.last);
+  const rest = Number(lab.last) - 100;
+
+  const verified = await lab.verify();
+  assert.equal(verified.breaks.length, 101);
+  assert.deepEqual(
+    verified.breaks.slice(0, 100).map(({ entry, failure }) => ({ entry, failure })),
+    Array.from({ length: 100 }, (_, i) => ({ entry: String(i + 1), failure: `entry ${i + 1} fails to verify` })),
+  );
+  const more = verified.breaks[100] ?? assert.fail('the breaks after the first 100');
+  assert.equal(more.failure, `${rest} more breaks, from entry 101 to entry ${last}`);
+  const references = verified.breaks.map((b) => b.incident);
+  assert.equal((await chainIncidents(lab.labId)).length, 101);
+  assert.equal(alarmsFor(references).length, 101, 'one alarm for each incident opened');
+  assert.partialDeepStrictEqual(ok(await as.quinn.call(routes.incident, { reference: more.incident })), {
+    firstFailure: '101',
+    lastFailure: last,
+    breakCount: rest,
+  });
+  assert.partialDeepStrictEqual(ok(await as.quinn.call(routes.incident, { reference: references[0] ?? '' })), {
+    firstFailure: '1',
+    lastFailure: '1',
+    breakCount: 1,
+  });
+
+  assert.deepEqual(
+    (await lab.verify()).breaks.map((b) => b.incident),
+    references,
+    'verifying again names the same incidents',
+  );
+  assert.equal(alarmsFor(references).length, 101, 'and raises no alarm again');
+
+  const again = String(lab.last - 5n);
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update, again' where chain = ${lab.labId} and seq = ${again}`,
+  ]);
+  const changed = (await lab.verify()).breaks;
+  assert.deepEqual(changed.slice(0, 100), verified.breaks.slice(0, 100), 'the first 100 breaks are as they were');
+  const recorded = changed[100] ?? assert.fail('the breaks after the first 100');
+  assert.notEqual(recorded.incident, more.incident, 'a change among them is a new System Incident');
+  assert.equal(recorded.incidentState, 'Open');
+  assert.equal(alarmsFor([recorded.incident]).length, 1);
+  assert.equal((await chainIncidents(lab.labId)).length, 102);
 });

@@ -65,6 +65,16 @@ function inWrite(tx: Transaction<DB>, labId: string) {
 
 export type WriteQueries = ReturnType<typeof inWrite>;
 
+/**
+ * How many breaks of a chain a verification records one by one. The breaks after them are recorded together, as one
+ * `More` break with their count and a digest of their fingerprints, so a verification writes a bounded set of System
+ * Incidents within the incident write limit however much of a chain is broken, and a change among them is still new.
+ */
+const BREAKS_ONE_BY_ONE = 100;
+
+/** A break, or the breaks after the first ones taken together, as a verification records it. */
+export type RecordedBreak = { entry: string; kind: BreakKind; through: string; breaks: number; fingerprint: string };
+
 /** The one lab-scoped seam: every read and write after login goes through it, filtered to the context's Lab. */
 export function labScope(db: Kysely<DB>, ctx: ActorContext) {
   const labId = ctx.lab.id;
@@ -79,11 +89,21 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
       const lastEntry = (chain: string) =>
         sql<string>`coalesce((select seq from lims.audit_chain where chain = ${chain}), 0)::text`;
       const breaks = (chain: string) =>
-        sql<{ entry: string; kind: BreakKind; through: string }[]>`coalesce((
-          select json_agg(
-            json_build_object('entry', b.seq::text, 'kind', b.kind, 'through', b.through::text) order by b.seq
+        sql<RecordedBreak[]>`coalesce((
+          with found as (
+            select b.*, row_number() over (order by b.seq) as n from lims.chain_breaks(${chain}) as b
+          ), recorded as (
+            select seq, kind, through, 1 as breaks, fingerprint from found where n <= ${BREAKS_ONE_BY_ONE}
+            union all
+            select min(seq), 'More', max(through), count(*)::int,
+              sha256(string_agg(int8send(seq) || fingerprint, ''::bytea order by seq))
+            from found where n > ${BREAKS_ONE_BY_ONE} having count(*) > 0
           )
-          from lims.chain_breaks(${chain}) as b
+          select json_agg(json_build_object(
+            'entry', r.seq::text, 'kind', r.kind, 'through', r.through::text, 'breaks', r.breaks,
+            'fingerprint', encode(r.fingerprint, 'hex')
+          ) order by r.seq)
+          from recorded as r
         ), '[]')`;
       const found = await db
         .selectNoFrom([

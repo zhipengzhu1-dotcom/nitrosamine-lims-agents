@@ -402,21 +402,23 @@ export function describeTrail(
 
 /**
  * What a break is, as `lims.chain_breaks` finds it: an entry that fails to verify, a run of entries that are gone, or,
- * after the last entry, a chain head that does not match it.
+ * after the last entry, a chain head that does not match it. `More` is every break after the ones a verification
+ * records one by one, taken together.
  */
-export type BreakKind = 'Changed' | 'Missing' | 'HeadMoved';
+export type BreakKind = 'Changed' | 'Missing' | 'HeadMoved' | 'More';
 
 /**
  * A break as the database found it, with the System Incident that records it, before it is read for QA; `through` is
- * the last entry of a missing run, and the break's own entry otherwise.
+ * the last entry it covers, and `breaks` how many breaks it is, one but for `More`.
  */
-export type ChainBreakFound = Omit<ChainBreak, 'failure'> & { kind: BreakKind; through: string };
+export type ChainBreakFound = Omit<ChainBreak, 'failure'> & { kind: BreakKind; through: string; breaks: number };
 
-const failureOf = ({ entry, kind, through }: { entry: string; kind: BreakKind; through: string }) =>
+const failureOf = ({ entry, kind, through, breaks }: Omit<ChainBreakFound, 'incident' | 'incidentState'>) =>
   ({
     Changed: `entry ${entry} fails to verify`,
     Missing: through === entry ? `entry ${entry} is missing` : `entries ${entry} to ${through} are missing`,
     HeadMoved: `the chain head does not match entry ${String(BigInt(entry) - 1n)}`,
+    More: `${breaks} more breaks, from entry ${entry} to entry ${through}`,
   })[kind];
 
 /** A break as the screen reads it before its Status: where the chain fails and the System Incident that records it. */
@@ -430,9 +432,11 @@ export const breakReport = (b: ChainBreak) => `${breakLine(b)} (${b.incidentStat
  * every break and the System Incident that records each, which `breakReport` reads out.
  */
 export function chainVerification(chain: ChainKind, lastEntry: string, found: ChainBreakFound[]): ChainVerification {
-  const breaks = found.map(({ kind, through, ...b }) => ({
-    ...b,
-    failure: failureOf({ entry: b.entry, kind, through }),
+  const breaks = found.map(({ entry, kind, through, breaks: count, incident, incidentState }) => ({
+    entry,
+    failure: failureOf({ entry, kind, through, breaks: count }),
+    incident,
+    incidentState,
   }));
   const [first] = breaks;
   if (first === undefined)

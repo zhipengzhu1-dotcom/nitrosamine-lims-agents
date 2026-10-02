@@ -2,11 +2,20 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { audited, type DB, postgresFault } from '@lims/db';
-import { type ActorContext, type IncidentState, referencePattern, routes, stepNames, stepRoute } from '@lims/domain';
+import {
+  type ActorContext,
+  type ChainBreakFound,
+  type IncidentState,
+  referencePattern,
+  routes,
+  stepNames,
+  stepRoute,
+} from '@lims/domain';
 import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { type Insertable, type InsertObject, type Kysely, sql } from 'kysely';
 import { type Static, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
+import type { RecordedBreak } from './scope.ts';
 
 const INCIDENT_SERVICE = { actor: 'svc:incident', role: 'system', reason: 'Open a System Incident' };
 const RAISE_SERVICE = { ...INCIDENT_SERVICE, reason: 'Raise an unwritten System Incident from the API log' };
@@ -110,43 +119,48 @@ export async function openJobIncident(
 const ALARM = 'System Incident alarm';
 
 /**
- * Opens, in one transaction, one System Incident for each break that chain verification found in a chain, naming the
- * chain as the Audit Trail does and the break's first failing entry, with the verifying QA as the requesting person,
- * and raises the alarm once for each incident it opened, after they are written. A break verified before answers its
- * incident, in whatever state it is now, and opens no other and raises no alarm. A failure to write them fails the
- * verification, whose 500 opens a System Incident of its own, so a break is never shown without a record.
+ * Opens, in one transaction, one System Incident for each recorded break that chain verification found in a chain,
+ * naming the chain as the Audit Trail does, the break's first and last entries, how many breaks it is and their
+ * fingerprint, with the verifying QA as the requesting person, and raises the alarm once for each incident it opened,
+ * after they are written. A break verified before, unchanged, answers its incident, in whatever state it is now, and
+ * opens no other and raises no alarm; a break tampered with again has a new fingerprint and opens its own. A failure
+ * to write them fails the verification, whose 500 opens a System Incident of its own, so a break is never shown
+ * without a record.
  */
-export async function openChainIncidents<B extends { entry: string }>(
+export async function openChainIncidents(
   db: Kysely<DB>,
   log: FastifyBaseLogger,
   requester: ActorContext,
   chain: string,
-  breaks: B[],
-): Promise<(B & { incident: string; incidentState: IncidentState })[]> {
+  breaks: RecordedBreak[],
+): Promise<ChainBreakFound[]> {
   if (breaks.length === 0) return [];
-  const entries = breaks.map((b) => b.entry);
+  const column = <K extends keyof RecordedBreak>(key: K) => breaks.map((b) => b[key]);
   const references = breaks.map(() => referenceOf(randomBytes(8)));
   const { opened, found } = await audited(db, INCIDENT_SERVICE, async (tx) => {
     await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
     const { rows: opened } = await sql<{ reference: string; entry: string }>`
-      insert into lims.system_incident (kind, reference, requested_by, session_lab_id, chain, first_failure)
-      select 'ChainVerifyFailure', t.reference, ${requester.person.id}, ${requester.lab.id}, ${chain}, t.entry
-      from unnest(${references}::text[], ${entries}::bigint[]) as t(reference, entry)
-      on conflict (chain, first_failure) do nothing
+      insert into lims.system_incident
+        (kind, reference, requested_by, session_lab_id, chain, first_failure, last_failure, break_count, fingerprint)
+      select 'ChainVerifyFailure', t.reference, ${requester.person.id}, ${requester.lab.id}, ${chain}, t.entry,
+        t.through, t.breaks, decode(t.fingerprint, 'hex')
+      from unnest(${references}::text[], ${column('entry')}::bigint[], ${column('through')}::bigint[],
+        ${column('breaks')}::int[], ${column('fingerprint')}::text[]) as t(reference, entry, through, breaks, fingerprint)
+      on conflict (chain, first_failure, fingerprint) do nothing
       returning reference, first_failure::text as entry`.execute(tx);
-    const found = await tx
-      .selectFrom('systemIncident')
-      .select(['firstFailure', 'reference', 'state'])
-      .where('chain', '=', chain)
-      .where(sql<boolean>`first_failure = any(${entries}::bigint[])`)
-      .execute();
+    const { rows: found } = await sql<{ key: string; reference: string; state: IncidentState }>`
+      select i.first_failure::text || ':' || encode(i.fingerprint, 'hex') as key, i.reference, i.state
+      from lims.system_incident i
+      join unnest(${column('entry')}::bigint[], ${column('fingerprint')}::text[]) as t(entry, fingerprint)
+        on i.first_failure = t.entry and i.fingerprint = decode(t.fingerprint, 'hex')
+      where i.chain = ${chain}`.execute(tx);
     return { opened, found };
   });
   for (const { reference, entry } of opened)
     log.error({ alarm: { reference, kind: 'ChainVerifyFailure', chain, entry } }, ALARM);
-  const byEntry = new Map(found.map((f) => [f.firstFailure, f]));
-  return breaks.map((b) => {
-    const incident = byEntry.get(b.entry);
+  const byBreak = new Map(found.map((f) => [f.key, f]));
+  return breaks.map(({ fingerprint, ...b }) => {
+    const incident = byBreak.get(`${b.entry}:${fingerprint}`);
     if (incident === undefined) throw new Error(`no System Incident records the break at entry ${b.entry}`);
     return { ...b, incident: incident.reference, incidentState: incident.state };
   });
