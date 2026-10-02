@@ -379,6 +379,10 @@ const stepInputs = {
   release: Type.Object({}, closed),
 } satisfies { [K in StepName]: TObject };
 export type StepInput<K extends StepName> = Static<(typeof stepInputs)[K]>;
+/** A press's step, record and entries as one text, the same in whatever order the entries were typed, so the API and the web agree on which presses are one press. */
+export function pressText(step: StepName, testId: string | null, input: object): string {
+  return JSON.stringify([step, testId, Object.entries(input).sort(([a], [b]) => (a < b ? -1 : 1))]);
+}
 /** A step's body for any K. Its type keeps testId and signature optional; the wire schema requires them where the registry does. */
 export type StepBody<K extends StepName> = Static<typeof stepEnvelope> & { input: StepInput<K> };
 
