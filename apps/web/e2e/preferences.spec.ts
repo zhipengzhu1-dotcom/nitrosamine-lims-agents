@@ -64,20 +64,21 @@ test('on a shared iPad the reduced-motion preference follows each person through
   page,
 }) => {
   test.skip(test.info().project.name !== 'ipad', 'the shared bench tablet');
+  // The stored preference is shared server state: only Theo, whom no other walk signs in as, ever turns it on.
   await page.goto('/');
-  await signIn(page, 'ana.analyst');
-  await openPreferences(page, 'Ana Ferreira');
+  await signIn(page, 'theo.untrained');
+  await openPreferences(page, 'Theo Brandt');
   await setReducedMotion(page, true);
-  expect(await pressedTransform(page), 'Ana, with the preference on, sees no movement').toBe('none');
+  expect(await pressedTransform(page), 'Theo, with the preference on, sees no movement').toBe('none');
   await page.evaluate(() => Object.assign(window, { sameDocument: true }));
 
-  await switchUser(page, 'theo.untrained', 'Theo Brandt');
-  await expect(page.getByLabel('Reduce motion wherever I sign in')).not.toBeChecked();
-  expect(await pressedTransform(page), 'Theo, with it off on a full-motion device, gets full motion').toBe(PRESSED);
-
   await switchUser(page, 'ana.analyst', 'Ana Ferreira');
+  await expect(page.getByLabel('Reduce motion wherever I sign in')).not.toBeChecked();
+  expect(await pressedTransform(page), 'Ana, with it off on a full-motion device, gets full motion').toBe(PRESSED);
+
+  await switchUser(page, 'theo.untrained', 'Theo Brandt');
   await expect(page.getByLabel('Reduce motion wherever I sign in')).toBeChecked();
-  expect(await pressedTransform(page), 'switching back to Ana reduces motion again').toBe('none');
+  expect(await pressedTransform(page), 'switching back to Theo reduces motion again').toBe('none');
   expect(await page.evaluate(() => 'sameDocument' in window), 'no reload happened').toBe(true);
 
   await setReducedMotion(page, false);

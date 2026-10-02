@@ -114,18 +114,18 @@ export function LabSwitchPage({ me }: { me: ActorContext }) {
 
 /** The person's own preferences, as the server holds them. A change applies once the server has saved it. */
 export function PreferencesPage({ me }: { me: ActorContext }) {
-  const { data, reload } = useApi(routes.me);
+  const { data, error } = useApi(routes.me);
   const { busy, commit, shown } = useCommit();
   return (
     <Shell me={me} active={null} action={null}>
       <h1>Your preferences</h1>
+      {error && <p className="note--bad">{error}</p>}
       {data && (
         <form
           className="card prefs"
           onSubmit={(e) =>
             commit(e, async (form) => {
               const { reducedMotion } = await setPreferences({ reducedMotion: form.has('reducedMotion') });
-              await reload();
               return reducedMotion
                 ? 'Saved. Motion is reduced wherever you sign in.'
                 : 'Saved. Motion follows each device’s own setting.';

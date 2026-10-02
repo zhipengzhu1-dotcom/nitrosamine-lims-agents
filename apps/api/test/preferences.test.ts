@@ -51,7 +51,7 @@ describe('the reduced-motion preference', () => {
     ]);
   });
 
-  it('a person changes only their own preference', async () => {
+  it("a person's save leaves every other person's preference as it was", async () => {
     const client = await api.login(ana);
     ok(await client.call(routes.setPreferences, { reducedMotion: true }));
     const other = await api.login(rui);
