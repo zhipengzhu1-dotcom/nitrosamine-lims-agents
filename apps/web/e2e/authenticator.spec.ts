@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import jsQR from 'jsqr';
-import { DECIDED_URL, DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
+import { DECIDED_DATABASE, DECIDED_URL, DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 import { expect, type Page, test } from './walk.ts';
 
 test.use({ baseURL: DECIDED_URL });
@@ -40,6 +40,44 @@ async function scanQrCode(page: Page): Promise<string | undefined> {
 
 const enrolling: Record<string, string> = { desktop: 'quinn.qa', iphone: 'rui.reviewer', pixel: 'lena.manager' };
 
+/**
+ * The enrolment grant a second Admin issues, written by the database owner in bea.admin's name. Under the decided
+ * login no Admin can sign in before an authenticator is enrolled, so the first grants come from outside the LIMS, as
+ * a deploy's do; the database still holds the issuer to the second-Admin rule, and the token is never stored.
+ */
+function grantFromSecondAdmin(username: string): string {
+  const token = randomBytes(32).toString('base64url');
+  execFileSync(
+    '../../scripts/pg.sh',
+    [
+      'psql',
+      '-qX',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-v',
+      `token=${token}`,
+      '-v',
+      `username=${username}`,
+      '-d',
+      DECIDED_DATABASE,
+      '-f',
+      '-',
+    ],
+    {
+      encoding: 'utf8',
+      input: `begin;
+        select set_config('lims.actor', 'person:bea.admin', true), set_config('lims.role', 'Admin', true),
+               set_config('lims.reason', 'Issue an enrolment grant before any Admin can sign in', true);
+        insert into lims.enrolment_grant (person_id, issued_by, token_hash)
+        select p.id, admin.id, sha256(convert_to(:'token', 'UTF8'))
+          from lims.person p, lims.person admin
+         where p.username = :'username' and admin.username = 'bea.admin';
+        commit;`,
+    },
+  );
+  return token;
+}
+
 /** The 30-second time step at the database clock, the clock the API checks a code against. */
 const currentStep = () =>
   Number(
@@ -66,6 +104,17 @@ test('a person enrols an authenticator from its QR code on a desktop or its type
   await shot('01-sign-in-asks-for-a-code');
   await page.getByRole('link', { name: 'Set up your authenticator' }).click();
   await expect(page.getByRole('heading', { name: 'Set up your authenticator' })).toBeVisible();
+  await page.getByLabel('Username').fill(username);
+  await page.getByLabel('Password').fill(DEMO_PASSWORD);
+  await page.getByRole('button', { name: 'Show my key' }).click();
+  await expect(page.getByRole('alert'), 'without an enrolment grant the password alone shows no key').toHaveText(
+    'Refused: The user ID, password or code is not valid.',
+  );
+  await shot('01b-no-grant-refused');
+
+  await page.goto(`/#/authenticator?grant=${grantFromSecondAdmin(username)}`);
+  await expect(page.getByRole('heading', { name: 'Set up your authenticator' })).toBeVisible();
+  await expect(page, 'the grant is taken off the address bar at once').toHaveURL(/#\/authenticator$/);
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Show my key' }).click();

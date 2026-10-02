@@ -11,12 +11,17 @@ alter type lims.sign_in_failure add value 'OtherPersonSignedIn';
 -- A code that another request spent first: the losing request rolls back with nothing written, then records this, which
 -- counts toward no lockout, because the code was right.
 alter type lims.sign_in_failure add value 'CodeAlreadyUsed';
+-- An enrolment with no enrolment grant, or one that is unknown, spent, expired or superseded. Counts toward no lockout.
+alter type lims.sign_in_failure add value 'NoEnrolmentGrant';
+-- A second Admin issued an enrolment grant for the subject; the Audit Trail entry of the grant names the Admin.
+alter type lims.access_event_kind add value 'EnrolmentGrantIssued';
 
 -- The enrolment reasons, like the sign-in-only ones before them, belong to a failed sign-in and to no other kind.
 alter table lims.access_event
   drop constraint access_event_failure_kind_check,
   add constraint access_event_failure_kind_check check (
-    (failure_reason::text not in ('UnknownUserId', 'NoLabChosen', 'AlreadyEnrolled', 'OtherPersonSignedIn')
+    (failure_reason::text not in ('UnknownUserId', 'NoLabChosen', 'AlreadyEnrolled', 'OtherPersonSignedIn',
+                                  'NoEnrolmentGrant')
      or kind = 'SignInFailed')
     and (failure_reason::text not in ('OtherUserId', 'SessionEnded') or kind::text = 'LabSwitchFailed')
     and (failure_reason::text <> 'WrongUserId' or kind::text = 'ReauthenticationFailed')
@@ -54,6 +59,89 @@ end $$;
 
 create trigger step_moves_forward before update of last_used_step on lims.authenticator
   for each row execute function lims.step_moves_forward();
+
+-- An enrolment grant: the second person at an enrolment. An Admin other than the one who created the account or
+-- issued its one-time links issues it, so no one person holds both the password and the authenticator of another.
+-- Like a one-time link, only the token's hash is kept, it works once, and it expires.
+create table lims.enrolment_grant (
+  id         uuid        primary key default gen_random_uuid(),
+  person_id  uuid        not null references lims.person,
+  issued_by  uuid        not null references lims.person,
+  token_hash bytea       not null unique check (octet_length(token_hash) = 32),
+  issued_at  timestamptz not null default clock_timestamp(),
+  expires_at timestamptz not null default clock_timestamp() + interval '72 hours',
+  used_at    timestamptz,
+  constraint enrolment_grant_second_person_check check (issued_by <> person_id),
+  constraint enrolment_grant_expiry_check check (expires_at > issued_at),
+  constraint enrolment_grant_use_check check (used_at is null or used_at between issued_at and expires_at)
+);
+
+-- The issuer is the acting Admin, and never the Admin who created the account or issued one of its one-time links:
+-- both are read from the Audit Trail, which the app role cannot rewrite. The database owner acting outside the LIMS
+-- names the issuer, as 0015's seeding_or_owner allows elsewhere, and the second-Admin rule still holds for them.
+create function lims.granted_by_a_second_admin() returns trigger
+language plpgsql as $$
+declare
+  issuer text;
+begin
+  select 'person:' || p.username into issuer from lims.person p where p.id = new.issued_by;
+  if issuer is null or new.issued_by = new.person_id then
+    return new; -- the foreign key refuses an issuer who does not exist, and the second-person check a self-issue
+  end if;
+  if not lims.seeding_or_owner() and issuer is distinct from current_setting('lims.actor', true) then
+    raise exception 'an enrolment grant is issued by the acting Admin' using errcode = 'LA016';
+  end if;
+  if not exists (select from lims.membership m where m.person_id = new.issued_by and m.role = 'Admin') then
+    raise exception 'an enrolment grant is issued by an Admin' using errcode = 'LA016';
+  end if;
+  if exists (select from lims.audit_entry e
+              where e.actor = issuer and e.op = 'INSERT'
+                and ((e.table_name = 'person' and e.new_row ->> 'id' = new.person_id::text)
+                  or (e.table_name = 'credential_link' and e.new_row ->> 'person_id' = new.person_id::text))) then
+    raise exception 'an enrolment grant comes from a second Admin: not the one who created the account or issued its one-time link'
+      using errcode = 'LA016';
+  end if;
+  return new;
+end $$;
+create trigger granted_by_a_second_admin before insert on lims.enrolment_grant
+  for each row execute function lims.granted_by_a_second_admin();
+
+create function lims.use_grant_once() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'DELETE' or old.used_at is not null
+     or (to_jsonb(new) - 'used_at') <> (to_jsonb(old) - 'used_at') then
+    raise exception 'an enrolment grant is only ever marked used, once' using errcode = 'LA002';
+  end if;
+  return coalesce(new, old);
+end $$;
+create trigger use_grant_once before update or delete on lims.enrolment_grant
+  for each row execute function lims.use_grant_once();
+create trigger refuse_truncate before truncate on lims.enrolment_grant
+  for each statement execute function lims.refuse_change();
+create trigger capture after insert or update or delete on lims.enrolment_grant
+  for each row execute function lims.capture();
+
+-- The only way an enrolment grant is spent: it takes the token itself, so the hash that the table and the Audit Trail
+-- hold redeems nothing, and only the person's latest grant counts. True when the grant was live for this person and is
+-- now marked used; the caller writes the authenticator in the same transaction, so a rollback leaves it unspent.
+create function lims.use_enrolment_grant(grant_token text, p_person_id uuid) returns boolean
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  this_instant constant timestamptz := clock_timestamp();
+  spent uuid;
+begin
+  update lims.enrolment_grant g set used_at = this_instant
+   where g.token_hash = sha256(convert_to(grant_token, 'UTF8')) and g.person_id = p_person_id and g.used_at is null
+     and this_instant < g.expires_at
+     and not exists (select from lims.enrolment_grant newer
+                      where newer.person_id = g.person_id and newer.issued_at > g.issued_at)
+  returning g.id into spent;
+  return spent is not null;
+end $$;
+
+grant select on lims.enrolment_grant to lims_app;
+grant insert (person_id, issued_by, token_hash) on lims.enrolment_grant to lims_app;
+grant execute on function lims.use_enrolment_grant(text, uuid) to lims_app;
 
 -- Changes the password of a session's person and writes its PasswordChanged Access Event, only in a transaction
 -- stamped with that person re-authenticated (see lims.unlock_session), so a code path that never proved the current

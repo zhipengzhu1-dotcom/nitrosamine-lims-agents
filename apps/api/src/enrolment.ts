@@ -1,6 +1,6 @@
 import { audited, type DB, type SignInFailure } from '@lims/db';
 import { routes } from '@lims/domain';
-import type { Kysely } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import {
   asOwnAccount,
@@ -19,10 +19,12 @@ import {
 import { base32, newTotpSecret, otpauthUri, sealSecret } from './totp.ts';
 
 /**
- * Enrolment proves the person by their own password and needs no session. A browser where someone else is signed in,
- * such as the Admin who created the account, is refused first, whatever was typed. The secret is shown once: every
- * other outcome, a second enrolment among them, is the uniform credential refusal, so the password alone learns
- * nothing, and each refusal is a failed sign-in Access Event; only a wrong password counts toward the lockout.
+ * Enrolment proves the person by their own password and an enrolment grant from a second Admin, and needs no session.
+ * A browser where someone else is signed in, such as the Admin who created the account, is refused first, whatever
+ * was typed. The secret is shown once: every other outcome, a second enrolment or a grant that is missing, spent or
+ * expired among them, is the uniform credential refusal, so the password alone learns nothing, and each refusal is a
+ * failed sign-in Access Event; only a wrong password counts toward the lockout. The grant is spent in the transaction
+ * that writes the authenticator, so a refused enrolment leaves it unspent.
  */
 export function enrolmentRoute(app: App, db: Kysely<DB>, accessEventKey: Buffer, credentials: Credentials): void {
   const { policy: limits } = credentials;
@@ -30,7 +32,7 @@ export function enrolmentRoute(app: App, db: Kysely<DB>, accessEventKey: Buffer,
   app.route({
     ...routes.enrolAuthenticator,
     handler: async (req) => {
-      const { username, password } = req.body;
+      const { username, password, grant } = req.body;
       const sourceAddress = sourceAddressOf(req);
       const person = await db.selectFrom('person').selectAll().where('username', '=', username).executeTakeFirst();
       const subject = person
@@ -69,15 +71,26 @@ export function enrolmentRoute(app: App, db: Kysely<DB>, accessEventKey: Buffer,
           await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...own });
           return REFUSAL.WrongPassword;
         }
-        const added = await tx
-          .insertInto('authenticator')
-          .values({ personId: person.id, secretCiphertext: sealSecret(credentials.totpKey, secret) })
-          .onConflict((oc) => oc.column('personId').doNothing())
+        // Under the row lock, so a second enrolment is read as such and never spends a grant.
+        const enrolled = await tx
+          .selectFrom('authenticator')
+          .select('personId')
+          .where('personId', '=', person.id)
           .executeTakeFirst();
-        if (!added.numInsertedOrUpdatedRows) {
+        if (enrolled) {
           await record(tx, { kind: 'SignInFailed', failureReason: 'AlreadyEnrolled', ...own });
           return REFUSAL.AlreadyEnrolled;
         }
+        const { rows } = await sql<{ granted: boolean }>`
+          select lims.use_enrolment_grant(${grant ?? ''}, ${person.id}) as granted`.execute(tx);
+        if (!rows[0]?.granted) {
+          await record(tx, { kind: 'SignInFailed', failureReason: 'NoEnrolmentGrant', ...own });
+          return REFUSAL.NoEnrolmentGrant;
+        }
+        await tx
+          .insertInto('authenticator')
+          .values({ personId: person.id, secretCiphertext: sealSecret(credentials.totpKey, secret) })
+          .execute();
         await record(tx, { kind: 'AuthenticatorEnrolled', ...own });
         return null;
       });

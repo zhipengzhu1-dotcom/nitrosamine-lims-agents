@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useId, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useId, useState } from 'react';
 import { type ActorContext, type Lab, type RouteInput, type RouteReply, routes } from '@lims/domain';
 import { encode } from 'uqr';
 import {
@@ -361,9 +361,16 @@ function QrCode({ text }: { text: string }) {
 }
 
 /** Enrols the person's authenticator: their username and password show its key once, as a QR code and as text to type. */
-export function AuthenticatorPage() {
+/**
+ * The enrolment page, reached through the enrolment link a second Admin gave the person. The grant is held here and
+ * taken off the URL at once, so that neither the address bar nor the browser history keeps it.
+ */
+export function AuthenticatorPage({ grant }: { grant: string | null }) {
   const { busy, commit, shown } = useCommit();
   const [enrolled, setEnrolled] = useState<RouteReply<typeof routes.enrolAuthenticator> | null>(null);
+  useEffect(() => {
+    if (grant !== null) history.replaceState(null, '', `${location.pathname}#/authenticator`);
+  }, [grant]);
   return (
     <div className="frame frame--bare">
       <TopBar />
@@ -386,7 +393,11 @@ export function AuthenticatorPage() {
             className="signin card"
             onSubmit={(e) =>
               commit(e, async (form) => {
-                const credentials = { username: field(form, 'username'), password: field(form, 'password') };
+                const credentials = {
+                  username: field(form, 'username'),
+                  password: field(form, 'password'),
+                  ...(grant === null ? {} : { grant }),
+                };
                 setEnrolled(await api(routes.enrolAuthenticator, credentials));
                 history.replaceState(null, '', location.pathname);
                 return '';
@@ -395,6 +406,12 @@ export function AuthenticatorPage() {
           >
             <h1>Set up your authenticator</h1>
             <p className="muted">Your username and password show your authenticator key once.</p>
+            {grant === null && (
+              <p className="muted">
+                Open this page through the enrolment link an Admin gave you: it works once and expires, and without it
+                the LIMS shows no key.
+              </p>
+            )}
             <p className="muted">
               Already enrolled? <a href="/">Sign in</a> with your password and a code from your authenticator.
             </p>

@@ -45,6 +45,8 @@ const id = {
   verified: randomUUID(),
   identityVerification: randomUUID(),
   credentialLink: randomUUID(),
+  secondAdmin: randomUUID(),
+  enrolmentGrant: randomUUID(),
   room: randomUUID(),
   otherLabRoom: randomUUID(),
   workstation: randomUUID(),
@@ -78,6 +80,8 @@ const fixture: [string, Row][] = [
   ],
   ['lims.person', { id: id.admin, username: 'refusal.admin', display_name: 'Refusal Admin' }],
   ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
+  // A second Admin, who created no account and issued no one-time link, so an enrolment grant can come from them.
+  ['lims.person', { id: id.secondAdmin, username: 'refusal.second', display_name: 'Second Admin' }],
   [
     'lims.person',
     {
@@ -101,6 +105,7 @@ const fixture: [string, Row][] = [
   ['lims.membership', { lab_id: id.lab, person_id: id.person, role: 'Analyst' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.otherPerson, role: 'QA' }],
   ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
+  ['lims.membership', { lab_id: id.otherLab, person_id: id.secondAdmin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
   [
     'lims.identity_verification',
@@ -122,6 +127,10 @@ const fixture: [string, Row][] = [
     },
   ],
   ['lims.credential_link', { id: id.credentialLink, person_id: id.verified, token_hash: Buffer.alloc(32, 5) }],
+  [
+    'lims.enrolment_grant',
+    { id: id.enrolmentGrant, person_id: id.verified, issued_by: id.secondAdmin, token_hash: Buffer.alloc(32, 11) },
+  ],
   ['lims.training_record', { lab_id: id.lab, person_id: id.person, method_id: id.method }],
   [
     'lims.sample',
@@ -334,7 +343,7 @@ const tables = {
   },
   'lims.person': {
     noun: 'person',
-    row: { username: 'refusal.second', display_name: 'Second Person', password_hash: 'not-a-real-hash' },
+    row: { username: 'refusal.another', display_name: 'Another Person', password_hash: 'not-a-real-hash' },
     notNull: ['id', 'username', 'display_name', 'failed_logins', 'reduced_motion'],
   },
   'lims.identity_verification': {
@@ -351,6 +360,11 @@ const tables = {
     noun: 'one-time link',
     row: { person_id: id.verified, token_hash: Buffer.alloc(32, 6) },
     notNull: ['id', 'person_id', 'token_hash', 'issued_at', 'expires_at'],
+  },
+  'lims.enrolment_grant': {
+    noun: 'enrolment grant',
+    row: { person_id: id.verified, issued_by: id.secondAdmin, token_hash: Buffer.alloc(32, 12) },
+    notNull: ['id', 'person_id', 'issued_by', 'token_hash', 'issued_at', 'expires_at'],
   },
   'lims.method': {
     noun: 'Method',
@@ -619,6 +633,7 @@ const auditedTables: Table[] = [
   'lims.audit_export',
   'lims.identity_verification',
   'lims.credential_link',
+  'lims.enrolment_grant',
   'lims.room',
   'lims.workstation',
 ];
@@ -733,6 +748,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.person': { id: id.person },
     'lims.identity_verification': { id: id.identityVerification },
     'lims.credential_link': { id: id.credentialLink },
+    'lims.enrolment_grant': { id: id.enrolmentGrant },
     'lims.method': { id: id.method },
     'lims.submission': { id: id.submission },
     'lims.lab': { lab_id: id.lab },
@@ -807,6 +823,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.credential_link',
       change: { token_hash: Buffer.alloc(32, 5) },
       constraint: 'credential_link_token_hash_key',
+    },
+    {
+      name: 'a second enrolment grant with the same token is refused',
+      table: 'lims.enrolment_grant',
+      change: { token_hash: Buffer.alloc(32, 11) },
+      constraint: 'enrolment_grant_token_hash_key',
     },
     {
       name: 'a second Method with the same code and version is refused',
@@ -980,6 +1002,18 @@ describe('the database refuses a reference to a row that does not exist', () => 
       table: 'lims.credential_link',
       change: { person_id: missing },
       constraint: 'credential_link_person_id_fkey',
+    },
+    {
+      name: 'an enrolment grant for a person who does not exist is refused',
+      table: 'lims.enrolment_grant',
+      change: { person_id: missing },
+      constraint: 'enrolment_grant_person_id_fkey',
+    },
+    {
+      name: 'an enrolment grant issued by a person who does not exist is refused',
+      table: 'lims.enrolment_grant',
+      change: { issued_by: missing },
+      constraint: 'enrolment_grant_issued_by_fkey',
     },
     {
       name: 'a Submission for a Customer that does not exist is refused',
@@ -1755,6 +1789,31 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { used_at: '2000-01-01T00:00:00Z' },
       constraint: 'credential_link_use_check',
     },
+    ...each(
+      'an enrolment grant whose token hash is not 32 bytes is refused',
+      'lims.enrolment_grant',
+      'token_hash',
+      [Buffer.alloc(31, 7), Buffer.alloc(33, 7)],
+      'enrolment_grant_token_hash_check',
+    ),
+    {
+      name: 'an enrolment grant that expires before it is issued is refused',
+      table: 'lims.enrolment_grant',
+      change: { expires_at: '2000-01-01T00:00:00Z' },
+      constraint: 'enrolment_grant_expiry_check',
+    },
+    {
+      name: 'an enrolment grant used outside its life is refused',
+      table: 'lims.enrolment_grant',
+      change: { used_at: '2000-01-01T00:00:00Z' },
+      constraint: 'enrolment_grant_use_check',
+    },
+    {
+      name: 'an enrolment grant a person issues for themselves is refused',
+      table: 'lims.enrolment_grant',
+      change: { issued_by: id.verified },
+      constraint: 'enrolment_grant_second_person_check',
+    },
   ]);
 });
 
@@ -2053,6 +2112,12 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       trigger: 'refuse_truncate',
       statement: 'truncate lims.credential_link',
     },
+    {
+      name: 'truncating the enrolment grants is refused',
+      table: 'lims.enrolment_grant',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.enrolment_grant',
+    },
   ];
   for (const c of cases) {
     covered.add(`${c.table}.${c.trigger}`);
@@ -2260,6 +2325,53 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
       await client.query('savepoint used');
       await assert.rejects(
         client.query('update lims.credential_link set used_at = clock_timestamp() where id = $1', [id.credentialLink]),
+        { code: 'LA002', message: once },
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.enrolment_grant.granted_by_a_second_admin');
+  it('an enrolment grant from the person, from someone who is not an Admin, from an Admin who created the account or issued its one-time link, or in another Admin’s name is refused', async () => {
+    const issue = 'insert into lims.enrolment_grant (person_id, issued_by, token_hash) values ($1, $2, $3)';
+    const token = Buffer.alloc(32, 13);
+    await refusedAs(issue, [id.verified, id.person, token], 'LA016', 'an enrolment grant is issued by an Admin');
+    // The fixture's Admin created refusal.verified and issued its one-time link, under their own name.
+    await refusedAs(
+      issue,
+      [id.verified, id.admin, token],
+      'LA016',
+      'an enrolment grant comes from a second Admin: not the one who created the account or issued its one-time link',
+    );
+    // The app role, unlike the owner, issues only in the acting Admin's name.
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('set local role lims_app');
+      await assert.rejects(client.query(issue, [id.verified, id.secondAdmin, token]), {
+        code: 'LA016',
+        message: 'an enrolment grant is issued by the acting Admin',
+      });
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.enrolment_grant.use_grant_once');
+  it('an enrolment grant is only ever marked used, once, even by the superuser', async () => {
+    const once = 'an enrolment grant is only ever marked used, once';
+    await refusedAs('update lims.enrolment_grant set token_hash = $1', [Buffer.alloc(32, 9)], 'LA002', once);
+    await refusedAs('delete from lims.enrolment_grant', [], 'LA002', once);
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('update lims.enrolment_grant set used_at = clock_timestamp() where id = $1', [
+        id.enrolmentGrant,
+      ]);
+      await client.query('savepoint used');
+      await assert.rejects(
+        client.query('update lims.enrolment_grant set used_at = clock_timestamp() where id = $1', [id.enrolmentGrant]),
         { code: 'LA002', message: once },
       );
     } finally {

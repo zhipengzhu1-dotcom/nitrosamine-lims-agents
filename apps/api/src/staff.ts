@@ -3,7 +3,7 @@ import { type DB, postgresFault } from '@lims/db';
 import { type ActorContext, administrationApart, routes, staffRefusal } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
-import { hashToken, sessionEnd, type SessionLimits } from './auth.ts';
+import { hashToken, sessionEnd, type SessionLimits, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type LabQueries, type Scope, type WriteQueries } from './scope.ts';
 
@@ -26,6 +26,7 @@ async function staffOf(q: LabQueries, labId: string, only?: string) {
       'person.username',
       'person.displayName as printedName',
       sql<boolean>`person.password_hash is not null`.as('credentialSet'),
+      sql<boolean>`exists (select from lims.authenticator a where a.person_id = person.id)`.as('authenticatorEnrolled'),
       'iv.checkedAt as identityVerifiedAt',
       'checker.displayName as identityVerifiedBy',
       'iv.evidence as identityEvidence',
@@ -61,6 +62,38 @@ async function issueLink(q: WriteQueries, personId: string) {
     .values({ personId, tokenHash: hashToken(token) })
     .returning('expiresAt')
     .executeTakeFirstOrThrow();
+  return { token, expiresAt };
+}
+
+/** What the database says when the issuer is the person, the Admin who created the account or one who issued its one-time link. */
+function secondAdmin(error: unknown): never {
+  if (postgresFault(error)?.sqlstate === 'LA016')
+    refuse(
+      'guard',
+      'An enrolment grant comes from a second Admin: not the person, and not an Admin who created the account or issued its one-time link.',
+    );
+  throw new Error('issuing an enrolment grant failed', { cause: error });
+}
+
+/**
+ * A fresh enrolment grant for the person from the acting Admin, whom the database holds to be a second Admin; the
+ * LIMS keeps only its hash, only the newest grant counts, and the issue is an Access Event on the person.
+ */
+async function issueEnrolmentGrant(q: WriteQueries, actor: ActorContext, personId: string, sourceAddress: string) {
+  const token = randomBytes(32).toString('base64url');
+  const { expiresAt } = await q.company
+    .insertInto('enrolmentGrant')
+    .values({ personId, issuedBy: actor.person.id, tokenHash: hashToken(token) })
+    .returning('expiresAt')
+    .executeTakeFirstOrThrow()
+    .catch(secondAdmin);
+  const roles = await q.from('membership').select('role').where('personId', '=', personId).orderBy('role').execute();
+  await q.accessEvent({
+    kind: 'EnrolmentGrantIssued',
+    subjectId: personId,
+    roles: roles.map((m) => m.role),
+    sourceAddress,
+  });
   return { token, expiresAt };
 }
 
@@ -200,6 +233,20 @@ export function staffRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): vo
         const person = await onePerson(q, labId, personId);
         if (person.credentialSet) refuse('state', `The person ${person.printedName} has already set a password.`);
         return { person, link: await issueLink(q, personId) };
+      });
+    },
+  });
+
+  app.route({
+    ...routes.issueEnrolmentGrant,
+    handler: async (req) => {
+      const { personId } = req.body;
+      const labId = req.actor.lab.id;
+      return adminScope(db, req.actor).write('Issue an enrolment grant', 'Admin', async (q) => {
+        const person = await onePerson(q, labId, personId);
+        if (person.authenticatorEnrolled)
+          refuse('state', `The person ${person.printedName} has already enrolled an authenticator.`);
+        return { person, grant: await issueEnrolmentGrant(q, req.actor, personId, sourceAddressOf(req)) };
       });
     },
   });

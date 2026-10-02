@@ -166,6 +166,7 @@ export const refusalsUnder = (policy: LoginPolicy): Refusals => {
     NoAuthenticator: notValid,
     CodeAlreadyUsed: notValid,
     AlreadyEnrolled: notValid,
+    NoEnrolmentGrant: notValid,
     OtherPersonSignedIn: () =>
       refuse(
         'guard',

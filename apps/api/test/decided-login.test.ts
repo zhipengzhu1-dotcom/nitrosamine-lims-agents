@@ -14,6 +14,8 @@ const as = {
   cora: await api.login(api.person('cora')),
   samir: await api.login(api.person('samir')),
   lena: await api.login(api.person('lena')),
+  // The second seeded Admin: not the creator of any account below, so the enrolment grants come from them.
+  bea: await api.login(api.person('bea')),
 };
 /** The one sentence every credential failure under the decided login answers with, which names the code it asks for. */
 const NOT_VALID = 'The user ID, password or code is not valid.';
@@ -26,6 +28,10 @@ function fromBase32(text: string): Buffer {
   return Buffer.from((bits.match(/.{8}/g) ?? []).map((byte) => Number.parseInt(byte, 2)));
 }
 
+/** An enrolment grant for the person from a second Admin, bea unless another is given. */
+const grantFor = async (personId: string, admin = as.bea) =>
+  ok(await admin.call(routes.issueEnrolmentGrant, { personId })).grant.token;
+
 /** A person enrolled under the decided login, with codes for this time step and the next. */
 async function enrolled(name: string, roles: Parameters<typeof api.addPerson>[1] = ['Analyst']) {
   const account = await api.addPerson(name, roles, { trained: true });
@@ -33,6 +39,7 @@ async function enrolled(name: string, roles: Parameters<typeof api.addPerson>[1]
     await new Client(decided.base).call(routes.enrolAuthenticator, {
       username: account.username,
       password: account.password,
+      grant: await grantFor(account.id),
     }),
   );
   const key = fromBase32(secret);
@@ -129,6 +136,7 @@ it('under the decided login, sign-in needs the password and a current code; a mi
   assert.equal(refusedWith(await signIn(account, account.password, wrong), 'badCredentials'), NOT_VALID);
   ok(await signIn(account, account.password, code()));
   assert.deepEqual(await eventsOf(account.id), [
+    { kind: 'EnrolmentGrantIssued', failureReason: null },
     { kind: 'AuthenticatorEnrolled', failureReason: null },
     { kind: 'SignInFailed', failureReason: 'WrongCode' },
     { kind: 'SignInFailed', failureReason: 'WrongCode' },
@@ -175,6 +183,7 @@ it('a sign-in refused for a Lab the person holds no Membership in spends no code
   refusedWith(await inLab(api.qcLabId), 'role');
   ok(await inLab(api.labId));
   assert.deepEqual(await eventsOf(account.id), [
+    { kind: 'EnrolmentGrantIssued', failureReason: null },
     { kind: 'AuthenticatorEnrolled', failureReason: null },
     { kind: 'SignInFailed', failureReason: 'NoMembership' },
     { kind: 'SignInSucceeded', failureReason: null },
@@ -218,6 +227,7 @@ it('two sign-ins racing with one code give one session and one refusal, recorded
     'reply',
   ]);
   assert.deepEqual(await eventsOf(account.id), [
+    { kind: 'EnrolmentGrantIssued', failureReason: null },
     { kind: 'AuthenticatorEnrolled', failureReason: null },
     { kind: 'SignInSucceeded', failureReason: null },
     { kind: 'SignInFailed', failureReason: 'CodeAlreadyUsed' },
@@ -275,11 +285,20 @@ it('enrolment shows the secret as text and as a QR payload once; a second enrolm
   const account = await api.addPerson('erin.enrol', ['Analyst']);
   const client = new Client(decided.base);
   const first = ok(
-    await client.call(routes.enrolAuthenticator, { username: account.username, password: account.password }),
+    await client.call(routes.enrolAuthenticator, {
+      username: account.username,
+      password: account.password,
+      grant: await grantFor(account.id),
+    }),
   );
   assert.match(first.secret, /^[A-Z2-7]{32}$/);
   const qr = new URL(first.otpauth);
   assert.deepEqual([qr.protocol, qr.host, qr.searchParams.get('secret')], ['otpauth:', 'totp', first.secret]);
+  // No second grant can be issued for an enrolled person; a second enrolment is refused before any grant is read.
+  assert.equal(
+    refusedWith(await as.bea.call(routes.issueEnrolmentGrant, { personId: account.id }), 'state'),
+    `The person ${account.username} has already enrolled an authenticator.`,
+  );
   const second = await client.call(routes.enrolAuthenticator, {
     username: account.username,
     password: account.password,
@@ -294,6 +313,7 @@ it('enrolment shows the secret as text and as a QR payload once; a second enrolm
     NOT_VALID,
   );
   assert.deepEqual(await eventsOf(account.id), [
+    { kind: 'EnrolmentGrantIssued', failureReason: null },
     { kind: 'AuthenticatorEnrolled', failureReason: null },
     { kind: 'SignInFailed', failureReason: 'AlreadyEnrolled' },
     { kind: 'SignInFailed', failureReason: 'WrongPassword' },
@@ -548,11 +568,107 @@ it('an Admin signed in on their own browser cannot enrol the authenticator of an
       .execute(),
     [{ kind: 'SignInFailed', failureReason: 'UnknownUserId', subjectId: null, typedUserIdLength: 15 }],
   );
-  ok(await new Client(decided.base).call(routes.enrolAuthenticator, { username: 'paz.holder', password }));
+  // The holder, with the password the set-password link gave them and no enrolment grant, cannot enrol either: the
+  // Admin who created the account and held that link never holds both factors alone.
+  const enrol = (grant?: string) =>
+    new Client(decided.base).call(routes.enrolAuthenticator, {
+      username: 'paz.holder',
+      password,
+      ...(grant === undefined ? {} : { grant }),
+    });
+  assert.equal(refusedWith(await enrol(), 'badCredentials'), NOT_VALID);
+  assert.equal(refusedWith(await enrol('not-a-grant'), 'badCredentials'), NOT_VALID);
+  assert.deepEqual((await eventsOf(person.id)).slice(2), [
+    { kind: 'SignInFailed', failureReason: 'NoEnrolmentGrant' },
+    { kind: 'SignInFailed', failureReason: 'NoEnrolmentGrant' },
+  ]);
+  assert.equal(await failedLoginsOf(person.id), 0, 'a missing grant is not a wrong password');
+  const grant = await grantFor(person.id);
+  ok(await enrol(grant));
+  assert.equal(refusedWith(await enrol(grant), 'badCredentials'), NOT_VALID, 'a grant enrols once');
+  const spent = await api.superuser
+    .selectFrom('enrolmentGrant')
+    .select('usedAt')
+    .where('personId', '=', person.id)
+    .executeTakeFirstOrThrow();
+  assert.notEqual(spent.usedAt, null, 'the grant is marked used in the transaction that enrolled');
   assert.deepEqual(
-    (await eventsOf(person.id)).map((event) => event.kind),
-    ['PasswordSet', 'SignInFailed', 'AuthenticatorEnrolled'],
+    (await eventsOf(person.id)).map((event) => event.failureReason ?? event.kind),
+    [
+      'PasswordSet',
+      'OtherPersonSignedIn',
+      'NoEnrolmentGrant',
+      'NoEnrolmentGrant',
+      'EnrolmentGrantIssued',
+      'AuthenticatorEnrolled',
+      'AlreadyEnrolled',
+    ],
   );
+});
+
+const SECOND_ADMIN =
+  'An enrolment grant comes from a second Admin: not the person, and not an Admin who created the account or issued its one-time link.';
+
+it('the Admin who created an account, and the Admin who issued its one-time link, cannot issue its enrolment grant; the database refuses them', async () => {
+  const ada = await api.login(api.person('ada'));
+  const verification = ok(
+    await ada.call(routes.recordIdentityVerification, {
+      printedName: 'Quy Holder',
+      evidence: 'Passport seen in person (fictional)',
+    }),
+  );
+  const { person } = ok(
+    await ada.call(routes.createAccount, { identityVerificationId: verification.id, username: 'quy.holder' }),
+  );
+  assert.equal(refusedWith(await ada.call(routes.issueEnrolmentGrant, { personId: person.id }), 'guard'), SECOND_ADMIN);
+  const { link } = ok(await as.bea.call(routes.issueLink, { personId: person.id }));
+  assert.equal(
+    refusedWith(await as.bea.call(routes.issueEnrolmentGrant, { personId: person.id }), 'guard'),
+    SECOND_ADMIN,
+  );
+  const cy = await api.login(await api.addPerson('cy.admin', ['Admin']));
+  const password = 'Benchline-2026-quy';
+  ok(await new Client(decided.base).call(routes.setPasswordThroughLink, { token: link.token, password }));
+  ok(
+    await new Client(decided.base).call(routes.enrolAuthenticator, {
+      username: 'quy.holder',
+      password,
+      grant: await grantFor(person.id, cy),
+    }),
+  );
+  assert.deepEqual(
+    (await eventsOf(person.id)).map((event) => event.failureReason ?? event.kind),
+    ['PasswordSet', 'EnrolmentGrantIssued', 'AuthenticatorEnrolled'],
+  );
+});
+
+it('an expired enrolment grant is refused with the uniform sentence', async () => {
+  const account = await api.addPerson('exa.expired', ['Analyst']);
+  const grant = await grantFor(account.id);
+  // A grant's expiry never moves, so the test ages it past the trigger that refuses the change.
+  await api.superuser.transaction().execute(async (tx) => {
+    await sql`select set_config('lims.actor', 'svc:test', true), set_config('lims.role', 'system', true),
+                     set_config('lims.reason', 'Age an enrolment grant', true)`.execute(tx);
+    await sql`alter table lims.enrolment_grant disable trigger use_grant_once`.execute(tx);
+    await sql`update lims.enrolment_grant set issued_at = issued_at - interval '73 hours',
+                     expires_at = expires_at - interval '73 hours' where person_id = ${account.id}`.execute(tx);
+    await sql`alter table lims.enrolment_grant enable trigger use_grant_once`.execute(tx);
+  });
+  assert.equal(
+    refusedWith(
+      await new Client(decided.base).call(routes.enrolAuthenticator, {
+        username: account.username,
+        password: account.password,
+        grant,
+      }),
+      'badCredentials',
+    ),
+    NOT_VALID,
+  );
+  assert.deepEqual(await eventsOf(account.id), [
+    { kind: 'EnrolmentGrantIssued', failureReason: null },
+    { kind: 'SignInFailed', failureReason: 'NoEnrolmentGrant' },
+  ]);
 });
 
 it('a signed-in person changes their password with the current password and a fresh code; a weak new password is refused first', async () => {

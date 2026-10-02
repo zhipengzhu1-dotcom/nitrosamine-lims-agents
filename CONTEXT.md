@@ -72,6 +72,10 @@ _Avoid_: Full name, signing name
 The link through which a person sets their own password, so that the Admin never sees or sets it. It works once and expires; the LIMS keeps only a hash of it.
 _Avoid_: Invitation, reset email, activation code
 
+**Enrolment grant**:
+The second person at an authenticator enrolment: a one-time token, carried by an enrolment link, that an Admin issues for a person, so that no one person holds both the password and the authenticator of another. The issuer is never the person, the Admin who created the account, or an Admin who issued one of its one-time links; the database refuses those issuers. It works once and expires; the LIMS keeps only a hash of it.
+_Avoid_: Invitation, second-factor reset, approval
+
 ### Sample chain
 
 **Submission**:

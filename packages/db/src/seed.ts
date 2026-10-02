@@ -14,6 +14,8 @@ const people = [
   { role: 'Reviewer', username: 'rui.reviewer', name: 'Rui Tanaka' },
   { role: 'QA', username: 'quinn.qa', name: 'Quinn Adeyemi' },
   { role: 'Admin', username: 'ada.admin', name: 'Ada Novak' },
+  // A second Admin, so that an enrolment grant can come from an Admin other than the one who created the account.
+  { role: 'Admin', username: 'bea.admin', name: 'Bea Okonkwo' },
 ] as const;
 
 export interface SeededAccount {

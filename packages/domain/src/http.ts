@@ -227,6 +227,8 @@ const staffPerson = Type.Object({
   roles: Type.Array(role),
   /** True once the person has set a password through their one-time link. */
   credentialSet: Type.Boolean(),
+  /** True once the person has enrolled their authenticator through an enrolment grant. */
+  authenticatorEnrolled: Type.Boolean(),
   identityVerifiedAt: nullable(instant),
   /** Who checked the person's identity and what they checked; null for a seeded demo account. */
   identityVerifiedBy: nullable(Type.String()),
@@ -260,6 +262,7 @@ const accessEventKindButLockout = Type.Enum({
   PasswordSet: 'PasswordSet',
   PasswordChanged: 'PasswordChanged',
   AuthenticatorEnrolled: 'AuthenticatorEnrolled',
+  EnrolmentGrantIssued: 'EnrolmentGrantIssued',
 } as const satisfies { [K in Exclude<db.AccessEventKind, 'Lockout'>]: K });
 const signInFailure = Type.Enum({
   UnknownUserId: 'UnknownUserId',
@@ -279,6 +282,7 @@ const signInFailure = Type.Enum({
   AlreadyEnrolled: 'AlreadyEnrolled',
   OtherPersonSignedIn: 'OtherPersonSignedIn',
   CodeAlreadyUsed: 'CodeAlreadyUsed',
+  NoEnrolmentGrant: 'NoEnrolmentGrant',
 } as const satisfies { [K in db.SignInFailure]: K });
 /** A session a Lockout ended, at the Lockout's instant: when it was signed in, and on which Workstation. */
 const endedSession = Type.Object({ id: uuid, signedInAt: instant, workstation: nullable(Type.String()) });
@@ -313,6 +317,11 @@ export const grantableRoles = ['SampleCustodian', 'Analyst', 'Reviewer', 'QA', '
 const accountCreated = Type.Object({
   person: staffPerson,
   link: Type.Object({ token: Type.String(), expiresAt: instant }),
+});
+/** The enrolment grant's token goes to the person, who enrols their authenticator with it; the LIMS keeps only its hash. */
+const enrolmentGrantIssued = Type.Object({
+  person: staffPerson,
+  grant: Type.Object({ token: Type.String(), expiresAt: instant }),
 });
 const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
 /** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
@@ -501,7 +510,11 @@ const code = Type.Optional(text);
 /** A sign-in names its Lab; the schema lets it out so that the API can answer `labNotChosen` after the password. */
 const signIn = Type.Object({ username: text, password: text, code, labId: Type.Optional(uuid) }, closed);
 const labSwitch = Type.Object({ username: text, password: text, code, labId: uuid }, closed);
-const authenticatorEnrolment = Type.Object({ username: text, password: text }, closed);
+/** The grant is the token from a second Admin's enrolment link; without one the enrolment is the uniform credential refusal. */
+const authenticatorEnrolment = Type.Object(
+  { username: text, password: text, grant: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })) },
+  closed,
+);
 /** An enrolled authenticator's secret, shown once: as text, and as the otpauth URI its QR code carries. */
 const enrolled = Type.Object({ secret: Type.String(), otpauth: Type.String() });
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
@@ -654,6 +667,12 @@ export const routes = {
     accountCreated,
   ),
   issueLink: route('POST', '/api/staff/links', { body: Type.Object({ personId: uuid }, closed) }, accountCreated),
+  issueEnrolmentGrant: route(
+    'POST',
+    '/api/staff/enrolment-grants',
+    { body: Type.Object({ personId: uuid }, closed) },
+    enrolmentGrantIssued,
+  ),
   accessEvents: route('GET', '/api/staff/:id/access-events', { params: byId }, personAccessEvents),
   grantMembership: route(
     'POST',

@@ -17,20 +17,22 @@ type Route =
   | { page: 'switchLab' }
   | { page: 'preferences' }
   | { page: 'welcome'; token: string }
-  | { page: 'authenticator' }
+  /** `grant` is the enrolment grant's token from the link an Admin gave, or null when the page was opened without one. */
+  | { page: 'authenticator'; grant: string | null }
   | { page: 'trail'; table: AuditedTable; id: string }
   | { page: 'auditExport' }
   /** A rail module; `accessEventsOf` names the person whose Access Events the Staff module shows, or null for the module itself. */
   | { page: 'module'; module: Module; accessEventsOf: string | null };
 
 function parse(hash: string): Route {
-  const [, a, id, b] = hash.split('/');
+  const [path, query] = hash.split('?');
+  const [, a, id, b] = (path ?? '').split('/');
   if (a === 'tests' && id && b === 'beside') return { page: 'tests', open: id };
   if (a === 'tests' && id) return b === 'report' ? { page: 'report', id } : { page: 'test', id };
   if (a === 'switch-lab') return { page: 'switchLab' };
   if (a === 'preferences') return { page: 'preferences' };
   if (a === 'welcome' && id) return { page: 'welcome', token: id };
-  if (a === 'authenticator') return { page: 'authenticator' };
+  if (a === 'authenticator') return { page: 'authenticator', grant: new URLSearchParams(query).get('grant') };
   if (a === 'trails' && isAuditedTable(id) && b) return { page: 'trail', table: id, id: b };
   if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
@@ -65,7 +67,7 @@ function App() {
   }, []);
 
   if (route.page === 'welcome') return <WelcomePage token={route.token} />;
-  if (route.page === 'authenticator') return <AuthenticatorPage />;
+  if (route.page === 'authenticator') return <AuthenticatorPage grant={route.grant} />;
   if (locked)
     return (
       <LockScreen

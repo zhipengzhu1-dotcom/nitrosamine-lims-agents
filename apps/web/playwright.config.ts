@@ -15,7 +15,12 @@ const webURL = `http://localhost:${webPort}`;
 /** A second LIMS under the decided login, with its own database, for the walks that need an authenticator code. */
 export const DECIDED_URL = `http://localhost:${decidedWebPort}`;
 const E2E_DB = 'lims_e2e';
-export const E2E_DATABASE = execFileSync(process.execPath, [checkout, 'database', E2E_DB], { encoding: 'utf8' }).trim();
+const DECIDED_DB = 'lims_e2e_decided';
+const databaseNamed = (name: string) =>
+  execFileSync(process.execPath, [checkout, 'database', name], { encoding: 'utf8' }).trim();
+export const E2E_DATABASE = databaseNamed(E2E_DB);
+/** The decided LIMS's database, which a walk reaches as its owner for what no Admin can do before one has enrolled. */
+export const DECIDED_DATABASE = databaseNamed(DECIDED_DB);
 export const API_LOG = fileURLToPath(new URL('api-log/api.log', import.meta.url));
 
 export default defineConfig({
@@ -37,7 +42,7 @@ export default defineConfig({
       command: '../../scripts/dev.sh --scratch',
       url: `${DECIDED_URL}/api/me`,
       env: {
-        LIMS_DB: 'lims_e2e_decided',
+        LIMS_DB: DECIDED_DB,
         LIMS_LOGIN: 'decided',
         LIMS_LOG_FILE: fileURLToPath(new URL('api-log/decided.log', import.meta.url)),
         PORT: decidedApiPort,
