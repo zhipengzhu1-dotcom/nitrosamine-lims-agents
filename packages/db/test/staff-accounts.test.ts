@@ -149,6 +149,36 @@ describe('the app role reaches a password only through a one-time link', () => {
       );
   });
 
+  it('the app role cannot create a staff account without an Identity Verification, or with a password', async () => {
+    const refusal = (error: unknown) =>
+      error instanceof Error &&
+      error.cause instanceof pg.DatabaseError &&
+      error.cause.code === 'LA007' &&
+      error.cause.message ===
+        'a staff account names its Identity Verification and has no password until its person sets one';
+    await assert.rejects(
+      inTransaction(app, [[`insert into lims.person (username, display_name) values ('no.verification', 'No Check')`]]),
+      refusal,
+    );
+    const [second] = await inTransaction(owner, [
+      [
+        `insert into lims.identity_verification (printed_name, evidence, checked_by, checked_in_lab_id)
+         values ('Pat Preset', 'Passport seen in person (fictional)', $1, $2) returning id`,
+        [ids.admin, ids.lab],
+      ],
+    ]);
+    await assert.rejects(
+      inTransaction(app, [
+        [
+          `insert into lims.person (username, display_name, identity_verification_id, password_hash)
+           values ('pat.preset', 'Pat Preset', $1, 'scrypt$x$y')`,
+          [second?.rows[0]?.id],
+        ],
+      ]),
+      refusal,
+    );
+  });
+
   it('the app role cannot mark a link used, date a check, or date a link itself', async () => {
     await assert.rejects(
       inTransaction(app, [['update lims.credential_link set used_at = clock_timestamp()']]),

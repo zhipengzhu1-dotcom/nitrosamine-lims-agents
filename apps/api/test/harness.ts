@@ -149,7 +149,8 @@ export async function startApi(name: string) {
       opts: { trained?: boolean; customerId?: string } = {},
     ): Promise<Account> {
       const account = { username, password: `${username}-password-for-tests`, id: '' };
-      await audited(db, { actor: 'svc:test', role: 'system', reason: 'Add a test person' }, async (tx) => {
+      // The owner adds test people with passwords; the app role creates staff only on an Identity Verification.
+      await audited(superuser, { actor: 'svc:test', role: 'system', reason: 'Add a test person' }, async (tx) => {
         ({ id: account.id } = await tx
           .insertInto('person')
           .values({

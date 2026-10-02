@@ -44,6 +44,25 @@ alter table lims.person
   alter column password_hash drop not null,
   add column identity_verification_id uuid unique references lims.identity_verification;
 
+-- A staff account is created with no password, naming its Identity Verification, so the person sets their own
+-- password through a one-time link. Two writers are exempt: the transaction that seeds an empty database (ADR
+-- 0002's demo-login exception, and the first Admin, whom no Admin can check), and the database owner acting outside
+-- the LIMS, whose writes the Audit Trail still captures. Customer Users get portal accounts, which this rule leaves
+-- alone.
+create function lims.staff_account_through_identity_verification() returns trigger language plpgsql as $$
+begin
+  if new.customer_id is null
+     and (new.identity_verification_id is null or new.password_hash is not null)
+     and not (select rolsuper from pg_roles where rolname = current_user)
+     and exists (select from lims.person p where not (p.xmin = pg_current_xact_id()::xid)) then
+    raise exception 'a staff account names its Identity Verification and has no password until its person sets one'
+      using errcode = 'LA007';
+  end if;
+  return new;
+end $$;
+create trigger staff_account_through_identity_verification before insert on lims.person
+  for each row execute function lims.staff_account_through_identity_verification();
+
 create function lims.keep_identity() returns trigger language plpgsql as $$
 begin
   if new.username is distinct from old.username then
