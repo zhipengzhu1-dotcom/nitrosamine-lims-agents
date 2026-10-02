@@ -2769,17 +2769,20 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
   });
 });
 
-describe('a person is recorded unlocked, so every lock lands through lock_once', () => {
+describe('a person is inserted unlocked, so every lock lands through lock_once', () => {
   covered.add('lims.person.insert_unlocked');
-  it('a person recorded already locked is refused, even for the superuser', async () => {
-    const error = await refusalOf(
-      `insert into lims.person (username, display_name, password_hash, locked_at)
-       values ('refusal.born-locked', 'Born Locked', 'not-a-real-hash', clock_timestamp())`,
-    );
-    assert.deepEqual(
-      [error.code, error.message],
-      ['23514', 'a person is recorded unlocked; a lock lands only on a recorded person, with its Lockout Access Event'],
-    );
+  // A Customer User, the one person the app role may insert without an Identity Verification.
+  const bornLocked = `insert into lims.person (username, display_name, customer_id, locked_at)
+    values ('refusal.born-locked', 'Born Locked', '${id.customer}', clock_timestamp())`;
+  it('a person inserted already locked is refused, for the app role and for the superuser', async () => {
+    for (const asRole of ['set local role lims_app; ', '']) {
+      const error = await refusalOf(`${asRole}${bornLocked}`);
+      assert.deepEqual(
+        [error.code, error.message],
+        ['23514', 'a person is inserted unlocked; a lock lands only through lock_once'],
+        asRole || 'as the superuser',
+      );
+    }
   });
 });
 
