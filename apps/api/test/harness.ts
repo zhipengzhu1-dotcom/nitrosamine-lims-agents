@@ -196,6 +196,24 @@ export async function startApi(name: string) {
   const qcLabId = await labOf('QC');
   const { id: methodId } = await db.selectFrom('method').select('id').executeTakeFirstOrThrow();
 
+  /**
+   * Resolves once `sessions` backends of this database wait on a lock, polled on a connection of its own, because a
+   * transaction sees one frozen snapshot of `pg_stat_activity`; fails after about 10 s.
+   */
+  async function untilWaitingOnLocks(sessions: number): Promise<void> {
+    for (let polls = 0; polls < 200; polls++) {
+      const { waiting } = await superuser
+        .selectNoFrom(
+          sql<number>`(select count(*)::int from pg_stat_activity
+            where datname = current_database() and wait_event_type = 'Lock')`.as('waiting'),
+        )
+        .executeTakeFirstOrThrow();
+      if (waiting >= sessions) return;
+      await sql`select pg_sleep(0.05)`.execute(superuser);
+    }
+    assert.fail(`${sessions} sessions never waited on a lock`);
+  }
+
   return {
     db,
     superuser,
@@ -205,22 +223,23 @@ export async function startApi(name: string) {
     log,
     logLines,
     startAnotherApi: (options: ListenOptions = {}) => listen(db, options),
+    untilWaitingOnLocks,
     /**
-     * Resolves once `sessions` backends of this database wait on a lock, polled on a connection of its own, because a
-     * transaction sees one frozen snapshot of `pg_stat_activity`; fails after about 10 s.
+     * Lands a lock on `account` that commits while `press` waits on a lock: the person row is locked out and the
+     * Signature table held in one open transaction, so a signing that never waits on the person row reads it unlocked
+     * and waits at its Signature insert instead, inside the window between that read and its commit.
      */
-    async untilWaitingOnLocks(sessions: number): Promise<void> {
-      for (let polls = 0; polls < 200; polls++) {
-        const { waiting } = await superuser
-          .selectNoFrom(
-            sql<number>`(select count(*)::int from pg_stat_activity
-              where datname = current_database() and wait_event_type = 'Lock')`.as('waiting'),
-          )
-          .executeTakeFirstOrThrow();
-        if (waiting >= sessions) return;
-        await sql`select pg_sleep(0.05)`.execute(superuser);
-      }
-      assert.fail(`${sessions} sessions never waited on a lock`);
+    async lockOutWhile<T>(account: Account, press: () => Promise<T>): Promise<T> {
+      const as = { actor: 'svc:test', role: 'system', reason: 'Lock a person out while they press' } as const;
+      const { answer } = await audited(superuser, as, async (tx) => {
+        await sql`lock table lims.signature in exclusive mode`.execute(tx);
+        await tx.updateTable('person').set({ lockedAt: sql`now()` }).where('id', '=', account.id).execute();
+        const answer = press();
+        await untilWaitingOnLocks(1);
+        // Wrapped, so the transaction does not await an answer that waits on its own lock.
+        return { answer };
+      });
+      return answer;
     },
     /** The clock seam: moves a person's open sessions `ms` into the past, as a clock advanced by `ms` would leave them. */
     async advanceClock(account: Account, ms: number): Promise<void> {

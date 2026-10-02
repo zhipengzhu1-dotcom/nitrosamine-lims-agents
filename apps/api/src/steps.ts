@@ -21,7 +21,7 @@ import {
 } from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
-import { reauthenticate, sourceAddressOf } from './auth.ts';
+import { holdReauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
 
@@ -266,7 +266,6 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
         db,
         { actor, session: req.sessionKey },
         { username: signature.username, password: signature.password },
-        `Re-authenticate to sign ${name}`,
         step.role,
         sourceAddressOf(req),
         'ReauthenticationFailed',
@@ -284,6 +283,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
     const claim = { testId: test?.id ?? randomUUID(), state: step.to };
     const { testId } = claim;
     const { receipt, replayed } = await scope.write(name, step.role, async (q) => {
+      if (signing) await holdReauthenticated(q.company, actor.person.id);
       // A press whose key another transaction holds waits here for that one to commit, then replays it.
       const claimed = await q
         .insert('commitKey', { key: body.commitKey, sessionId, requestHash, ...claim })

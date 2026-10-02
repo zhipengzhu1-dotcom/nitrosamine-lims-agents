@@ -348,6 +348,27 @@ describe('Lock and Switch user', () => {
     );
   });
 
+  it('a Lockout committed after the unlock password was checked refuses the unlock and keeps the failure count', async () => {
+    const ana = await api.addPerson(`ana.locked-out-at-unlock-${randomUUID()}`, ['Analyst']);
+    const browser = await api.login(ana);
+    ok(await browser.call(routes.lock));
+    refusedWith(await browser.call(routes.unlock, { password: 'not-the-password' }), 'badCredentials');
+
+    const unlock = await api.lockOutWhile(ana, () => browser.call(routes.unlock, { password: ana.password }));
+
+    assert.equal(refusedWith(unlock, 'accountLocked'), 'this account is locked');
+    const person = await api.superuser
+      .selectFrom('person')
+      .select('failedLogins')
+      .where('id', '=', ana.id)
+      .executeTakeFirstOrThrow();
+    assert.equal(person.failedLogins, 1, 'a locked account keeps the failures that led to it');
+    assert.deepEqual(
+      (await eventsOf(ana.id)).map((e) => e.kind),
+      ['SignInSucceeded', 'Lock', 'UnlockFailed'],
+    );
+  });
+
   it('locking a locked session writes no second lock Access Event, and unlocking an unlocked one no unlock event', async () => {
     const ana = await api.addPerson(`ana.twice-${randomUUID()}`, ['Analyst']);
     const browser = await api.login(ana);

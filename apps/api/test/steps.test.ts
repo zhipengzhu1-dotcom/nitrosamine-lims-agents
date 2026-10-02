@@ -616,6 +616,21 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
   refusedWith(await client.call(routes.me), 'noSession');
 });
 
+it('a Lockout committed after the signing password was checked refuses the Signature and leaves the Test as it was', async () => {
+  const signer = await api.addPerson('lea.analyst', ['Analyst'], { trained: true });
+  const client = await api.login(signer);
+  const id = await submitTestTo('Assigned', signer);
+  const before = await view(id);
+  const signature = await signatureOf(client, id, signer);
+
+  const signing = await api.lockOutWhile(signer, () =>
+    client.call(stepRoute('enterResult'), { commitKey: randomUUID(), testId: id, input: result, signature }),
+  );
+
+  assert.equal(refusedWith(signing, 'accountLocked'), 'this account is locked');
+  assert.deepEqual(await view(id), before, 'no Result, no Signature, and the Test still Assigned');
+});
+
 it("a Customer User cannot read another Customer's Test", async () => {
   const id = await submitTestTo('Requested');
   assert.ok(ok(await as.cora.call(routes.tests)).some((t) => t.id === id));
