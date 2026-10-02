@@ -36,6 +36,16 @@ case "${1:-}" in
     gh api --paginate "repos/$REPO/actions/runners" --jq '.runners[] | select(.name | startswith("lims-runner-")) | .id' |
       while read -r id; do gh api -X DELETE "repos/$REPO/actions/runners/$id" || echo "runner $id not deleted" >&2; done
     ;;
-  status) gh api --paginate "repos/$REPO/actions/runners" --jq '.runners[] | [.name, .status, .busy] | @tsv' ;;
+  status)
+    gh api --paginate "repos/$REPO/actions/runners" --jq '.runners[] | [.name, .status, .busy] | @tsv'
+    if pgrep -f 'caffeinate -i .*ci-runner.sh slot' >/dev/null; then
+      echo "The slots keep the Mac awake."
+    elif pgrep -f 'ci-runner.sh slot' >/dev/null; then
+      echo "The slots run without caffeinate, so the Mac can sleep mid-job. Run stop, then start." >&2
+      exit 1
+    else
+      echo "The slots are not running."
+    fi
+    ;;
   *) echo "usage: scripts/ci-runner.sh build|start|status|stop|slot check|e2e" >&2; exit 2 ;;
 esac
