@@ -194,3 +194,32 @@ it('when the System Incident cannot be written, the log records it unwritten and
   );
   assert.equal(typeof unwritten?.time, 'number', 'the log line holds the instant');
 });
+
+it('an incident the database could not write is raised from the log volume at the next start, at the instant its line was logged', async () => {
+  const path = join(volume, 'unwritten.log');
+  const onVolume = await api.startAnotherApi({ log: logFile(path) });
+  const testId = await assignedToLou();
+  await sql`alter table lims.system_incident add constraint raise_probe check (record_id <> ${sql.lit(testId)})`.execute(
+    api.superuser,
+  );
+  const { reference } = await failEnterResult(as.lou, testId, onVolume.base);
+  await sql`alter table lims.system_incident drop constraint raise_probe`.execute(api.superuser);
+  assert.deepEqual(await incidentsWith(reference), [], 'the database wrote no System Incident at the time');
+
+  await api.startAnotherApi({ logVolume: { file: path, clock: { every: () => () => {} } } });
+  const line = readFileSync(path, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((text): Record<string, unknown> => JSON.parse(text))
+    .find((logged) => logged.msg === 'unwritten System Incident' && logged.reqId === reference);
+  const raised = await api.db
+    .selectFrom('systemIncident')
+    .select([
+      'recordId',
+      'requestedBy',
+      sql<string>`(extract(epoch from logged_at) * 1000)::bigint::text`.as('loggedMs'),
+    ])
+    .where('reference', '=', reference)
+    .execute();
+  assert.deepEqual(raised, [{ recordId: testId, requestedBy: lou.id, loggedMs: String(line?.time) }]);
+});

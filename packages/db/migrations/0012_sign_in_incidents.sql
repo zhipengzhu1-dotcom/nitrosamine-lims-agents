@@ -5,7 +5,8 @@ alter type lims.incident_kind add value 'SignInBurstFromAddress';
 alter type lims.incident_kind add value 'SignInBurstOnUnknownUserId';
 alter type lims.incident_kind add value 'RepeatedSignInOnLockedAccount';
 
--- An incident raised from Access Events names the account, the address or the unknown-ID hash, and has no failing step.
+-- An incident raised from Access Events names the account, the address or the unknown-ID hash, and has no failing step;
+-- a failure of the LIMS (an unexpected failure or an unraisable log line) has its step and error class.
 alter table lims.system_incident
   alter column step drop not null,
   alter column error_class drop not null,
@@ -14,7 +15,7 @@ alter table lims.system_incident
   add column typed_user_id_hmac bytea check (octet_length(typed_user_id_hmac) = 32),
   -- The kinds are compared as text: a new enum value cannot be used in the transaction that adds it.
   add constraint system_incident_facts_check check (
-    (kind::text = 'UnexpectedFailure') = (step is not null)
+    (kind::text in ('UnexpectedFailure', 'UnraisableLogLine')) = (step is not null)
     and (step is null) = (error_class is null)
     and (kind::text in ('Lockout', 'RepeatedSignInOnLockedAccount')) = (subject_id is not null)
     and (kind::text = 'SignInBurstFromAddress') = (source_address is not null)

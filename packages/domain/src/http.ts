@@ -39,6 +39,8 @@ const text = Type.String({ minLength: 1, maxLength: 200 });
 /** A decimal as typed. */
 export const decimalPattern = '-?[0-9]+(\\.[0-9]+)?';
 const decimal = Type.String({ pattern: `^${decimalPattern}$` });
+/** A System Incident's reference: eight Crockford base32 characters, which a person can read aloud. */
+export const referencePattern = '[0-9A-HJKMNP-TV-Z]{8}';
 const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
@@ -57,6 +59,21 @@ const actorContext = Type.Object({
   roles: Type.Array(role),
 });
 export type ActorContext = Static<typeof actorContext>;
+/**
+ * How long the session lasts from this answer: `idleLeftMs` if no request follows, `absoluteLeftMs` at most, and
+ * `idleLimitMs` from each request that follows.
+ * Durations, not instants, so the web counts down without comparing its clock with the server's.
+ */
+const sessionClock = Type.Object({
+  idleLimitMs: Type.Integer({ minimum: 1 }),
+  idleLeftMs: Type.Integer({ minimum: 0 }),
+  absoluteLeftMs: Type.Integer({ minimum: 0 }),
+});
+export type SessionClock = Static<typeof sessionClock>;
+/** What a person is told when the API refuses a session that has ended; the web shows it as the API sends it. */
+export const SESSION_ENDED = 'Your session has ended. Sign in again.';
+const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock });
+export type SignedInView = Static<typeof signedIn>;
 const testRow = Type.Object({
   id: uuid,
   state: testState,
@@ -80,12 +97,20 @@ const result = Type.Object({
   performedOn: calendarDate,
 });
 export type Result = Static<typeof result>;
+/** One Record Version of a record: its number, the canonical form that rendered it and the hex SHA-256 of its content. */
+const recordVersionRef = Type.Object({
+  version: Type.Integer({ minimum: 1 }),
+  canonicalForm: Type.Integer({ minimum: 0 }),
+  contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+});
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
   signedAt: instant,
   record: Type.String(),
-  contentHash: Type.String(),
+  recordVersion: recordVersionRef,
+  /** True once the record has a Record Version later than the one this Signature was given on. */
+  unsigned: Type.Boolean(),
 });
 export type Signature = Static<typeof signature>;
 /** An Audit Trail row snapshot, keyed by its stored column names. */
@@ -100,6 +125,7 @@ export const auditedTable = Type.Enum({
   test: 'test',
   result: 'result',
   test_report: 'test_report',
+  record_version: 'record_version',
   signature: 'signature',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;
@@ -162,9 +188,11 @@ const trailEntry = Type.Object({
 export type TrailEntry = Static<typeof trailEntry>;
 const trail = Type.Object({ record: recordRef, labZone: Type.String(), entries: Type.Array(trailEntry) });
 export type Trail = Static<typeof trail>;
-const reportRef = Type.Object({ number: Type.String() });
+const reportRef = Type.Object({ id: uuid, number: Type.String() });
+/** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
 const testView = Type.Object({
   test: testRow,
+  recordVersion: nullable(recordVersionRef),
   report: nullable(reportRef),
   result: nullable(result),
   signatures: Type.Array(signature),
@@ -190,6 +218,35 @@ const chainVerification = Type.Object({
 export type ChainVerification = Static<typeof chainVerification>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
+const systemIncident = Type.Object({
+  reference: Type.String({ pattern: `^${referencePattern}$` }),
+  kind: Type.Enum({
+    UnexpectedFailure: 'UnexpectedFailure',
+    UnraisableLogLine: 'UnraisableLogLine',
+    Lockout: 'Lockout',
+    SignInBurstFromAddress: 'SignInBurstFromAddress',
+    SignInBurstOnUnknownUserId: 'SignInBurstOnUnknownUserId',
+    RepeatedSignInOnLockedAccount: 'RepeatedSignInOnLockedAccount',
+  } as const satisfies { [K in db.IncidentKind]: K }),
+  state: Type.Enum({ Open: 'Open' } as const satisfies { [K in db.IncidentState]: K }),
+  /** The failing step and error class of a failure of the LIMS; null for a sign-in incident. */
+  step: nullable(Type.String()),
+  recordId: nullable(uuid),
+  requestedBy: nullable(uuid),
+  sessionLabId: nullable(uuid),
+  errorClass: nullable(Type.String()),
+  /** What a sign-in incident names: the account, the source address, or the hex HMAC of an unknown user ID. */
+  subjectId: nullable(uuid),
+  sourceAddress: nullable(Type.String()),
+  typedUserIdHmac: nullable(sha256Hex),
+  sqlstate: nullable(Type.String()),
+  constraintName: nullable(Type.String()),
+  /** The database's insert time. */
+  openedAt: instant,
+  /** For an incident the database could not write at the time, the instant its log line was written, from the API host's clock. */
+  loggedAt: nullable(instant),
+});
+export type SystemIncident = Static<typeof systemIncident>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** What a committed step answers, and what a retry of the same press answers again. */
 export type StepTaken = Static<typeof stepTaken>;
@@ -279,9 +336,11 @@ function route<
 
 /** Every route the API serves besides the steps. */
 export const routes = {
-  login: route('POST', '/api/login', { body: credentials }, actorContext),
+  login: route('POST', '/api/login', { body: credentials }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
-  me: route('GET', '/api/me', {}, actorContext),
+  me: route('GET', '/api/me', {}, signedIn),
+  /** Reads how long the session has left without counting as activity, for the web's countdown. */
+  session: route('GET', '/api/session', {}, sessionClock),
   lookups: route('GET', '/api/lookups', {}, lookups),
   tests: route('GET', '/api/tests', {}, Type.Array(testRow)),
   test: route('GET', '/api/tests/:id', { params: byId }, testView),
@@ -294,6 +353,12 @@ export const routes = {
     trail,
   ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
+  incident: route(
+    'GET',
+    '/api/incidents/:reference',
+    { params: Type.Object({ reference: Type.String({ pattern: `^${referencePattern}$` }) }) },
+    systemIncident,
+  ),
 } satisfies Record<string, Route>;
 
 /** The route of one step, whose body requires a Commit Key, a testId when the step starts from a state, and a signature when it signs. */

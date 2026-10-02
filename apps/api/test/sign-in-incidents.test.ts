@@ -308,3 +308,21 @@ it('the source address is the hop the trusted proxy saw, kept as a plain address
     'a forwarded value that is no address falls back to the peer',
   );
 });
+
+it('QA reads a sign-in incident by its reference, with the hash in hex and no step', async () => {
+  const typed = `burst.read-${randomUUID()}`;
+  for (let i = 0; i < unknownIdRule.attempts; i++)
+    refusedWith(await signIn(nextAddress(), typed, 'any-password'), 'badCredentials');
+  const opened = (await incidents('SignInBurstOnUnknownUserId')).find((i) => i.typedUserIdHmac?.equals(hashOf(typed)));
+  const qa = await api.login(await api.addPerson('burst.reader', ['QA']));
+
+  const read = ok(await qa.call(routes.incident, { reference: opened?.reference ?? assert.fail('no incident') }));
+  assert.partialDeepStrictEqual(read, {
+    kind: 'SignInBurstOnUnknownUserId',
+    step: null,
+    errorClass: null,
+    subjectId: null,
+    sourceAddress: null,
+    typedUserIdHmac: hashOf(typed).toString('hex'),
+  });
+});

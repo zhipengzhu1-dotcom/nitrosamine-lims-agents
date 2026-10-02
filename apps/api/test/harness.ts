@@ -18,6 +18,8 @@ import {
 import { type Kysely, sql } from 'kysely';
 import { type AppOptions, buildApp } from '../src/app.ts';
 
+type LogSink = NonNullable<AppOptions['log']>;
+
 const { server } = dbConfig();
 
 /** The status each kind answers with, as the tests expect it; every refused answer is checked against this table. */
@@ -98,18 +100,35 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
 
 const accessEventKey = randomBytes(32);
 
-type ListenOptions = Partial<Pick<AppOptions, 'secureCookie' | 'log' | 'trustedProxies'>>;
+interface ListenOptions {
+  secureCookie?: boolean;
+  log?: LogSink;
+  login?: AppOptions['login'];
+  sweepEveryMs?: number | null;
+  logVolume?: AppOptions['logVolume'];
+  trustedProxies?: string[];
+}
 
 /** Listens on 127.0.0.1 and trusts it as a proxy unless told otherwise, so a Client's `from` sets the source address. */
 async function listen(
   db: Kysely<DB>,
-  { secureCookie = false, log, trustedProxies = ['127.0.0.1'] }: ListenOptions = {},
+  {
+    secureCookie = false,
+    log,
+    login = 'decided',
+    sweepEveryMs = null,
+    logVolume = null,
+    trustedProxies = ['127.0.0.1'],
+  }: ListenOptions = {},
 ) {
   const lines: string[] = [];
   const app = buildApp(db, {
     log: log ?? { write: (line) => lines.push(line) },
+    logVolume,
     secureCookie,
     accessEventKey,
+    login,
+    sweepEveryMs,
     trustedProxies,
   });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
@@ -122,7 +141,10 @@ async function listen(
   };
 }
 
-/** A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API that keeps its log lines, torn down after the file's tests. */
+/**
+ * A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API with the decided
+ * login and no sweep of its own, that keeps its log lines, torn down after the file's tests.
+ */
 export async function startApi(name: string) {
   const database = checkoutDatabase(name);
   const admin = createDb(databaseUrl(server, 'postgres'));
@@ -149,6 +171,16 @@ export async function startApi(name: string) {
     log,
     logLines,
     startAnotherApi: (options: ListenOptions = {}) => listen(db, options),
+    /** The clock seam: moves a person's open sessions `ms` into the past, as a clock advanced by `ms` would leave them. */
+    async advanceClock(account: Account, ms: number): Promise<void> {
+      const by = sql`${ms} * interval '1 millisecond'`;
+      await superuser
+        .updateTable('session')
+        .set({ createdAt: sql`created_at - ${by}`, lastSeenAt: sql`last_seen_at - ${by}` })
+        .where('personId', '=', account.id)
+        .where('endedAt', 'is', null)
+        .execute();
+    },
     labId,
     methodId,
     person(name: SeededName): Account {

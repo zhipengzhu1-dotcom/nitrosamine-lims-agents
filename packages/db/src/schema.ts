@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
+export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -19,7 +19,7 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
-export type IncidentKind = "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure";
+export type IncidentKind = "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure" | "UnraisableLogLine";
 
 export type IncidentState = "Open";
 
@@ -55,7 +55,7 @@ export interface AccessEvent {
   roles: ArrayType<Role>;
   sessionId: string | null;
   sessionLabId: string | null;
-  sourceAddress: string;
+  sourceAddress: string | null;
   subjectId: string | null;
   typedUserIdHmac: Buffer | null;
   typedUserIdLength: number | null;
@@ -123,6 +123,18 @@ export interface Person {
   username: string;
 }
 
+export interface RecordVersion {
+  canonicalForm: number;
+  content: Buffer;
+  contentHash: Generated<Buffer>;
+  id: Generated<string>;
+  labId: string;
+  recordId: string;
+  recordTable: string;
+  savedAt: Generated<Timestamp>;
+  version: number;
+}
+
 export interface Result {
   analyte: string;
   enteredBy: string;
@@ -156,14 +168,11 @@ export interface Session {
 }
 
 export interface Signature {
-  content: Buffer;
-  contentHash: Generated<Buffer>;
   id: Generated<string>;
   labId: string;
   meaning: Meaning;
   personId: string;
-  recordId: string;
-  recordTable: string;
+  recordVersionId: string;
   signedAt: Generated<Timestamp>;
 }
 
@@ -179,6 +188,7 @@ export interface SystemIncident {
   errorClass: string | null;
   id: Generated<string>;
   kind: IncidentKind;
+  loggedAt: Timestamp | null;
   openedAt: Generated<Timestamp>;
   recordId: string | null;
   reference: string;
@@ -224,6 +234,7 @@ export interface DB {
   membership: Membership;
   method: Method;
   person: Person;
+  recordVersion: RecordVersion;
   result: Result;
   sample: Sample;
   session: Session;

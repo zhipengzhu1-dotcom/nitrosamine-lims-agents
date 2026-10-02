@@ -104,6 +104,20 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     label: (row) => text(row.number),
     fields: { number: { label: 'Number' }, test_id: { label: 'Test', ref: 'test' } },
   },
+  record_version: {
+    kind: 'Record Version',
+    chain: 'lab',
+    label: (row) => text(row.version),
+    fields: {
+      record_table: { label: 'Record kind' },
+      record_id: { label: 'Record', refTableIn: 'record_table' },
+      version: { label: 'Version' },
+      canonical_form: { label: 'Canonical form' },
+      content: { label: 'Canonical content', bytesAsUtf8: true },
+      content_hash: { label: 'SHA-256 of the content' },
+      saved_at: { label: 'Saved at' },
+    },
+  },
   signature: {
     kind: 'Signature',
     chain: 'lab',
@@ -111,10 +125,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     fields: {
       meaning: { label: 'Meaning' },
       person_id: { label: 'Signer', ref: 'person' },
-      record_table: { label: 'Record kind' },
-      record_id: { label: 'Record', refTableIn: 'record_table' },
-      content: { label: 'Signed Record Version', bytesAsUtf8: true },
-      content_hash: { label: 'SHA-256 of the Record Version' },
+      record_version_id: { label: 'Record Version', ref: 'record_version' },
       signed_at: { label: 'Signed at' },
     },
   },
