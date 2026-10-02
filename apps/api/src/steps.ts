@@ -210,7 +210,7 @@ async function seenVersion(scope: LabQueries, testId: string, signature: Signing
   if ((await statementInForce(scope)).version !== signature.statementVersion)
     refuse(
       'signingRefused',
-      'The signature statement changed since this screen loaded it. Read it again before signing.',
+      'The Signature Statement changed since this screen loaded it. Read it again before signing.',
     );
   return { id: latest.id, contentHash: signature.recordVersion.contentHash };
 }

@@ -442,7 +442,7 @@ it('a signing on sight of a signature statement version that is not in force is 
   });
   assert.equal(
     refusedWith(refused, 'signingRefused'),
-    'The signature statement changed since this screen loaded it. Read it again before signing.',
+    'The Signature Statement changed since this screen loaded it. Read it again before signing.',
   );
   assert.deepEqual((await view(id, as.ana)).signatures, [], 'nothing was signed');
   const { n } = await api.superuser
