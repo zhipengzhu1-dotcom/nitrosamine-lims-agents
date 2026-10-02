@@ -348,6 +348,68 @@ it("the PDF prints Windows-1252's curly quotes and dashes, and a character outsi
   assert.ok(pdf.includes('Customer\\222s tablets \\226 lot 7 <U+4E8C>'), 'printed as WinAnsi bytes');
 });
 
+it("nothing of another Lab's Customer or Sample appears in the CSV or the PDF, even where a shared record names it", async () => {
+  const submission = await write('Add a Customer of a second Lab', async (tx) => {
+    const customer = await tx
+      .insertInto('customer')
+      .values({ name: 'Fabrikam Tokyo (fictional)' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    return tx
+      .insertInto('submission')
+      .values({ customerId: customer.id, submittedBy: quinn.id, number: 'SUB-2026-900001' })
+      .returning(['id', 'number'])
+      .executeTakeFirstOrThrow();
+  });
+  const { lab, sample } = await write('Add a second test Lab', async (tx) => {
+    const added = await tx
+      .insertInto('lab')
+      .values({ code: 'TK', name: 'Tokyo Lab (fictional)', timeZone: 'Asia/Tokyo' })
+      .returning('labId')
+      .executeTakeFirstOrThrow();
+
+    const tokyoSample = await tx
+      .insertInto('sample')
+      .values({
+        labId: added.labId,
+        submissionId: submission.id,
+        number: 'TK-S-2026-000001',
+        description: 'Granules (fictional)',
+      })
+      .returning(['id', 'number'])
+      .executeTakeFirstOrThrow();
+    return { lab: added, sample: tokyoSample };
+  });
+  const method = await write('Add a test Method', async (tx) => {
+    const added = await tx
+      .insertInto('method')
+      .values({ code: 'RD-MTH-0902', version: '1', title: 'NDEA method transfer (fictional)' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await tx.insertInto('trainingRecord').values({ labId: api.labId, personId: ana.id, methodId: added.id }).execute();
+    return added;
+  });
+  const mine = await submitted(as.cora, { methodId: method.id });
+  const named = [sample.number, sample.id, submission.number, 'Fabrikam Tokyo (fictional)', lab.labId];
+  const title = `Transferred from ${named.join(', ')} to ${mine.sampleNumber}`;
+  await write('Record the transfer Samples', (tx) =>
+    tx.updateTable('method').set({ title }).where('id', '=', method.id).execute(),
+  );
+
+  const update = dataOf(await generate(northwindId)).entries.find(
+    (e) => e.record.id === method.id && e.op === 'UPDATE',
+  );
+  assert.ok(update?.redacted, 'the shared Method entry is in the export, redacted');
+  for (const file of (await generate(northwindId, 'CSV')).files) {
+    const text = Buffer.from(file.base64, 'base64').toString('latin1');
+    for (const other of named) {
+      const printed = other.replaceAll('(', '\\(').replaceAll(')', '\\)');
+      assert.ok(!text.includes(other) && !text.includes(printed), `${file.name} does not hold ${other}`);
+    }
+    assert.ok(text.includes(mine.sampleNumber), `${file.name} keeps the requesting Customer's Sample number`);
+  }
+});
+
 it('a CSV cell a spreadsheet would run as a formula starts with an apostrophe', async () => {
   await submitted(as.cora, { description: '=HYPERLINK("https://example.invalid","open")' });
   const csv = fileText((await generate(northwindId, 'CSV')).files[0]);

@@ -4,6 +4,7 @@ import { Value } from 'typebox/value';
 import { instant, REDACTED, redactionFor, type TrailEntry } from '../src/index.ts';
 
 const HASH = 'ab'.repeat(32);
+const REFERENCED = '5b8f5f0e-0000-4000-8000-000000000001';
 const at = Value.Decode(instant, '2026-10-01T12:00:00.000000Z');
 
 function entryNaming(text: string): TrailEntry {
@@ -90,13 +91,43 @@ describe("an Audit Export replaces another Customer's identifiers and keeps the 
       redacted: false,
     },
     {
+      name: "another Lab's Sample number is redacted, though no list names it",
+      text: 'Moved from TK-S-2026-000001',
+      expected: `Moved from ${REDACTED}`,
+      redacted: true,
+    },
+    {
+      name: 'a Submission number no list names is redacted',
+      text: 'See SUB-2026-900001',
+      expected: `See ${REDACTED}`,
+      redacted: true,
+    },
+    {
+      name: 'a record ID the entries do not reference is redacted',
+      text: 'Copied from f00dbabe-0000-4000-8000-00000000abcd',
+      expected: `Copied from ${REDACTED}`,
+      redacted: true,
+    },
+    {
+      name: 'a record ID the entries reference stays',
+      text: `Checked by ${REFERENCED}`,
+      expected: `Checked by ${REFERENCED}`,
+      redacted: false,
+    },
+    {
+      name: "a Container of the requesting Customer's Sample stays",
+      text: 'Container RD-S-2026-000001-C02',
+      expected: 'Container RD-S-2026-000001-C02',
+      redacted: false,
+    },
+    {
       name: 'a value naming no Customer is unchanged',
       text: 'NDMA by LC-MS/MS',
       expected: 'NDMA by LC-MS/MS',
       redacted: false,
     },
   ];
-  const redact = redactionFor(own, others);
+  const redact = redactionFor(own, others, [REFERENCED]);
   for (const c of cases)
     it(c.name, () => {
       const out = redact(entryNaming(c.text));
@@ -115,8 +146,8 @@ describe("an Audit Export replaces another Customer's identifiers and keeps the 
     assert.deepEqual([out.raw.hash, out.raw.prevHash], [HASH, HASH]);
   });
 
-  it('with no other Customer nothing is redacted', () => {
-    const entry = entryNaming('RD-S-2026-000002');
-    assert.deepEqual(redactionFor(own, [])(entry), { ...entry, redacted: false });
+  it('with no other Customer, a value naming no record is unchanged', () => {
+    const entry = entryNaming('NDMA by LC-MS/MS');
+    assert.deepEqual(redactionFor(own, [], [])(entry), { ...entry, redacted: false });
   });
 });

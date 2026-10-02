@@ -325,7 +325,7 @@ export function AuditExportPage({ me }: { me: ActorContext }) {
             </select>
           </label>
           <label>
-            Data file
+            Format
             <select value={format} onChange={(e) => setFormat(e.target.value === 'CSV' ? 'CSV' : 'JSON')}>
               <option value="JSON">JSON, with a PDF</option>
               <option value="CSV">CSV, with a PDF</option>

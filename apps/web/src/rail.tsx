@@ -1,6 +1,7 @@
 import {
   type ActorContext,
   decimalPattern,
+  mayTake,
   routes,
   type StepInput,
   type StepName,
@@ -150,7 +151,7 @@ export const modules = [
   },
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
-  { key: 'audit-export', name: 'Audit Export', holds: '' },
+  { key: 'audit-export', name: 'Audit Export', holds: '', takes: 'generateAuditExport' },
 ] as const;
 export type Module = (typeof modules)[number];
 type ModuleKey = Module['key'];
@@ -173,11 +174,13 @@ export function Shell({
     <div className="frame">
       <TopBar>
         <nav>
-          {modules.map((m) => (
-            <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
-              {m.name}
-            </a>
-          ))}
+          {modules
+            .filter((m) => !('takes' in m) || mayTake(m.takes, me.roles))
+            .map((m) => (
+              <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
+                {m.name}
+              </a>
+            ))}
         </nav>
       </TopBar>
       <main className="plane">{children}</main>
