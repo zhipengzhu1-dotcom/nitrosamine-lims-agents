@@ -44,7 +44,7 @@ describe('the failed-sign-in Access Event indexes hold only the failure kinds', 
  */
 async function triggerPlans(events: string[]): Promise<string> {
   const plans: string[] = [];
-  const collect = (notice: pg.NoticeMessage) => plans.push(notice.message ?? '');
+  const collect = (notice: { message?: string | undefined }) => plans.push(notice.message ?? '');
   client.on('notice', collect);
   await client.query('begin');
   try {
