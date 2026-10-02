@@ -11,7 +11,7 @@ import {
 } from 'kysely';
 
 type CompanyTable = 'customer' | 'person' | 'method' | 'submission' | 'lab';
-type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session'>;
+type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session' | 'systemIncident'>;
 
 function inLab(q: Kysely<DB>, labId: string) {
   const ofLab = (table: LabTable) => sql<boolean>`${sql.ref(`${table}.labId`)} = ${labId}`;
@@ -57,15 +57,30 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
   return {
     ctx,
     ...inLab(db, labId),
-    auditTrail: () => db.selectFrom('auditEntry').where('chain', '=', labId),
-    verifyAuditTrail: () =>
-      db
+    /** Reaches only this Lab's chain and the company chain. */
+    trail: () => db.selectFrom('auditEntry').where('chain', 'in', [labId, 'company']),
+    /** Recomputes this Lab's chain and the company chain in one statement, so both are read from one snapshot. */
+    verifyAuditTrail: async () => {
+      const lastEntry = (chain: string) =>
+        sql<string>`coalesce((select seq from lims.audit_chain where chain = ${chain}), 0)::text`;
+      const firstFailure = (chain: string) => sql<string | null>`lims.verify_chain(${chain})::text`;
+      const found = await db
         .selectNoFrom([
           sql<Date>`now()`.as('at'),
-          sql<string | null>`lims.verify_chain(${labId})`.as('lab'),
-          sql<string | null>`lims.verify_chain('company')`.as('company'),
+          lastEntry(labId).as('labLast'),
+          firstFailure(labId).as('labFailure'),
+          lastEntry('company').as('companyLast'),
+          firstFailure('company').as('companyFailure'),
         ])
-        .executeTakeFirstOrThrow(),
+        .executeTakeFirstOrThrow();
+      return {
+        at: found.at,
+        chains: [
+          { chain: 'lab' as const, lastEntry: found.labLast, firstFailure: found.labFailure },
+          { chain: 'company' as const, lastEntry: found.companyLast, firstFailure: found.companyFailure },
+        ],
+      };
+    },
     write: <R>(reason: string, role: Role, fn: (q: WriteQueries) => Promise<R>) =>
       audited(db, { actor: `person:${ctx.person.username}`, role, reason }, (tx) => fn(inWrite(tx, labId))),
   };

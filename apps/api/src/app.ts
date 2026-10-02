@@ -10,15 +10,15 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import { actorFor, lockRoutes, loginRoutes, logoutRoute, SESSION_COOKIE, type SessionKey } from './auth.ts';
-import { readRoutes } from './reads.ts';
+import { loginRoutes, type SessionKey } from './auth.ts';
+import { apiLogger, type LogSink } from './log.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
-import { stepRoutes } from './steps.ts';
-import { workstationRoutes } from './workstations.ts';
+import { sessionRoutes } from './session-routes.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
     actor: ActorContext;
+    requester: ActorContext | null;
     sessionKey: SessionKey;
   }
 }
@@ -42,58 +42,22 @@ export type App = FastifyInstance<
   WireTypes
 >;
 
-export interface LogSink {
-  write(line: string): void;
-}
 export interface AppOptions {
   log: LogSink | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
 }
 
-const REDACTED = [
-  'req.body',
-  'req.headers.cookie',
-  'req.headers.authorization',
-  'res.headers["set-cookie"]',
-  'password',
-  '*.password',
-  '*.*.password',
-  // The err serializer copies pg's own fields onto the line, and detail quotes the failing row.
-  'err.detail',
-  'err.hint',
-  'err.where',
-  'err.internalQuery',
-];
-
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   const app = Fastify({
-    logger: options.log
-      ? { level: 'info', stream: options.log, redact: { paths: REDACTED, censor: '[redacted]' } }
-      : false,
+    logger: options.log ? apiLogger(options.log) : false,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
     genReqId: requestReference,
   }).withTypeProvider<WireTypes>();
-  app.setErrorHandler(answerThrown);
+  app.setErrorHandler(answerThrown(db));
+  app.decorateRequest('requester', null);
   app.setNotFoundHandler(() => refuse('notFound', 'no such route'));
   loginRoutes(app, db, options.accessEventKey, options.secureCookie);
-  const withSession = (whileLocked: boolean, routes: (scope: App) => void) =>
-    app.register(async (scope) => {
-      scope.decorateRequest('actor');
-      scope.decorateRequest('sessionKey');
-      scope.addHook('onRequest', async (req) => {
-        ({ actor: req.actor, session: req.sessionKey } = await actorFor(db, req.cookies[SESSION_COOKIE], {
-          whileLocked,
-        }));
-      });
-      routes(scope);
-    });
-  withSession(true, (lockScreen) => lockRoutes(lockScreen, db));
-  withSession(false, (signedIn) => {
-    logoutRoute(signedIn, db);
-    readRoutes(signedIn, db);
-    stepRoutes(signedIn, db);
-    workstationRoutes(signedIn, db);
-  });
+  sessionRoutes(app, db);
   return app;
 }

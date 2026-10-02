@@ -39,7 +39,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 
 - Return a refusal from domain code as a value. Domain code never throws, so that the API and the web can both ask "may this person do this?" without a `try`.
 - Turn a refusal into an HTTP error only in the API, and only through `refuse`, so that every status code is chosen in one place.
-- Do not swallow an unexpected failure, because a hidden failure on a write path is a lost record. A `catch` adds context and rethrows with `cause`, or it does not exist.
+- Do not swallow an unexpected failure, because a hidden failure on a write path is a lost record. A `catch` adds context and rethrows with `cause`, or it does not exist. The one exception is the System Incident writer: when the database cannot write the incident, it logs the unwritten incident and lets the 500 carry its reference, because the log line is then the only witness. The log file sink likewise writes a line the volume refuses to stderr, so a full disk cannot take the reference out of a 500 ([#89](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/89)).
 - Write a refusal message as a sentence for the person at the bench, in glossary terms, because the web shows it as written.
 
 ## Values keep their digits and time comes from the database
@@ -47,7 +47,7 @@ The walking skeleton does not meet every rule yet. [Task: bring the walking skel
 - Never hold a measured value or a limit in a JavaScript `number`. Use a decimal string in TypeScript and `text` or `numeric` in Postgres, because a float loses the digits as typed.
 - Do arithmetic on values in one domain module, so that rounding ([ADR 0006](adr/0006-acceptance-criteria-round-the-value-once-to-the-limits-written-decimals.md)) has one implementation. Choose the decimal library when the first calculation is built.
 - Take every timestamp that is stored on a row from the database clock, because the API host's clock is not the record's clock.
-- Send a time over HTTP as an ISO 8601 UTC string, and format it for display in one web function, so that every screen shows time the same way.
+- Send a time over HTTP as an ISO 8601 UTC string, and format it for display in one web module, so that every screen shows time the same way. The one exception is an Audit Trail entry's time on its owning Lab's wall clock (`atLab`, [#111](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/111)): the Lab's zone is record data, not a display preference, so the database renders that instant as ISO 8601 with the Lab's offset and the same web module formats it.
 
 ## The database refuses bad data
 

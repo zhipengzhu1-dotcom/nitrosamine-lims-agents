@@ -7,7 +7,8 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 1 | Closed schemas | [#86](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/86) |
 | 1 | Refusal kinds | [#86](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/86) |
 | 1 | Commit keys | [#87](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/87) |
-| 1 | System Incidents with log volume, redaction and the unwritten-incident check | |
+| 1 | System Incidents with log volume, redaction and the unwritten-incident check | Partly: [#89](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/89) built the incidents and redaction. Unbuilt: the API log volume in the deploy config with its nightly shipping under `oplogs/` (proposed on #89), and the unwritten-incident check ([#90](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/90)) |
+| 1 | A chain-verify failure opens a System Incident (QA's Verify chain names the first failing entry and how far the chain is intact, [#111](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/111); the record waits for the System Incident ticket) | |
 | 1 | Access Events with the expiry sweep | [#91](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/91) (Access Events; the expiry sweep is [#92](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/92)) |
 | 1 | Counters | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
 | 1 | Transaction IDs | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
@@ -27,7 +28,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 3 | Record Type Register | |
 | 3 | Calculation Versions | |
 | 3 | Review Checklists | |
-| 3 | Readable Audit Trail panel | |
+| 3 | Readable Audit Trail panel | [#111](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/111) |
 | 3 | QA audit export | |
 | 4 | Document vault | |
 | 4 | Training Records | |
