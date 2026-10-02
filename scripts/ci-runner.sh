@@ -39,14 +39,7 @@ case "${1:-}" in
     ;;
   status)
     gh api --paginate "repos/$REPO/actions/runners" --jq '.runners[] | [.name, .status, .busy] | @tsv'
-    if pgrep -f 'caffeinate -i .*ci-runner.sh slot' >/dev/null; then
-      echo "The slots keep the Mac awake."
-    elif pgrep -f 'ci-runner.sh slot' >/dev/null; then
-      echo "The slots run without caffeinate, so the Mac can sleep mid-job. Run stop, then start." >&2
-      exit 1
-    else
-      echo "The slots are not running."
-    fi
-    ;;
+    if pgrep -f '^caffeinate -i .*ci-runner\.sh slot' >/dev/null; then echo "The slots keep the Mac awake."
+    else echo "No slot keeps the Mac awake. Run stop, then start." >&2; exit 1; fi ;;
   *) echo "usage: scripts/ci-runner.sh build|start|status|stop|slot check|e2e" >&2; exit 2 ;;
 esac
