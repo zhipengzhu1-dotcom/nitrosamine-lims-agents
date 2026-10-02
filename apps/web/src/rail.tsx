@@ -343,6 +343,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
           className="sheet"
           data-closing={sheet.closing || undefined}
           inert={sheet.closing}
+          aria-hidden={sheet.closing || undefined}
           aria-labelledby="sheet-title"
           onSubmit={(e) => {
             e.preventDefault();
@@ -427,7 +428,11 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
       )}
       <footer className="rail">
         <div className="who">
-          <b>{me.person.displayName}</b>
+          <b>
+            <a href="#/preferences" aria-label={`${me.person.displayName}, your preferences`}>
+              {me.person.displayName}
+            </a>
+          </b>
           <span>
             {me.lab.code} · {me.roles.map(words).join(', ')} · <code>{me.person.username}</code>
           </span>

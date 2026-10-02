@@ -12,6 +12,7 @@ A demo LIMS for a nitrosamine QC lab, built to 21 CFR Part 11, EU GMP Annex 11 a
 ## Workflow
 
 - **Code work** routes through `pstack:poteto-mode`. The map's Notes list the skills it hands off to (architect, tdd, deslop, interrogate, UI skills).
+- **UI review** of a pull request that changes what a screen shows includes a run of the project `verify` skill at phone width (`open(slug, 'phone')`) over each flow the pull request changes, with the screenshots listed in the pull request. The skill's "Phone width on every UI pull request" section says how.
 - **Compliance review** is the final verification of a behaviour change, run once on the finished work. A behaviour change adds or modifies what the LIMS does: what it records, who may act, which step it blocks, how it calculates or compares a result, or what it shows, exports, signs or keeps. A decision (an ADR, a ticket answer, a glossary definition) counts as much as code, and non-GMP Tests as much as GMP ones. Everything else (refactors, renames, tests, build and dev tooling, styling, link and typo fixes, the agents and skills themselves) merges with one line in the commit, PR or ticket: "No compliance review: <reason>". When unsure, treat the work as a behaviour change.
 
   Run it last: once the tests pass and the code reviews are resolved, or once the ticket's resolution is written, and before the merge or the close. Dispatch in parallel each expert whose scope the work touches:

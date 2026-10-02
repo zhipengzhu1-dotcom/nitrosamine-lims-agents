@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
-import { api, type LockMode, signIn, signOut, switchLab, unlock, useApi } from './api.ts';
+import { api, type LockMode, setPreferences, signIn, signOut, switchLab, unlock, useApi } from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
 import { field, useCommit } from './form.tsx';
 
@@ -108,6 +108,47 @@ export function LabSwitchPage({ me }: { me: ActorContext }) {
         commit="Switch Lab"
         onSubmit={switchLab}
       />
+    </Shell>
+  );
+}
+
+/** The person's own preferences, as the server holds them. A change applies once the server has saved it. */
+export function PreferencesPage({ me }: { me: ActorContext }) {
+  const { data, reload } = useApi(routes.me);
+  const { busy, commit, shown } = useCommit();
+  return (
+    <Shell me={me} active={null} action={null}>
+      <h1>Your preferences</h1>
+      {data && (
+        <form
+          className="card prefs"
+          onSubmit={(e) =>
+            commit(e, async (form) => {
+              const { reducedMotion } = await setPreferences({ reducedMotion: form.has('reducedMotion') });
+              await reload();
+              return reducedMotion
+                ? 'Saved. Motion is reduced wherever you sign in.'
+                : 'Saved. Motion follows each device’s own setting.';
+            })
+          }
+        >
+          <fieldset className="lock__set" disabled={busy}>
+            <legend>Motion</legend>
+            <label className="check">
+              <input type="checkbox" name="reducedMotion" defaultChecked={data.preferences.reducedMotion} />
+              Reduce motion wherever I sign in
+            </label>
+            <p className="muted">
+              Sheets, notes and status changes then appear without movement. With this off, a device set to reduce
+              motion still reduces it.
+            </p>
+            {shown}
+            <button type="submit" className="rbtn" aria-busy={busy}>
+              Save preferences
+            </button>
+          </fieldset>
+        </form>
+      )}
     </Shell>
   );
 }

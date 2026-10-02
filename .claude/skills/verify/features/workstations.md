@@ -29,5 +29,5 @@ Preconditions:
 
 ## Gotchas
 
-- `drive.ts`'s `v.shot` takes a full-page screenshot, which unrolls the fixed rail layout. Use `page.screenshot` without `fullPage` to see the sheet over the rail as a person does.
+- `v.shot(name)` takes a full-page screenshot, which unrolls the fixed rail layout. Use `v.shot(name, false)` to see the sheet over the rail as a person does.
 - The device cookie lives in the browser context. A new `open()` is a new, unregistered browser.
