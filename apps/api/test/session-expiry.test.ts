@@ -236,6 +236,32 @@ it('a Lockout Access Event is stamped at the lock instant, and one for a person 
   assert.equal(lockedOutAt.getTime(), lockedAt?.getTime());
 });
 
+it("the API's database role cannot choose, move or clear a person's lock, so it cannot choose when their sessions end", async () => {
+  const person = await api.addPerson('expiry.lock-backdate', ['Analyst']);
+  const client = await api.login(person);
+  const setLock = (lockedAt: ReturnType<typeof sql<Date | null>>) =>
+    audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Set a lock' }, (tx) =>
+      tx.updateTable('person').set({ lockedAt }).where('id', '=', person.id).execute(),
+    );
+  const before = await dbNow();
+  await setLock(sql<Date>`now() - interval '3 hours'`);
+  const { lockedAt } = await api.superuser
+    .selectFrom('person')
+    .select('lockedAt')
+    .where('id', '=', person.id)
+    .executeTakeFirstOrThrow();
+  assert.ok((lockedAt?.getTime() ?? 0) >= before.getTime(), 'the lock is stamped at the database clock, not backdated');
+
+  for (const change of [sql<Date | null>`null`, sql<Date>`now() - interval '1 hour'`])
+    await assert.rejects(
+      setLock(change),
+      (err: { code?: string; message?: string }) =>
+        err.code === '23514' && err.message === 'a lockout stands; it cannot be moved or cleared',
+    );
+  refusedWith(await client.call(routes.me), 'noSession');
+  assert.equal((await sessionOf(person)).endedAt?.getTime(), lockedAt?.getTime());
+});
+
 it("a locked person's session that lapsed before the lock ends at its own end, with its expiry Access Event", async () => {
   const person = await api.addPerson('expiry.locked', ['Analyst']);
   const client = await api.login(person);

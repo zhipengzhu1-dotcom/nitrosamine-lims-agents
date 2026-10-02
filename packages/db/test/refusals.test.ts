@@ -1760,6 +1760,7 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
     ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
     ['lims.access_event.stamp_lockout', 'session-expiry.test.ts'],
+    ['lims.person.lock_once', 'session-expiry.test.ts'],
     ['public.schema_migration.refuse_change', 'migrate.test.ts'],
     ['public.schema_migration.refuse_truncate', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_not_null', 'migrate.test.ts'],

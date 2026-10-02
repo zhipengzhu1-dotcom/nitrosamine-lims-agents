@@ -45,7 +45,7 @@ const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', re
 const SWEEP_SERVICE: AuditContext = {
   actor: 'svc:session-sweep',
   role: 'system',
-  reason: 'End lapsed sessions',
+  reason: 'End sessions past their limit or locked out',
 };
 
 const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
@@ -294,7 +294,7 @@ export async function actorFor(
         'session.endedAt',
         'session.workstationId',
         sql<boolean>`session.locked_at is not null`.as('locked'),
-        sql<boolean>`lims.session_end(session.last_seen_at, session.created_at, ${idle}, ${absolute}) > now()`.as(
+        sql<boolean>`lims.session_lapse(session.last_seen_at, session.created_at, person.locked_at, ${idle}, ${absolute}) > now()`.as(
           'live',
         ),
         sql<number>`(extract(epoch from session.last_seen_at + ${idle} - now()) * 1000)::integer`.as('idleLeftMs'),
@@ -303,7 +303,6 @@ export async function actorFor(
         ),
         'workstation.name as workstationName',
         'room.name as roomName',
-        'person.lockedAt',
         'person.id as personId',
         'person.username',
         'person.displayName',
@@ -321,7 +320,7 @@ export async function actorFor(
     await endLapsedSessions(db, limits, key);
     return refuse('noSession', SESSION_ENDED);
   };
-  if (session.lockedAt || !session.live) return lapsed();
+  if (!session.live) return lapsed();
   if (session.locked && !whileLocked) refuse('sessionLocked', lockedMessage(session.displayName));
   let { idleLeftMs, absoluteLeftMs }: { idleLeftMs: number; absoluteLeftMs: number | null } = session;
   if (!session.locked) {
@@ -567,7 +566,7 @@ export function loginRoutes(
         .select([
           'session.labId',
           'session.id',
-          sql<boolean>`person.locked_at is null and lims.session_end(last_seen_at, created_at, ${idle}, ${absolute}) > now()`.as(
+          sql<boolean>`lims.session_lapse(last_seen_at, created_at, person.locked_at, ${idle}, ${absolute}) > now()`.as(
             'live',
           ),
           sql<number>`(extract(epoch from last_seen_at + ${idle} - now()) * 1000)::integer`.as('idleLeftMs'),
