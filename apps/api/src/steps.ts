@@ -4,8 +4,8 @@ import {
   type ActorContext,
   type Meaning,
   type PersonId,
-  type Reauthentication,
   type RouteReply,
+  type SigningBody,
   refusal,
   type Step,
   type StepBody,
@@ -155,18 +155,23 @@ interface Seen {
   contentHash: string;
 }
 
+/** One signing to make inside the step's transaction, once the step's own writes are done. */
+interface Signing {
+  meaning: Meaning;
+  table: Signable;
+  testId: string;
+  seen: Seen;
+  statementVersion: number;
+  release: string;
+}
+
 /**
  * Writes the re-authentication record and signs through lims.sign in the step's transaction, so the database holds
  * the only path to a Signature: the record ties the signing to this person, session and meaning, and the function
  * refuses unless what the signer saw is still the record's latest Record Version.
  */
-async function sign(
-  q: WriteQueries,
-  ctx: ActorContext,
-  sessionId: string,
-  signing: { meaning: Meaning; table: Signable; testId: string; seen: Seen; release: string },
-) {
-  const { meaning, table, testId, seen, release } = signing;
+async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signing: Signing) {
+  const { meaning, table, testId, seen, statementVersion, release } = signing;
   const recordId =
     table === 'test'
       ? testId
@@ -175,12 +180,14 @@ async function sign(
     .insert('reauthentication', { sessionId, personId: ctx.person.id, meaning, authenticator: 'Password' })
     .returning('id')
     .executeTakeFirstOrThrow();
-  await sql`select lims.sign(${proof.id}, ${table}, ${recordId}, ${seen.id}, decode(${seen.contentHash}, 'hex'),
-                             ${meaning}, ${release})`.execute(q.company);
+  await sql`select lims.sign(${proof.id}, ${sessionId}, ${table}, ${recordId}, ${seen.id},
+                             decode(${seen.contentHash}, 'hex'), ${statementVersion}, ${meaning}, ${release})`.execute(
+    q.company,
+  );
 }
 
-/** The signer's typed credentials and the Record Version they saw, refused as recordChanged when the Test has moved on since. */
-async function seenVersion(scope: LabQueries, testId: string, signature: Reauthentication): Promise<Seen> {
+/** The row of the Record Version the signer saw, with the hash as shown; refused as recordChanged when the Test has moved on since. */
+async function seenVersion(scope: LabQueries, testId: string, signature: SigningBody): Promise<Seen> {
   const latest = await latestVersion(scope, 'test', testId);
   if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
     refuse('recordChanged', 'the Test changed since this screen loaded it; read it again before signing');
@@ -225,13 +232,20 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
       req.log.info({ step: name, testId: first.testId }, 'step replayed');
       return receiptOf(first, sessionId, requestHash);
     }
-    let signing: Parameters<typeof sign>[3] | null = null;
+    let signing: Signing | null = null;
     if (step.signs) {
       const signature = body.signature ?? refuse('malformed', `${name} needs the signer's credentials`);
       const testId = test?.id ?? refuse('malformed', `${name} signs a Test`);
       const seen = await seenVersion(scope, testId, signature);
       await reauthenticate(db, { actor, session: req.sessionKey }, signature, name, step.role, sourceAddressOf(req));
-      signing = { meaning: step.signs, table: effect.signedRecord ?? 'test', testId, seen, release };
+      signing = {
+        meaning: step.signs,
+        table: effect.signedRecord ?? 'test',
+        testId,
+        seen,
+        statementVersion: signature.statementVersion,
+        release,
+      };
     }
 
     const claim = { testId: test?.id ?? randomUUID(), state: step.to };

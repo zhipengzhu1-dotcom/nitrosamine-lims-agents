@@ -3,15 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { audited, type Json, type JsonObject } from '@lims/db';
 import { sql } from 'kysely';
-import {
-  type Reauthentication,
-  routes,
-  type StepInput,
-  type StepName,
-  stepNames,
-  stepRoute,
-  steps,
-} from '@lims/domain';
+import { routes, type StepInput, type StepName, stepNames, type SigningBody, stepRoute, steps } from '@lims/domain';
 import { LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
 import { labScope } from '../src/scope.ts';
 import { type Account, type Client, ok, refusedWith, signatureOf, startApi, TEST_RELEASE } from './harness.ts';
@@ -325,6 +317,7 @@ it('the Analyst who signed Performed cannot review, and the Reviewer who reviewe
     username: 'unused',
     password: 'unused',
     recordVersion: { version: 1, contentHash: '0'.repeat(64) },
+    statementVersion: 1,
   };
   const selfReview = await as.dana.call(stepRoute('review'), {
     commitKey: randomUUID(),
@@ -349,7 +342,7 @@ it('a signing with a wrong password is refused and changes nothing, and a signin
   const id = await submitTestTo('Assigned', wes);
   const before = await view(id);
   const seen = await signatureOf(as.wes, id, wes);
-  const enter = (signature: Reauthentication) =>
+  const enter = (signature: SigningBody) =>
     as.wes.call(stepRoute('enterResult'), { commitKey: randomUUID(), testId: id, input: result, signature });
 
   assert.equal(
@@ -380,7 +373,7 @@ it('a typed user ID that is not the session person is refused like a wrong passw
         .executeTakeFirstOrThrow()
     ).failedLogins;
   const seen = await signatureOf(client, id, signer);
-  const attempt = (signature: Reauthentication) =>
+  const attempt = (signature: SigningBody) =>
     client.call(stepRoute('enterResult'), { commitKey: randomUUID(), testId: id, input: result, signature });
 
   assert.equal(

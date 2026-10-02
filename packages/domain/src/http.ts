@@ -192,11 +192,13 @@ export type TrailEntry = Static<typeof trailEntry>;
 const trail = Type.Object({ record: recordRef, labZone: Type.String(), entries: Type.Array(trailEntry) });
 export type Trail = Static<typeof trail>;
 const reportRef = Type.Object({ id: uuid, number: Type.String() });
-/** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
 /** The signature statement in force: what a signer attests, as QA approved it, with the version a Signature records. */
 const signatureStatement = Type.Object({ version: Type.Integer({ minimum: 1 }), text: Type.String() });
 export type SignatureStatement = Static<typeof signatureStatement>;
-/** `statement` is the signature statement in force when `next` is a step that signs, and null otherwise. */
+/**
+ * `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a
+ * guessed value be confirmed. `statement` is the signature statement in force when `next` is a step that signs, and null otherwise.
+ */
 const testView = Type.Object({
   test: testRow,
   recordVersion: nullable(recordVersionRef),
@@ -298,13 +300,19 @@ const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
 /** The Record Version the signer saw, as the screen showed it: the signing is refused if the record has moved on. */
 const seenVersion = Type.Object({ version: recordVersionRef.properties.version, contentHash: sha256Hex }, closed);
-/** What a signer re-enters and attests: their user ID and password, and the Record Version they saw. */
-const reauthentication = Type.Object({ username: text, password: text, recordVersion: seenVersion }, closed);
-export type Reauthentication = Static<typeof reauthentication>;
+const typedCredentials = Type.Object({ username: text, password: text }, closed);
+/** What a signer types on the signature sheet: their user ID and their password. */
+export type TypedCredentials = Static<typeof typedCredentials>;
+/** What a signing sends: the typed credentials, the Record Version the sheet showed and the signature statement version it showed. */
+const signingBody = Type.Object(
+  { ...typedCredentials.properties, recordVersion: seenVersion, statementVersion: Type.Integer({ minimum: 1 }) },
+  closed,
+);
+export type SigningBody = Static<typeof signingBody>;
 const stepEnvelope = Type.Object({
   commitKey: uuid,
   testId: Type.Optional(uuid),
-  signature: Type.Optional(reauthentication),
+  signature: Type.Optional(signingBody),
 });
 const stepInputs = {
   submit: Type.Object({ methodId: uuid, description: text }, closed),

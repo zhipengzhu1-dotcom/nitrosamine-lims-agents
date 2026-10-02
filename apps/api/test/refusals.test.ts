@@ -37,6 +37,7 @@ const signature = {
   username: 'unused',
   password: 'unused',
   recordVersion: { version: 1, contentHash: '0'.repeat(64) },
+  statementVersion: 1,
 };
 const result = {
   analyte: 'NDMA',

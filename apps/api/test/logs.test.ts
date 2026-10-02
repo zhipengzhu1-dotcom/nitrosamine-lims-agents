@@ -76,7 +76,12 @@ it('a refusal and a request that fails validation answer with their own status, 
     commitKey: randomUUID(),
     testId,
     input: {},
-    signature: { username: 'cora.customer', password: 'x', recordVersion: { version: 1, contentHash: '0'.repeat(64) } },
+    signature: {
+      username: 'cora.customer',
+      password: 'x',
+      recordVersion: { version: 1, contentHash: '0'.repeat(64) },
+      statementVersion: 1,
+    },
   });
   assert.deepEqual(refused, {
     status: 409,

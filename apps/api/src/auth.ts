@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, verifyPassword } from '@lims/db/credentials';
-import { type ActorContext, routes, SESSION_ENDED, type SessionClock } from '@lims/domain';
+import { type ActorContext, routes, SESSION_ENDED, type SessionClock, type TypedCredentials } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
 import { openJobIncident } from './incident.ts';
@@ -117,12 +117,6 @@ export function sourceAddressOf(req: {
   return mapped && isIP(mapped) === 4 ? mapped : address;
 }
 
-/** What a signer re-enters on the signature sheet. */
-export interface TypedCredentials {
-  username: string;
-  password: string;
-}
-
 /**
  * Proves the signer before the transaction that signs: the typed user ID must be the session's person and the password
  * theirs. A failure refuses as badCredentials after writing its own committed failed re-authentication Access Event,
@@ -157,11 +151,8 @@ export async function reauthenticate(
       sessionLabId: session.labId,
       sessionId: session.id,
     };
-    const failureReason: SignInFailure = theirs
-      ? wasLocked
-        ? 'WrongPasswordOnLockedAccount'
-        : 'WrongPassword'
-      : 'WrongUserId';
+    let failureReason: SignInFailure = 'WrongUserId';
+    if (theirs) failureReason = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
     await record(tx, { kind: 'ReauthenticationFailed', failureReason, ...event });
     if (lockedNow) await record(tx, { kind: 'Lockout', ...event });
   });

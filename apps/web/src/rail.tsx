@@ -10,6 +10,7 @@ import {
   stepRoute,
   steps,
   type TestState,
+  type TypedCredentials,
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -56,14 +57,9 @@ export const demoSigning =
   'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
 
 /** What the Test page knows that a signing needs: the Record Version it shows and the signature statement in force. */
-export interface Signing {
+export interface SigningView {
   recordVersion: RecordVersionRef;
   statement: SignatureStatement;
-}
-/** What a signer types on the sheet. */
-export interface TypedCredentials {
-  username: string;
-  password: string;
 }
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -88,7 +84,7 @@ export interface RailAction {
   context: string;
   fields: readonly Field[];
   /** `role` is the registry's role for the step, which the server has already found the person to hold here. */
-  signs: ({ meaning: SignedMeaning; what: string[]; role: Role } & Signing) | null;
+  signs: ({ meaning: SignedMeaning; what: string[]; role: Role } & SigningView) | null;
   run: (input: Record<string, string>, credentials: TypedCredentials | null) => Promise<string>;
 }
 
@@ -97,7 +93,7 @@ export function stepAction(
   testId: string | null,
   what: string[],
   onDone: () => Promise<void>,
-  signing: Signing | null = null,
+  signing: SigningView | null = null,
 ): RailAction {
   const step = steps[name];
   const ui = stepUi[name];
@@ -114,12 +110,18 @@ export function stepAction(
       const press = `commitKey:${name}:${testId ?? 'new'}`;
       const commitKey = sessionStorage.getItem(press) ?? crypto.randomUUID();
       sessionStorage.setItem(press, commitKey);
-      const { version, contentHash } = signing?.recordVersion ?? { version: 0, contentHash: '' };
       await api(stepRoute(name), {
         commitKey,
         ...(testId && { testId }),
         input,
-        ...(credentials && { signature: { ...credentials, recordVersion: { version, contentHash } } }),
+        ...(credentials &&
+          signing && {
+            signature: {
+              ...credentials,
+              recordVersion: { version: signing.recordVersion.version, contentHash: signing.recordVersion.contentHash },
+              statementVersion: signing.statement.version,
+            },
+          }),
       }).catch((e: unknown) => {
         if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(press);
         throw e;

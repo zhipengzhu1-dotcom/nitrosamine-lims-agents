@@ -166,6 +166,11 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(review).toBeFocused();
 
   await review.click();
+  await expect(sheet.locator('.meaning'), 'the Reviewed sheet shows its meaning and statement').toContainText(
+    /Reviewed.*Signature statement version 1/s,
+  );
+  await expect(sheet.getByText(/^Rui Tanaka may sign Reviewed as Reviewer in R&D Laboratory/)).toBeVisible();
+  await expect(sheet.locator('code.hash')).toHaveText(/^[0-9a-f]{64}$/);
   const height = (await box(sheet)).height;
   await sign(page, 'Reviewed', 'not-the-password');
   await railSays(page, 'Refused: the credentials are not valid. Nothing has been signed.');

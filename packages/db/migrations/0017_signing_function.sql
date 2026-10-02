@@ -25,7 +25,8 @@ create table lims.reauthentication (
   authenticator text         not null check (authenticator in ('Password')),
   at            timestamptz  not null default clock_timestamp(),
   primary key (lab_id, id),
-  foreign key (lab_id, session_id, person_id) references lims.session (lab_id, id, person_id)
+  foreign key (lab_id, session_id, person_id) references lims.session (lab_id, id, person_id),
+  constraint reauthentication_facts_key unique (lab_id, id, session_id, person_id, meaning, authenticator)
 );
 
 do $$
@@ -44,8 +45,9 @@ end $$;
 
 -- What a Signature records besides its signer, meaning and Record Version (#13, #85 Signing): the printed name,
 -- username and role as they were at signing, the hash and canonical form of the signed content, the statement shown,
--- the authenticator, the session and the app release. The hash and form are copied from the Record Version and the
--- statement hash from the statement, and each copy is a foreign key to the row it copies, so neither can differ.
+-- the authenticator, the session and the app release. The hash and form are copied from the Record Version, the
+-- statement hash from the statement, and the session, meaning and authenticator from the re-authentication record,
+-- and each copy is a foreign key to the row it copies, so none can differ.
 alter table lims.record_version add unique (lab_id, id, content_hash, canonical_form);
 alter table lims.signature
   add column printed_name        text,
@@ -55,7 +57,7 @@ alter table lims.signature
   add column canonical_form      integer,
   add column statement_version   integer,
   add column statement_hash      bytea,
-  add column authenticator       text check (authenticator in ('Password')),
+  add column authenticator       text,
   add column session_id          uuid,
   add column app_release         text check (app_release <> ''),
   add column reauthentication_id uuid unique,
@@ -63,8 +65,10 @@ alter table lims.signature
   add constraint signature_record_version_fkey foreign key (lab_id, record_version_id, content_hash, canonical_form)
     references lims.record_version (lab_id, id, content_hash, canonical_form),
   add foreign key (statement_version, statement_hash) references lims.signature_statement (version, statement_hash),
-  add foreign key (lab_id, reauthentication_id) references lims.reauthentication,
-  add foreign key (lab_id, session_id, person_id) references lims.session (lab_id, id, person_id);
+  add foreign key (lab_id, session_id, person_id) references lims.session (lab_id, id, person_id),
+  add constraint signature_reauthentication_fkey
+    foreign key (lab_id, reauthentication_id, session_id, person_id, meaning, authenticator)
+    references lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator);
 
 select set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 'system', true),
        set_config('lims.reason', 'Seed signature statement 1 and record what each thin-slice Signature already held', true);
@@ -125,16 +129,19 @@ create trigger sign_only before insert on lims.signature
   for each row execute function lims.refuse_unsigned_insert();
 
 -- The one way a Signature is written (#45 gaps 3 and 9; #85 Signing). The signer is the transaction's actor, a person
--- holding the transaction's role in the Lab, not locked, with a credential of their own, with the live session of a re-authentication record that
--- this transaction wrote for that person and meaning and that no Signature holds. The record signed is the latest
+-- holding the transaction's role in the Lab, not locked, with a credential of their own, signing on the request's
+-- session (p_session_id) against a re-authentication record that this transaction wrote for that person, session and
+-- meaning and that no Signature holds. The statement recorded is the one the signer saw (p_statement_version), which
+-- must still be the one in force. The record signed is the latest
 -- Record Version of (p_record_table, p_record_id). The signer saw p_seen_version with p_seen_hash: that row must hold
 -- that hash, no other transaction may have versioned the seen record after it, and the signed record is the seen one
 -- or one this transaction created, such as the Test Report a release issues. Rows this transaction wrote are told by
 -- age(xmin) = 0, which holds for rows written at the transaction's top level, as the API writes them. The hash and
 -- form written are the stored Record Version's, never a parameter. A session past its limit that the sweep has not
 -- ended yet still counts as live here; actorFor refused the request before this point in that case.
-create function lims.sign(p_reauthentication_id uuid, p_record_table text, p_record_id uuid,
-                          p_seen_version uuid, p_seen_hash bytea, p_meaning lims.meaning, p_app_release text)
+create function lims.sign(p_reauthentication_id uuid, p_session_id uuid, p_record_table text, p_record_id uuid,
+                          p_seen_version uuid, p_seen_hash bytea, p_statement_version integer, p_meaning lims.meaning,
+                          p_app_release text)
 returns uuid
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -171,6 +178,9 @@ begin
   end if;
   if proof.person_id <> signer.id then
     raise exception 'the re-authentication record is another person''s' using errcode = 'LA010';
+  end if;
+  if proof.session_id <> p_session_id then
+    raise exception 'the re-authentication record was given on another session' using errcode = 'LA010';
   end if;
   if proof.meaning <> p_meaning then
     raise exception 'the re-authentication record was given to sign %, not %', proof.meaning, p_meaning using errcode = 'LA010';
@@ -213,6 +223,10 @@ begin
   end if;
 
   select * into shown from signature_statement order by version desc limit 1;
+  if shown.version <> p_statement_version then
+    raise exception 'the signature statement changed to version % after the signer saw version %; it must be read again before signing',
+      shown.version, p_statement_version using errcode = 'LA010';
+  end if;
 
   perform set_this_transaction('lims.signing', proof.id::text);
   insert into signature (lab_id, id, person_id, printed_name, username, role, meaning, record_version_id, content_hash,
@@ -225,8 +239,8 @@ begin
   return signature_id;
 end $$;
 
-revoke execute on function lims.sign(uuid, text, uuid, uuid, bytea, lims.meaning, text) from public;
-grant execute on function lims.sign(uuid, text, uuid, uuid, bytea, lims.meaning, text) to lims_app;
+revoke execute on function lims.sign(uuid, uuid, text, uuid, uuid, bytea, integer, lims.meaning, text) from public;
+grant execute on function lims.sign(uuid, uuid, text, uuid, uuid, bytea, integer, lims.meaning, text) to lims_app;
 
 -- A failed re-authentication at signing is an Access Event of its own kind, counted toward the lockout and the bursts
 -- like a failed sign-in (#85 Access Events). WrongUserId is a typed user ID that is not the session's person.

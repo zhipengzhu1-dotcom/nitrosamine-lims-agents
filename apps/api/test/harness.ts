@@ -7,7 +7,6 @@ import { migrate } from '@lims/db/migrate';
 import { type SeededAccount, seed } from '@lims/db/seed';
 import {
   pathOf,
-  type Reauthentication,
   type RefusalKind,
   type Reply,
   type Route,
@@ -15,6 +14,7 @@ import {
   type RouteReply,
   readReply,
   routes,
+  type SigningBody,
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import { type AppOptions, buildApp } from '../src/app.ts';
@@ -92,11 +92,16 @@ export function ok<R extends Route>(answer: Answer<R>): RouteReply<R> {
     : assert.fail(`expected a reply, got ${answer.status} ${answer.body.kind}: ${answer.body.message}`);
 }
 
-/** What a signer sends from the signature sheet: their typed user ID and password, and the Record Version the Test page showed them. */
-export async function signatureOf(client: Client, testId: string, account: Account): Promise<Reauthentication> {
-  const { recordVersion } = ok(await client.call(routes.test, { id: testId }));
+/** What a signer sends from the signature sheet: their typed user ID and password, and the Record Version and statement the Test page showed them. */
+export async function signatureOf(client: Client, testId: string, account: Account): Promise<SigningBody> {
+  const { recordVersion, statement } = ok(await client.call(routes.test, { id: testId }));
   const { version, contentHash } = recordVersion ?? assert.fail('a signer sees the Record Version of the Test');
-  return { username: account.username, password: account.password, recordVersion: { version, contentHash } };
+  return {
+    username: account.username,
+    password: account.password,
+    recordVersion: { version, contentHash },
+    statementVersion: statement?.version ?? assert.fail('a signer sees the signature statement'),
+  };
 }
 
 export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKind): string {

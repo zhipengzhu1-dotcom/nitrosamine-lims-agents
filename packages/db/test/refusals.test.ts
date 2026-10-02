@@ -36,6 +36,7 @@ const id = {
   reauthentication: randomUUID(),
   secondReauthentication: randomUUID(),
   probeReauthentication: randomUUID(),
+  secondSession: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -102,6 +103,7 @@ const fixture: [string, Row][] = [
   ],
   ['lims.session', { lab_id: id.lab, id: id.session, person_id: id.person, token_hash: token }],
   ['lims.session', { lab_id: id.lab, id: id.otherSession, person_id: id.otherPerson, token_hash: Buffer.alloc(32, 5) }],
+  ['lims.session', { lab_id: id.lab, id: id.secondSession, person_id: id.person, token_hash: Buffer.alloc(32, 6) }],
   [
     'lims.reauthentication',
     {
@@ -827,7 +829,25 @@ describe('the database refuses a reference to a row that does not exist', () => 
       name: 'a Signature against a re-authentication record that does not exist is refused',
       table: 'lims.signature',
       change: { reauthentication_id: missing },
-      constraint: 'signature_lab_id_reauthentication_id_fkey',
+      constraint: 'signature_reauthentication_fkey',
+    },
+    {
+      name: "a Signature with a meaning other than its re-authentication record's is refused",
+      table: 'lims.signature',
+      change: { meaning: 'Released' },
+      constraint: 'signature_reauthentication_fkey',
+    },
+    {
+      name: "a Signature by an authenticator other than its re-authentication record's is refused",
+      table: 'lims.signature',
+      change: { authenticator: 'Totp' },
+      constraint: 'signature_reauthentication_fkey',
+    },
+    {
+      name: "a Signature on a live session of the signer other than its re-authentication record's is refused",
+      table: 'lims.signature',
+      change: { session_id: id.secondSession },
+      constraint: 'signature_reauthentication_fkey',
     },
     {
       name: 'a Signature on a session that does not exist is refused',
@@ -960,13 +980,6 @@ describe('the database refuses a value outside its allowed set', () => {
       'authenticator',
       ['Totp', 'password', ''],
       'reauthentication_authenticator_check',
-    ),
-    ...each(
-      'a Signature by an authenticator the LIMS does not have is refused',
-      'lims.signature',
-      'authenticator',
-      ['Totp', 'password', ''],
-      'signature_authenticator_check',
     ),
     {
       name: 'a Signature with an empty app release is refused',
@@ -1523,22 +1536,27 @@ describe('a Signature is written only by the signing function, which refuses eve
     `(select content_hash from lims.record_version where lab_id = '${id.lab}' and record_id = '${recordId}' and version = ${version})`;
   const sign = ({
     reauthentication = id.probeReauthentication,
+    session = id.session,
     table = 'test',
     recordId = id.test,
     seen = versionOf(id.test, 2),
     hash = hashOf(id.test, 2),
+    statementVersion = 1,
     meaning = 'Performed',
     release = 'test',
   }: {
     reauthentication?: string;
+    session?: string;
     table?: string;
     recordId?: string;
     seen?: string;
     hash?: string;
+    statementVersion?: number;
     meaning?: string;
     release?: string;
   } = {}) =>
-    `select lims.sign('${reauthentication}', '${table}', '${recordId}', ${seen}, ${hash}, '${meaning}', '${release}')`;
+    `select lims.sign('${reauthentication}', '${session}', '${table}', '${recordId}', ${seen}, ${hash},
+                      ${statementVersion}, '${meaning}', '${release}')`;
 
   /** Runs the statements in one transaction and returns the first refusal, or null when all are accepted; always rolls back. */
   async function attempt(...statements: string[]): Promise<pg.DatabaseError | null> {
@@ -1676,6 +1694,22 @@ describe('a Signature is written only by the signing function, which refuses eve
       message: "the re-authentication record is another person's",
     },
     {
+      name: "signing on another live session of the signer than the re-authentication record's is refused",
+      statements: [asPerson(), reauthenticate(), sign({ session: id.secondSession })],
+      message: 'the re-authentication record was given on another session',
+    },
+    {
+      name: 'signing on sight of a signature statement that is no longer in force is refused',
+      statements: [
+        asPerson(),
+        `insert into lims.signature_statement (version, statement) values (2, convert_to('A newer statement (fictional).', 'UTF8'))`,
+        reauthenticate(),
+        sign(),
+      ],
+      message:
+        'the signature statement changed to version 2 after the signer saw version 1; it must be read again before signing',
+    },
+    {
       name: 'signing with a re-authentication record given for another meaning is refused',
       statements: [asPerson(), reauthenticate('Reviewed'), sign()],
       message: 'the re-authentication record was given to sign Reviewed, not Performed',
@@ -1759,6 +1793,7 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
       'lims.signature_statement.signature_statement_statement_hash_not_null',
       'unreachable: generated from statement, which is not null',
     ],
+    ['lims.reauthentication.reauthentication_facts_key', 'unreachable: (lab_id, id) is already the key'],
     ['lims.test.version_record', 'record-version.test.ts'],
     ['lims.result.version_record', 'record-version.test.ts'],
     ['lims.test_report.version_record', 'record-version.test.ts'],
