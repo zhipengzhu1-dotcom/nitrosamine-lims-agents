@@ -1,6 +1,7 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { expect, type Page, test } from './walk.ts';
-import { DEMO_PASSWORD } from '../playwright.config.ts';
+import { DEMO_PASSWORD, E2E_DATABASE } from '../playwright.config.ts';
 
 const sample = (which: string) =>
   `Metformin HCl tablets, ${which} (fictional, ${test.info().project.name} ${randomUUID()})`;
@@ -78,7 +79,7 @@ test('the same entries typed in another order after a dropped Submit and a reloa
   expect(new Set(commitKeys).size).toBe(1);
 });
 
-test('the same entries after a dropped Submit, a sign-out and a sign-in are told the press was already saved', async ({
+test('the same entries pressed twice after a dropped Submit, a sign-out and a sign-in are told twice the press was already saved', async ({
   page,
 }) => {
   const dropped = sample('dropped reply');
@@ -88,12 +89,34 @@ test('the same entries after a dropped Submit, a sign-out and a sign-in are told
   await signInAsCora(page);
 
   await fillSubmitSheet(page, dropped, 'method first');
-  await page.getByRole('button', { name: 'Submit' }).click();
-  await expect(page.getByRole('status')).toContainText(
-    'this press was already saved before the latest sign-in; reload to see what was saved',
-  );
-  expect(commitKeys, 'the press is resent with its Commit Key').toHaveLength(2);
+  const submit = page.getByRole('button', { name: 'Submit' });
+  const press = async () => {
+    const answered = page.waitForResponse('**/api/steps/submit');
+    await submit.click();
+    expect((await answered).status()).toBe(422);
+    await expect(submit, 'the rail has shown the answer').toHaveAttribute('aria-busy', 'false');
+    return (await page.getByRole('status').textContent()) ?? '';
+  };
+  const first = await press();
+  expect(first).toContain('this press was already saved before the latest sign-in; reload to see what was saved');
+  expect(await press(), 'the second press is refused with the same message').toBe(first);
+  expect(commitKeys, 'both presses resend the Commit Key of the saved press').toHaveLength(3);
   expect(new Set(commitKeys).size).toBe(1);
+  expect(submissionsInTheAuditTrail(dropped), 'the Audit Trail holds one Submission for the entries').toBe(1);
   await page.reload();
   await expect(page.getByRole('row', { name: dropped }), 'the Submission is saved once').toHaveCount(1);
 });
+
+function submissionsInTheAuditTrail(description: string) {
+  const count = execFileSync(
+    '../../scripts/pg.sh',
+    ['psql', '-qtA', '-v', 'ON_ERROR_STOP=1', '-d', E2E_DATABASE, '-v', `description=${description}`],
+    {
+      input: `select count(*) from lims.audit_entry
+               where table_name = 'submission' and op = 'INSERT'
+                 and new_row ->> 'id' in (select submission_id::text from lims.sample where description = :'description');`,
+      encoding: 'utf8',
+    },
+  );
+  return Number(count.trim());
+}

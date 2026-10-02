@@ -164,7 +164,8 @@ export function stepAction(
             },
           }),
       }).catch(async (e: unknown) => {
-        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(slot);
+        // A keyReused refusal means the LIMS holds this key's press: a fresh key would record the press a second time.
+        if (e instanceof Refused && e.kind !== 'failure' && e.kind !== 'keyReused') sessionStorage.removeItem(slot);
         // The record or the statement moved on: the page reads it again, so the next sheet shows what is current.
         if (e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) await onDone();
         throw e;
