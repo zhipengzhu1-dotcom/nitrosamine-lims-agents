@@ -165,18 +165,24 @@ for (const [limit, kind, activeFor, thenIdleFor] of [
     assert.deepEqual(await expiriesOf(person), [event]);
   });
 
-it('a request racing the sweep for the same lapsed session leaves one expiry Access Event', async () => {
-  const people = await Promise.all(Array.from({ length: 5 }, (_, i) => api.addPerson(`expiry.race-${i}`, ['Analyst'])));
-  const clients = await Promise.all(people.map((person) => api.login(person)));
-  for (const person of people) await api.advanceClock(person, idleMs + MINUTE_MS);
+it('a request and the sweep that both reach the same lapsed session leave one expiry Access Event', async () => {
+  const person = await api.addPerson('expiry.race', ['Analyst']);
+  const client = await api.login(person);
+  await api.advanceClock(person, idleMs + MINUTE_MS);
 
-  const [answers] = await Promise.all([Promise.all(clients.map((client) => client.call(routes.me))), sweep()]);
-  for (const answer of answers) refusedWith(answer, 'noSession');
-  for (const person of people)
-    assert.deepEqual(
-      (await expiriesOf(person)).map((e) => e.kind),
-      ['IdleExpiry'],
-    );
+  const { answers } = await api.superuser.transaction().execute(async (tx) => {
+    await sql`select from lims.audit_chain where chain = 'company' for update`.execute(tx);
+    const answers = Promise.all([client.call(routes.me), sweep()]);
+    await api.untilWaitingOnLocks(2);
+    // Wrapped, so the transaction does not await answers that wait on its own lock.
+    return { answers };
+  });
+  const [answer] = await answers;
+  refusedWith(answer, 'noSession');
+  assert.deepEqual(
+    (await expiriesOf(person)).map((e) => e.kind),
+    ['IdleExpiry'],
+  );
 });
 
 it("the countdown's check on a lapsed session ends it with its expiry Access Event", async () => {
