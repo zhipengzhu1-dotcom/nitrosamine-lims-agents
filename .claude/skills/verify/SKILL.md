@@ -72,7 +72,8 @@ Stable handles, all from the shipped UI (`apps/web/src`):
 - The step form fields are `Method`, `Sample description`, `Analyst`, `Analyte`, `Result as written`, `Unit`, `Injection sequence`, `Notebook reference` and `Performed on`. Use `{ exact: true }` for these labels.
 - The signature sheet has a field matching the label `/Password/` and the button `Sign as Performed|Reviewed|Released`.
 - When the server accepts a step, the status line reads `... The Test is now <State in words>.` When it refuses, the line reads `Refused: <message>.` and adds ` Nothing has been signed.` for a signing step.
-- Test Report: the link `/^RD-R-\d{4}-\d{6}$/` on a Reported Test, the heading `Test Report RD-R-YYYY-00000n`, and the QA-only button `Verify Audit Trail`.
+- Test Report: the link `/^RD-R-\d{4}-\d{6}$/` on a Reported Test, the heading `Test Report RD-R-YYYY-00000n`.
+- Audit Trail panel on a Test page: the region `Audit Trail`, its `listitem`s (one per entry, text starting with the chain and `#<seq>`), the field `Search the trail`, the select `Order`, each entry's `Raw entry <seq>` button and `details.long` values, and the QA-only button `Verify chain` whose answer lands in `.verdict`.
 
 Twenty wrong passwords in a row lock an account for the life of the scratch database. Lock only `ada.admin`, and relaunch to unlock it. Demo accounts, all with the password `verify-demo-password`: `cora.customer`, `samir.custodian`, `lena.manager`, `ana.analyst` (trained on the Method), `theo.untrained` (an Analyst with no Training Record), `rui.reviewer`, `quinn.qa` and `ada.admin`.
 
