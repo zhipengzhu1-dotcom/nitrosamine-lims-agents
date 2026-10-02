@@ -90,7 +90,7 @@ test('the same entries after a dropped Submit, a sign-out and a sign-in are told
   await fillSubmitSheet(page, dropped, 'method first');
   await page.getByRole('button', { name: 'Submit' }).click();
   await expect(page.getByRole('status')).toContainText(
-    'this press was already saved before the latest sign-in; reload to see what was saved',
+    'This press was already saved before the latest sign-in. Reload to see what was saved.',
   );
   expect(commitKeys, 'the press is resent with its Commit Key').toHaveLength(2);
   expect(new Set(commitKeys).size).toBe(1);

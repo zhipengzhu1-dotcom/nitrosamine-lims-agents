@@ -13,7 +13,7 @@ import {
   type TrailEntry,
 } from '@lims/domain';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
-import { api, Refused, useApi, useFresh } from './api.ts';
+import { api, failureText, Refused, useApi, useFresh } from './api.ts';
 import { Shell, Status, words } from './rail.tsx';
 import { time, When, whenText } from './time.tsx';
 
@@ -148,7 +148,7 @@ function VerifyChain() {
     try {
       setAnswer({ found: await api(routes.verifyAuditTrail) });
     } catch (error) {
-      setAnswer({ failed: error instanceof Error ? error.message : 'the LIMS did not answer' });
+      setAnswer({ failed: failureText(error) });
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -297,8 +297,8 @@ export function AuditExportPage({ me }: { me: ActorContext }) {
     } catch (error) {
       setRefusal(
         error instanceof Refused && error.kind !== 'failure'
-          ? `Refused: ${error.message}. No export was generated.`
-          : `Not finished: ${error instanceof Error ? error.message : 'the LIMS did not answer'}. Generate again to see what was recorded.`,
+          ? `Refused: ${error.message} No export was generated.`
+          : `Not finished: ${error instanceof Refused ? error.message : 'The LIMS did not answer.'} Generate again to see what was recorded.`,
       );
     } finally {
       inFlight.current = false;

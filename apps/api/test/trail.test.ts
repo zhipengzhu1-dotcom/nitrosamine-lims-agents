@@ -347,7 +347,7 @@ it("QA's Verify chain on an untouched chain replies Intact, verified through ent
   ]);
   assert.equal(
     refusedWith(await as.rui.call(routes.verifyAuditTrail), 'role'),
-    'verifying the Audit Trail is a QA action',
+    'Verifying the Audit Trail is a QA action.',
   );
   refusedWith(await as.lena.call(routes.verifyAuditTrail), 'role');
 });
@@ -357,7 +357,7 @@ it('a Customer User asking for any trail is refused', async () => {
   ok(await as.cora.call(routes.test, { id }));
   assert.equal(
     refusedWith(await as.cora.call(routes.testTrail, { id }), 'role'),
-    'the Audit Trail is not shown to a Customer User',
+    'The Audit Trail is not shown to a Customer User.',
   );
   refusedWith(await as.cora.call(routes.recordTrail, { table: 'test', id }), 'role');
   refusedWith(await as.cora.call(routes.recordTrail, { table: 'method', id: api.methodId }), 'role');

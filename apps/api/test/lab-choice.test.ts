@@ -72,7 +72,7 @@ it('a sign-in that names no Lab is refused as labNotChosen after the right passw
   const multi = await inBothLabs('choice.none');
   const single = await api.addPerson('choice.single', ['Analyst']);
 
-  assert.equal(refusedWith(await signIn(multi), 'labNotChosen'), 'choose the Lab to work in');
+  assert.equal(refusedWith(await signIn(multi), 'labNotChosen'), 'Choose the Lab to work in.');
   refusedWith(await signIn(single), 'labNotChosen');
   refusedWith(
     await new Client(api.base).call(routes.login, { username: multi.username, password: 'not-the-password' }),
