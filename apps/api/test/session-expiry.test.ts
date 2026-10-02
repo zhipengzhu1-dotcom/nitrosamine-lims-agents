@@ -230,18 +230,17 @@ it('a sweep that fails opens a System Incident, and the next sweep records the e
       .select(['step', 'sqlstate', 'requestedBy'])
       .where('step', '=', 'expirySweep')
       .execute();
-  const sweepAs = (grant: 'grant' | 'revoke') =>
-    sql`${sql.raw(grant)} execute on function lims.end_expired_sessions(interval, interval) ${sql.raw(grant === 'grant' ? 'to' : 'from')} lims_app`.execute(
-      api.superuser,
-    );
-
-  await sweepAs('revoke');
+  await sql`revoke execute on function lims.end_expired_sessions(interval, interval) from lims_app`.execute(
+    api.superuser,
+  );
   try {
     const sweeping = await api.startAnotherApi({ sweepEveryMs: 20 });
     for (let wait = 0; wait < 250 && (await incidents()).length === 0; wait++) await sleep(20);
     await sweeping.app.close();
   } finally {
-    await sweepAs('grant');
+    await sql`grant execute on function lims.end_expired_sessions(interval, interval) to lims_app`.execute(
+      api.superuser,
+    );
   }
 
   const [incident] = await incidents();

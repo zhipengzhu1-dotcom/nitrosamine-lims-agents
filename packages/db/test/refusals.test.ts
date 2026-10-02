@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { after, before, describe, it } from 'node:test';
 import pg from 'pg';
-import { checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
+import { checkoutDatabase, databaseUrl, dbServer } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 
 const DATABASE = checkoutDatabase('lims_refusals_test');
 const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
@@ -489,7 +489,7 @@ before(async () => {
   const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   try {
-    await admin.query(`drop database if exists ${DATABASE} with (force)`);
+    await admin.query(`drop database if exists ${pg.escapeIdentifier(DATABASE)} with (force)`);
   } finally {
     await admin.end();
   }
