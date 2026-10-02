@@ -19,11 +19,6 @@ async function switchUser(page: Page, username: string, name: string) {
   await expect(page.locator('.rail')).toContainText(name);
 }
 
-async function signOut(page: Page) {
-  await signOutFromRail(page);
-  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-}
-
 const railSays = (page: Page, text: string | RegExp) => expect(page.getByRole('status')).toContainText(text);
 
 /**
@@ -161,19 +156,19 @@ test('on a phone a closing signature sheet leaves the accessibility tree, and th
   await page.getByLabel('Sample description').fill(description);
   await page.getByRole('button', { name: 'Submit' }).click();
   await railSays(page, 'now Requested');
-  await signOut(page);
+  await signOutFromRail(page);
   await signIn(page, 'samir.custodian');
   await openTheTest();
   await page.getByRole('button', { name: 'Receive' }).click();
   await railSays(page, 'now Ready');
-  await signOut(page);
+  await signOutFromRail(page);
   await signIn(page, 'lena.manager');
   await openTheTest();
   await page.getByRole('button', { name: 'Assign' }).click();
   await page.getByLabel('Analyst').selectOption({ label: 'Ana Ferreira' });
   await page.getByRole('button', { name: 'Assign' }).click();
   await railSays(page, 'now Assigned');
-  await signOut(page);
+  await signOutFromRail(page);
   await signIn(page, 'ana.analyst');
   await openTheTest();
 

@@ -1,8 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, openSessionBlock, type Page, signOutFromRail, submittedTest, test } from './walk.ts';
+import {
+  expect,
+  type Locator,
+  openSessionBlock,
+  PHONE,
+  type Page,
+  signOutFromRail,
+  submittedTest,
+  test,
+} from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
-const PHONE = { width: 390, height: 844 };
 const sidewaysScroll = (box: Locator) => box.evaluate((e) => e.scrollWidth - e.clientWidth);
 const height = (box: Locator) => box.evaluate((e: HTMLElement) => e.offsetHeight);
 /** The most of an upright phone's height the Bench Rail may take with no sheet open and a context line of up to two lines, as #220 decided. */
@@ -122,7 +130,13 @@ test('with no sheet open, the Bench Rail takes at most 22% of the phone and its 
   await signIn(page, 'rui.reviewer');
   await page.getByRole('row', { name: description }).getByRole('link').click();
   const review = page.getByRole('button', { name: 'Review', exact: true });
-  await expect(page.locator('.rail__context'), 'the context line names the Test and wraps').toContainText('Test of');
+  const context = page.locator('.rail__context');
+  await expect(context, 'the context line names the Test').toContainText('Test of');
+  const [lineBox, lineHeight] = await context.evaluate((e: HTMLElement) => [
+    e.offsetHeight,
+    Number(getComputedStyle(e.querySelector('p') ?? e).lineHeight.replace('px', '')),
+  ]);
+  expect(lineBox, 'the context line wraps to two lines').toBeGreaterThan(lineHeight * 1.5);
   await laidOutAtLeast(review, 56);
   await railWithinShare(page, "the Reviewer's Test, with a two-line context line and the Review commit button");
 });
@@ -131,6 +145,7 @@ test('the phone rail keeps Switch user and Lock in one tap and Sign out in the s
   await signInAsCustomer(page);
   const session = page.getByRole('button', { name: /^Cora .* Session ends in/ });
   const signOut = page.getByRole('button', { name: 'Sign out' });
+  await laidOutAtLeast(session, 44);
   for (const name of ['Switch user', 'Lock']) await laidOutAtLeast(page.getByRole('button', { name, exact: true }), 44);
   await expect(session).toHaveAttribute('aria-expanded', 'false');
   await expect(signOut, 'Sign out folds into the closed session block').toBeHidden();

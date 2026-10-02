@@ -18,11 +18,6 @@ async function signIn(page: Page, username: string) {
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
 }
 
-async function signOut(page: Page) {
-  await signOutFromRail(page);
-  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-}
-
 const signatureRow = (page: Page, meaning: string) =>
   page.locator('tr', { has: page.locator('td[data-label="Meaning"] .sig', { hasText: meaning }) });
 
@@ -212,13 +207,13 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await page.getByRole('button', { name: 'Submit' }).click();
   await railSays(page, 'now Requested');
   await expect(page.getByRole('row', { name: description })).toContainText('Requested');
-  await signOut(page);
+  await signOutFromRail(page);
 
   await signIn(page, 'samir.custodian');
   await openTheTest();
   await page.getByRole('button', { name: 'Receive' }).click();
   await railSays(page, 'now Ready');
-  await signOut(page);
+  await signOutFromRail(page);
 
   await signIn(page, 'lena.manager');
   await shot(page, 'worklist');
@@ -230,7 +225,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await atLeast(assign, 44, 56);
   await assign.click();
   await railSays(page, 'now Assigned');
-  await signOut(page);
+  await signOutFromRail(page);
 
   await signIn(page, 'ana.analyst');
   await openTheTest();
@@ -285,7 +280,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   ).toHaveCount(0);
   heldPerformed.resolve();
   await railSays(page, 'Performed Signature recorded in the Audit Trail. The Test is now Submitted For Review.');
-  await signOut(page);
+  await signOutFromRail(page);
 
   await signIn(page, 'rui.reviewer');
   await openTheTest();
@@ -359,7 +354,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   held.resolve();
   await railSays(page, 'now Reviewed');
   await expect(page.getByRole('status'), 'with no step left, focus goes to the status line').toBeFocused();
-  await signOut(page);
+  await signOutFromRail(page);
 
   await signIn(page, 'cora.customer');
   await openTheTest();
@@ -367,7 +362,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(page.getByText('The Result is not released yet.')).toBeVisible();
   await expect(page.getByText('The Signatures are not released yet.')).toBeVisible();
   await expect(page.getByText(/No Result entered|No Signatures yet/), 'never that none exists').toHaveCount(0);
-  await signOut(page);
+  await signOutFromRail(page);
 
   await signIn(page, 'quinn.qa');
   await openTheTest();

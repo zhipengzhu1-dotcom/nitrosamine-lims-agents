@@ -11,11 +11,6 @@ async function signIn(page: Page, username: string, lab = /R&D Laboratory/) {
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
 }
 
-async function signOut(page: Page) {
-  await signOutFromRail(page);
-  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-}
-
 async function atLeast(target: Locator, width: number, height: number) {
   const b = await target.boundingBox();
   if (!b) throw new Error('the element is not on screen');
@@ -153,7 +148,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     .click();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Method RD-MTH-0001 v1');
   await expect(page.getByRole('region', { name: 'Audit Trail' }).getByRole('listitem')).toHaveCount(1);
-  await signOut(page);
+  await signOutFromRail(page);
 
   await signIn(page, 'quinn.qa');
   await page.goto(`/#/tests/${testId}`);
@@ -171,7 +166,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     await expect(status, 'intact reads in the ok colour').toHaveCSS('color', INTACT_COLOUR);
     await expect(status.locator('path'), 'and with the tick glyph').toHaveAttribute('d', TICK);
   }
-  await signOut(page);
+  await signOutFromRail(page);
 
   await signIn(page, 'cora.customer');
   await page.goto(`/#/tests/${testId}`);
@@ -222,7 +217,7 @@ test('QA verifying a broken chain sees Broken beside that chain, in its own glyp
   await expect(intact).toHaveCSS('color', INTACT_COLOUR);
   await expect(broken.locator('path')).toHaveAttribute('d', 'M4 4l8 8M12 4l-8 8');
   await expect(intact.locator('path')).toHaveAttribute('d', TICK);
-  await signOut(page);
+  await signOutFromRail(page);
 });
 
 /** Writes one more entry on the QC Lab's chain and alters it, so this run has a break of its own; returns its entry. */
@@ -284,5 +279,5 @@ test('QA verifying a chain whose break has a Closed System Incident still sees B
   await verify.click();
   await expect(own).toHaveText(`entry ${entry} fails to verify, recorded as System Incident ${incident} Closed`);
   await expect(page.locator('.chains > li').first().locator('.status').first()).toHaveText('Broken');
-  await signOut(page);
+  await signOutFromRail(page);
 });
