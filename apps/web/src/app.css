@@ -931,6 +931,9 @@ select {
   padding: 0;
   border: 0;
 }
+.rail__toggle {
+  display: none;
+}
 .record-number {
   white-space: nowrap;
 }
@@ -1031,11 +1034,71 @@ a.btn {
 }
 
 @media (max-width: 640px) {
+  .rail__toggle {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: 400 14px / 1.3 var(--font);
+    text-align: left;
+  }
+  .rail__toggle b {
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 16px;
+    font-weight: 800;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rail__toggle b::after {
+    content: "";
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    margin: 0 0 3px 8px;
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    transform: rotate(-135deg);
+  }
+  .rail[data-session-open] .rail__toggle b::after {
+    margin-bottom: 0;
+    transform: rotate(45deg);
+  }
+  .rail__toggle .who__clock {
+    font-size: 13px;
+    color: var(--on-bench-2);
+    white-space: nowrap;
+  }
+  .rail:not([data-session-open]) :is(.who, .rail__folded),
+  .who .who__clock {
+    display: none;
+  }
   .who {
+    order: 1;
     flex-basis: 100%;
   }
-  .rail__out {
+  .rail__session {
+    display: contents;
+  }
+  .rail__session .rbtn {
+    padding: 0 12px;
+    white-space: nowrap;
+  }
+  .rail__folded {
+    order: 2;
     flex: 1;
+  }
+  .rail__context {
+    order: 3;
+  }
+  .rbtn--commit {
+    order: 4;
   }
   .top {
     flex-wrap: wrap;
@@ -1154,18 +1217,6 @@ a.btn {
   .sheet__foot .rbtn {
     flex: 1;
   }
-  .rail__session {
-    order: 3;
-    flex-basis: 100%;
-  }
-  .rail__session {
-    flex-wrap: wrap;
-  }
-  .rail__session .rbtn {
-    flex: 1 1 auto;
-    padding: 0 8px;
-    white-space: nowrap;
-  }
   .signin {
     margin-top: 24px;
   }
@@ -1196,7 +1247,7 @@ a.btn {
 
 /* A phone, upright or sideways, where an open sheet covers the rail. */
 @media (max-width: 640px), (max-height: 500px) and (orientation: landscape) {
-  .frame:has(> .sheet:not([data-closing])) :is(.rail__session, .who a) {
+  .frame:has(> .sheet:not([data-closing])) :is(.rail__toggle, .rail__session, .who a) {
     visibility: hidden;
     transition: visibility 0s var(--dur-sheet-in);
   }

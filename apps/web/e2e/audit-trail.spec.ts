@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, submittedTest, test, utcThenLabClock } from './walk.ts';
+import { expect, type Locator, type Page, signOutFromRail, submittedTest, test, utcThenLabClock } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string, lab = /R&D Laboratory/) {
@@ -12,7 +12,7 @@ async function signIn(page: Page, username: string, lab = /R&D Laboratory/) {
 }
 
 async function signOut(page: Page) {
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOutFromRail(page);
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 }
 

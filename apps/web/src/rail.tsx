@@ -312,6 +312,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
   const [refusal, setRefusal] = useState<Note | null>(null);
   const [instant, setInstant] = useState(false);
   const [locking, setLocking] = useState(false);
+  const [sessionOpen, setSessionOpen] = useState(false);
   const inFlight = useRef(false);
   const count = useRef(0);
   const returnFocus = useRef(false);
@@ -553,8 +554,18 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
           </fieldset>
         </form>
       )}
-      <footer className="rail">
-        <div className="who">
+      <footer className="rail" data-session-open={sessionOpen || undefined}>
+        <button
+          type="button"
+          className="rail__toggle"
+          aria-expanded={sessionOpen}
+          aria-controls="rail-who rail-session"
+          onClick={() => setSessionOpen((open) => !open)}
+        >
+          <b>{me.person.displayName}</b>
+          <SessionCountdown />
+        </button>
+        <div id="rail-who" className="who">
           <b>
             <a href="#/preferences" aria-label={`${me.person.displayName}, your preferences`}>
               {me.person.displayName}
@@ -584,11 +595,11 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
             {action.label}
           </button>
         )}
-        <fieldset className="rail__session" disabled={busy || locking}>
+        <fieldset id="rail-session" className="rail__session" disabled={busy || locking}>
           {!me.workstation && (
             <button
               type="button"
-              className="rbtn rbtn--quiet rail__out"
+              className="rbtn rbtn--quiet rail__out rail__folded"
               onClick={() => {
                 location.hash = '#/switch-lab';
               }}
@@ -602,7 +613,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
           <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void lockAs('unlock')}>
             Lock
           </button>
-          <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void signOut()}>
+          <button type="button" className="rbtn rbtn--quiet rail__out rail__folded" onClick={() => void signOut()}>
             Sign out
           </button>
         </fieldset>

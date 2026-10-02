@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, type Page, test } from './walk.ts';
+import { expect, openSessionBlock, type Page, signOutFromRail, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 const RD = /R&D Laboratory/;
@@ -20,7 +20,7 @@ async function switchUser(page: Page, username: string, name: string) {
 }
 
 async function signOut(page: Page) {
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOutFromRail(page);
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 }
 
@@ -62,6 +62,7 @@ async function pressedTransform(page: Page): Promise<string> {
 }
 
 async function openPreferences(page: Page, name: string) {
+  await openSessionBlock(page);
   await page.getByRole('link', { name: `${name}, your preferences` }).click();
   await expect(page.getByRole('heading', { name: 'Your preferences' })).toBeVisible();
 }
