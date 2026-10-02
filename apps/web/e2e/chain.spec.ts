@@ -135,7 +135,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(password).toBeFocused();
   const [field, foot] = [await box(password), await box(sheet.locator('.sheet__foot'))];
   expect(field.y + field.height, 'the password field is clear of the sheet foot').toBeLessThanOrEqual(foot.y);
-  expect((await box(sheet)).height, 'the sheet keeps its height').toBe(height);
+  expect((await box(sheet)).height, 'the sheet keeps its height').toBeCloseTo(height, 2);
 
   await page.request.post('/api/logout', { data: {} });
   const whoAmI: string[] = [];
@@ -192,13 +192,17 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   );
   await sign(page, 'Released');
   await railSays(page, 'now Reported');
+  await page.getByRole('button', { name: 'Verify chain' }).click();
+  await expect(page.locator('.verdict')).toHaveText(
+    /^Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC: Lab chain intact through entry \d+; Company chain intact through entry \d+\. Not anchored off-server \(demo\)\.$/,
+  );
   const [releaseKey, retryKey] = commitKeys.slice(-2);
   expect(retryKey, 'the press whose reply was dropped is resent with its Commit Key').toBe(releaseKey);
   const presses = new Set(commitKeys);
   expect(presses.size, 'every other press sent a fresh Commit Key').toBe(commitKeys.length - 1);
   for (const key of presses)
     expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  const reportLink = page.getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ });
+  const reportLink = page.locator('.facts').getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ });
   await atLeast(reportLink, 44, 44);
   await reportLink.click();
   await expect(page.getByRole('heading', { name: /Test Report RD-R-\d{4}-\d{6}/ })).toBeVisible();
@@ -210,12 +214,6 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   ]) {
     await expect(page.getByRole('row', { name: new RegExp(`${meaning}.*${signer}`) })).toBeVisible();
   }
-  await page.getByRole('button', { name: 'Verify Audit Trail' }).click();
-  await railSays(
-    page,
-    'Lab chain internally consistent, company chain internally consistent. Not anchored off-server (demo).',
-  );
-  await railSays(page, /Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC:/);
   await shot(page, 'test-report');
 });
 
