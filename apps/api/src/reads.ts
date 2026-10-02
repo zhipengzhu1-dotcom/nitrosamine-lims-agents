@@ -157,6 +157,9 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
             'errorClass',
             'sqlstate',
             'constraintName',
+            'subjectId',
+            sql<string | null>`host(source_address)`.as('sourceAddress'),
+            sql<string | null>`encode(typed_user_id_hmac, 'hex')`.as('typedUserIdHmac'),
             'openedAt',
             'loggedAt',
           ])

@@ -263,7 +263,7 @@ const tables = {
       sqlstate: '23514',
       constraint_name: 'result_value_check',
     },
-    notNull: ['id', 'kind', 'reference', 'opened_at', 'step', 'error_class', 'state'],
+    notNull: ['id', 'kind', 'reference', 'opened_at', 'state'],
   },
   'lims.commit_key': {
     noun: 'Commit Key',
@@ -705,6 +705,12 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'system_incident_requested_by_fkey',
     },
     {
+      name: 'a lockout System Incident naming an account that does not exist is refused',
+      table: 'lims.system_incident',
+      change: { kind: 'Lockout', subject_id: missing, step: null, error_class: null },
+      constraint: 'system_incident_subject_id_fkey',
+    },
+    {
       name: 'a System Incident in a Lab that does not exist is refused',
       table: 'lims.system_incident',
       change: { session_lab_id: missing },
@@ -750,6 +756,12 @@ describe('the database refuses a reference to a row that does not exist', () => 
 });
 
 describe('the database refuses a value outside its allowed set', () => {
+  const incidentFacts = (what: string, change: Row): Case => ({
+    name: `${what} is refused`,
+    table: 'lims.system_incident',
+    change,
+    constraint: 'system_incident_facts_check',
+  });
   const each = (name: string, table: Table, column: string, values: unknown[], constraint: string): Case[] =>
     values.map((value) => ({
       name: `${name}: ${JSON.stringify(value)}`,
@@ -821,6 +833,48 @@ describe('the database refuses a value outside its allowed set', () => {
       ['2351', '235140', '2351a'],
       'system_incident_sqlstate_check',
     ),
+    incidentFacts('an unexpected-failure System Incident without its step', { step: null, error_class: null }),
+    incidentFacts('an unexpected-failure System Incident without its error class', { error_class: null }),
+    incidentFacts('an unraisable-log-line System Incident without its step', {
+      kind: 'UnraisableLogLine',
+      step: null,
+      error_class: null,
+    }),
+    incidentFacts('an unexpected-failure System Incident that names an account', { subject_id: id.person }),
+    incidentFacts('a lockout System Incident that names no account', {
+      kind: 'Lockout',
+      step: null,
+      error_class: null,
+    }),
+    incidentFacts('a lockout System Incident with a failing step', { kind: 'Lockout', subject_id: id.person }),
+    incidentFacts('a sign-in burst System Incident that names no address', {
+      kind: 'SignInBurstFromAddress',
+      step: null,
+      error_class: null,
+    }),
+    incidentFacts('an unknown-ID burst System Incident that names no hash', {
+      kind: 'SignInBurstOnUnknownUserId',
+      step: null,
+      error_class: null,
+    }),
+    incidentFacts('a locked-account System Incident that also names an address', {
+      kind: 'RepeatedSignInOnLockedAccount',
+      subject_id: id.person,
+      source_address: '192.0.2.9',
+      step: null,
+      error_class: null,
+    }),
+    {
+      name: 'an unknown-ID burst System Incident whose hash is not 32 bytes is refused',
+      table: 'lims.system_incident',
+      change: {
+        kind: 'SignInBurstOnUnknownUserId',
+        typed_user_id_hmac: Buffer.alloc(16, 3),
+        step: null,
+        error_class: null,
+      },
+      constraint: 'system_incident_typed_user_id_hmac_check',
+    },
     {
       name: 'an Audit Trail entry without a transaction ID is refused',
       table: 'lims.audit_entry',
@@ -1156,6 +1210,9 @@ describe('a Signature, a Record Version, an Access Event, an Audit Trail entry, 
       error_class: 'TypeError',
       sqlstate: null,
       constraint_name: null,
+      subject_id: id.person,
+      source_address: '192.0.2.9',
+      typed_user_id_hmac: Buffer.alloc(32, 9),
     };
     for (const [column, value] of Object.entries(changes)) {
       const error = await refusalOf(
@@ -1187,6 +1244,7 @@ it('every lims table is captured in the Audit Trail except the sessions, the Com
 it('every constraint and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
+    ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
     ['public.schema_migration.refuse_change', 'migrate.test.ts'],
     ['public.schema_migration.refuse_truncate', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_not_null', 'migrate.test.ts'],

@@ -50,8 +50,11 @@ export type Answer<R extends Route> = Exclude<Reply<R>, { kind: 'breach' }>;
 export class Client {
   cookie = '';
   base: string;
-  constructor(base: string) {
+  /** The source address the test's proxy forwards, or none for the socket's own address. */
+  from: string | null;
+  constructor(base: string, from: string | null = null) {
     this.base = base;
+    this.from = from;
   }
 
   call<R extends Route>(route: R, ...request: RouteInput<R>): Promise<Answer<R>> {
@@ -62,7 +65,11 @@ export class Client {
     const post = route.method === 'POST';
     const res = await fetch(this.base + pathOf(route, request), {
       method: route.method,
-      headers: { cookie: this.cookie, ...(post ? { 'content-type': 'application/json' } : {}) },
+      headers: {
+        cookie: this.cookie,
+        ...(post ? { 'content-type': 'application/json' } : {}),
+        ...(this.from ? { 'x-forwarded-for': this.from } : {}),
+      },
       ...(post ? { body: JSON.stringify(request ?? {}) } : {}),
     });
     for (const header of res.headers.getSetCookie()) {
@@ -99,11 +106,20 @@ interface ListenOptions {
   login?: AppOptions['login'];
   sweepEveryMs?: number | null;
   logVolume?: AppOptions['logVolume'];
+  trustedProxies?: string[];
 }
 
+/** Listens on 127.0.0.1 and trusts it as a proxy unless told otherwise, so a Client's `from` sets the source address. */
 async function listen(
   db: Kysely<DB>,
-  { secureCookie = false, log, login = 'decided', sweepEveryMs = null, logVolume = null }: ListenOptions = {},
+  {
+    secureCookie = false,
+    log,
+    login = 'decided',
+    sweepEveryMs = null,
+    logVolume = null,
+    trustedProxies = ['127.0.0.1'],
+  }: ListenOptions = {},
 ) {
   const lines: string[] = [];
   const app = buildApp(db, {
@@ -113,6 +129,7 @@ async function listen(
     accessEventKey,
     login,
     sweepEveryMs,
+    trustedProxies,
   });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(() => app.close());

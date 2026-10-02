@@ -395,7 +395,7 @@ A record that pauses a Test or Sample for a stated reason (a Deviation, a receip
 _Avoid_: On hold (as a status), suspension, quarantine
 
 **System Incident**:
-A record that the LIMS itself failed or misbehaved (an unexpected failure answered with a reference the person can quote, an alarm, a missed backup or anchor, a failed restore drill, a clock step), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
+A record that the LIMS itself failed or misbehaved (an unexpected failure answered with a reference the person can quote, an alarm, a missed backup or anchor, a failed restore drill, a clock step), or that someone may be attacking sign-in (a lockout, a burst of failed sign-ins from one address or against one unknown user ID, repeated attempts against a locked account), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
 _Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failures)
 
 **Training Record**:

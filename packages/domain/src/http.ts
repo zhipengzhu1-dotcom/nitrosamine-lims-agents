@@ -223,13 +223,22 @@ const systemIncident = Type.Object({
   kind: Type.Enum({
     UnexpectedFailure: 'UnexpectedFailure',
     UnraisableLogLine: 'UnraisableLogLine',
+    Lockout: 'Lockout',
+    SignInBurstFromAddress: 'SignInBurstFromAddress',
+    SignInBurstOnUnknownUserId: 'SignInBurstOnUnknownUserId',
+    RepeatedSignInOnLockedAccount: 'RepeatedSignInOnLockedAccount',
   } as const satisfies { [K in db.IncidentKind]: K }),
   state: Type.Enum({ Open: 'Open' } as const satisfies { [K in db.IncidentState]: K }),
-  step: Type.String(),
+  /** The failing step and error class of a failure of the LIMS; null for a sign-in incident. */
+  step: nullable(Type.String()),
   recordId: nullable(uuid),
   requestedBy: nullable(uuid),
   sessionLabId: nullable(uuid),
-  errorClass: Type.String(),
+  errorClass: nullable(Type.String()),
+  /** What a sign-in incident names: the account, the source address, or the hex HMAC of an unknown user ID. */
+  subjectId: nullable(uuid),
+  sourceAddress: nullable(Type.String()),
+  typedUserIdHmac: nullable(sha256Hex),
   sqlstate: nullable(Type.String()),
   constraintName: nullable(Type.String()),
   /** The database's insert time. */

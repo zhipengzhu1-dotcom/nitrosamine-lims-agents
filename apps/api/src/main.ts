@@ -9,6 +9,7 @@ await buildApp(createDb(config.databaseUrl), {
   logVolume: config.logFile ? { file: config.logFile, clock: systemClock } : null,
   secureCookie: config.secureCookie,
   accessEventKey: config.accessEventKey,
+  trustedProxies: config.trustedProxies,
   login: config.login,
   sweepEveryMs: SWEEP_EVERY_MS,
 }).listen(config.listen);

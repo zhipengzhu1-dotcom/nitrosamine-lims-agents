@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, verifyPassword } from '@lims/db/credentials';
@@ -97,6 +98,22 @@ async function countFailure(tx: Transaction<DB>, personId: string) {
       sql<boolean>`old.locked_at is null and new.locked_at is not null`.as('lockedNow'),
     ])
     .executeTakeFirstOrThrow();
+}
+
+/**
+ * The request's source address as one Access Event key: a trusted proxy's forwarded value that is not an address
+ * falls back to the peer, and an IPv4-mapped IPv6 address is the IPv4 address.
+ */
+export function sourceAddressOf(req: {
+  ip: string;
+  socket: { remoteAddress?: string | undefined };
+  log: { warn: (message: string) => void };
+}): string {
+  if (!isIP(req.ip))
+    req.log.warn('a trusted proxy forwarded a source address that is not an address; the peer is used');
+  const address = (isIP(req.ip) ? req.ip : (req.socket.remoteAddress ?? '')).replace(/%.*$/, '');
+  const mapped = /^::ffff:(.+)$/i.exec(address)?.[1];
+  return mapped && isIP(mapped) === 4 ? mapped : address;
 }
 
 /** Proves the signer before a Signature is written: a wrong password refuses as badCredentials, counts toward lockout, and a lockout it applies is an Access Event. */
@@ -245,7 +262,7 @@ export function loginRoutes(
     ...routes.login,
     handler: async (req, reply) => {
       const { username, password } = req.body;
-      const sourceAddress = req.ip;
+      const sourceAddress = sourceAddressOf(req);
       const person = await db.selectFrom('person').selectAll().where('username', '=', username).executeTakeFirst();
       if (!person) {
         await verifyPassword(password, TIMING_DECOY_HASH);
@@ -347,7 +364,7 @@ export function logoutRoute(app: App, db: Kysely<DB>, limits: SessionLimits): vo
           kind: 'SignOut',
           subjectId: actor.person.id,
           roles: actor.roles,
-          sourceAddress: req.ip,
+          sourceAddress: sourceAddressOf(req),
           sessionLabId: session.labId,
           sessionId: session.id,
         });
