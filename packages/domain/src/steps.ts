@@ -57,6 +57,14 @@ export const steps = {
   },
 } satisfies Record<string, Step>;
 
+/** Who may take each action that is not a step on a Test; the API refuses and the web offers by this table. */
+export const actions = {
+  generateAuditExport: { role: 'QA' },
+} as const satisfies Record<string, { role: Role }>;
+export type ActionName = keyof typeof actions;
+/** True when one of `roles` takes `action`. */
+export const mayTake = (action: ActionName, roles: readonly Role[]): boolean => roles.includes(actions[action].role);
+
 export type StepName = keyof typeof steps;
 export const stepNames = Object.keys(steps).filter((key): key is StepName => Object.hasOwn(steps, key));
 

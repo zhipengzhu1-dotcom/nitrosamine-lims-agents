@@ -2,6 +2,7 @@ import {
   type ActorContext,
   type ChainVerdict,
   decimalPattern,
+  mayTake,
   type Lab,
   type RecordVersionRef,
   type Role,
@@ -194,6 +195,7 @@ export const modules = [
   },
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
+  { key: 'audit-export', name: 'Audit Export', holds: '', takes: 'generateAuditExport' },
   { key: 'workstations', name: 'Workstations', holds: '' },
   { key: 'staff', name: 'Staff', holds: '' },
 ] as const;
@@ -220,6 +222,7 @@ export function Shell({
         <nav>
           {modules
             .filter((m) => m.key !== 'staff' || staffRefusal(me.roles) === null)
+            .filter((m) => !('takes' in m) || mayTake(m.takes, me.roles))
             .map((m) => (
               <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
                 {m.name}

@@ -136,6 +136,7 @@ export const auditedTable = Type.Enum({
   test_report: 'test_report',
   record_version: 'record_version',
   signature: 'signature',
+  audit_export: 'audit_export',
   signature_statement: 'signature_statement',
   signing_role: 'signing_role',
   reauthentication: 'reauthentication',
@@ -280,6 +281,37 @@ const chainVerification = Type.Object({
 export type ChainVerification = Static<typeof chainVerification>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
+const auditExportFormat = Type.Enum({ JSON: 'JSON', CSV: 'CSV' } as const satisfies { [K in db.AuditExportFormat]: K });
+export type AuditExportFormat = Static<typeof auditExportFormat>;
+const customerRef = Type.Object({ id: uuid, name: Type.String() });
+/** An entry as an Audit Export carries it: `redacted` is true when another Customer's identifier was replaced in it, raw values included, so its raw rows no longer hash to `raw.hash`. */
+const exportedEntry = Type.Object({ ...trailEntry.properties, redacted: Type.Boolean() });
+export type ExportedEntry = Static<typeof exportedEntry>;
+/** The JSON data file of an Audit Export: what it covers, as of when, the chains' state then, and every entry. */
+export const auditExportData = Type.Object({
+  customer: customerRef,
+  lab: Type.Object({ code: Type.String(), name: Type.String(), zone: Type.String() }),
+  asOf: instant,
+  generatedBy: Type.Object({ label: Type.String(), username: Type.String(), role }),
+  chains: Type.Array(chainVerification),
+  entries: Type.Array(exportedEntry),
+});
+export type AuditExportData = Static<typeof auditExportData>;
+const exportedFile = Type.Object({
+  name: Type.String(),
+  mediaType: Type.String(),
+  sha256: sha256Hex,
+  base64: Type.String({ pattern: '^[A-Za-z0-9+/]*={0,2}$' }),
+});
+const auditExport = Type.Object({
+  id: uuid,
+  customer: customerRef,
+  generatedAt: instant,
+  entryCount: Type.Integer({ minimum: 0 }),
+  /** The data file in the format asked for, then its PDF. */
+  files: Type.Tuple([exportedFile, exportedFile]),
+});
+export type AuditExport = Static<typeof auditExport>;
 const systemIncident = Type.Object({
   reference: Type.String({ pattern: `^${referencePattern}$` }),
   kind: Type.Enum({
@@ -470,6 +502,14 @@ export const routes = {
     trail,
   ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
+  /** The Customers QA can export for: those with a Sample in this Lab. */
+  auditExportCustomers: route('GET', '/api/audit-exports/customers', {}, Type.Array(customerRef)),
+  auditExport: route(
+    'POST',
+    '/api/audit-exports',
+    { body: Type.Object({ customerId: uuid, format: auditExportFormat }, closed) },
+    auditExport,
+  ),
   staff: route('GET', '/api/staff', {}, staff),
   recordIdentityVerification: route(
     'POST',

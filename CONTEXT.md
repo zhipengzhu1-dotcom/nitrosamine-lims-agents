@@ -512,6 +512,10 @@ _Avoid_: Log, history, change log
 The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock (succeeded or failed), lockout, takeover, Lab switch, failed Re-authentication at signing, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
 _Avoid_: Login log, session log, access log
 
+**Audit Export**:
+The Audit Trail of one Customer's Submissions, Samples, Tests and their records, with the shared records they use, which QA generates to answer that Customer's audit. Another Customer's identifiers are redacted wherever they appear. It comes as a searchable data file (JSON or CSV) with a PDF of the same entries, each entry in glossary words beside its raw values. Generating one is itself recorded in the Audit Trail with the hash of each file handed out. Customers never see the Audit Trail any other way.
+_Avoid_: Audit report, trail dump, audit log export
+
 **Lab switch**:
 Moving a signed-in person's work from one Lab to another in which they hold a Membership. It needs the full re-authentication of a sign-in, nothing is chosen for them, and from then on they see only the new Lab's records. It is an Access Event, and a failed one counts toward the lockout.
 _Avoid_: Change Lab, Lab login, context switch

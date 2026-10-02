@@ -7,6 +7,7 @@ import { labScope, type Scope } from './scope.ts';
 import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
 import { staffRoutes } from './staff.ts';
 import { trailRoutes } from './trail.ts';
+import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -103,6 +104,7 @@ async function testView(scope: Scope, id: string) {
 
 export function readRoutes(app: App, db: Kysely<DB>): void {
   trailRoutes(app, db);
+  auditExportRoutes(app, db);
   staffRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => ({ ...req.actor, session: req.sessionClock }) });
 

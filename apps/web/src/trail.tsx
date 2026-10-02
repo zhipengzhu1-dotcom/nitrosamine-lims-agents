@@ -1,5 +1,7 @@
 import {
   type ActorContext,
+  type AuditExport,
+  type AuditExportFormat,
   type AuditedTable,
   auditedRecords,
   type AuditTrailVerification,
@@ -10,8 +12,8 @@ import {
   type TrailChange,
   type TrailEntry,
 } from '@lims/domain';
-import { useEffect, useRef, useState } from 'react';
-import { api, useApi, useFresh } from './api.ts';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { api, Refused, useApi, useFresh } from './api.ts';
 import { Shell, Status, words } from './rail.tsx';
 import { labTime, time } from './time.ts';
 
@@ -264,6 +266,115 @@ export function TrailPage({ me, table, id }: { me: ActorContext; table: AuditedT
       </h1>
       {error && <p className="note--bad">{error}</p>}
       <TrailPanel me={me} trail={data} />
+    </Shell>
+  );
+}
+
+interface Download {
+  name: string;
+  sha256: string;
+  url: string;
+}
+
+function downloadOf(file: AuditExport['files'][number]): Download {
+  const bytes = Uint8Array.from(atob(file.base64), (ch) => ch.codePointAt(0) ?? 0);
+  return {
+    name: file.name,
+    sha256: file.sha256,
+    url: URL.createObjectURL(new Blob([bytes], { type: file.mediaType })),
+  };
+}
+
+export function AuditExportPage({ me }: { me: ActorContext }) {
+  const customers = useApi(routes.auditExportCustomers);
+  const [customerId, setCustomerId] = useState('');
+  const [format, setFormat] = useState<AuditExportFormat>('JSON');
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState('');
+  const [done, setDone] = useState<{ answer: AuditExport; downloads: Download[] } | null>(null);
+  const inFlight = useRef(false);
+  useEffect(() => () => done?.downloads.forEach((d) => URL.revokeObjectURL(d.url)), [done]);
+
+  async function generate(event: FormEvent) {
+    event.preventDefault();
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setRefusal('');
+    try {
+      const answer = await api(routes.auditExport, { customerId, format });
+      setDone({ answer, downloads: answer.files.map((f) => downloadOf(f)) });
+    } catch (error) {
+      setRefusal(
+        error instanceof Refused && error.kind !== 'failure'
+          ? `Refused: ${error.message}. No export was generated.`
+          : `Not finished: ${error instanceof Error ? error.message : 'the LIMS did not answer'}. Generate again to see what was recorded.`,
+      );
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Shell me={me} active="audit-export" action={null}>
+      <h1>Audit Export</h1>
+      <p className="muted">
+        One Customer&apos;s Audit Trail for a Customer audit: its Submissions, Samples, Tests and their records, with
+        the shared records they use. Another Customer&apos;s identifiers read [redacted]. Generating an export is
+        recorded in the Audit Trail.
+      </p>
+      {customers.error && <p className="note--bad">{customers.error}</p>}
+      {customers.data && (
+        <form className="export" onSubmit={(e) => void generate(e)}>
+          <label>
+            Customer
+            <select required value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+              <option value="" disabled>
+                Choose a Customer
+              </option>
+              {customers.data.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Format
+            <select value={format} onChange={(e) => setFormat(e.target.value === 'CSV' ? 'CSV' : 'JSON')}>
+              <option value="JSON">JSON, with a PDF</option>
+              <option value="CSV">CSV, with a PDF</option>
+            </select>
+          </label>
+          <button type="submit" className="rbtn" disabled={busy} aria-busy={busy}>
+            Generate export
+          </button>
+        </form>
+      )}
+      {refusal && (
+        <p className="note--bad" role="alert">
+          {refusal}
+        </p>
+      )}
+      {done && (
+        <section className="export__done" aria-label="Generated export">
+          <h2>For {done.answer.customer.name}</h2>
+          <p>
+            Generated {time(done.answer.generatedAt)}: {done.answer.entryCount} entries.
+          </p>
+          <ul>
+            {done.downloads.map((d) => (
+              <li key={d.name}>
+                <a className="btn" href={d.url} download={d.name}>
+                  Download {d.name}
+                </a>
+                <code>SHA-256 {d.sha256}</code>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </Shell>
   );
 }
