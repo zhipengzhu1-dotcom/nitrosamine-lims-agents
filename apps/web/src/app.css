@@ -318,7 +318,7 @@ th {
   gap: 8px 16px;
   margin-bottom: 12px;
 }
-.worklist__tools label {
+.worklist__tools > label {
   flex: 1 1 220px;
   max-width: 360px;
   margin: 0;
@@ -361,6 +361,9 @@ th {
 }
 .row--open a {
   font-weight: 700;
+}
+.split__list td a {
+  white-space: nowrap;
 }
 
 .split__close {
