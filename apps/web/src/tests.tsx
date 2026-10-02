@@ -51,22 +51,18 @@ function Pipeline({
 }) {
   const counts = stateOrder.map((state) => ({ state, n: found.filter((t) => t.state === state).length }));
   return (
-    <div className="pipeline" role="group" aria-label="Filter by Test state">
-      <button type="button" className="pipe" aria-pressed={chosen === null} onClick={() => onChoose(null)}>
+    <div className="pipeline" role="radiogroup" aria-label="Filter by Test state">
+      <label className="pipe">
+        <input type="radio" name="state" checked={chosen === null} onChange={() => onChoose(null)} />
         All <b>{found.length}</b>
-      </button>
+      </label>
       {counts
         .filter(({ state, n }) => n > 0 || state === chosen)
         .map(({ state, n }) => (
-          <button
-            key={state}
-            type="button"
-            className="pipe"
-            aria-pressed={chosen === state}
-            onClick={() => onChoose(state)}
-          >
+          <label key={state} className="pipe">
+            <input type="radio" name="state" checked={chosen === state} onChange={() => onChoose(state)} />
             <Status state={state} /> <b>{n}</b>
-          </button>
+          </label>
         ))}
     </div>
   );

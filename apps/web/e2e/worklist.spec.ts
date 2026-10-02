@@ -49,15 +49,16 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
   const list = worklist.locator('tbody tr');
   await expect(page.getByRole('row', { name: requested })).toBeVisible();
 
-  const pipeline = page.getByRole('group', { name: 'Filter by Test state' });
-  const chips = pipeline.getByRole('button');
+  const pipeline = page.getByRole('radiogroup', { name: 'Filter by Test state' });
+  const chips = pipeline.getByRole('radio');
+  const all = pipeline.getByRole('radio', { name: /^All \d+$/ });
+  await expect(all, 'the Worklist opens on every state').toBeChecked();
   for (const chip of await chips.all()) {
     await expect(chip, 'a shown state holds at least one Test').toHaveAccessibleName(/ [1-9]\d*$/);
-    await atLeast44(chip, `the ${await chip.textContent()} filter`);
+    await atLeast44(chip, 'a state filter');
   }
-  const inReviewChip = pipeline.getByRole('button', { name: /^Submitted For Review \d+$/ });
-  await inReviewChip.click();
-  await expect(inReviewChip).toHaveAttribute('aria-pressed', 'true');
+  const inReviewChip = pipeline.getByRole('radio', { name: /^Submitted For Review \d+$/ });
+  await inReviewChip.check();
   await expect(page.getByRole('row', { name: inReview }), 'the filter keeps a Test in the chosen state').toBeVisible();
   await expect(page.getByRole('row', { name: requested }), 'the filter drops a Test in another state').toHaveCount(0);
   for (const state of await list.locator('td[data-label="State"]').allTextContents())
@@ -68,7 +69,7 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
   await atLeast44(search, 'the search box');
   await search.fill(sampleNumber);
   await expect(list).toHaveCount(1);
-  await expect(chips, 'every state with no matching Test is hidden').toHaveText([
+  await expect(pipeline.locator('label'), 'every state with no matching Test is hidden').toHaveText([
     /^All\s*1$/,
     /^Submitted For Review\s*1$/,
   ]);
@@ -79,7 +80,8 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
   expect(new URL(page.url()).hash).toBe(`#/tests/${testId}/beside`);
   expect(await sidewaysScroll(page.locator('html')), 'the page does not scroll sideways').toBe(0);
 
-  if (test.info().project.name === 'desktop') {
+  const desktop = test.info().project.name === 'desktop';
+  if (desktop) {
     await expect(list, 'the Worklist stays beside the Test').toHaveCount(1);
     await expect(worklist.getByRole('columnheader')).toHaveText(['Sample', 'State', 'Received']);
     const split = await page.locator('.split').boundingBox();
@@ -87,12 +89,21 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
     const share = (opened?.width ?? 0) / (split?.width ?? Infinity);
     expect(share, 'the Test takes about 60% of the width').toBeGreaterThan(0.55);
     expect(share, 'the Test takes about 60% of the width').toBeLessThan(0.65);
+
+    await all.check();
+    await search.fill(tag);
+    await list.filter({ hasNotText: sampleNumber }).getByRole('link').click();
+    await expect(record, 'choosing another Test beside the list shows that Test').toContainText('Requested');
+    await expect(record).not.toContainText(sampleNumber);
+    await expect(list, 'the Worklist keeps both Tests beside the one open').toHaveCount(2);
+    await search.fill(sampleNumber);
   } else {
     await expect(page.getByRole('heading', { name: 'Tests' }), 'on a phone the Test opens full screen').toBeHidden();
-    const opened = await page.locator('.split__record').boundingBox();
-    expect(opened?.width ?? 0, 'on a phone the Test takes the full width').toBeGreaterThan(
-      (page.viewportSize()?.width ?? Infinity) - 1,
-    );
+    const [opened, plane] = await Promise.all([
+      page.locator('.split__record').evaluate((e) => e.clientWidth),
+      page.locator('.plane').evaluate((e) => e.clientWidth - 24),
+    ]);
+    expect(opened, 'on a phone the Test takes the full width inside the margins').toBe(plane);
   }
 
   const close = page.getByRole('link', { name: 'Close' });
@@ -100,7 +111,7 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
   await close.click();
   await expect(page.getByRole('heading', { name: 'Tests', level: 1 })).toBeVisible();
   await expect(search, 'Close keeps the search').toHaveValue(sampleNumber);
-  await expect(inReviewChip, 'Close keeps the filter').toHaveAttribute('aria-pressed', 'true');
+  await expect(desktop ? all : inReviewChip, 'Close keeps the filter').toBeChecked();
 
   await page.goto(`/#/tests/${testId}`);
   await expect(record).toContainText(sampleNumber);

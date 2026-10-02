@@ -328,27 +328,43 @@ th {
   flex-wrap: wrap;
   gap: 6px;
 }
-.pipe {
-  display: inline-flex;
+.pipeline .pipe {
+  position: relative;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   min-width: 44px;
   min-height: 44px;
+  margin: 0;
   padding: 0 12px;
   border: 1px solid var(--line-2);
   border-radius: 8px;
   background: var(--sheet);
-  color: var(--ink);
-  font: 600 13px var(--font);
+  font-size: 13px;
+  cursor: pointer;
+}
+/* The radio covers its chip, so a press anywhere on the chip chooses it; the chip's border shows the choice. */
+.pipe input {
+  position: absolute;
+  z-index: 1;
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  margin: 0;
+  opacity: 0;
   cursor: pointer;
 }
 .pipe b {
   font-variant-numeric: tabular-nums;
 }
-.pipe[aria-pressed="true"] {
+.pipe:has(input:checked) {
   border-color: var(--act);
   box-shadow: inset 0 0 0 1px var(--act);
   background: color-mix(in srgb, var(--act) 8%, var(--sheet));
+}
+.pipe:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 .row--open td {
   background: color-mix(in srgb, var(--act) 8%, var(--sheet));
@@ -357,42 +373,35 @@ th {
   font-weight: 700;
 }
 
-/* A list with a record open: each side scrolls on its own, so choosing another record keeps the list where it was. */
-.plane:has(> .split) {
-  padding: 0;
-  overflow: hidden;
-}
-.split {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-  height: 100%;
-}
-.split > section {
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: 16px 24px;
-}
-.split__record {
-  border-left: 1px solid var(--line);
-}
 .split__close {
   margin-bottom: 8px;
 }
-@media (max-width: 900px) {
+/* Narrower than a desktop, an open record takes the screen as it does alone, and the plane scrolls it. */
+.split__list {
+  display: none;
+}
+/* At desktop width each side scrolls on its own, so choosing another record keeps the list where it was. */
+@media (min-width: 901px) {
+  .plane:has(> .split) {
+    padding: 0;
+    overflow: hidden;
+  }
   .split {
-    grid-template-columns: minmax(0, 1fr);
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    height: 100%;
   }
   .split__list {
-    display: none;
+    display: block;
+  }
+  .split > section {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 16px 24px;
   }
   .split__record {
-    border-left: 0;
-  }
-}
-@media (max-width: 640px) {
-  .split > section {
-    padding: 12px;
+    border-left: 1px solid var(--line);
   }
 }
 .verify {
