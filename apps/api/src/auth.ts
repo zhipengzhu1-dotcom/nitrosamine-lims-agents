@@ -52,7 +52,8 @@ const SWEEP_SERVICE: AuditContext = {
 const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
 
 /** Signing out, locking, unlocking and switching Lab act on the person's own session, under no role of the Lab. */
-const NEEDS_NO_ROLE = 'none' as const;
+/** The Audit Trail's role for a step a person takes on their own account, under no role of the Lab. */
+export const NEEDS_NO_ROLE = 'none' as const;
 
 /** A session or device token as stored: its SHA-256, never the token. */
 export const hashToken = (token: string) => createHash('sha256').update(token).digest();

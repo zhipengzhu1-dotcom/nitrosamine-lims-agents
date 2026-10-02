@@ -197,7 +197,8 @@ export async function switchLab(body: RouteInput<typeof routes.switchLab>[0]): P
 /** Saves the person's own preferences and applies them once the server has them. */
 export async function setPreferences(preferences: Preferences): Promise<Preferences> {
   const saved = await api(routes.setPreferences, preferences);
-  setPersonReducesMotion(saved.reducedMotion);
+  // A save that answers after the session ended must not carry the person's setting onto the sign-in screen.
+  if (session) setPersonReducesMotion(saved.reducedMotion);
   return saved;
 }
 
