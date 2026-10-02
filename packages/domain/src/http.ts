@@ -138,6 +138,7 @@ export const auditedTable = Type.Enum({
   person: 'person',
   method: 'method',
   submission: 'submission',
+  lab: 'lab',
   sample: 'sample',
   test: 'test',
   result: 'result',

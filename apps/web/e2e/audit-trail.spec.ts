@@ -45,6 +45,15 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   const entries = trail.getByRole('listitem');
   await expect(trail.getByRole('heading', { name: 'Audit Trail' })).toBeVisible();
   await expect(trail.getByText(/\d+ entries\. Times in UTC and in the Lab's zone, America\/New_York\./)).toBeVisible();
+  const zone = trail.getByRole('link', { name: 'America/New_York' });
+  await atLeast(zone, 44, 44);
+  await zone.click();
+  await expect(page.getByRole('heading', { level: 1 }), "the zone opens the Lab's own trail").toHaveText('Lab RD');
+  await expect(
+    page.getByRole('region', { name: 'Audit Trail' }).getByRole('listitem').first(),
+    'where the Lab and its time zone were recorded',
+  ).toContainText(/Time zone\s*America\/New_York/);
+  await page.goBack();
   await expect(entries.first()).toContainText('Company chain');
   await expect(entries.first()).toContainText('Cora Lindqvist (Customer) created the Submission');
   await expect(entries.first().locator('.entry__time')).toHaveText(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC$/);

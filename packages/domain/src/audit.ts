@@ -27,6 +27,8 @@ interface FieldSpec {
 interface RecordSpec {
   kind: string;
   chain: ChainKind;
+  /** The column that holds the record's id, when it is not `id`. */
+  key?: string;
   label: (row: RowSnapshot, labelOf: LabelOf) => string;
   fields: Record<string, FieldSpec>;
 }
@@ -67,6 +69,13 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       submitted_by: { label: 'Submitted by', ref: 'person' },
     },
   },
+  lab: {
+    kind: 'Lab',
+    chain: 'lab',
+    key: 'lab_id',
+    label: (row) => text(row.code),
+    fields: { code: { label: 'Code' }, name: { label: 'Name' }, time_zone: { label: 'Time zone' } },
+  },
   sample: {
     kind: 'Sample',
     chain: 'lab',
@@ -75,6 +84,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       number: { label: 'Number' },
       description: { label: 'Description' },
       received_at: { label: 'Received', shows: 'instant', movedByStep: true },
+      received_time_zone: { label: 'Received in time zone', movedByStep: true },
       submission_id: { label: 'Submission', ref: 'submission' },
     },
   },
@@ -145,6 +155,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       app_release: { label: 'App release' },
       reauthentication_id: { label: 'Re-authentication', ref: 'reauthentication' },
       signed_at: { label: 'Signed at', shows: 'instant' },
+      signed_time_zone: { label: 'Signed in time zone' },
     },
   },
   audit_export: {
@@ -202,6 +213,10 @@ export const isAuditedTable = (value: unknown): value is AuditedTable => audited
 /** The glossary noun of an audited table's records, such as "Test Report" for `test_report`; any other name as it is. */
 export const recordKind = (table: unknown): string =>
   isAuditedTable(table) ? auditedRecords[table].kind : text(table);
+/** The column an audited table keeps its record id in: `id`, or the key its registry entry names. */
+export const recordKey = (table: string): string =>
+  isAuditedTable(table) ? (auditedRecords[table].key ?? 'id') : 'id';
+const recordIdOf = (table: string, row: RowSnapshot): unknown => row[recordKey(table)];
 /** The chain an entry sits on: the Lab's when its chain is that Lab's id, the company's otherwise. */
 export const chainKindOf = (chain: string, labId: string): ChainKind => (chain === labId ? 'lab' : 'company');
 
@@ -273,7 +288,8 @@ function indexImages(images: readonly RowImage[]) {
   const push = (map: Map<string, RowImage[]>, key: string, image: RowImage) =>
     map.set(key, [...(map.get(key) ?? []), image]);
   for (const image of images) {
-    if (typeof image.row.id === 'string') push(byRecord, `${image.table}:${image.row.id}`, image);
+    const recordId = recordIdOf(image.table, image.row);
+    if (typeof recordId === 'string') push(byRecord, `${image.table}:${recordId}`, image);
     if (image.table === 'person' && typeof image.row.username === 'string') push(byUsername, image.row.username, image);
   }
   for (const list of [...byRecord.values(), ...byUsername.values()]) list.sort(byAt);
@@ -311,7 +327,7 @@ export function referencedRecords(images: readonly RowImage[]): RecordIds[] {
     ids.set(table, (ids.get(table) ?? new Set()).add(id));
   };
   for (const { table, row } of images) {
-    add(table, row.id);
+    add(table, recordIdOf(table, row));
     for (const [column, field] of Object.entries(auditedRecords[table].fields))
       add(referenceOf(field, row), row[column]);
   }
@@ -337,11 +353,12 @@ export function describeTrail(
     const { labelOf, actorLabel } = labelsAt(e.at);
     const row = e.newRow ?? e.oldRow ?? {};
     const spec = isAuditedTable(e.table) ? auditedRecords[e.table] : null;
+    const recordId = recordIdOf(e.table, row);
     const record: RecordRef = {
       table: e.table,
-      id: text(row.id),
+      id: text(recordId),
       kind: recordKind(e.table),
-      label: isAuditedTable(e.table) ? labelOf(e.table, row.id) : text(row.id),
+      label: isAuditedTable(e.table) ? labelOf(e.table, recordId) : text(recordId),
     };
     const chain = chainKindOf(e.chain, labId);
     const shown = (column: string, value: unknown): ShownValue | null => {

@@ -13,6 +13,7 @@ import {
   type Instant,
   isAuditedTable,
   type RecordIds,
+  recordKey,
   referencedRecords,
   type RowImage,
   type RowSnapshot,
@@ -65,7 +66,8 @@ const atLabText = sql<Instant | null>`(
   select ${onWallClock(entryAt, sql.ref('l.time_zone'))}
     from lims.lab l where l.lab_id::text = audit_entry.chain)`;
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
-const newId = sql<string>`new_row->>'id'`;
+const rowIdOf = (table: AuditedTable) => sql<string>`coalesce(new_row, old_row)->>${recordKey(table)}`;
+const newIdOf = (table: AuditedTable) => sql<string>`new_row->>${recordKey(table)}`;
 const usernameOf = sql<string>`new_row->>'username'`;
 
 export type Where = (eb: ExpressionBuilder<DB, 'auditEntry'>) => ExpressionWrapper<DB, 'auditEntry', SqlBool>;
@@ -125,7 +127,7 @@ async function imagesWanted(scope: Scope, wanted: RecordIds[], usernames: string
           return eb.and([
             eb('tableName', '=', table),
             eb('chain', '=', chainOf(scope, table)),
-            eb.or([...(ids.length > 0 ? [eb(newId, 'in', ids)] : []), ...byUsername]),
+            eb.or([...(ids.length > 0 ? [eb(newIdOf(table), 'in', ids)] : []), ...byUsername]),
           ]);
         }),
       ),
@@ -199,7 +201,7 @@ function staffScope(db: Kysely<DB>, req: { actor: Scope['ctx'] }): Scope {
   return labScope(db, req.actor);
 }
 
-/** Whether a company record is one this Lab already sees: a Method or a signature statement always, a Person through a Membership here, a Customer or Submission through a Sample here. */
+/** Whether a record is one this Lab already sees: a Method or a signature statement always, a Person through a Membership here, a Customer or Submission through a Sample here, and of the Labs only this one. */
 async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promise<boolean> {
   switch (table) {
     case 'method':
@@ -219,6 +221,8 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
       );
     case 'submission':
       return Boolean(await scope.from('sample').select('id').where('submissionId', '=', id).executeTakeFirst());
+    case 'lab':
+      return id === scope.ctx.lab.id;
     case 'sample':
     case 'test':
     case 'result':
@@ -275,7 +279,7 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
       if (!(await seenFromLab(scope, table, id)))
         refuse('notFound', `This Lab has no such ${auditedRecords[table].kind}.`);
       return trailOf(scope, { table, id }, (eb) =>
-        eb.and([eb('chain', '=', chainOf(scope, table)), eb('tableName', '=', table), eb(rowId, '=', id)]),
+        eb.and([eb('chain', '=', chainOf(scope, table)), eb('tableName', '=', table), eb(rowIdOf(table), '=', id)]),
       );
     },
   });

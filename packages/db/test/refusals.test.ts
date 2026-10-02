@@ -1073,7 +1073,6 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'test_report_lab_id_test_id_fkey',
     },
     noLab('lims.record_version', 'Record Version'),
-    noLab('lims.signature', 'Signature'),
     {
       name: 'a Signature on a Record Version that does not exist is refused',
       table: 'lims.signature',
@@ -2765,6 +2764,86 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
   });
 });
 
+describe("a Lab's time zone changes only through a migration, and a Signature and a Received keep the zone in force when written", () => {
+  it("the app role holds no update on a Lab's time zone, so a statement that changes it is refused", async () => {
+    const error = await refusalOf(
+      `set local role lims_app; update lims.lab set time_zone = 'Asia/Tokyo' where lab_id = '${id.lab}'`,
+    );
+    assert.equal(error.code, '42501', error.message);
+    const { rows } = await client.query<{ privilege: string }>(
+      `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
+        where grantee = 'lims_app' and table_schema = 'lims' and table_name = 'lab' and privilege_type = 'UPDATE'
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.privilege),
+      ['UPDATE code', 'UPDATE name'],
+    );
+  });
+
+  covered.add('lims.signature.sign_in_lab_time_zone');
+  it("a Signature takes its Lab's time zone, whatever the insert says", async () => {
+    const forged = { ...tables['lims.signature'].row, signed_time_zone: 'Asia/Tokyo' };
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await signingStamp(forged);
+      const [statement, values] = insert('lims.signature', forged);
+      const { rows } = await client.query<Row>(`${statement} returning signed_time_zone`, values);
+      assert.deepEqual(rows, [{ signed_time_zone: 'America/New_York' }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.signature.signature_signed_time_zone_not_null');
+  it('a Signature in a Lab that does not exist is refused', async () => {
+    const error = await refusalOfRow('lims.signature', { lab_id: missing });
+    assert.deepEqual(
+      [error.code, error.table, error.column],
+      ['23502', 'signature', 'signed_time_zone'],
+      error.message,
+    );
+  });
+
+  covered.add('lims.sample.receive_in_lab_time_zone');
+  it("a Received takes its Lab's time zone when it is recorded and keeps it through any other change, whatever the statement says", async () => {
+    const sample = randomUUID();
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      const [statement, values] = insert('lims.sample', {
+        ...tables['lims.sample'].row,
+        id: sample,
+        received_time_zone: 'Asia/Tokyo',
+      });
+      const zone = async (change: string) =>
+        (
+          await client.query<{ zone: string | null }>(
+            `update lims.sample set ${change} where id = $1 returning received_time_zone as zone`,
+            [sample],
+          )
+        ).rows[0]?.zone;
+      const inserted = await client.query<{ zone: string | null }>(
+        `${statement} returning received_time_zone as zone`,
+        values,
+      );
+      assert.deepEqual(
+        [
+          inserted.rows[0]?.zone,
+          await zone(`received_time_zone = 'Asia/Tokyo'`),
+          await zone('received_at = clock_timestamp()'),
+          await zone(`received_time_zone = 'Asia/Tokyo', description = 'Capsules, relabelled'`),
+          await zone('received_time_zone = null'),
+        ],
+        [null, null, 'America/New_York', 'America/New_York', 'America/New_York'],
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+});
+
 it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
@@ -2798,6 +2877,10 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
     [
       'lims.signature.signature_username_not_null',
       'unreachable: sign_as_the_person sets it with printed_name, whose not null refuses first',
+    ],
+    [
+      'lims.signature.signature_lab_id_fkey',
+      'unreachable: sign_in_lab_time_zone leaves signed_time_zone null, whose not null refuses first',
     ],
     ['lims.test.version_record', 'record-version.test.ts'],
     ['lims.result.version_record', 'record-version.test.ts'],

@@ -203,7 +203,13 @@ export function TrailPanel({ me, trail }: { me: ActorContext; trail: Trail | und
         {trail && (
           <p className="muted">
             {needle === '' ? trail.entries.length : `${shown.length} of ${trail.entries.length}`} entries. Times in UTC
-            {trail.entries.some((e) => e.atLab !== null) ? ` and in the Lab's zone, ${trail.labZone}` : ''}.
+            {trail.entries.some((e) => e.atLab !== null) && (
+              <>
+                {" and in the Lab's zone, "}
+                <a href={`#/trails/lab/${me.lab.id}`}>{trail.labZone}</a>
+              </>
+            )}
+            .
           </p>
         )}
       </div>
