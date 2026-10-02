@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { expect, type Page, test } from './walk.ts';
+import { type RouteReply, routes } from '@lims/domain';
+import { DESKTOP, expect, PHONE, type Page, signInByApi, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function credentials(page: Page, lab: RegExp, password = DEMO_PASSWORD) {
@@ -49,24 +50,20 @@ test('the sign-in screen offers each Lab with none selected, and the rail switch
 
 /** Registers a new R&D Workstation as the Admin and enrols this browser as it, so the browser offers only R&D. Leaves the page signed out. */
 async function enrolThisBrowserInRD(page: Page) {
-  const labs: { id: string; code: string }[] = await (await page.request.get('/api/labs')).json();
-  const labId = labs.find((lab) => lab.code === 'RD')?.id;
-  const signedIn = await page.request.post('/api/login', {
-    data: { username: 'ada.admin', password: DEMO_PASSWORD, labId },
-  });
-  expect(signedIn.ok(), `sign in as ada.admin: ${await signedIn.text()}`).toBe(true);
-  const { rooms } = await (await page.request.get('/api/workstations')).json();
+  await signInByApi(page, 'ada.admin');
+  const { rooms }: RouteReply<typeof routes.workstations> = await (await page.request.get('/api/workstations')).json();
   const registered = await page.request.post('/api/workstations', {
     data: {
       name: `RD-BENCH-${test.info().project.name}-${randomUUID().slice(0, 8)}`,
-      roomId: rooms[0].id,
+      roomId: rooms[0]?.id,
       browserPolicy: 'Managed Chrome; no saved passwords',
       reason: 'New bench PC for the Switch Lab walk',
     },
   });
   expect(registered.ok(), `register a Workstation: ${await registered.text()}`).toBe(true);
+  const workstation: RouteReply<typeof routes.registerWorkstation> = await registered.json();
   const enrolled = await page.request.post('/api/workstations/enrol', {
-    data: { workstationId: (await registered.json()).id, reason: 'Enrol the bench PC browser' },
+    data: { workstationId: workstation.id, reason: 'Enrol the bench PC browser' },
   });
   expect(enrolled.ok(), `enrol this browser: ${await enrolled.text()}`).toBe(true);
   await page.request.post('/api/logout', { data: {} });
@@ -93,10 +90,7 @@ test('on a browser enrolled in one Lab, Switch Lab gives its reason beside the d
   await expect(reason).toBeVisible();
   await expect(button).toBeDisabled();
   await expect(button).toHaveAccessibleDescription('There is no other Lab to work in.');
-  for (const size of [
-    { width: 390, height: 844 },
-    { width: 1360, height: 900 },
-  ]) {
+  for (const size of [PHONE, DESKTOP]) {
     await page.setViewportSize(size);
     const [said, row] = [await reason.boundingBox(), await button.boundingBox()];
     if (!said || !row) throw new Error('the reason or the button is not on screen');

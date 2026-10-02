@@ -26,7 +26,7 @@ function CredentialsForm({
   const [error, setError] = useState(notice);
   const offered = labs.data?.filter((lab) => lab.id !== except);
   const noOtherLab = offered?.length === 0;
-  const reason = useId();
+  const reasonId = useId();
   const [busy, setBusy] = useState(false);
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -74,7 +74,7 @@ function CredentialsForm({
           </p>
         )}
         {noOtherLab && (
-          <p id={reason} className="muted">
+          <p id={reasonId} className="muted">
             There is no other Lab to work in.
           </p>
         )}
@@ -83,7 +83,7 @@ function CredentialsForm({
           className="rbtn"
           aria-busy={busy}
           disabled={!offered?.length}
-          aria-describedby={noOtherLab ? reason : undefined}
+          aria-describedby={noOtherLab ? reasonId : undefined}
         >
           {commit}
         </button>

@@ -1,9 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { expect, type Page, submittedTest, test } from './walk.ts';
+import { DESKTOP, expect, PHONE, type Page, submittedTest, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
-
-const PHONE = { width: 390, height: 844 };
-const DESKTOP = { width: 1360, height: 900 };
 
 async function openASubmittedTestAsReviewer(page: Page) {
   const description = `Metformin HCl 500 mg tablets, lot NW-0044 (fictional, ${test.info().project.name} ${randomUUID()})`;
@@ -45,7 +42,7 @@ const textBelow12px = (page: Page) =>
   });
 
 /** Each visible input, select and textarea, with the text of its visible labels and its computed text size. */
-const fields = (page: Page) =>
+const visibleFields = (page: Page) =>
   page.evaluate(() =>
     [
       ...document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
@@ -93,7 +90,7 @@ test('with the signing sheet open at phone and desktop width, no visible text is
     await page.setViewportSize(size);
     const at = `at ${size.width}x${size.height}`;
     expect(await textBelow12px(page), `no visible text below 12 px ${at}`).toEqual([]);
-    const shown = await fields(page);
+    const shown = await visibleFields(page);
     expect(shown.length, `the sheet shows its credential fields ${at}`).toBeGreaterThan(0);
     for (const { field, label, size: fontSize } of shown) {
       expect(label, `${field} has a visible label ${at}`).not.toBe('');
