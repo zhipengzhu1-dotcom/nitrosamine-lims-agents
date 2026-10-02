@@ -12,13 +12,13 @@ import {
   createDb,
   type DB,
   databaseUrl,
-  dbConfig,
+  dbServer,
   type Json,
   type JsonObject,
 } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 
 const DATABASE = checkoutDatabase('lims_record_version_test');
 const SLICE = checkoutDatabase('lims_record_version_slice_test');

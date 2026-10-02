@@ -12,7 +12,7 @@ WEB_PORT=${WEB_PORT:-5173}
 scripts/pg.sh start >/dev/null
 if [ "${1:-}" = --scratch ]; then
   LIMS_DB=$(node packages/db/src/checkout.ts database "$LIMS_DB")
-  PGOPTIONS=--client-min-messages=warning scripts/pg.sh psql -qc "drop database if exists \"$LIMS_DB\" with (force)"
+  PGOPTIONS=--client-min-messages=warning scripts/pg.sh psql -q -v ON_ERROR_STOP=1 -v db="$LIMS_DB" <<<'drop database if exists :"db" with (force)'
 fi
 node packages/db/src/migrate.ts
 if [ "$(scripts/pg.sh psql -d "$LIMS_DB" -tAc 'select count(*) from lims.lab')" = 0 ]; then

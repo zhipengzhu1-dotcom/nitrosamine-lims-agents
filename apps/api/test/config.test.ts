@@ -8,7 +8,7 @@ const UNREACHABLE = 'postgres://nobody@127.0.0.1:1';
 
 function start(env: Record<string, string>) {
   return spawnSync(process.execPath, [api], {
-    env: { LIMS_PG: UNREACHABLE, ...env },
+    env: { LIMS_PG: UNREACHABLE, LIMS_DB: 'lims_unreachable', ...env },
     encoding: 'utf8',
     timeout: 10_000,
   });

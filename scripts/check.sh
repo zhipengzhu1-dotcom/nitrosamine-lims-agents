@@ -21,6 +21,15 @@ if git grep -nE '"[~^][0-9]' -- '*package.json'; then
   echo "Pin every dependency to an exact version." >&2
   exit 1
 fi
+# shellcheck disable=SC2016 # the backticks and ${ are regex text, not shell expansions
+if git grep -nE 'sql\.raw\(([^'\''"`]|`[^`]*\$\{)' -- '*.ts' '*.tsx'; then
+  echo "sql.raw takes only a quoted string literal. Pass a value through the sql tag, which binds it as a parameter." >&2
+  exit 1
+fi
+if git grep -nE 'psql.*[[:space:]'\''"]-[A-Za-z]*c[A-Za-z]*['\''"]?[[:space:],].*\$[{A-Za-z_]' -- .claude/skills/verify apps/web/e2e scripts; then
+  echo "psql -c builds SQL from an interpolated value. Bind it with psql -v name=value and send the SQL on stdin, where :'name' quotes it." >&2
+  exit 1
+fi
 for dir in apps/*/test packages/*/test; do
   [ -d "$dir" ] || continue
   if ! grep -q '"test":' "$(dirname "$dir")/package.json"; then

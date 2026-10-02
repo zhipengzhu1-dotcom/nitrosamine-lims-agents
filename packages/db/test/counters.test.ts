@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { after, before, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
-import { checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
+import { checkoutDatabase, databaseUrl, dbServer } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 const DATABASE = checkoutDatabase('lims_counters_test');
 const BEFORE_COUNTERS = '0005_counters_and_transaction_ids.sql';
 

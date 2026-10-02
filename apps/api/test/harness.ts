@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { after } from 'node:test';
-import { audited, checkoutDatabase, createDb, type DB, databaseUrl, dbConfig, type Role } from '@lims/db';
+import { audited, checkoutDatabase, createDb, type DB, databaseUrl, dbServer, type Role } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
 import { migrate } from '@lims/db/migrate';
 import { type SeededAccount, seed } from '@lims/db/seed';
@@ -20,7 +20,7 @@ import { type AppOptions, buildApp } from '../src/app.ts';
 
 type LogSink = NonNullable<AppOptions['log']>;
 
-const { server } = dbConfig();
+const server = dbServer();
 
 /** The status each kind answers with, as the tests expect it; every refused answer is checked against this table. */
 const STATUS_OF: { readonly [K in RefusalKind]: number } = {

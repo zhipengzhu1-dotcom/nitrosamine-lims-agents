@@ -39,8 +39,9 @@ const REFUSAL = [
 ];
 
 /**
- * Creates the database if it is missing, refuses before applying anything when an applied migration's file changed or
- * is gone, then applies each pending file as the superuser and records the SHA-256 of its bytes.
+ * Refuses before creating anything when two files share a migration number. Creates the database if it is missing,
+ * refuses before applying anything when an applied migration's file changed or is gone, then applies each pending file
+ * as the superuser and records the SHA-256 of its bytes.
  */
 export async function migrate(server: string, database: string, folder: URL = migrations): Promise<string[]> {
   const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
@@ -60,6 +61,13 @@ export async function migrate(server: string, database: string, folder: URL = mi
 
 async function readMigrations(folder: URL): Promise<Migration[]> {
   const names = (await readdir(folder)).filter((f) => f.endsWith('.sql')).sort();
+  const clashes = [...Map.groupBy(names, (name) => name.slice(0, 4)).values()]
+    .filter((same) => same.length > 1)
+    .map((same) => same.join(' and '));
+  if (clashes.length > 0)
+    throw new Error(
+      `migrate refused to run: ${clashes.join('; ')} share a migration number. Give the unmerged file the next free number.`,
+    );
   return Promise.all(
     names.map(async (name) => {
       const bytes = await readFile(new URL(name, folder));
