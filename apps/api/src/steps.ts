@@ -4,6 +4,7 @@ import {
   type ActorContext,
   type Meaning,
   type PersonId,
+  pressText,
   type RouteReply,
   type SignatureStatement,
   type SigningBody,
@@ -227,7 +228,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
     const sessionId = req.sessionKey.id;
     const scope = labScope(db, actor);
     const requestHash = createHash('sha256')
-      .update(JSON.stringify({ step: name, testId: body.testId ?? null, input: body.input }))
+      .update(pressText(name, body.testId ?? null, body.input))
       .digest();
     const kept = (q: LabQueries) =>
       q.from('commitKey').select(['sessionId', 'requestHash', 'testId', 'state']).where('key', '=', body.commitKey);

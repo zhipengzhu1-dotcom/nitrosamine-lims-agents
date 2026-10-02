@@ -110,6 +110,16 @@ it('a Submission sent twice with the same Commit Key creates one Submission and 
   assert.deepEqual(await totals(), before, 'the retry writes nothing');
 });
 
+it('a Submission resent with the same entries in another order answers the first receipt and writes nothing', async () => {
+  const key = randomUUID();
+  const { methodId, description } = submission.input;
+  const first = ok(await post(as.cora, 'submit', { commitKey: key, input: { methodId, description } }));
+  const before = await totals();
+  const retry = ok(await post(as.cora, 'submit', { commitKey: key, input: { description, methodId } }));
+  assert.deepEqual(retry, first);
+  assert.deepEqual(await totals(), before, 'the retry writes nothing');
+});
+
 async function bothWaitingOnLockedTable<T>(table: 'submission' | 'result', presses: () => Promise<T>[]) {
   let answers: Promise<T[]> | undefined;
   await api.superuser.transaction().execute(async (tx) => {

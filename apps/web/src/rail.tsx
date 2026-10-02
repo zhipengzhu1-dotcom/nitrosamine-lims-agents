@@ -4,6 +4,7 @@ import {
   type Lab,
   type RecordVersionRef,
   type Role,
+  pressText,
   routes,
   type SignatureStatement,
   type StepInput,
@@ -88,6 +89,11 @@ export interface RailAction {
   run: (input: Record<string, string>, credentials: TypedCredentials | null) => Promise<string>;
 }
 
+async function commitKeySlot(press: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(press));
+  return `commitKey:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
 export function stepAction(
   name: StepName,
   testId: string | null,
@@ -106,10 +112,11 @@ export function stepAction(
         ? { meaning: step.signs, what: ui.record ? [...what, ui.record] : what, role: step.role, ...signing }
         : null,
     async run(input, credentials) {
-      // Kept until the server answers, even across a reload, so pressing again after no answer resends this press.
-      const press = `commitKey:${name}:${testId ?? 'new'}`;
-      const commitKey = sessionStorage.getItem(press) ?? crypto.randomUUID();
-      sessionStorage.setItem(press, commitKey);
+      // Kept until the server answers, even across a reload, so the same press after no answer resends its Commit Key.
+      // The slot names the press by a digest, so no entries are kept in the browser.
+      const slot = await commitKeySlot(pressText(name, testId, input));
+      const commitKey = sessionStorage.getItem(slot) ?? crypto.randomUUID();
+      sessionStorage.setItem(slot, commitKey);
       await api(stepRoute(name), {
         commitKey,
         ...(testId && { testId }),
@@ -123,12 +130,12 @@ export function stepAction(
             },
           }),
       }).catch(async (e: unknown) => {
-        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(press);
+        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(slot);
         // The record or the statement moved on: the page reads it again, so the next sheet shows what is current.
         if (e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) await onDone();
         throw e;
       });
-      sessionStorage.removeItem(press);
+      sessionStorage.removeItem(slot);
       await onDone();
       return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
