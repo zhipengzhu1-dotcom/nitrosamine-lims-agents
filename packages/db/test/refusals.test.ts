@@ -1149,7 +1149,7 @@ it('every lims table is captured in the Audit Trail except the sessions, the Com
 it('every constraint and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
-    ['lims.access_event.open_incident', 'apps/api/test/sign-in-incidents.test.ts: opens, not refuses'],
+    ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
     ['public.schema_migration.refuse_change', 'migrate.test.ts'],
     ['public.schema_migration.refuse_truncate', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_not_null', 'migrate.test.ts'],

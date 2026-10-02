@@ -100,7 +100,7 @@ const accessEventKey = randomBytes(32);
 
 type ListenOptions = Partial<Pick<AppOptions, 'secureCookie' | 'log' | 'trustedProxies'>>;
 
-/** Listens on 127.0.0.1, which the API trusts as a proxy by default, so a Client's `from` sets the source address. */
+/** Listens on 127.0.0.1 and trusts it as a proxy unless told otherwise, so a Client's `from` sets the source address. */
 async function listen(
   db: Kysely<DB>,
   { secureCookie = false, log, trustedProxies = ['127.0.0.1'] }: ListenOptions = {},

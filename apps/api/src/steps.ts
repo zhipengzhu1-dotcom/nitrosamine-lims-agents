@@ -18,7 +18,7 @@ import {
 } from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
-import { reauthenticate } from './auth.ts';
+import { reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
 
@@ -209,7 +209,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
     }
     if (step.signs) {
       const { password } = body.signature ?? refuse('malformed', `${name} needs the signer's password`);
-      await reauthenticate(db, { actor, session: req.sessionKey }, password, name, step.role, req.ip);
+      await reauthenticate(db, { actor, session: req.sessionKey }, password, name, step.role, sourceAddressOf(req));
     }
 
     const claim = { testId: test?.id ?? randomUUID(), state: step.to };

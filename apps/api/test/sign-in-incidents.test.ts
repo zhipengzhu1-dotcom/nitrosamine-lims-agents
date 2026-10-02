@@ -20,9 +20,9 @@ const { rows: rules } = await sql<{ kind: IncidentKind; attempts: number; within
   api.superuser,
 );
 const rule = (kind: IncidentKind) => rules.find((r) => r.kind === kind) ?? assert.fail(`no burst rule for ${kind}`);
-const byAddress = rule('SignInBurstFromAddress');
-const byHash = rule('SignInBurstOnUnknownUserId');
-const onLocked = rule('RepeatedSignInOnLockedAccount');
+const addressRule = rule('SignInBurstFromAddress');
+const unknownIdRule = rule('SignInBurstOnUnknownUserId');
+const lockedAccountRule = rule('RepeatedSignInOnLockedAccount');
 
 const hashOf = (typed: string) => createHmac('sha256', api.accessEventKey).update(typed).digest();
 
@@ -67,7 +67,7 @@ async function lock(account: Account): Promise<void> {
 
 it('a burst of failed sign-ins from one source address opens a System Incident naming the address, on the company chain under the incident service', async () => {
   const from = nextAddress();
-  for (let i = 0; i < byAddress.attempts; i++)
+  for (let i = 0; i < addressRule.attempts; i++)
     refusedWith(await signIn(from, `burst.nobody-${randomUUID()}`, 'any-password'), 'badCredentials');
 
   const opened = (await incidents('SignInBurstFromAddress')).filter((i) => i.sourceAddress === from);
@@ -106,7 +106,9 @@ it('a burst of failed sign-ins from one source address opens a System Incident n
 it('a burst whose attempts arrive at once opens one System Incident', async () => {
   const from = nextAddress();
   const answers = await Promise.all(
-    Array.from({ length: 2 * byAddress.attempts }, () => signIn(from, `burst.nobody-${randomUUID()}`, 'any-password')),
+    Array.from({ length: 2 * addressRule.attempts }, () =>
+      signIn(from, `burst.nobody-${randomUUID()}`, 'any-password'),
+    ),
   );
   for (const answer of answers) refusedWith(answer, 'badCredentials');
   assert.equal((await incidents('SignInBurstFromAddress')).filter((i) => i.sourceAddress === from).length, 1);
@@ -116,7 +118,7 @@ it('during a burst every attempt writes its failure Access Event and gets the sa
   const from = nextAddress();
   const known = await api.addPerson('burst.known', ['Analyst']);
   const answers = [];
-  for (let i = 0; i < byAddress.attempts + 2; i++)
+  for (let i = 0; i < addressRule.attempts + 2; i++)
     answers.push(
       i % 2
         ? await signIn(from, known.username, 'not-the-password')
@@ -138,7 +140,7 @@ it('during a burst every attempt writes its failure Access Event and gets the sa
 
 it('a burst against one unknown-ID hash from several addresses opens a System Incident naming the hash, never the typed ID', async () => {
   const typed = `burst.target-${randomUUID()}`;
-  for (let i = 0; i < byHash.attempts; i++)
+  for (let i = 0; i < unknownIdRule.attempts; i++)
     refusedWith(await signIn(nextAddress(), typed, 'any-password'), 'badCredentials');
 
   const opened = (await incidents('SignInBurstOnUnknownUserId')).filter((i) =>
@@ -157,7 +159,7 @@ it('a burst against one unknown-ID hash from several addresses opens a System In
 it('repeated attempts against a locked account open a System Incident naming the account', async () => {
   const locked = await api.addPerson('burst.locked', ['Analyst']);
   await lock(locked);
-  for (let i = 0; i < onLocked.attempts; i++)
+  for (let i = 0; i < lockedAccountRule.attempts; i++)
     refusedWith(
       await signIn(nextAddress(), locked.username, i % 2 ? locked.password : 'not-the-password'),
       i % 2 ? 'accountLocked' : 'badCredentials',
@@ -168,20 +170,34 @@ it('repeated attempts against a locked account open a System Incident naming the
   assert.deepEqual([opened[0]?.sourceAddress, opened[0]?.typedUserIdHmac], [null, null]);
 });
 
-it('a lockout opens a System Incident of kind lockout naming the account', async () => {
+it('a lockout opens a System Incident of kind lockout naming the account, and the Access Events stay under the sign-in service', async () => {
   const person = await api.addPerson('burst.lockout', ['Analyst']);
+  const from = nextAddress();
   for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
-    refusedWith(await signIn(nextAddress(), person.username, 'not-the-password'), 'badCredentials');
+    refusedWith(
+      await signIn(LOCKOUT_AFTER_FAILURES - i > addressRule.attempts ? nextAddress() : from, person.username, 'wrong'),
+      'badCredentials',
+    );
 
   const opened = (await incidents('Lockout')).filter((i) => i.subjectId === person.id);
   assert.equal(opened.length, 1, 'one System Incident for the lockout');
-  const lockout = await api.superuser
-    .selectFrom('accessEvent')
-    .select('id')
-    .where('kind', '=', 'Lockout')
-    .where('subjectId', '=', person.id)
+  assert.equal(
+    (await incidents('SignInBurstFromAddress')).filter((i) => i.sourceAddress === from).length,
+    1,
+    'the attempt that locked the account also opened a burst',
+  );
+  const entries = await api.superuser
+    .selectFrom('auditEntry')
+    .select([sql<string>`new_row ->> 'kind'`.as('kind'), 'actor', 'reason'])
+    .where('tableName', '=', 'access_event')
+    .where(sql<boolean>`new_row ->> 'subject_id' = ${person.id}`)
+    .where(sql<boolean>`new_row ->> 'kind' = 'Lockout'`)
     .execute();
-  assert.equal(lockout.length, 1, 'the lockout itself is an Access Event');
+  assert.deepEqual(
+    entries,
+    [{ kind: 'Lockout', actor: 'svc:sign-in', reason: 'Sign in' }],
+    'the lockout is an Access Event, written by the sign-in service after the incident service wrote the burst',
+  );
 });
 
 it('attempts below each burst threshold open no System Incident', async () => {
@@ -191,14 +207,14 @@ it('attempts below each burst threshold open no System Incident', async () => {
     .executeTakeFirstOrThrow();
 
   const from = nextAddress();
-  for (let i = 0; i < byAddress.attempts - 1; i++)
+  for (let i = 0; i < addressRule.attempts - 1; i++)
     refusedWith(await signIn(from, `burst.nobody-${randomUUID()}`, 'any-password'), 'badCredentials');
   const typed = `burst.quiet-${randomUUID()}`;
-  for (let i = 0; i < byHash.attempts - 1; i++)
+  for (let i = 0; i < unknownIdRule.attempts - 1; i++)
     refusedWith(await signIn(nextAddress(), typed, 'any-password'), 'badCredentials');
   const locked = await api.addPerson('burst.quiet-locked', ['Analyst']);
   await lock(locked);
-  for (let i = 0; i < onLocked.attempts - 1; i++)
+  for (let i = 0; i < lockedAccountRule.attempts - 1; i++)
     refusedWith(await signIn(nextAddress(), locked.username, 'not-the-password'), 'badCredentials');
 
   const after = await api.superuser
@@ -217,18 +233,18 @@ it('attempts spread wider than the window open no System Incident, and a continu
       refusedWith(await signIn(from, `burst.nobody-${randomUUID()}`, 'any-password'), 'badCredentials');
   };
 
-  await fail(byAddress.attempts - 1);
-  await advanceClock(byAddress.withinMs);
+  await fail(addressRule.attempts - 1);
+  await advanceClock(addressRule.withinMs);
   await fail(1);
   assert.equal(await count(from), 0, 'attempts outside the window are not counted');
 
-  await fail(byAddress.attempts - 1);
+  await fail(addressRule.attempts - 1);
   assert.equal(await count(from), 1, 'a burst inside the window opens one System Incident');
-  await fail(byAddress.attempts);
+  await fail(addressRule.attempts);
   assert.equal(await count(from), 1, 'the burst continuing inside the window opens no other');
 
-  await advanceClock(byAddress.withinMs);
-  await fail(byAddress.attempts);
+  await advanceClock(addressRule.withinMs);
+  await fail(addressRule.attempts);
   assert.equal(await count(from), 2, 'the burst continuing into the next window opens one more');
 });
 
@@ -260,4 +276,24 @@ it('a forwarded address from a peer that is not a trusted proxy is not taken as 
     .where('typedUserIdHmac', '=', hashOf(typed))
     .executeTakeFirstOrThrow();
   assert.equal(event.sourceAddress, '127.0.0.1', 'the socket peer is the source address');
+});
+
+it('the source address is the hop the trusted proxy saw, kept as a plain address', async () => {
+  const recorded = async (forwarded: string) => {
+    const typed = `burst.forwarded-${randomUUID()}`;
+    refusedWith(await signIn(forwarded, typed, 'any-password'), 'badCredentials');
+    const event = await api.superuser
+      .selectFrom('accessEvent')
+      .select(sql<string>`host(source_address)`.as('sourceAddress'))
+      .where('typedUserIdHmac', '=', hashOf(typed))
+      .executeTakeFirstOrThrow();
+    return event.sourceAddress;
+  };
+  assert.equal(await recorded('203.0.113.66, 198.51.100.7'), '198.51.100.7', 'a spoofed earlier hop is ignored');
+  assert.equal(await recorded('::ffff:198.51.100.8'), '198.51.100.8', 'an IPv4-mapped address is its IPv4 address');
+  assert.equal(
+    await recorded('not-an-address'),
+    '127.0.0.1',
+    'a forwarded value that is no address falls back to the peer',
+  );
 });
