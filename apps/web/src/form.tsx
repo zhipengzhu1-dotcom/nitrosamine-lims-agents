@@ -7,8 +7,8 @@ interface Outcome {
 }
 
 function unanswered(err: unknown): string {
-  if (err instanceof Refused) return `${err.kind === 'failure' ? 'Not finished' : 'Refused'}: ${err.message}.`;
-  if (err instanceof Error && !(err instanceof TypeError)) return `Refused: ${err.message}.`;
+  if (err instanceof Refused) return `${err.kind === 'failure' ? 'Not finished' : 'Refused'}: ${err.message}`;
+  if (err instanceof Error && !(err instanceof TypeError)) return `Refused: ${err.message}`;
   return 'The LIMS did not answer. Reload to see what was saved before you press again.';
 }
 

@@ -39,7 +39,8 @@ function visibleTests(scope: Scope) {
 
 async function testView(scope: Scope, id: string) {
   const test =
-    (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ?? refuse('notFound', 'no such Test');
+    (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ??
+    refuse('notFound', 'You can see no such Test.');
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
@@ -143,7 +144,7 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
     handler: async (req) => {
       const scope = labScope(db, req.actor);
       const { report, test, result, signatures } = await testView(scope, req.params.id);
-      if (!report) return refuse('notFound', 'this Test has no released Test Report');
+      if (!report) return refuse('notFound', 'This Test has no released Test Report.');
       const { version, canonicalForm, contentHash } = await latestVersion(scope, 'test_report', report.id);
       return { report, recordVersion: { version, canonicalForm, contentHash }, test, result, signatures };
     },
@@ -153,7 +154,7 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
     ...routes.incident,
     handler: async (req) => {
       if (!req.actor.roles.some((role) => role === 'Admin' || role === 'QA'))
-        refuse('role', 'reading a System Incident is an Admin or QA action');
+        refuse('role', 'Reading a System Incident is an Admin or QA action.');
       return (
         (await db
           .selectFrom('systemIncident')
@@ -175,7 +176,7 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
             'loggedAt',
           ])
           .where('reference', '=', req.params.reference)
-          .executeTakeFirst()) ?? refuse('notFound', `no System Incident has the reference ${req.params.reference}`)
+          .executeTakeFirst()) ?? refuse('notFound', `No System Incident has the reference ${req.params.reference}.`)
       );
     },
   });

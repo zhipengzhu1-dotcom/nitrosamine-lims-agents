@@ -29,6 +29,6 @@ Preconditions:
 
 ## Gotchas
 
-- Opening `#/tests/<id>/report` for a Test that is not `Reported` shows `this Test has no released Test Report` on the page (HTTP 404).
+- Opening `#/tests/<id>/report` for a Test that is not `Reported` shows `This Test has no released Test Report.` on the page (HTTP 404).
 - `Verify chain` moved to the Test page's Audit Trail panel; the report page's rail has no action.
 - `Print` opens the browser's print dialog, which blocks the headless page. Do not press it.

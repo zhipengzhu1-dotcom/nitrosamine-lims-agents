@@ -277,8 +277,8 @@ const EXIT_FALLBACK_MS = 400;
 function unansweredText(e: unknown, signs: boolean): string {
   if (!(e instanceof Refused))
     return `The LIMS did not answer. ${signs ? 'Type your password again and sign' : 'Press again'} with the same entries; they will not be saved twice.`;
-  if (e.kind === 'failure') return `Not finished: ${e.message}.`;
-  return `Refused: ${e.message}.${signs ? ' Nothing has been signed.' : ''}`;
+  if (e.kind === 'failure') return `Not finished: ${e.message}`;
+  return `Refused: ${e.message}${signs ? ' Nothing has been signed.' : ''}`;
 }
 
 function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | null; notice?: string | undefined }) {
@@ -389,7 +389,11 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     try {
       await lock(mode);
     } catch (e) {
-      setNote({ text: `Refused: ${e instanceof Error ? e.message : String(e)}.`, tone: 'bad', n: ++count.current });
+      setNote({
+        text: e instanceof Refused ? `Refused: ${e.message}` : 'The LIMS did not answer. Press again.',
+        tone: 'bad',
+        n: ++count.current,
+      });
     } finally {
       inFlight.current = false;
       setLocking(false);

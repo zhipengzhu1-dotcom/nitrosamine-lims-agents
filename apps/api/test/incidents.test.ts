@@ -57,7 +57,7 @@ async function failEnterResult(client: Client, testId: string, base = api.base) 
     }),
   });
   const text = await res.text();
-  const reference = /reference (\w+)"/.exec(text)?.[1] ?? assert.fail(`no reference in ${text}`);
+  const reference = /reference (\w+)\."/.exec(text)?.[1] ?? assert.fail(`no reference in ${text}`);
   return { status: res.status, reference };
 }
 

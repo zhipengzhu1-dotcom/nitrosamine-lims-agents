@@ -29,21 +29,21 @@ export const steps = {
     guard: (f) =>
       f.assignee === null || f.assigneeTrained
         ? null
-        : 'the assignee must be an Analyst in this Lab with a Training Record for the Method',
+        : 'The assignee must be an Analyst in this Lab with a Training Record for the Method.',
   },
   enterResult: {
     from: 'Assigned',
     to: 'SubmittedForReview',
     role: 'Analyst',
     signs: 'Performed',
-    guard: (f) => (f.actor === f.assignee ? null : 'only the assigned Analyst can enter the Result'),
+    guard: (f) => (f.actor === f.assignee ? null : 'Only the assigned Analyst can enter the Result.'),
   },
   review: {
     from: 'SubmittedForReview',
     to: 'Reviewed',
     role: 'Reviewer',
     signs: 'Reviewed',
-    guard: (f) => (f.signers.Performed === f.actor ? 'the Analyst who performed the Test cannot review it' : null),
+    guard: (f) => (f.signers.Performed === f.actor ? 'The Analyst who performed the Test cannot review it.' : null),
   },
   release: {
     from: 'Reviewed',
@@ -52,7 +52,7 @@ export const steps = {
     signs: 'Released',
     guard: (f) =>
       f.signers.Performed === f.actor || f.signers.Reviewed === f.actor
-        ? 'QA cannot release a Test they performed or reviewed'
+        ? 'QA cannot release a Test they performed or reviewed.'
         : null,
   },
 } satisfies Record<string, Step>;
@@ -81,8 +81,9 @@ export function refusal(
 ): Refusal | null {
   const step: Step = steps[name];
   if (step.from !== state)
-    return { kind: 'state', message: `${name} needs a Test in ${step.from ?? 'no'} state, not ${state}` };
-  if (!roles.includes(step.role)) return { kind: 'role', message: `${name} is taken by the ${step.role} role` };
+    return { kind: 'state', message: `The ${name} step needs a Test in ${step.from ?? 'no'} state, not ${state}.` };
+  if (!roles.includes(step.role))
+    return { kind: 'role', message: `The ${name} step is taken by the ${step.role} role.` };
   const failed = step.guard?.(facts);
   return failed ? { kind: 'guard', message: failed } : null;
 }

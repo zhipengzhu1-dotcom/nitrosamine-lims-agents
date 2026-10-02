@@ -263,7 +263,7 @@ export function WelcomePage({ token }: { token: string }) {
             onSubmit={(e) =>
               commit(e, async (form) => {
                 const password = field(form, 'password');
-                if (password !== field(form, 'confirm')) throw new Error('the two passwords differ');
+                if (password !== field(form, 'confirm')) throw new Error('The two passwords differ.');
                 const set = await api(routes.setPasswordThroughLink, { token, password });
                 setUsername(set.username);
                 history.replaceState(null, '', location.pathname);

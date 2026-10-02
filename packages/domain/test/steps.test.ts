@@ -51,7 +51,7 @@ describe('a step from any state but its own is refused', () => {
       for (const state of states.filter((s) => s !== from))
         assert.deepEqual(refusal(name, state, [role], allowed), {
           kind: 'state',
-          message: `${name} needs a Test in ${from ?? 'no'} state, not ${state}`,
+          message: `The ${name} step needs a Test in ${from ?? 'no'} state, not ${state}.`,
         });
     });
   }
@@ -61,7 +61,7 @@ describe('a step by any role but its own is refused', () => {
   for (const name of stepNames) {
     const { from, role } = steps[name];
     it(`${name} is taken only by the ${role} role`, () => {
-      const expected: Refusal = { kind: 'role', message: `${name} is taken by the ${role} role` };
+      const expected: Refusal = { kind: 'role', message: `The ${name} step is taken by the ${role} role.` };
       assert.deepEqual(refusal(name, from, [], allowed), expected, 'a person with no role');
       for (const other of roles.filter((r) => r !== role))
         assert.deepEqual(refusal(name, from, [other], allowed), expected, other);
@@ -75,7 +75,7 @@ describe("a step whose guard fails is refused with the guard's reason", () => {
       name: 'assigning an Analyst without a Training Record for the Method is refused',
       step: 'assign',
       facts: { assignee: 'theo', assigneeTrained: false },
-      refused: 'the assignee must be an Analyst in this Lab with a Training Record for the Method',
+      refused: 'The assignee must be an Analyst in this Lab with a Training Record for the Method.',
     },
     {
       name: 'assign is offered while the Lab Manager has named no assignee yet',
@@ -87,25 +87,25 @@ describe("a step whose guard fails is refused with the guard's reason", () => {
       name: 'a Result entered by anyone but the assigned Analyst is refused',
       step: 'enterResult',
       facts: { assignee: 'wes' },
-      refused: 'only the assigned Analyst can enter the Result',
+      refused: 'Only the assigned Analyst can enter the Result.',
     },
     {
       name: 'a review by the Analyst who performed the Test is refused',
       step: 'review',
       facts: { signers: { Performed: 'ana' } },
-      refused: 'the Analyst who performed the Test cannot review it',
+      refused: 'The Analyst who performed the Test cannot review it.',
     },
     {
       name: 'a release by the Analyst who performed the Test is refused',
       step: 'release',
       facts: { signers: { Performed: 'ana', Reviewed: 'rui' } },
-      refused: 'QA cannot release a Test they performed or reviewed',
+      refused: 'QA cannot release a Test they performed or reviewed.',
     },
     {
       name: 'a release by the Reviewer who reviewed the Test is refused',
       step: 'release',
       facts: { signers: { Performed: 'pia', Reviewed: 'ana' } },
-      refused: 'QA cannot release a Test they performed or reviewed',
+      refused: 'QA cannot release a Test they performed or reviewed.',
     },
   ];
   for (const c of cases)
@@ -115,4 +115,37 @@ describe("a step whose guard fails is refused with the guard's reason", () => {
       const expected: Refusal | null = c.refused === null ? null : { kind: 'guard', message: c.refused };
       assert.deepEqual(refusal(c.step, from, [role], { ...allowed, ...c.facts }), expected);
     });
+});
+
+describe('every refusal the step registry gives is a sentence for the person at the bench', () => {
+  it('each message starts with a capital letter and ends with a full stop', () => {
+    const people = [null, 'ana', 'rui'];
+    const facts = people.flatMap((assignee) =>
+      [true, false].flatMap((assigneeTrained) =>
+        people.flatMap((Performed) =>
+          people.map(
+            (Reviewed): StepFacts => ({
+              actor: 'ana',
+              assignee,
+              assigneeTrained,
+              signers: { ...(Performed && { Performed }), ...(Reviewed && { Reviewed }) },
+            }),
+          ),
+        ),
+      ),
+    );
+    const held: Role[][] = [[], ...roles.map((role) => [role])];
+    const messages = new Set(
+      stepNames.flatMap((name) =>
+        states.flatMap((state) =>
+          held.flatMap((some) => facts.flatMap((f) => refusal(name, state, some, f)?.message ?? [])),
+        ),
+      ),
+    );
+    assert.ok(messages.size > stepNames.length, 'the registry was asked for its refusals');
+    assert.deepEqual(
+      [...messages].filter((message) => !/^[A-Z][\s\S]*\.$/.test(message)),
+      [],
+    );
+  });
 });

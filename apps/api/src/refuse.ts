@@ -47,10 +47,15 @@ const REFUSED_BY_FASTIFY = /^FST_ERR_(CTP_|BAD_URL)/;
 
 function refusedByFastify(error: FastifyError): Refused | null {
   const unknownField = error.validation?.find((fault) => fault.keyword === 'additionalProperties');
-  if (unknownField) return new Refused('unknownField', `the LIMS does not know the field ${fieldPath(unknownField)}`);
+  if (unknownField) return new Refused('unknownField', `The LIMS does not know the field ${fieldPath(unknownField)}.`);
   const [first] = error.validation ?? [];
-  if (first) return new Refused('malformed', `${error.validationContext}${first.instancePath} ${first.message}`);
-  if (REFUSED_BY_FASTIFY.test(error.code)) return new Refused('malformed', error.message);
+  if (first)
+    return new Refused(
+      'malformed',
+      `The LIMS cannot read this request: ${error.validationContext}${first.instancePath} ${first.message}.`,
+    );
+  if (REFUSED_BY_FASTIFY.test(error.code))
+    return new Refused('malformed', `The LIMS cannot read this request: ${error.message}.`);
   return null;
 }
 
@@ -68,7 +73,7 @@ export function answerThrown(db: Kysely<DB>) {
     await openSystemIncident(db, req, error);
     return reply.code(STATUS.failure).send({
       kind: 'failure',
-      message: `the LIMS could not finish this request; reload to see what was saved, and give the Admin reference ${req.id}`,
+      message: `The LIMS could not finish this request. Reload to see what was saved, and give the Admin reference ${req.id}.`,
     });
   };
 }

@@ -157,7 +157,10 @@ it('two concurrent signing steps with the same Commit Key commit once and both a
 it('a step without a Commit Key is refused as malformed and writes nothing', async () => {
   const before = await totals();
   const refused = await as.cora.send(stepRoute('submit'), submission);
-  assert.equal(refusedWith(refused, 'malformed'), "body must have required property 'commitKey'");
+  assert.equal(
+    refusedWith(refused, 'malformed'),
+    "The LIMS cannot read this request: body must have required property 'commitKey'.",
+  );
   assert.deepEqual(await totals(), before);
 });
 
@@ -169,7 +172,7 @@ it("the same Commit Key from another session is refused and does not answer the 
   const refused = await post(otherSession, 'submit', { commitKey: key, ...submission });
   assert.equal(
     refusedWith(refused, 'keyReused'),
-    'this press was already saved under another sign-in; reload to see what was saved',
+    'This press was already saved under another sign-in. Reload to see what was saved.',
   );
   assert.deepEqual(await totals(), before, 'no second Submission');
 });

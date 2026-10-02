@@ -38,7 +38,7 @@ interface Effect<I> {
 const effects: { [K in StepName]: Effect<StepInput<K>> } = {
   submit: {
     async write(q, ctx, testId, input) {
-      const customerId = ctx.person.customerId ?? refuse('role', 'only a Customer User submits');
+      const customerId = ctx.person.customerId ?? refuse('role', 'Only a Customer User makes a Submission.');
       const submission = await q.company
         .insertInto('submission')
         .values({ customerId, submittedBy: ctx.person.id, number: await q.takeNumber('Submission') })
@@ -188,7 +188,8 @@ async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signi
 
 /** lims.sign's own refusal (LA010) reaches the bench as a refusal; any other failure is thrown with its cause. */
 function signingRefused(error: unknown): never {
-  if (postgresFault(error)?.sqlstate === 'LA010' && error instanceof Error) refuse('signingRefused', error.message);
+  if (postgresFault(error)?.sqlstate === 'LA010' && error instanceof Error)
+    refuse('signingRefused', `The Signature was refused: ${error.message}.`);
   throw new Error('signing failed', { cause: error });
 }
 
@@ -204,11 +205,11 @@ export function statementInForce(scope: LabQueries): Promise<SignatureStatement>
 async function seenVersion(scope: LabQueries, testId: string, signature: SigningBody): Promise<Seen> {
   const latest = await latestVersion(scope, 'test', testId);
   if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
-    refuse('recordChanged', 'the Test changed since this screen loaded it; read it again before signing');
+    refuse('recordChanged', 'The Test changed since this screen loaded it. Read it again before signing.');
   if ((await statementInForce(scope)).version !== signature.statementVersion)
     refuse(
       'signingRefused',
-      'the signature statement changed since this screen loaded it; read it again before signing',
+      'The signature statement changed since this screen loaded it. Read it again before signing.',
     );
   return { id: latest.id, contentHash: signature.recordVersion.contentHash };
 }
@@ -217,9 +218,9 @@ type KeptCommit = Pick<Selectable<DB['commitKey']>, 'sessionId' | 'requestHash' 
 
 function receiptOf(kept: KeptCommit, sessionId: string, requestHash: Buffer): StepTaken {
   if (kept.sessionId !== sessionId)
-    refuse('keyReused', 'this press was already saved under another sign-in; reload to see what was saved');
+    refuse('keyReused', 'This press was already saved under another sign-in. Reload to see what was saved.');
   if (!kept.requestHash.equals(requestHash))
-    refuse('keyReused', 'this press was already saved with other entries; reload to see what was saved');
+    refuse('keyReused', 'This press was already saved with other entries. Reload to see what was saved.');
   return { testId: kept.testId, state: kept.state };
 }
 
@@ -241,7 +242,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
       body.testId === undefined
         ? null
         : ((await scope.from('test').selectAll().where('id', '=', body.testId).executeTakeFirst()) ??
-          refuse('notFound', 'no such Test in this Lab'));
+          refuse('notFound', 'This Lab has no such Test.'));
     const facts = await factsFor(scope, actor, test, effect.assignee?.(body.input));
     const refused = refusal(name, test?.state ?? null, actor.roles, facts);
     if (refused) {
@@ -259,8 +260,8 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
         req.log.info({ step: name, testId: first.testId }, 'step replayed');
         return receiptOf(first, sessionId, requestHash);
       }
-      const signature = body.signature ?? refuse('malformed', `${name} needs the signer's credentials`);
-      const testId = test?.id ?? refuse('malformed', `${name} signs a Test`);
+      const signature = body.signature ?? refuse('malformed', "This step needs the signer's credentials.");
+      const testId = test?.id ?? refuse('malformed', 'Name the Test this step signs.');
       const seen = await seenVersion(scope, testId, signature);
       await reauthenticate(
         db,
@@ -299,7 +300,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
           .where('id', '=', testId)
           .where('state', '=', test.state)
           .executeTakeFirstOrThrow();
-        if (!moved.numUpdatedRows) refuse('stale', 'the Test has moved on; reload it');
+        if (!moved.numUpdatedRows) refuse('stale', 'The Test has moved on. Reload it.');
       }
       await effect.write(q, actor, testId, body.input);
       if (signing) await sign(q, actor, sessionId, signing);

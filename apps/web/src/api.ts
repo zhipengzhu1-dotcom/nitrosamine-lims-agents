@@ -95,7 +95,7 @@ function tick() {
   // rethrown with its context, so it reaches the console instead of vanishing.
   check().catch((err: unknown) => {
     if (err instanceof Refused && err.kind === 'noSession') return;
-    throw new Error('could not ask the LIMS whether the session has ended', { cause: err });
+    throw new Error('The LIMS could not say whether the session has ended.', { cause: err });
   });
 }
 
@@ -152,7 +152,7 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
       : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) },
   );
   const json: unknown = await res.json().catch(() => ({}));
-  const refused = res.ok ? null : refusedBy(json, `the LIMS did not answer (${res.status})`);
+  const refused = res.ok ? null : refusedBy(json, `The LIMS did not answer (status ${res.status}).`);
   if (refused?.kind === 'noSession') {
     endSession(refused.message);
     throw refused;

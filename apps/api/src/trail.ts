@@ -167,7 +167,7 @@ export async function storedInstantsIn(
 
 async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, where: Where): Promise<Trail> {
   const entries = await rawEntries(scope, where);
-  if (entries.length === 0) refuse('notFound', `no such ${auditedRecords[root.table].kind} in this Lab`);
+  if (entries.length === 0) refuse('notFound', `This Lab has no such ${auditedRecords[root.table].kind}.`);
   const { timeZone } = await scope.company
     .selectFrom('lab')
     .select('timeZone')
@@ -188,7 +188,7 @@ async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, 
 }
 
 function staffScope(db: Kysely<DB>, req: { actor: Scope['ctx'] }): Scope {
-  if (req.actor.person.customerId !== null) refuse('role', 'the Audit Trail is not shown to a Customer User');
+  if (req.actor.person.customerId !== null) refuse('role', 'The Audit Trail is not shown to a Customer User.');
   return labScope(db, req.actor);
 }
 
@@ -237,7 +237,7 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
           .leftJoin('testReport', 'testReport.testId', 'test.id')
           .select(['test.id', 'test.sampleId', 'sample.submissionId', 'testReport.id as reportId'])
           .where('test.id', '=', id)
-          .executeTakeFirst()) ?? refuse('notFound', 'no such Test in this Lab');
+          .executeTakeFirst()) ?? refuse('notFound', 'This Lab has no such Test.');
       const ids = [test.id, test.sampleId, ...(test.reportId ? [test.reportId] : [])];
       return trailOf(scope, { table: 'test', id }, (eb) =>
         eb.or([
@@ -266,7 +266,7 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
       const scope = staffScope(db, req);
       const { table, id } = req.params;
       if (!(await seenFromLab(scope, table, id)))
-        refuse('notFound', `no such ${auditedRecords[table].kind} in this Lab`);
+        refuse('notFound', `This Lab has no such ${auditedRecords[table].kind}.`);
       return trailOf(scope, { table, id }, (eb) =>
         eb.and([eb('chain', '=', chainOf(scope, table)), eb('tableName', '=', table), eb(rowId, '=', id)]),
       );
@@ -276,7 +276,7 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
   app.route({
     ...routes.verifyAuditTrail,
     handler: async (req) => {
-      if (!req.actor.roles.includes('QA')) refuse('role', 'verifying the Audit Trail is a QA action');
+      if (!req.actor.roles.includes('QA')) refuse('role', 'Verifying the Audit Trail is a QA action.');
       const { at, chains } = await labScope(db, req.actor).verifyAuditTrail();
       return {
         at,

@@ -148,13 +148,13 @@ it('every route that takes a body refuses a field its schema does not name with 
   for (const name of stepNames) {
     const { route, body } = posts[name];
     const refused = await client.send(route, { ...body, input: { ...body.input, extra: 1 } });
-    assert.equal(refusedWith(refused, 'unknownField'), 'the LIMS does not know the field input.extra', name);
+    assert.equal(refusedWith(refused, 'unknownField'), 'The LIMS does not know the field input.extra.', name);
   }
   for (const [name, { route, body }] of Object.entries(posts)) {
     // Each route gets its own session: lock and logout end what the next route's hook would read before the body.
     const client = await api.login(cora);
     const refused = await client.send(route, { ...body, extra: 1 });
-    assert.equal(refusedWith(refused, 'unknownField'), 'the LIMS does not know the field extra', name);
+    assert.equal(refusedWith(refused, 'unknownField'), 'The LIMS does not know the field extra.', name);
     const control = await client.send(route, body);
     assert.ok(
       control.kind === 'reply' || !['unknownField', 'malformed'].includes(control.body.kind),
@@ -165,14 +165,14 @@ it('every route that takes a body refuses a field its schema does not name with 
 
 it('a body with an unknown field and a missing required field is refused for the unknown field', async () => {
   const refused = await as.cora.send(stepRoute('receive'), { commitKey: randomUUID(), input: {}, extra: 1 });
-  assert.equal(refusedWith(refused, 'unknownField'), 'the LIMS does not know the field extra');
+  assert.equal(refusedWith(refused, 'unknownField'), 'The LIMS does not know the field extra.');
 });
 
 it('a step whose input names an unknown field is refused and writes no row and no Audit Trail entry', async () => {
   const before = await counts();
   const { body } = posts.submit;
   const refused = await as.cora.send(posts.submit.route, { ...body, input: { ...body.input, extra: 1 } });
-  assert.equal(refusedWith(refused, 'unknownField'), 'the LIMS does not know the field input.extra');
+  assert.equal(refusedWith(refused, 'unknownField'), 'The LIMS does not know the field input.extra.');
   assert.deepEqual(await counts(), before);
 });
 
@@ -187,7 +187,7 @@ it('a signing step with the right password and an unknown field in the signature
     input: result,
     signature: { ...(await signatureOf(client, id, lou)), extra: 1 },
   });
-  assert.equal(refusedWith(refused, 'unknownField'), 'the LIMS does not know the field signature.extra');
+  assert.equal(refusedWith(refused, 'unknownField'), 'The LIMS does not know the field signature.extra.');
   assert.deepEqual(await counts(), before, 'no Signature, no Result and no Audit Trail entry');
   const person = await api.superuser
     .selectFrom('person')
@@ -205,10 +205,13 @@ it('unparseable JSON and a missing required field are refused as malformed, an u
   assert.equal(refusalIn(unparseable.body).kind, 'malformed');
 
   const missing = await as.cora.send(stepRoute('receive'), { commitKey: randomUUID(), input: {} });
-  assert.equal(refusedWith(missing, 'malformed'), "body must have required property 'testId'");
+  assert.equal(
+    refusedWith(missing, 'malformed'),
+    "The LIMS cannot read this request: body must have required property 'testId'.",
+  );
 
   const unknownRoute = await raw('/api/no-such-route', { method: 'GET' });
-  assert.deepEqual(unknownRoute, { status: 404, body: { kind: 'notFound', message: 'no such route' } });
+  assert.deepEqual(unknownRoute, { status: 404, body: { kind: 'notFound', message: 'The LIMS has no such route.' } });
 
   const text = await raw(stepRoute('submit').url, {
     method: 'POST',

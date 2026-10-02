@@ -13,16 +13,16 @@ it('a wrong password or an unknown username gives no session, and the right pass
   const wrongPassword = await client.call(routes.login, { username: rui.username, password: 'not-the-password' });
   const unknownUsername = await client.call(routes.login, { username: 'no.such-person', password: rui.password });
   for (const refused of [wrongPassword, unknownUsername])
-    assert.equal(refusedWith(refused, 'badCredentials'), 'the user ID or password is not valid');
+    assert.equal(refusedWith(refused, 'badCredentials'), 'The user ID or password is not valid.');
   assert.equal(client.cookie, '', 'no session cookie after a refused sign-in');
-  assert.equal(refusedWith(await client.call(routes.me), 'noSession'), 'sign in first');
+  assert.equal(refusedWith(await client.call(routes.me), 'noSession'), 'Sign in first.');
 
   const signedIn = await api.login(rui);
   assert.equal(ok(await signedIn.call(routes.me)).person.username, rui.username);
 
   const noLab = await api.addPerson('nolab.person', []);
   const refused = await client.call(routes.login, { username: noLab.username, password: noLab.password });
-  assert.equal(refusedWith(refused, 'role'), 'this account belongs to no Lab', 'told only with the right password');
+  assert.equal(refusedWith(refused, 'role'), 'This account belongs to no Lab.', 'told only with the right password');
 });
 
 it(`the ${LOCKOUT_AFTER_FAILURES}th failed login locks the account and ends its sessions, and only the right password learns of the lock`, async () => {
@@ -37,12 +37,12 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th failed login locks the account and ends its 
   for (let i = 1; i <= LOCKOUT_AFTER_FAILURES; i++) refusedWith(await fail(), 'badCredentials');
   const firstLock = (await lockedAt()) ?? assert.fail('the account is locked');
   const locked = await new Client(api.base).call(routes.login, { username: ada.username, password: ada.password });
-  assert.equal(refusedWith(locked, 'accountLocked'), 'this account is locked');
+  assert.equal(refusedWith(locked, 'accountLocked'), 'This account is locked.');
   assert.equal(refusedWith(await session.call(routes.me), 'noSession'), SESSION_ENDED);
 
   assert.equal(
     refusedWith(await fail(), 'badCredentials'),
-    'the user ID or password is not valid',
+    'The user ID or password is not valid.',
     'a wrong password answers the same whether or not the account is locked',
   );
   assert.deepEqual(await lockedAt(), firstLock, 'a wrong password on a locked account keeps the first lock time');
@@ -70,7 +70,7 @@ it('a session ends when idle too long, when too old, and on logout', async () =>
   for (const [name, client, message] of [
     ['idle', sessions.idle, SESSION_ENDED],
     ['old', sessions.old, SESSION_ENDED],
-    ['out', sessions.out, 'sign in first'],
+    ['out', sessions.out, 'Sign in first.'],
   ] as const)
     assert.equal(refusedWith(await client.call(routes.me), 'noSession'), message, name);
 });

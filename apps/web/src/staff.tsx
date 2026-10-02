@@ -130,7 +130,7 @@ function GrantMembership({
       onSubmit={(e) =>
         commit(e, async (form) => {
           const role = field(form, 'role');
-          if (!isGrantable(role)) throw new Error('choose a role');
+          if (!isGrantable(role)) throw new Error('Choose a role.');
           const person = await api(routes.grantMembership, {
             personId: field(form, 'personId'),
             role,
