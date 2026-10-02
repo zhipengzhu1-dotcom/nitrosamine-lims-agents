@@ -5,6 +5,15 @@ const COURIER_ADVANCE_EM = 0.6;
 export const PDF_COLUMNS = Math.floor((PAGE.width - 2 * PAGE.margin) / (FONT_SIZE * COURIER_ADVANCE_EM));
 const LINES_PER_PAGE = Math.floor((PAGE.height - 2 * PAGE.margin - 2 * LEADING) / LEADING);
 
+const cp1252 = new TextDecoder('windows-1252');
+/** The characters Windows-1252 puts at 0x80-0x9F, such as curly quotes, dashes and the euro sign, by their byte. */
+const CP1252_HIGH = new Map(
+  Array.from({ length: 0x20 }, (_, i) => [cp1252.decode(Uint8Array.of(0x80 + i)), 0x80 + i] as const).filter(
+    ([ch]) => (ch.codePointAt(0) ?? 0) > 0xff,
+  ),
+);
+const octal = (byte: number) => `\\${byte.toString(8).padStart(3, '0')}`;
+
 /** A character Courier's WinAnsi encoding cannot print becomes `?`; the data file beside the PDF keeps it as written. */
 function winAnsi(line: string): string {
   return Array.from(line)
@@ -12,8 +21,9 @@ function winAnsi(line: string): string {
       const code = ch.codePointAt(0) ?? 0x3f;
       if (code === 0x28 || code === 0x29 || code === 0x5c) return `\\${ch}`;
       if (code >= 0x20 && code <= 0x7e) return ch;
-      if (code >= 0xa0 && code <= 0xff) return `\\${code.toString(8).padStart(3, '0')}`;
-      return '?';
+      if (code >= 0xa0 && code <= 0xff) return octal(code);
+      const high = CP1252_HIGH.get(ch);
+      return high === undefined ? '?' : octal(high);
     })
     .join('');
 }

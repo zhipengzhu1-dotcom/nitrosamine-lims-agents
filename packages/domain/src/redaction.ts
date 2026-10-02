@@ -4,10 +4,11 @@ export const REDACTED = '[redacted]';
 
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Replaces every identifier in `others` with REDACTED in readable and raw values alike, and never touches one in `own`, even where it contains one in `others`. */
+/** Replaces every identifier in `others`, in any case, with REDACTED in readable and raw values alike, and never touches one in `own`, even where it contains one in `others`. */
 export function redactionFor(own: readonly string[], others: readonly string[]): (entry: TrailEntry) => ExportedEntry {
-  const mine = new Set(own);
-  const theirs = others.filter((s) => s.trim() !== '' && !mine.has(s));
+  const folded = (s: string) => s.toLocaleLowerCase('en');
+  const mine = new Set(own.map((s) => folded(s)));
+  const theirs = others.filter((s) => s.trim() !== '' && !mine.has(folded(s)));
   const pattern =
     theirs.length === 0
       ? null
@@ -16,7 +17,7 @@ export function redactionFor(own: readonly string[], others: readonly string[]):
             .sort((a, b) => b.length - a.length)
             .map((s) => escaped(s))
             .join('|')})(?![\\p{L}\\p{N}])`,
-          'gu',
+          'giu',
         );
   return (entry) => {
     let redacted = false;
@@ -24,7 +25,7 @@ export function redactionFor(own: readonly string[], others: readonly string[]):
       pattern === null
         ? value
         : value.replace(pattern, (found) => {
-            if (mine.has(found)) return found;
+            if (mine.has(folded(found))) return found;
             redacted = true;
             return REDACTED;
           });

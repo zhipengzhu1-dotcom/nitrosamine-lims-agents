@@ -68,7 +68,10 @@ async function recordsByCustomer(scope: Scope) {
       .execute(),
   ]);
   const of = new Map<string, CustomerRecords>(
-    customers.map((c) => [c.id, { labIds: [], submissionIds: new Set(), methodIds: new Set(), userIds: [], identifiers: [c.id, c.name] }]),
+    customers.map((c) => [
+      c.id,
+      { labIds: [], submissionIds: new Set(), methodIds: new Set(), userIds: [], identifiers: [c.id, c.name] },
+    ]),
   );
   const owner = new Map<string, string>();
   const own = (id: string, by: string | undefined, ...identifiers: string[]) => {
@@ -106,8 +109,10 @@ const rawText = (value: unknown) =>
   value === undefined || value === null ? '' : typeof value === 'string' ? value : JSON.stringify(value);
 const chainWords = { lab: 'Lab chain', company: 'Company chain' } as const;
 
+/** A cell a spreadsheet would run as a formula starts with an apostrophe, unless it is a plain number. */
 function csvField(value: string): string {
-  return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+  const inert = /^[=+\-@\t\r]/.test(value) && !/^-?\d+(\.\d+)?$/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(inert) ? `"${inert.replaceAll('"', '""')}"` : inert;
 }
 
 const CSV_HEADER = [
@@ -217,6 +222,62 @@ const fileStem = (name: string, asOf: Instant) =>
       .toLowerCase() || 'customer'
   }-${asOf.slice(0, 10)}`;
 
+/** One Customer's Audit Export as one snapshot of the database holds it, other Customers' identifiers redacted. */
+async function exportData(scope: Scope, customerId: string): Promise<AuditExportData> {
+  const customer =
+    (await customersSeen(scope).where('id', '=', customerId).executeTakeFirst()) ??
+    refuse('notFound', 'no such Customer in this Lab');
+  const labId = scope.ctx.lab.id;
+  const byCustomer = await recordsByCustomer(scope);
+  const mine = byCustomer.get(customer.id) ?? refuse('notFound', 'no such Customer in this Lab');
+  const others = [...byCustomer].flatMap(([id, c]) => (id === customer.id ? [] : c.identifiers));
+  const { asOf } = await scope.company
+    .selectNoFrom(sql<Instant>`to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as('asOf'))
+    .executeTakeFirstOrThrow();
+  const entries = await rawEntries(scope, (eb) =>
+    eb.or([
+      eb.and([
+        eb('chain', '=', labId),
+        eb.or([
+          eb(rowId, '=', sql<string>`any(${mine.labIds}::text[])`),
+          eb.and([eb('tableName', '=', 'audit_export'), eb(sql`new_row->>'customer_id'`, '=', customer.id)]),
+        ]),
+      ]),
+      eb.and([
+        eb('chain', '=', 'company'),
+        eb.or([
+          eb.and([eb('tableName', '=', 'customer'), eb(rowId, '=', customer.id)]),
+          eb.and([
+            eb('tableName', '=', 'submission'),
+            eb(rowId, '=', sql<string>`any(${[...mine.submissionIds]}::text[])`),
+          ]),
+          eb.and([eb('tableName', '=', 'person'), eb(rowId, '=', sql<string>`any(${mine.userIds}::text[])`)]),
+          eb.and([eb('tableName', '=', 'method'), eb(rowId, '=', sql<string>`any(${[...mine.methodIds]}::text[])`)]),
+        ]),
+      ]),
+    ]),
+  );
+  const [images, verified, lab] = await Promise.all([
+    imagesFor(scope, entries),
+    scope.verifyAuditTrail(),
+    scope.company
+      .selectFrom('lab')
+      .select(['code', 'name', 'timeZone'])
+      .where('labId', '=', labId)
+      .executeTakeFirstOrThrow(),
+  ]);
+  const redact = redactionFor(mine.identifiers, others);
+  const data: AuditExportData = {
+    customer,
+    lab: { code: lab.code, name: lab.name, zone: lab.timeZone },
+    asOf,
+    generatedBy: { label: scope.ctx.person.displayName, username: scope.ctx.person.username, role: 'QA' },
+    chains: verified.chains.map((c) => chainVerification(c.chain, c.lastEntry, c.firstFailure)),
+    entries: describeTrail(entries, images, labId).map((e) => redact(e)),
+  };
+  return data;
+}
+
 /** Only QA in this Lab lists Customers or exports, and every Audit Export is recorded on the Lab chain with its files' hashes. */
 export function auditExportRoutes(app: App, db: Kysely<DB>): void {
   app.route({
@@ -229,60 +290,12 @@ export function auditExportRoutes(app: App, db: Kysely<DB>): void {
     handler: async (req) => {
       const scope = qaScope(db, req);
       const { customerId, format } = req.body;
-      const customer =
-        (await customersSeen(scope).where('id', '=', customerId).executeTakeFirst()) ??
-        refuse('notFound', 'no such Customer in this Lab');
-      const labId = scope.ctx.lab.id;
-      const byCustomer = await recordsByCustomer(scope);
-      const mine = byCustomer.get(customer.id) ?? refuse('notFound', 'no such Customer in this Lab');
-      const others = [...byCustomer].flatMap(([id, c]) => (id === customer.id ? [] : c.identifiers));
-      const { asOf } = await scope.company
-        .selectNoFrom(sql<Instant>`to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as('asOf'))
-        .executeTakeFirstOrThrow();
-      const entries = await rawEntries(scope, (eb) =>
-        eb.or([
-          eb.and([
-            eb('chain', '=', labId),
-            eb.or([
-              eb(rowId, '=', sql<string>`any(${mine.labIds}::text[])`),
-              eb.and([eb('tableName', '=', 'audit_export'), eb(sql`new_row->>'customer_id'`, '=', customer.id)]),
-            ]),
-          ]),
-          eb.and([
-            eb('chain', '=', 'company'),
-            eb.or([
-              eb.and([eb('tableName', '=', 'customer'), eb(rowId, '=', customer.id)]),
-              eb.and([
-                eb('tableName', '=', 'submission'),
-                eb(rowId, '=', sql<string>`any(${[...mine.submissionIds]}::text[])`),
-              ]),
-              eb.and([eb('tableName', '=', 'person'), eb(rowId, '=', sql<string>`any(${mine.userIds}::text[])`)]),
-              eb.and([
-                eb('tableName', '=', 'method'),
-                eb(rowId, '=', sql<string>`any(${[...mine.methodIds]}::text[])`),
-              ]),
-            ]),
-          ]),
-        ]),
-      );
-      const [images, verified, lab] = await Promise.all([
-        imagesFor(scope, entries),
-        scope.verifyAuditTrail(),
-        scope.company
-          .selectFrom('lab')
-          .select(['code', 'name', 'timeZone'])
-          .where('labId', '=', labId)
-          .executeTakeFirstOrThrow(),
-      ]);
-      const redact = redactionFor(mine.identifiers, others);
-      const data: AuditExportData = {
-        customer,
-        lab: { code: lab.code, name: lab.name, zone: lab.timeZone },
-        asOf,
-        generatedBy: { label: scope.ctx.person.displayName, username: scope.ctx.person.username, role: 'QA' },
-        chains: verified.chains.map((c) => chainVerification(c.chain, c.lastEntry, c.firstFailure)),
-        entries: describeTrail(entries, images, labId).map((e) => redact(e)),
-      };
+      const data = await db
+        .transaction()
+        .setIsolationLevel('repeatable read')
+        .setAccessMode('read only')
+        .execute((tx) => exportData(labScope(tx, req.actor), customerId));
+      const { customer, asOf } = data;
       const stem = fileStem(customer.name, asOf);
       const formats: Record<AuditExportFormat, { name: string; mediaType: string; bytes: Buffer }> = {
         JSON: {

@@ -66,11 +66,14 @@ async function take(client: Client, name: StepName, testId: string, input: StepI
   ok(await client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) }));
 }
 
-async function submitted(customer: Client, { methodId = api.methodId, released = false } = {}) {
+async function submitted(
+  customer: Client,
+  { methodId = api.methodId, released = false, description = 'Metformin HCl tablets (fictional)' } = {},
+) {
   const { testId } = ok(
     await customer.call(stepRoute('submit'), {
       commitKey: randomUUID(),
-      input: { methodId, description: 'Metformin HCl tablets (fictional)' },
+      input: { methodId, description },
     }),
   );
   await take(as.samir, 'receive', testId);
@@ -333,4 +336,17 @@ it('QA picks from the Customers with a Sample in this Lab, and a Customer with n
   assert.deepEqual(listed.map((c) => c.id).sort(), [northwindId, contoso.id].sort());
   const empty = await newCustomer('Fabrikam (fictional)');
   refusedWith(await as.quinn.call(routes.auditExport, { customerId: empty.id, format: 'JSON' }), 'notFound');
+});
+
+it("the PDF prints Windows-1252's curly quotes and dashes, and a character outside it as ?", async () => {
+  await submitted(as.cora, { description: 'Customer’s tablets – lot 7 二' });
+  const pdf = Buffer.from((await generate(northwindId)).files[1].base64, 'base64').toString('latin1');
+  assert.ok(pdf.includes('Customer\\222s tablets \\226 lot 7 ?'), 'printed as WinAnsi bytes');
+});
+
+it('a CSV cell a spreadsheet would run as a formula starts with an apostrophe', async () => {
+  await submitted(as.cora, { description: '=HYPERLINK("https://example.invalid","open")' });
+  const csv = fileText((await generate(northwindId, 'CSV')).files[0]);
+  assert.ok(csv.includes(`"'=HYPERLINK(""https://example.invalid"",""open"")"`), 'the formula is quoted and inert');
+  assert.ok(!/(^|,)"?=HYPERLINK/m.test(csv), 'no cell starts with the formula');
 });

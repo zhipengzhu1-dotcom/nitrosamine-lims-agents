@@ -78,6 +78,12 @@ describe("an Audit Export replaces another Customer's identifiers and keeps the 
       redacted: true,
     },
     {
+      name: "another Customer's name in another case is redacted",
+      text: 'Called CONTOSO LABS (FICTIONAL) about rd-s-2026-000002',
+      expected: `Called ${REDACTED} about ${REDACTED}`,
+      redacted: true,
+    },
+    {
       name: "another Customer's name inside a longer word is left alone",
       text: 'Northwinds and Contoso Labs (fictional)s',
       expected: 'Northwinds and Contoso Labs (fictional)s',
