@@ -383,7 +383,7 @@ it('a stored instant carries its UTC and Lab-zone renderings, a Record kind read
   assert.match(changeOf('record_version', 'content_hash').text, /^[0-9a-f]{64}$/);
 });
 
-it("a Test's Signatures and Received keep the Lab wall clock of the zone in force when each was written, on the Worklist, the Test and its Test Report, after the Lab's time zone changes; one written after the change takes the new zone; and the change shows in the Lab's own trail", async () => {
+it("a Test's Signatures and Received keep the Lab wall clock of the zone in force when each was written, on every screen and in the Audit Trail, after the Lab's time zone changes", async () => {
   const setZone = (timeZone: string) =>
     audited(
       api.superuser,
@@ -399,27 +399,40 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
     const view = ok(await as.rui.call(routes.test, { id }));
     const report = ok(await as.cora.call(routes.report, { id }));
     const row = ok(await as.rui.call(routes.tests)).find((t) => t.id === id) ?? assert.fail('the Worklist row');
+    const inTrail = (await trailOf(id)).entries
+      .flatMap((e) => e.changes)
+      .filter((c) => c.field === 'signed_at' || c.field === 'received_at')
+      .map((c) => c.new?.instant ?? assert.fail(`the ${c.label} instant`));
     return [
       ...[view, report].flatMap((r) => r.signatures.map((s) => ({ at: s.signedAt, atLab: s.signedAtLab }))),
       ...[view.test, report.test, row].map((t) => ({
         at: t.receivedAt ?? assert.fail('the Received time'),
         atLab: t.receivedAtLab,
       })),
+      ...inTrail,
     ];
   };
   const toMillis = (atLab: string | null) => atLab?.replace(/(\.\d{3})\d{3}/, '$1');
   const writtenBefore = await submitTestTo('Reported');
   const shownBefore = await shownOn(writtenBefore);
-  assert.equal(shownBefore.length, 9, 'three Signatures on the Test and on its Test Report, and three Received');
+  assert.equal(
+    shownBefore.length,
+    13,
+    'three Signatures on the Test, on its Test Report and in the Audit Trail, and a Received on each screen and in the Audit Trail',
+  );
   for (const { at, atLab } of shownBefore)
-    assert.equal(toMillis(atLab), onLabClock(at, before), `${at} on the ${before} clock`);
+    assert.equal(toMillis(atLab), toMillis(onLabClock(at, before)), `${at} on the ${before} clock`);
   await setZone('Asia/Tokyo');
   try {
     assert.deepEqual(await shownOn(writtenBefore), shownBefore, 'the zone change moves no Lab clock written before it');
     const writtenAfter = await submitTestTo('Reported');
     for (const { at, atLab } of await shownOn(writtenAfter)) {
       assert.match(atLab ?? '', /\+09:00$/, `${at} on the Tokyo clock`);
-      assert.equal(toMillis(atLab), onLabClock(at, 'Asia/Tokyo'), `${at} on the Lab wall clock, as Intl renders it`);
+      assert.equal(
+        toMillis(atLab),
+        toMillis(onLabClock(at, 'Asia/Tokyo')),
+        `${at} on the Lab wall clock, as Intl renders it`,
+      );
     }
     const lab = ok(await as.rui.call(routes.recordTrail, { table: 'lab', id: api.labId }));
     assert.deepEqual([lab.record.kind, lab.labZone], ['Lab', 'Asia/Tokyo']);

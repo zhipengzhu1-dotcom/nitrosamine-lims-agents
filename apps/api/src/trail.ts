@@ -10,6 +10,7 @@ import {
   currentLabel,
   describeTrail,
   imagesOf,
+  instantKey,
   type Instant,
   isAuditedTable,
   type RecordIds,
@@ -22,6 +23,7 @@ import {
   storedInstants,
   type TimedEntry,
   type Trail,
+  type ZonedInstant,
 } from '@lims/domain';
 import {
   type ExpressionBuilder,
@@ -160,18 +162,20 @@ export async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<Ro
   return images;
 }
 
-/** Each stored instant as the database renders it, in UTC and on `zone`'s wall clock, so that no host clock formats one. */
+/** Each stored instant as the database renders it, in UTC and on the wall clock of the zone its row kept, else `labZone`, so that no host clock formats one. */
 export async function storedInstantsIn(
   scope: Scope,
-  zone: string,
-  stored: string[],
+  labZone: string,
+  wanted: ZonedInstant[],
 ): Promise<Map<string, StoredInstant>> {
-  const value = sql.ref('v.stored');
-  const { rows } = await sql<StoredInstant & { stored: string }>`
-    select v.stored, ${inUtc(sql`${value}::timestamptz`)} as at,
-           ${onWallClock(sql`${value}::timestamptz`, sql`${zone}::text`)} as at_lab
-      from unnest(${stored}::text[]) as v(stored)`.execute(scope.company);
-  return new Map(rows.map(({ stored: key, ...rendered }) => [key, rendered]));
+  const value = sql`${sql.ref('v.stored')}::timestamptz`;
+  const { rows } = await sql<StoredInstant & ZonedInstant>`
+    select v.stored, v.zone, ${inUtc(value)} as at,
+           ${onWallClock(value, sql`coalesce(${sql.ref('v.zone')}, ${labZone}::text)`)} as at_lab
+      from unnest(${wanted.map((w) => w.stored)}::text[], ${wanted.map((w) => w.zone)}::text[]) as v(stored, zone)`.execute(
+    scope.company,
+  );
+  return new Map(rows.map(({ stored, zone, ...rendered }) => [instantKey({ stored, zone }), rendered]));
 }
 
 async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, where: Where): Promise<Trail> {

@@ -21,6 +21,8 @@ interface FieldSpec {
   ref?: AuditedTable;
   refTableIn?: string;
   shows?: Shows;
+  /** The column of the same row that keeps the Lab time zone an instant was written in. */
+  zone?: string;
   movedByStep?: true;
 }
 
@@ -83,7 +85,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     fields: {
       number: { label: 'Number' },
       description: { label: 'Description' },
-      received_at: { label: 'Received', shows: 'instant', movedByStep: true },
+      received_at: { label: 'Received', shows: 'instant', zone: 'received_time_zone', movedByStep: true },
       received_time_zone: { label: 'Received in time zone', movedByStep: true },
       submission_id: { label: 'Submission', ref: 'submission' },
     },
@@ -154,7 +156,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       session_id: { label: 'Session' },
       app_release: { label: 'App release' },
       reauthentication_id: { label: 'Re-authentication', ref: 'reauthentication' },
-      signed_at: { label: 'Signed at', shows: 'instant' },
+      signed_at: { label: 'Signed at', shows: 'instant', zone: 'signed_time_zone' },
       signed_time_zone: { label: 'Signed in time zone' },
     },
   },
@@ -267,17 +269,33 @@ export interface StoredInstant {
   atLab: Instant;
 }
 
-/** Every instant the entries' row snapshots store, as stored, so that the API can have the database render each. */
-export function storedInstants(entries: readonly RawEntry[]): string[] {
-  const found = new Set<string>();
+/** An instant as a row snapshot stores it, with the Lab time zone the row kept beside it, or null when it kept none. */
+export interface ZonedInstant {
+  stored: string;
+  zone: string | null;
+}
+
+/** The one key a stored instant and its kept zone are rendered under. */
+export const instantKey = ({ stored, zone }: ZonedInstant): string => (zone === null ? stored : `${stored} ${zone}`);
+
+function zonedInstant(field: FieldSpec, row: RowSnapshot, value: unknown): ZonedInstant {
+  const zone = field.zone === undefined ? null : row[field.zone];
+  return { stored: text(value), zone: typeof zone === 'string' ? zone : null };
+}
+
+/** Every instant the entries' row snapshots store, with the zone each row kept, so that the API can have the database render each on the Lab wall clock it was written on. */
+export function storedInstants(entries: readonly RawEntry[]): ZonedInstant[] {
+  const found = new Map<string, ZonedInstant>();
   for (const e of entries) {
     const spec = isAuditedTable(e.table) ? auditedRecords[e.table] : null;
     for (const row of [e.oldRow, e.newRow])
       for (const [column, field] of Object.entries(spec?.fields ?? {}))
-        if (field.shows === 'instant' && row?.[column] !== undefined && row[column] !== null)
-          found.add(text(row[column]));
+        if (field.shows === 'instant' && row?.[column] !== undefined && row[column] !== null) {
+          const zoned = zonedInstant(field, row, row[column]);
+          found.set(instantKey(zoned), zoned);
+        }
   }
-  return [...found];
+  return [...found.values()];
 }
 
 const byAt = (a: RowImage, b: RowImage) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
@@ -361,7 +379,8 @@ export function describeTrail(
       label: isAuditedTable(e.table) ? labelOf(e.table, recordId) : text(recordId),
     };
     const chain = chainKindOf(e.chain, labId);
-    const shown = (column: string, value: unknown): ShownValue | null => {
+    const shown = (column: string, image: RowSnapshot): ShownValue | null => {
+      const value = image[column];
       if (value === null || value === undefined) return null;
       const field = spec?.fields[column];
       const refTable = field ? referenceOf(field, row) : null;
@@ -374,7 +393,7 @@ export function describeTrail(
         case 'recordKind':
           return plain(recordKind(value));
         case 'instant': {
-          const stored = instants.get(text(value));
+          const stored = instants.get(instantKey(zonedInstant(field, image, value)));
           return {
             text: text(value),
             ref: null,
@@ -398,8 +417,8 @@ export function describeTrail(
       .map((column) => ({
         field: column,
         label: spec?.fields[column]?.label ?? column,
-        old: shown(column, before[column]),
-        new: shown(column, after[column]),
+        old: shown(column, before),
+        new: shown(column, after),
       }));
     return {
       chain,
