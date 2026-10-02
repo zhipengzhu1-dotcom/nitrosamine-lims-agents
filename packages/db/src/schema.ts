@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "Lockout" | "SignInFailed" | "SignInSucceeded" | "SignOut";
+export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "Lockout" | "ReauthenticationFailed" | "SignInFailed" | "SignInSucceeded" | "SignOut";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -41,7 +41,7 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoLab" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount";
+export type SignInFailure = "AccountLocked" | "NoLab" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -123,6 +123,16 @@ export interface Person {
   username: string;
 }
 
+export interface Reauthentication {
+  at: Generated<Timestamp>;
+  authenticator: string;
+  id: Generated<string>;
+  labId: string;
+  meaning: Meaning;
+  personId: string;
+  sessionId: string;
+}
+
 export interface RecordVersion {
   canonicalForm: number;
   content: Buffer;
@@ -168,12 +178,30 @@ export interface Session {
 }
 
 export interface Signature {
+  appRelease: string | null;
+  authenticator: string | null;
+  canonicalForm: number;
+  contentHash: Buffer;
   id: Generated<string>;
   labId: string;
   meaning: Meaning;
   personId: string;
+  printedName: string;
+  reauthenticationId: string | null;
   recordVersionId: string;
+  role: Role;
+  sessionId: string | null;
   signedAt: Generated<Timestamp>;
+  statementHash: Buffer | null;
+  statementVersion: number | null;
+  username: string;
+}
+
+export interface SignatureStatement {
+  approvedAt: Generated<Timestamp>;
+  statement: Buffer;
+  statementHash: Generated<Buffer>;
+  version: number;
 }
 
 export interface Submission {
@@ -234,11 +262,13 @@ export interface DB {
   membership: Membership;
   method: Method;
   person: Person;
+  reauthentication: Reauthentication;
   recordVersion: RecordVersion;
   result: Result;
   sample: Sample;
   session: Session;
   signature: Signature;
+  signatureStatement: SignatureStatement;
   submission: Submission;
   systemIncident: SystemIncident;
   test: Test;
