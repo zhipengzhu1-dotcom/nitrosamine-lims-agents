@@ -118,11 +118,21 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await expect(signed.locator('.changes dt')).toHaveText([
     'Meaning',
     'Signer',
-    'Username',
-    'Printed name',
+    'Printed name at signing',
+    'Username at signing',
+    'Role at signing',
     'Record Version',
+    'SHA-256 of the signed content',
+    'Canonical form',
+    'Signature statement version',
+    'Signature statement hash',
+    'Authenticator',
+    'Session',
+    'App release',
+    'Re-authentication',
     'Signed at',
   ]);
+  await expect(signed.locator('dt:text-is("Signature statement hash") + dd summary')).toHaveText(/^[0-9a-f]{48}…$/);
   await expect(signed.locator('dt:text-is("Signed at") + dd')).toHaveText(
     /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d -0[45]:00$/,
   );
