@@ -2,12 +2,21 @@
 # Runs the slice locally: Postgres, migrations, a seed on an empty database, then the API and the web together.
 # --scratch gives the database this checkout's suffix and drops it first, and empties the API log.
 # With LIMS_LOG_FILE set, the API appends its log to that file instead of printing it.
+# The password pepper and the TOTP key, unless given, persist in the gitignored .pg/dev-secrets from the first start,
+# so a password or an authenticator set under one start still verifies after the next; --scratch draws fresh ones.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LIMS_DB=${LIMS_DB:-lims} PORT=${PORT:-3000}
+secrets=.pg/dev-secrets
+if [ "${1:-}" != --scratch ] && [ ! -f "$secrets" ]; then
+  mkdir -p .pg
+  (umask 077; printf 'pepper=%s\ntotp_key=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" >"$secrets")
+fi
+# shellcheck source=/dev/null
+[ "${1:-}" = --scratch ] || . "$secrets"
 access_event_key=${LIMS_ACCESS_EVENT_KEY:-$(openssl rand -hex 32)}
-password_pepper=${LIMS_PASSWORD_PEPPER:-$(openssl rand -hex 32)}
-totp_key=${LIMS_TOTP_KEY:-$(openssl rand -hex 32)}
+password_pepper=${LIMS_PASSWORD_PEPPER:-${pepper:-$(openssl rand -hex 32)}}
+totp_key=${LIMS_TOTP_KEY:-${totp_key:-$(openssl rand -hex 32)}}
 release=${LIMS_RELEASE:-development}
 login=${LIMS_LOGIN:-demo}
 log_file=${LIMS_LOG_FILE:-}
