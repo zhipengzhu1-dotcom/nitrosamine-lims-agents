@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
-import { checkoutDatabase, databaseUrl, dbConfig } from '../src/db.ts';
+import { checkoutDatabase, databaseUrl, dbServer } from '../src/db.ts';
 import { migrate } from '../src/migrate.ts';
 
-const { server } = dbConfig();
+const server = dbServer();
 const migrations = new URL('../migrations/', import.meta.url);
 const AS_ADMIN = `select set_config('lims.actor', 'person:grants.admin', true), set_config('lims.role', 'Admin', true),
                          set_config('lims.reason', 'Probe a grant', true)`;
