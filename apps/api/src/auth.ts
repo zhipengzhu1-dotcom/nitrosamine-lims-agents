@@ -242,9 +242,8 @@ class Reauthenticated {
 export type { Reauthenticated };
 
 /**
- * Runs `write` in one audited transaction that first holds the re-authenticated person's row until it commits, so a
- * Lockout lands wholly before the write or wholly after it, and clears the failure count. A Lockout that landed since
- * the password was checked refuses the write as accountLocked and records the refusal as an Access Event, as sign-in does.
+ * Runs `write` in one audited transaction that holds the re-authenticated person's row first, so a Lockout lands wholly
+ * before the write, which it then refuses as accountLocked and records as a failed authentication, or wholly after it.
  */
 export async function auditedAfterReauthentication<R>(
   db: Kysely<DB>,
@@ -253,12 +252,12 @@ export async function auditedAfterReauthentication<R>(
   write: (tx: Transaction<DB>) => Promise<R>,
 ): Promise<R> {
   if (!reauthenticated) return audited(db, ctx, write);
-  const done = await audited(db, ctx, async (tx) => {
-    if (!(await resetFailuresUnlessLocked(tx, reauthenticated.personId))) return { written: await write(tx) };
-    await record(tx, reauthenticated.refusedByLockout);
-    return null;
-  });
-  return done ? done.written : refuse('accountLocked', 'this account is locked');
+  const done = await audited(db, ctx, async (tx) =>
+    (await resetFailuresUnlessLocked(tx, reauthenticated.personId)) ? null : { written: await write(tx) },
+  );
+  if (done) return done.written;
+  await audited(db, { ...ctx, reason: 'Failed authentication' }, (tx) => record(tx, reauthenticated.refusedByLockout));
+  return refuse('accountLocked', 'this account is locked');
 }
 
 /**
