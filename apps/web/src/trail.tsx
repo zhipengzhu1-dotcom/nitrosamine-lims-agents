@@ -23,19 +23,31 @@ const chainWords = { lab: 'Lab chain', company: 'Company chain' } as const;
 const SHORT = 48;
 const NONE = 'none';
 
+const whenText = (at: string, atLab: string | null) => (atLab ? `${time(at)} · ${labTime(atLab)}` : time(at));
+const valueText = (value: ShownValue | null) =>
+  value === null ? NONE : value.instant ? whenText(value.instant.at, value.instant.atLab) : value.text;
+
+function When({ at, atLab }: { at: string; atLab: string | null }) {
+  return (
+    <>
+      {time(at)}
+      {atLab && <span className="muted"> · {labTime(atLab)}</span>}
+    </>
+  );
+}
+
 function searchText(e: TrailEntry): string {
   return [
     `#${e.seq}`,
     chainWords[e.chain],
-    time(e.at),
-    e.atLab ? labTime(e.atLab) : '',
+    whenText(e.at, e.atLab),
     e.actor.label,
     words(e.actor.role),
     action[e.op],
     e.reason,
     e.record.kind,
     e.record.label,
-    ...e.changes.flatMap((c) => [c.label, c.old?.text ?? NONE, c.new?.text ?? NONE]),
+    ...e.changes.flatMap((c) => [c.label, valueText(c.old), valueText(c.new)]),
   ]
     .join(' ')
     .toLowerCase();
@@ -45,6 +57,7 @@ function Value({ value, change, e }: { value: ShownValue | null; change: TrailCh
   if (value === null) return <i className="muted">{NONE}</i>;
   if (change.field === 'state' && e.record.table === 'test' && isTestState(value.text))
     return <Status state={value.text} />;
+  if (value.instant) return <When at={value.instant.at} atLab={value.instant.atLab} />;
   const text = value.ref ? (
     <a href={`#/trails/${value.ref.table}/${value.ref.id}`}>{value.text}</a>
   ) : (
@@ -67,8 +80,7 @@ function Entry({ e, root, fresh, onRaw }: { e: TrailEntry; root: Trail['record']
         <span className={`chain chain--${e.chain}`}>{chainWords[e.chain]}</span>
         <span className="entry__seq">#{e.seq}</span>
         <span className="entry__time">
-          {time(e.at)}
-          {e.atLab && <span className="muted"> · {labTime(e.atLab)}</span>}
+          <When at={e.at} atLab={e.atLab} />
         </span>
       </div>
       <p className="entry__line">
@@ -138,21 +150,15 @@ function RawDialog({ entry, onClose }: { entry: TrailEntry | null; onClose: () =
 function VerifyChain() {
   const inFlight = useRef(false);
   const [busy, setBusy] = useState(false);
-  const [verdict, setVerdict] = useState<{ text: string; tone: 'ok' | 'bad' } | null>(null);
+  const [answer, setAnswer] = useState<{ found: AuditTrailVerification } | { failed: string } | null>(null);
   async function verify() {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     try {
-      const found: AuditTrailVerification = await api(routes.verifyAuditTrail);
-      const broken = found.chains.some((c) => c.firstFailure !== null);
-      const chains = found.chains.map((c) => `${chainWords[c.chain]} ${c.report}`).join('; ');
-      setVerdict({
-        text: `Recomputed at ${time(found.at)}: ${chains}. Not anchored off-server (demo).`,
-        tone: broken ? 'bad' : 'ok',
-      });
+      setAnswer({ found: await api(routes.verifyAuditTrail) });
     } catch (error) {
-      setVerdict({ text: error instanceof Error ? error.message : 'the LIMS did not answer', tone: 'bad' });
+      setAnswer({ failed: error instanceof Error ? error.message : 'the LIMS did not answer' });
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -163,11 +169,21 @@ function VerifyChain() {
       <button type="button" className="btn" onClick={() => void verify()} disabled={busy} aria-busy={busy}>
         Verify chain
       </button>
-      {verdict && (
-        <p className={`verdict note--${verdict.tone}`} aria-live="polite">
-          {verdict.text}
-        </p>
-      )}
+      <div className="verdict" aria-live="polite">
+        {answer && 'failed' in answer && <p className="note--bad">{answer.failed}</p>}
+        {answer && 'found' in answer && (
+          <>
+            <p>Recomputed at {time(answer.found.at)}. Not anchored off-server (demo).</p>
+            <ul className="chains">
+              {answer.found.chains.map((c) => (
+                <li key={c.chain}>
+                  {chainWords[c.chain]} <Status verdict={c.verdict} /> {c.report}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -186,7 +202,7 @@ export function TrailPanel({ me, trail }: { me: ActorContext; trail: Trail | und
         <h2>Audit Trail</h2>
         {trail && (
           <p className="muted">
-            {trail.entries.length} entries. Times in UTC
+            {needle === '' ? trail.entries.length : `${shown.length} of ${trail.entries.length}`} entries. Times in UTC
             {trail.entries.some((e) => e.atLab !== null) ? ` and in the Lab's zone, ${trail.labZone}` : ''}.
           </p>
         )}

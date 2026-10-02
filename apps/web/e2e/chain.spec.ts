@@ -261,9 +261,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await sign(page, 'Released');
   await railSays(page, 'now Reported');
   await page.getByRole('button', { name: 'Verify chain' }).click();
-  await expect(page.locator('.verdict')).toHaveText(
-    /^Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC: Lab chain intact through entry \d+; Company chain intact through entry \d+\. Not anchored off-server \(demo\)\.$/,
-  );
+  await expect(page.locator('.chains li')).toHaveText([
+    /^Lab chain Intact verified through entry \d+$/,
+    /^Company chain Intact verified through entry \d+$/,
+  ]);
   const [releaseKey, retryKey] = commitKeys.slice(-2);
   expect(retryKey, 'the press whose reply was dropped is resent with its Commit Key').toBe(releaseKey);
   const presses = new Set(commitKeys);
@@ -301,9 +302,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await railSays(page, 'Unsigned: Performed, Reviewed, Released. The record changed after signing.');
   await shot(page, 'test-unsigned');
   await page.getByRole('button', { name: 'Verify chain' }).click();
-  await expect(page.locator('.verdict')).toHaveText(
-    /Lab chain intact through entry \d+; Company chain intact through entry \d+/,
-  );
+  await expect(page.locator('.chains li')).toHaveText([/^Lab chain Intact /, /^Company chain Intact /]);
 });
 
 test('a wrong password and an unknown user ID show the same failure message', async ({ page }) => {
