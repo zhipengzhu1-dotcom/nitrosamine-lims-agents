@@ -110,12 +110,16 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     'this Test has no released Test Report',
     'no Test Report for the Customer before release',
   );
+  const unreleased = await view(id, as.cora);
   assert.deepEqual(
-    [(await view(id, as.cora)).recordVersion, (await view(id, as.cora)).signatures],
-    [null, []],
+    [unreleased.recordVersion, unreleased.result, unreleased.signatures],
+    [null, null, []],
     'before release the Customer gets no Record Version hash, which could confirm a guessed Result',
   );
+  assert.equal(unreleased.withheld, true, 'the Customer is told the Result and Signatures are withheld until release');
+  assert.equal((await view(id, as.rui)).withheld, false, 'staff see the Test whole before release');
   assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
+  assert.equal((await view(id, as.cora)).withheld, false, 'release shows the Customer the whole Test');
 
   const reported = await view(id, as.quinn);
   assert.equal(reported.test.state, 'Reported');

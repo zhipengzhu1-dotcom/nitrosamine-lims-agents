@@ -247,6 +247,8 @@ export type SignatureStatement = Static<typeof signatureStatement>;
 /**
  * `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a
  * guessed value be confirmed. `statement` is the signature statement in force, null for a Customer, who never signs.
+ * `withheld` is true while the Result, Signatures and Record Version are held back from a Customer until release, so their
+ * absence never reads as none.
  */
 const testView = Type.Object({
   test: testRow,
@@ -254,6 +256,7 @@ const testView = Type.Object({
   report: nullable(reportRef),
   result: nullable(result),
   signatures: Type.Array(signature),
+  withheld: Type.Boolean(),
   next: nullable(Type.Enum(stepNames)),
   statement: nullable(signatureStatement),
 });

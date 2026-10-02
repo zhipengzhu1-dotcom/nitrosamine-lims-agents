@@ -101,6 +101,8 @@ p {
   grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
+  /* Hidden would still scroll: typing in a sheet still sliding in pulled the frame up and the rail over the sheet. */
+  overflow: clip;
 }
 .frame > .plane,
 .sheet {
@@ -520,7 +522,8 @@ td a,
 }
 
 .rail {
-  grid-row: 3;
+  /* Placed, not auto-placed: a phone's open sheet spans row 3 too, and an auto-placed rail would open a second column. */
+  grid-area: 3 / 1;
   z-index: 2;
   min-height: var(--rail-h);
   display: flex;
@@ -560,6 +563,15 @@ td a,
   min-width: 0;
   font-size: 15px;
   font-weight: 700;
+}
+/* An open sheet shows its own line, so the rail's copy stays for screen readers only. */
+.frame:has(> .sheet:not([data-closing])) .rail__context .note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .note {
   margin: 0;
@@ -976,6 +988,7 @@ a.btn {
     border-top: 1px solid var(--line);
   }
   .top nav a {
+    min-height: 44px;
     padding: 0 10px;
   }
   .plane {
@@ -1034,7 +1047,13 @@ a.btn {
   }
   .sheet {
     --foot-h: 156px;
+    grid-row: 2 / 4;
+    z-index: 3;
     padding: 12px 12px 0;
+  }
+  .frame:has(> .sheet:not([data-closing])) .rail__session {
+    visibility: hidden;
+    transition: visibility 0s var(--dur-sheet-in);
   }
   .sheet h2 {
     flex-wrap: wrap;
@@ -1044,7 +1063,7 @@ a.btn {
   .sheet__foot {
     flex-wrap: wrap;
     gap: 8px;
-    padding: 10px 0 12px;
+    padding: 10px 0 max(12px, env(safe-area-inset-bottom));
   }
   .sheet__line {
     --lines: 3;
