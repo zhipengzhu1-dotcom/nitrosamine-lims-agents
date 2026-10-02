@@ -27,7 +27,8 @@ case "${1:-}" in
     if pgrep -f 'ci-runner.sh slot' >/dev/null; then echo "The slots are already running. Run stop first." >&2; exit 1; fi
     mkdir -p "$HOME/Library/Logs/lims-runner"
     for n in "${SLOTS[@]}"; do
-      nohup "$0" slot "$n" >>"$HOME/Library/Logs/lims-runner/$n.log" 2>&1 &
+      # caffeinate holds off idle sleep while the slot runs. A sleeping Mac freezes the runner, and GitHub fails its job.
+      nohup caffeinate -i "$0" slot "$n" >>"$HOME/Library/Logs/lims-runner/$n.log" 2>&1 &
     done
     ;;
   stop)

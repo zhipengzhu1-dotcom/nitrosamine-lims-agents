@@ -42,13 +42,15 @@ scripts/ci-runner.sh start
 
 Each slot registers its runner and starts its container. The slots keep running after you close the terminal. They stop when the Mac restarts, so run `start` again after a restart. `start` refuses while the slots are still running, because a second loop would remove the first loop's container mid-job. While Docker Desktop is stopped, each slot waits and registers no runner.
 
+Each slot runs under `caffeinate -i`, which holds off idle sleep while the slots run. A sleeping Mac freezes the Docker VM and the runner inside it, and GitHub fails the job 10 minutes after the runner's last heartbeat. On 2026-10-02 the Mac, set to sleep after one minute idle, slept 8 seconds into `main`'s e2e job and again 13 seconds into the rerun. After a wake the VM's clock lags until Docker resyncs it, and until then the slot registers a runner every few seconds that GitHub refuses for an expired token. A closed lid still sleeps the Mac, so leave it open while the slots run, and `stop` releases the hold.
+
 ## Check the runners
 
 ```sh
 scripts/ci-runner.sh status
 ```
 
-It prints one line for each registered runner, with its name, `online` or `offline`, and whether it is running a job. Each slot's log is in `~/Library/Logs/lims-runner/<slot>.log`, and `docker ps --filter name=lims-runner-` shows the containers.
+It prints one line for each registered runner, with its name, `online` or `offline`, and whether it is running a job, then whether the slots keep the Mac awake. It exits 1 while the slots run without `caffeinate`, which happens when slots started by an older version of the script are still running. Each slot's log is in `~/Library/Logs/lims-runner/<slot>.log`, and `docker ps --filter name=lims-runner-` shows the containers.
 
 ## Stop the runners
 
