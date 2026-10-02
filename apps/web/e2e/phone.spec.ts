@@ -38,6 +38,17 @@ test('the Submit sheet and its long Method name fit a 390 px phone with no sidew
   }
 });
 
+test('an open sheet hides the session buttons and Cancel brings them back', async ({ page }) => {
+  await signInAsCustomer(page);
+  const signOut = page.getByRole('button', { name: 'Sign out' });
+  await expect(signOut, 'the rail offers Sign out before a sheet opens').toBeVisible();
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(page.locator('form.sheet')).toBeVisible();
+  await expect(signOut, 'the open sheet hides Sign out').toBeHidden();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(signOut, 'Sign out is back once the sheet closes').toBeVisible();
+});
+
 test('the tabs are 44 px touch targets, the bar fades where more tabs lie beyond, and the last tab scrolls clear of the fade', async ({
   page,
 }) => {

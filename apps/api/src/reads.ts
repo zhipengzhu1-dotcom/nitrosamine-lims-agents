@@ -43,7 +43,8 @@ async function testView(scope: Scope, id: string) {
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
-  const withheld = isCustomer && test.state !== 'Reported';
+  // Released means a Test Report exists, the same fact the report route refuses on, so the two reads cannot disagree.
+  const withheld = isCustomer && !report;
   const latest = withheld ? null : await latestVersion(scope, 'test', id);
   const next = nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test));
   return {
