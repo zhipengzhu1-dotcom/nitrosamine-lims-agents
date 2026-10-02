@@ -399,6 +399,18 @@ it('the raw entry under each readable entry keeps the stored values and hashes',
   assert.equal(JSON.parse(content?.new?.text ?? '').analyte, 'NDMA', 'the signed bytes read as the Record Version');
 });
 
+const ALARM = 'System Incident alarm';
+const alarmsFor = (references: string[]) =>
+  api
+    .logLines()
+    .filter((line) => line.msg === ALARM)
+    .map((line) => line.alarm)
+    .filter(
+      (alarm): alarm is { reference: string } =>
+        typeof alarm === 'object' && alarm !== null && 'reference' in alarm && typeof alarm.reference === 'string',
+    )
+    .filter((alarm) => references.includes(alarm.reference));
+
 const chainIncidents = (chain: string) =>
   api.db
     .selectFrom('systemIncident')
@@ -495,6 +507,7 @@ it("after the company chain's head is moved, two QAs verifying at once open one 
     [[after], [after]],
     'whichever verification reads the other one incident written on the moved head, the failing entry is the same',
   );
+  assert.equal(alarmsFor([incident]).length, 1, 'two QAs verifying at once raise one alarm');
 
   await submitTestTo('Ready');
   const again = ok(await as.quinn.call(routes.verifyAuditTrail)).chains[1]?.breaks;
@@ -506,18 +519,6 @@ it("after the company chain's head is moved, two QAs verifying at once open one 
   assert.equal(again?.[0]?.incident, incident);
   assert.deepEqual(await chainIncidents('company'), [{ reference: incident, firstFailure: after }]);
 });
-
-const ALARM = 'System Incident alarm';
-const alarmsFor = (references: string[]) =>
-  api
-    .logLines()
-    .filter((line) => line.msg === ALARM)
-    .map((line) => line.alarm)
-    .filter(
-      (alarm): alarm is { reference: string } =>
-        typeof alarm === 'object' && alarm !== null && 'reference' in alarm && typeof alarm.reference === 'string',
-    )
-    .filter((alarm) => references.includes(alarm.reference));
 
 /** A new Lab whose chain no other test breaks, with `entries` more entries on it, and a QA signed in to it. */
 async function labOfItsOwn(code: string, entries: number) {

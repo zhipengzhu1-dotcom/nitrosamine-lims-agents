@@ -86,7 +86,7 @@ const markLook = {
   'Signatures unsigned': unsignedLook,
   Open: unsignedLook,
   Acknowledged: {
-    tone: 'done',
+    tone: 'bad',
     glyph: (
       <>
         <circle cx="8" cy="8" r="6" />
@@ -107,8 +107,8 @@ const markLook = {
 
 /**
  * A Test state with its track, or a mark with its glyph: a chain verdict, a System Incident's state, an unsigned
- * Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page: the word and glyph are final,
- * and an accent plays around them.
+ * Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
+ * the word and glyph are final, and an accent plays around them.
  */
 export function Status(props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook }) {
   if ('mark' in props) {

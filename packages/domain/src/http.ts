@@ -275,7 +275,7 @@ const lookups = Type.Object({
   methods: Type.Array(Type.Object({ id: uuid, code: Type.String(), version: Type.String(), title: Type.String() })),
   analysts: Type.Array(Type.Object({ id: uuid, displayName: Type.String() })),
 });
-/** How a recomputed chain stands: Intact through its last entry, or Broken at its first failure. */
+/** How a recomputed chain stands: Intact through its last entry, or Broken from its first break on. */
 export const chainVerdict = Type.Union([Type.Literal('Intact'), Type.Literal('Broken')]);
 export type ChainVerdict = Static<typeof chainVerdict>;
 /** Where a System Incident stands: Open until its actions are recorded and signed Acknowledged, then Closed. */
