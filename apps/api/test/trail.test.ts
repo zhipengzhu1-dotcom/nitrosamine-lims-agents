@@ -13,7 +13,7 @@ import {
   type TrailEntry,
 } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_trail_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -43,7 +43,7 @@ const result = {
 };
 
 async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
-  const signature = signer && { password: signer.password };
+  const signature = signer && (await signatureOf(client, testId, signer));
   assert.equal(
     (await client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) }))
       .status,

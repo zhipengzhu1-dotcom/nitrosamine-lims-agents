@@ -70,7 +70,7 @@ export async function deviceOf(
     .where('deviceTokenHash', '=', hashToken(token))
     .executeTakeFirst();
 }
-const notValid = () => refuse('badCredentials', 'the credentials are not valid');
+const notValid = () => refuse('badCredentials', 'the user ID or password is not valid');
 const linkNotValid = () =>
   refuse('badCredentials', 'this link has been used, replaced or has expired; ask the Admin for a new one');
 
@@ -82,6 +82,7 @@ const REFUSAL: { readonly [F in SignInFailure]: (labName?: string) => never } = 
   NoCredential: notValid,
   AccountLocked: () => refuse('accountLocked', 'this account is locked'),
   NoLab: () => refuse('role', 'this account belongs to no Lab'),
+  WrongUserId: notValid,
   NoLabChosen: () => refuse('labNotChosen', 'choose the Lab to work in'),
   NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
   NotInWorkstationLab: () => refuse('role', "this account belongs to no role in this Workstation's Lab"),
@@ -211,21 +212,27 @@ export function sourceAddressOf(req: {
 }
 
 /**
- * Proves the person of the session again, to sign or to unlock: a wrong password refuses as badCredentials, counts
- * toward lockout, and writes `failureEvent` when given; a lockout it applies is an Access Event.
+ * Proves the person of the session again, to sign or to unlock: the password must be theirs, and a typed user ID, when
+ * given, must be theirs too. A failure refuses as badCredentials, counts toward the lockout and writes `failureEvent`
+ * when given, with why for a failed re-authentication; a lockout it applies is an Access Event.
  */
 export async function reauthenticate(
   db: Kysely<DB>,
   { actor, session }: Pick<SignedIn, 'actor' | 'session'>,
-  password: string,
+  typed: { password: string; username?: string },
   purpose: string,
   role: Role | typeof NEEDS_NO_ROLE,
   sourceAddress: string,
-  failureEvent?: 'UnlockFailed',
+  failureEvent?: 'UnlockFailed' | 'ReauthenticationFailed',
 ): Promise<void> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', actor.person.id).executeTakeFirstOrThrow();
   const as = (reason: string) => ({ actor: `person:${person.username}`, role, reason });
-  if (person.passwordHash && (await verifyPassword(password, person.passwordHash))) {
+  const theirs = typed.username === undefined || typed.username === person.username;
+  const proven = await verifyPassword(
+    typed.password,
+    theirs && person.passwordHash ? person.passwordHash : TIMING_DECOY_HASH,
+  );
+  if (theirs && proven && person.passwordHash) {
     if (person.lockedAt) refuse('accountLocked', 'this account is locked');
     if (person.failedLogins > 0)
       await audited(db, as(purpose), (tx) =>
@@ -234,7 +241,7 @@ export async function reauthenticate(
     return;
   }
   await audited(db, as('Failed authentication'), async (tx) => {
-    const { lockedNow } = await countFailure(tx, person.id);
+    const { wasLocked, lockedNow } = await countFailure(tx, person.id);
     const event = {
       subjectId: person.id,
       roles: actor.roles,
@@ -243,9 +250,14 @@ export async function reauthenticate(
       sessionId: session.id,
       workstationId: session.workstationId,
     };
-    if (failureEvent) await record(tx, { kind: failureEvent, ...event });
+    if (failureEvent === 'ReauthenticationFailed') {
+      let failureReason: SignInFailure = 'WrongUserId';
+      if (theirs) failureReason = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
+      await record(tx, { kind: failureEvent, failureReason, ...event });
+    } else if (failureEvent) await record(tx, { kind: failureEvent, ...event });
     if (lockedNow) await record(tx, { kind: 'Lockout', ...event });
   });
+  if (typed.username === undefined) refuse('badCredentials', 'the password is not valid');
   notValid();
 }
 
@@ -628,7 +640,7 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
       await reauthenticate(
         db,
         signedIn,
-        req.body.password,
+        { password: req.body.password },
         'Unlock',
         NEEDS_NO_ROLE,
         sourceAddressOf(req),

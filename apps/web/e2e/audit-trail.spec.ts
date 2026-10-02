@@ -46,6 +46,7 @@ async function submittedTest(page: Page, description: string): Promise<string> {
   const ana = analysts.find((a: { displayName: string }) => a.displayName === 'Ana Ferreira');
   await step('assign', { testId, input: { assigneeId: ana.id } });
   await as('ana.analyst');
+  const { recordVersion, statement } = await (await page.request.get(`/api/tests/${testId}`)).json();
   await step('enterResult', {
     testId,
     input: {
@@ -56,7 +57,12 @@ async function submittedTest(page: Page, description: string): Promise<string> {
       notebookRef: 'RD-NB-0007-012',
       performedOn: '2026-09-30',
     },
-    signature: { password: DEMO_PASSWORD },
+    signature: {
+      username: 'ana.analyst',
+      password: DEMO_PASSWORD,
+      recordVersion: { version: recordVersion.version, contentHash: recordVersion.contentHash },
+      statementVersion: statement.version,
+    },
   });
   await page.request.post('/api/logout', { data: {} });
   return testId;
@@ -120,7 +126,8 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await expect(signed.locator('dt:text-is("Signed at") + dd')).toHaveText(
     /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d -0[45]:00$/,
   );
-  const versioned = entries.filter({ has: page.locator('details.long') }).first();
+  // The Signature entry above it also has long values (its copied hashes), so the Record Version is found by its content.
+  const versioned = entries.filter({ has: page.locator('details.long', { hasText: '"analyte"' }) }).first();
   await expect(versioned).toContainText('Record Version');
   await expect(versioned.locator('dt:text-is("Record kind") + dd')).toHaveText('Test');
   await expect(versioned.locator('dt:text-is("Saved at") + dd')).toHaveText(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · /);
@@ -148,6 +155,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await search.fill('Reviewed');
   await expect(entries).toHaveCount(0);
   await page.getByRole('button', { name: 'Review', exact: true }).click();
+  await page.getByLabel(/User ID/).fill('rui.reviewer');
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign as Reviewed' }).click();
   await expect(page.getByRole('status')).toContainText('now Reviewed');

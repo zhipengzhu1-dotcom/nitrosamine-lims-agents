@@ -4,7 +4,7 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { factsFor, latestVersion, signedVersions } from './steps.ts';
+import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
 import { staffRoutes } from './staff.ts';
 import { trailRoutes } from './trail.ts';
 
@@ -44,6 +44,7 @@ async function testView(scope: Scope, id: string) {
   const isCustomer = scope.ctx.person.customerId !== null;
   const visibleToActor = !isCustomer || test.state === 'Reported';
   const latest = visibleToActor ? await latestVersion(scope, 'test', id) : null;
+  const next = nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test));
   return {
     test,
     recordVersion: latest && {
@@ -71,6 +72,8 @@ async function testView(scope: Scope, id: string) {
           .select([
             'signature.meaning',
             'signature.printedName as signer',
+            'signature.username',
+            'signature.role',
             'signature.signedAt',
             'recordVersion.recordTable as record',
             'recordVersion.version',
@@ -93,7 +96,8 @@ async function testView(scope: Scope, id: string) {
             })),
           )
       : [],
-    next: nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test)),
+    next,
+    statement: isCustomer ? null : await statementInForce(scope),
   };
 }
 
