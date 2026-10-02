@@ -420,13 +420,15 @@ describe('Lock and Switch user', () => {
 
     await endLapsedSessions(api.db, SESSION_LIMITS.decided);
 
+    const events = await eventsOf(ana.id);
     assert.deepEqual(
-      (await eventsOf(ana.id)).map((e) => [e.kind, e.workstationId]).sort(),
-      [
-        ['IdleExpiry', workstation.id],
-        ['SignInSucceeded', workstation.id],
-      ],
+      events.map((e) => e.kind).sort(),
+      ['IdleExpiry', 'SignInSucceeded'],
       'the expiry is stamped at last activity plus the idle limit, so it sorts by kind here',
+    );
+    assert.deepEqual(
+      events.map((e) => e.workstationId),
+      [workstation.id, workstation.id],
     );
   });
 
