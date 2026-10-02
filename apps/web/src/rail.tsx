@@ -1,5 +1,6 @@
 import {
   type ActorContext,
+  type ChainVerdict,
   decimalPattern,
   type Lab,
   pressText,
@@ -62,7 +63,6 @@ export const demoSigning = 'Demo: accounts share one password, and a signing re-
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-export type ChainVerdict = 'Intact' | 'Broken';
 const verdictLook = {
   Intact: { tone: 'ok', glyph: 'M3 8.5l3.5 3.5L13 4.5' },
   Broken: { tone: 'bad', glyph: 'M4 4l8 8M12 4l-8 8' },

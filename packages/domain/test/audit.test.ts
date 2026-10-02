@@ -21,19 +21,32 @@ describe('a recomputed chain reads as how far it is intact', () => {
       name: 'an untouched chain is intact through its last entry',
       last: '12',
       failure: null,
-      expected: { lastEntry: '12', intactThrough: '12', firstFailure: null, report: 'intact through entry 12' },
+      expected: {
+        verdict: 'Intact',
+        lastEntry: '12',
+        intactThrough: '12',
+        firstFailure: null,
+        report: 'verified through entry 12',
+      },
     },
     {
       name: 'an empty chain is intact through entry 0',
       last: '0',
       failure: null,
-      expected: { lastEntry: '0', intactThrough: '0', firstFailure: null, report: 'intact through entry 0' },
+      expected: {
+        verdict: 'Intact',
+        lastEntry: '0',
+        intactThrough: '0',
+        firstFailure: null,
+        report: 'verified through entry 0',
+      },
     },
     {
       name: 'an altered entry is the first failure, and the chain is intact through the entry before it',
       last: '12',
       failure: '5',
       expected: {
+        verdict: 'Broken',
         lastEntry: '12',
         intactThrough: '4',
         firstFailure: '5',
@@ -45,6 +58,7 @@ describe('a recomputed chain reads as how far it is intact', () => {
       last: '12',
       failure: '13',
       expected: {
+        verdict: 'Broken',
         lastEntry: '12',
         intactThrough: '12',
         firstFailure: '13',

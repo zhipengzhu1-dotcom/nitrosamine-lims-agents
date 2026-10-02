@@ -175,7 +175,7 @@ function VerifyChain() {
             <ul className="chains">
               {answer.found.chains.map((c) => (
                 <li key={c.chain}>
-                  {chainWords[c.chain]} <Status verdict={c.firstFailure === null ? 'Intact' : 'Broken'} /> {c.report}
+                  {chainWords[c.chain]} <Status verdict={c.verdict} /> {c.report}
                 </li>
               ))}
             </ul>

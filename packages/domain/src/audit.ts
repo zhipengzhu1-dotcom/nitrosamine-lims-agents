@@ -204,7 +204,8 @@ export function storedInstants(entries: readonly RawEntry[]): string[] {
     const spec = isAuditedTable(e.table) ? auditedRecords[e.table] : null;
     for (const row of [e.oldRow, e.newRow])
       for (const [column, field] of Object.entries(spec?.fields ?? {}))
-        if (field.shows === 'instant' && typeof row?.[column] === 'string') found.add(row[column]);
+        if (field.shows === 'instant' && row?.[column] !== undefined && row[column] !== null)
+          found.add(text(row[column]));
   }
   return [...found];
 }
@@ -347,10 +348,18 @@ export function describeTrail(
 /** How QA reads a recomputed chain: intact through its last entry, or through the entry before the first that fails. */
 export function chainVerification(chain: ChainKind, lastEntry: string, firstFailure: string | null): ChainVerification {
   if (firstFailure === null)
-    return { chain, lastEntry, intactThrough: lastEntry, firstFailure, report: `intact through entry ${lastEntry}` };
+    return {
+      chain,
+      verdict: 'Intact',
+      lastEntry,
+      intactThrough: lastEntry,
+      firstFailure,
+      report: `verified through entry ${lastEntry}`,
+    };
   if (bySeq(firstFailure, lastEntry) > 0)
     return {
       chain,
+      verdict: 'Broken',
       lastEntry,
       intactThrough: lastEntry,
       firstFailure,
@@ -359,6 +368,7 @@ export function chainVerification(chain: ChainKind, lastEntry: string, firstFail
   const intactThrough = String(Number(firstFailure) - 1);
   return {
     chain,
+    verdict: 'Broken',
     lastEntry,
     intactThrough,
     firstFailure,

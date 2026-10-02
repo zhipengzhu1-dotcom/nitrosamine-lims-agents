@@ -298,7 +298,6 @@ th {
   list-style: none;
   margin: 4px 0 0;
   padding: 0;
-  animation: rise var(--dur-enter) var(--ease-out) both;
 }
 .entries {
   list-style: none;
@@ -909,8 +908,7 @@ a.btn {
       opacity: 0;
     }
   }
-  .note--ok,
-  .chains {
+  .note--ok {
     animation-name: fade;
     animation-duration: var(--dur-fade);
   }

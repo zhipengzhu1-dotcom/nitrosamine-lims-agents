@@ -321,7 +321,7 @@ it("a cited record's own trail holds only that record's entries, and a record ou
   refusedWith(await as.rui.call(routes.recordTrail, { table: 'sample', id }), 'notFound');
 });
 
-it("QA's Verify chain on an untouched chain replies intact through entry N, with N the chain's last entry; another role is refused", async () => {
+it("QA's Verify chain on an untouched chain replies Intact, verified through entry N, with N the chain's last entry; another role is refused", async () => {
   await submitTestTo('Ready');
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   const [labLast, companyLast] = [await lastEntryOf(api.labId), await lastEntryOf('company')];
@@ -331,14 +331,16 @@ it("QA's Verify chain on an untouched chain replies intact through entry N, with
       lastEntry: labLast,
       intactThrough: labLast,
       firstFailure: null,
-      report: `intact through entry ${labLast}`,
+      verdict: 'Intact',
+      report: `verified through entry ${labLast}`,
     },
     {
       chain: 'company',
       lastEntry: companyLast,
       intactThrough: companyLast,
       firstFailure: null,
-      report: `intact through entry ${companyLast}`,
+      verdict: 'Intact',
+      report: `verified through entry ${companyLast}`,
     },
   ]);
   assert.equal(
@@ -413,6 +415,7 @@ it('after an entry is altered by the database owner, Verify chain names it as th
     lastEntry: String(last),
     intactThrough: String(altered - 1n),
     firstFailure: String(altered),
+    verdict: 'Broken',
     report: `entry ${altered} fails to verify; intact through entry ${altered - 1n}`,
   });
   assert.equal(verified.chains[1]?.firstFailure, null, 'the company chain is untouched');

@@ -221,8 +221,8 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await railSays(page, 'now Reported');
   await page.getByRole('button', { name: 'Verify chain' }).click();
   await expect(page.locator('.chains li')).toHaveText([
-    /^Lab chain Intact intact through entry \d+$/,
-    /^Company chain Intact intact through entry \d+$/,
+    /^Lab chain Intact verified through entry \d+$/,
+    /^Company chain Intact verified through entry \d+$/,
   ]);
   const [releaseKey, retryKey] = commitKeys.slice(-2);
   expect(retryKey, 'the press whose reply was dropped is resent with its Commit Key').toBe(releaseKey);
