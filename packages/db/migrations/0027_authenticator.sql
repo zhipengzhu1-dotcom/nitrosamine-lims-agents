@@ -4,6 +4,20 @@ alter type lims.access_event_kind add value 'AuthenticatorEnrolled';
 alter type lims.access_event_kind add value 'PasswordChanged';
 alter type lims.sign_in_failure add value 'WrongCode';
 alter type lims.sign_in_failure add value 'NoAuthenticator';
+-- Enrolment refused with the uniform credential sentence: the account already holds an authenticator, or the browser
+-- holds another person's live session. Neither counts toward the lockout.
+alter type lims.sign_in_failure add value 'AlreadyEnrolled';
+alter type lims.sign_in_failure add value 'OtherPersonSignedIn';
+
+-- The enrolment reasons, like the sign-in-only ones before them, belong to a failed sign-in and to no other kind.
+alter table lims.access_event
+  drop constraint access_event_failure_kind_check,
+  add constraint access_event_failure_kind_check check (
+    (failure_reason::text not in ('UnknownUserId', 'NoLabChosen', 'AlreadyEnrolled', 'OtherPersonSignedIn')
+     or kind = 'SignInFailed')
+    and (failure_reason::text not in ('OtherUserId', 'SessionEnded') or kind::text = 'LabSwitchFailed')
+    and (failure_reason::text <> 'WrongUserId' or kind::text = 'ReauthenticationFailed')
+  );
 
 -- A person's TOTP authenticator: its secret encrypted under the API's TOTP key, and the last time step a code was
 -- accepted at. Working state like the session, so the Audit Trail never copies the secret; the AuthenticatorEnrolled

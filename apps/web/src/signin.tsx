@@ -391,6 +391,9 @@ export function AuthenticatorPage() {
           >
             <h1>Set up your authenticator</h1>
             <p className="muted">Your username and password show your authenticator key once.</p>
+            <p className="muted">
+              Already enrolled? <a href="/">Sign in</a> with your password and a code from your authenticator.
+            </p>
             <label>
               Username
               <input name="username" required autoComplete="username" />

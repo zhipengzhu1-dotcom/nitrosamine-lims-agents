@@ -139,7 +139,7 @@ const linkNotValid = () =>
 
 type Refusals = { readonly [F in SignInFailure]: (labName?: string) => never };
 /** How each sign-in or Lab switch failure is refused under `policy`; a credential failure answers its one sentence. */
-const refusalsUnder = (policy: LoginPolicy): Refusals => {
+export const refusalsUnder = (policy: LoginPolicy): Refusals => {
   const notValid = () => refuse('badCredentials', credentialsNotValid(policy, 'userId'));
   return {
     UnknownUserId: notValid,
@@ -152,6 +152,12 @@ const refusalsUnder = (policy: LoginPolicy): Refusals => {
     WrongUserId: notValid,
     WrongCode: notValid,
     NoAuthenticator: notValid,
+    AlreadyEnrolled: notValid,
+    OtherPersonSignedIn: () =>
+      refuse(
+        'guard',
+        'Sign out first. Only the holder of an account enrols its authenticator, in a browser where no one else is signed in.',
+      ),
     NoLabChosen: () => refuse('labNotChosen', 'Choose the Lab to work in.'),
     NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
     NotInWorkstationLab: () => refuse('role', "You hold no Membership in this Workstation's Lab."),
@@ -525,7 +531,8 @@ async function endSession(
   return rows[0]?.ended === true;
 }
 
-function typedUserIdDigest(key: Buffer, typed: string) {
+/** How an Access Event records a user ID nobody holds: its HMAC under the key, and its length, never the text. */
+export function typedUserIdDigest(key: Buffer, typed: string) {
   return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: typed.length };
 }
 

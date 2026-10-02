@@ -43,7 +43,7 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "PlatformOperator" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoAuthenticator" | "NoCredential" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongCode" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
+export type SignInFailure = "AccountLocked" | "AlreadyEnrolled" | "NoAuthenticator" | "NoCredential" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherPersonSignedIn" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongCode" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 

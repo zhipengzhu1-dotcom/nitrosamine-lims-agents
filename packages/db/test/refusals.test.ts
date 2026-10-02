@@ -1645,17 +1645,17 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { failure_reason: 'OtherUserId' },
       constraint: 'access_event_failure_kind_check',
     },
-    {
-      name: 'a failed Lab switch Access Event with a reason only a sign-in has is refused',
-      table: 'lims.access_event',
+    ...['NoLabChosen', 'AlreadyEnrolled', 'OtherPersonSignedIn'].map((reason) => ({
+      name: `a failed Lab switch Access Event with the ${reason} reason, which only a sign-in has, is refused`,
+      table: 'lims.access_event' as const,
       change: {
         kind: 'LabSwitchFailed',
-        failure_reason: 'NoLabChosen',
+        failure_reason: reason,
         session_lab_id: id.lab,
         session_id: id.session,
       },
       constraint: 'access_event_failure_kind_check',
-    },
+    })),
     {
       name: 'a Lab switch Access Event that names no previous session is refused',
       table: 'lims.access_event',

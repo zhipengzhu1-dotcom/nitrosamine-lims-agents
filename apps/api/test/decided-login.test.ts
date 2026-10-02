@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
 import { routes, stepRoute } from '@lims/domain';
@@ -222,7 +222,7 @@ it('under the decided login, signing refuses without the typed user ID, the pass
   ok(await enterResult(client, testId, account, { code: code(1) }));
 });
 
-it('enrolment shows the secret as text and as a QR payload once; a second enrolment shows none, and one Access Event records it', async () => {
+it('enrolment shows the secret as text and as a QR payload once; a second enrolment is the uniform refusal, so the right password alone learns nothing', async () => {
   const account = await api.addPerson('erin.enrol', ['Analyst']);
   const client = new Client(decided.base);
   const first = ok(
@@ -235,7 +235,7 @@ it('enrolment shows the secret as text and as a QR payload once; a second enrolm
     username: account.username,
     password: account.password,
   });
-  refusedWith(second, 'state');
+  assert.equal(refusedWith(second, 'badCredentials'), NOT_VALID);
   assert.equal(JSON.stringify(second.body).includes(first.secret), false);
   assert.equal(
     refusedWith(
@@ -246,8 +246,49 @@ it('enrolment shows the secret as text and as a QR payload once; a second enrolm
   );
   assert.deepEqual(await eventsOf(account.id), [
     { kind: 'AuthenticatorEnrolled', failureReason: null },
+    { kind: 'SignInFailed', failureReason: 'AlreadyEnrolled' },
     { kind: 'SignInFailed', failureReason: 'WrongPassword' },
   ]);
+  const { failedLogins } = await api.superuser
+    .selectFrom('person')
+    .select('failedLogins')
+    .where('id', '=', account.id)
+    .executeTakeFirstOrThrow();
+  assert.equal(failedLogins, 1, 'only the wrong password counts toward the lockout');
+});
+
+it('enrolment refuses an unknown user ID, an account with no credential yet and a locked account with the uniform sentence, and records each', async () => {
+  const client = new Client(decided.base);
+  const enrol = (username: string, password: string) => client.call(routes.enrolAuthenticator, { username, password });
+  assert.equal(refusedWith(await enrol('nobody.enrol', 'Benchline-2026-nobody'), 'badCredentials'), NOT_VALID);
+  const unknown = await api.superuser
+    .selectFrom('accessEvent')
+    .select(['kind', 'failureReason', 'subjectId', 'typedUserIdLength'])
+    .where('typedUserIdHmac', '=', createHmac('sha256', api.accessEventKey).update('nobody.enrol').digest())
+    .execute();
+  assert.deepEqual(unknown, [
+    { kind: 'SignInFailed', failureReason: 'UnknownUserId', subjectId: null, typedUserIdLength: 'nobody.enrol'.length },
+  ]);
+
+  const ada = await api.login(api.person('ada'));
+  const verification = ok(
+    await ada.call(routes.recordIdentityVerification, {
+      printedName: 'Noa Credential',
+      evidence: 'Passport seen in person (fictional)',
+    }),
+  );
+  const { person } = ok(
+    await ada.call(routes.createAccount, { identityVerificationId: verification.id, username: 'noa.nocredential' }),
+  );
+  assert.equal(refusedWith(await enrol('noa.nocredential', 'Benchline-2026-noa'), 'badCredentials'), NOT_VALID);
+  assert.deepEqual(await eventsOf(person.id), [{ kind: 'SignInFailed', failureReason: 'NoCredential' }]);
+
+  const locked = await api.addPerson('lia.locked', ['Analyst']);
+  await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Lock a person out' }, (tx) =>
+    tx.updateTable('person').set({ lockedAt: sql`clock_timestamp()` }).where('id', '=', locked.id).execute(),
+  );
+  assert.equal(refusedWith(await enrol(locked.username, locked.password), 'badCredentials'), NOT_VALID);
+  assert.deepEqual(await eventsOf(locked.id), [{ kind: 'SignInFailed', failureReason: 'AccountLocked' }]);
 });
 
 it('a password under 15 characters or missing a character type is refused with a sentence; a password that meets the rule is set', async () => {
@@ -292,14 +333,14 @@ it('an Admin signed in on their own browser cannot enrol the authenticator of an
     refusedWith(await ada.call(routes.enrolAuthenticator, { username: 'paz.holder', password }), 'guard'),
     'Sign out first. Only the holder of an account enrols its authenticator, in a browser where no one else is signed in.',
   );
-  assert.deepEqual(
-    (await eventsOf(person.id)).map((event) => event.kind),
-    ['PasswordSet'],
-  );
+  assert.deepEqual(await eventsOf(person.id), [
+    { kind: 'PasswordSet', failureReason: null },
+    { kind: 'SignInFailed', failureReason: 'OtherPersonSignedIn' },
+  ]);
   ok(await new Client(decided.base).call(routes.enrolAuthenticator, { username: 'paz.holder', password }));
   assert.deepEqual(
     (await eventsOf(person.id)).map((event) => event.kind),
-    ['PasswordSet', 'AuthenticatorEnrolled'],
+    ['PasswordSet', 'SignInFailed', 'AuthenticatorEnrolled'],
   );
 });
 

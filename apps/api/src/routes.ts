@@ -13,6 +13,6 @@ export function apiRoutes(
   credentials: Credentials,
 ): void {
   loginRoutes(app, db, options.accessEventKey, options.secureCookie, credentials);
-  enrolmentRoute(app, db, credentials);
+  enrolmentRoute(app, db, options.accessEventKey, credentials);
   sessionRoutes(app, db, credentials, options.release);
 }
