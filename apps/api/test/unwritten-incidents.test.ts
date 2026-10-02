@@ -126,7 +126,15 @@ it('a line whose reference already has a System Incident is skipped, and startin
   await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Open a System Incident' }, (tx) =>
     tx
       .insertInto('systemIncident')
-      .values({ kind: 'UnexpectedFailure', reference: 'FX000002', step: 'review', errorClass: 'DatabaseError' })
+      .values({
+        kind: 'UnexpectedFailure',
+        reference: 'FX000002',
+        sessionLabId: api.labId,
+        step: 'enterResult',
+        errorClass: 'DatabaseError',
+        sqlstate: '23514',
+        constraintName: 'result_value_check',
+      })
       .execute(),
   );
   const file = logVolume('skip', unwrittenLine('FX000002'), unwrittenLine('FX000003'));
@@ -134,7 +142,7 @@ it('a line whose reference already has a System Incident is skipped, and startin
   await startOn(file);
 
   const [written] = await incidentsWith('FX000002');
-  assert.deepEqual([written?.step, written?.loggedAt], ['review', null], 'the written System Incident is unchanged');
+  assert.equal(written?.loggedAt, null, 'the written System Incident is unchanged');
   assert.equal((await incidentsWith('FX000003')).length, 1);
   assert.equal((await auditEntriesOf('FX000002')).length, 1, 'the skipped line wrote nothing');
   assert.equal((await auditEntriesOf('FX000003')).length, 1, 'the second start wrote nothing');
@@ -199,17 +207,63 @@ it('reading a System Incident is refused to anyone but Admin and QA, and an unkn
   refusedWith(await quinn.call(routes.incident, { reference: 'FX0000ZZ' }), 'notFound');
 });
 
-it('an unwritten line the check cannot read, or whose values the database refuses, is logged as unreadable, and the lines after it are still raised', async () => {
-  const unknownPerson = unwrittenLine('FX000006').replace('"requestedBy":null', '"requestedBy":"lou"');
+const unraisable = () =>
+  api.db
+    .selectFrom('systemIncident')
+    .select(['reference', 'errorClass', 'sqlstate', 'constraintName'])
+    .where('kind', '=', 'UnraisableLogLine')
+    .orderBy('openedAt')
+    .execute();
+
+it('a line the check cannot read, or whose values the database refuses, is written once as an UnraisableLogLine System Incident, and the lines after it are still raised', async () => {
+  const before = (await unraisable()).length;
+  const notAnId = unwrittenLine('FX000006').replace('"requestedBy":null', '"requestedBy":"lou"');
   const torn = `${unwrittenLine('FX000008').slice(0, -2)}\n`;
   const noSuchPerson = unwrittenLine('FX000009').replace('"requestedBy":null', `"requestedBy":"${NO_SUCH_ROW}"`);
-  const started = await startOn(logVolume('unreadable', unknownPerson, torn, noSuchPerson, unwrittenLine('FX000007')));
+  const file = logVolume('unreadable', notAnId, torn, noSuchPerson, unwrittenLine('FX000007'));
+  const started = await startOn(file);
+  const again = await startOn(file);
 
   for (const reference of ['FX000006', 'FX000008', 'FX000009']) assert.deepEqual(await incidentsWith(reference), []);
   assert.equal((await incidentsWith('FX000007')).length, 1);
-  const unreadable = started
-    .logLines()
-    .filter((line) => line.msg === 'unreadable unwritten System Incident line')
-    .map((line) => line.line);
-  assert.deepEqual(unreadable, [1, 2, 3], 'the log names each line it could not read or the database refused');
+  assert.deepEqual(
+    (await unraisable())
+      .slice(before)
+      .map(({ errorClass, sqlstate, constraintName }) => [errorClass, sqlstate, constraintName]),
+    [
+      ['RefusedValues', '22P02', null],
+      ['UnreadableLine', null, null],
+      ['RefusedValues', '23503', 'system_incident_requested_by_fkey'],
+    ],
+    'each line that cannot be raised is a System Incident, written once over two starts',
+  );
+  const logged = (api: typeof started) =>
+    api
+      .logLines()
+      .filter((line) => line.msg === 'unraisable unwritten System Incident line')
+      .map((line) => line.line);
+  assert.deepEqual(logged(started), [1, 2, 3], 'the log names each line the first time');
+  assert.deepEqual(logged(again), [], 'a later check does not log it again');
+});
+
+it('a line whose reference a different System Incident already holds is written as an UnraisableLogLine System Incident', async () => {
+  await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Open a System Incident' }, (tx) =>
+    tx
+      .insertInto('systemIncident')
+      .values({ kind: 'UnexpectedFailure', reference: 'FX00000D', step: 'review', errorClass: 'TypeError' })
+      .execute(),
+  );
+  const before = (await unraisable()).length;
+  await startOn(logVolume('taken', unwrittenLine('FX00000D')));
+
+  const [held] = await incidentsWith('FX00000D');
+  assert.deepEqual(
+    [held?.step, held?.loggedAt],
+    ['review', null],
+    'the System Incident that holds the reference is unchanged',
+  );
+  assert.deepEqual(
+    (await unraisable()).slice(before).map((incident) => incident.errorClass),
+    ['ReferenceTaken'],
+  );
 });

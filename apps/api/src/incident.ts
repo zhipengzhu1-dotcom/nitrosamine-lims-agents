@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { audited, type DB, postgresFault } from '@lims/db';
 import { referencePattern, routes, stepNames, stepRoute } from '@lims/domain';
 import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
-import { type Insertable, type Kysely, sql } from 'kysely';
+import { type Insertable, type InsertObject, type Kysely, sql } from 'kysely';
 import { type Static, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
 
@@ -12,6 +13,12 @@ const RAISE_SERVICE = { ...INCIDENT_SERVICE, reason: 'Raise an unwritten System 
 const UNWRITTEN = 'unwritten System Incident';
 
 const INCIDENT_WRITE_LIMIT = '3s';
+const READ_ALOUD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/** A reference a person can read aloud: eight Crockford base32 characters, one from each of the first eight bytes. */
+export function referenceOf(bytes: Uint8Array): string {
+  return Array.from(bytes.subarray(0, 8), (byte) => READ_ALOUD.charAt(byte % 32)).join('');
+}
 
 const STEP_OF_ROUTE = new Map<string, string>([
   ...Object.entries(routes).map(([name, route]): [string, string] => [`${route.method} ${route.url}`, name]),
@@ -94,34 +101,82 @@ function unwrittenOn(line: string): Static<typeof unwrittenLine> | 'unreadable' 
 /** A data exception (22) or integrity constraint violation (23): the database refused this line's values, not the write. */
 const REFUSED_VALUES = /^2[23]/;
 
-async function raise(db: Kysely<DB>, { time, unwrittenSystemIncident: logged }: Static<typeof unwrittenLine>) {
-  const { kind, reference, requestedBy, sessionLabId, step, recordId, errorClass, sqlstate, constraintName } = logged;
-  const incident = { kind, reference, requestedBy, sessionLabId, step, recordId, errorClass, sqlstate, constraintName };
-  try {
-    const { numInsertedOrUpdatedRows } = await audited(db, RAISE_SERVICE, async (tx) => {
-      await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
-      return tx
-        .insertInto('systemIncident')
-        .values({ ...incident, loggedAt: sql<Date>`to_timestamp(${time}::double precision / 1000)` })
-        .onConflict((conflict) => conflict.column('reference').doNothing())
-        .executeTakeFirstOrThrow();
-    });
+type Unraisable = {
+  errorClass: 'UnreadableLine' | 'RefusedValues' | 'ReferenceTaken';
+  sqlstate?: string;
+  constraintName?: string | null;
+};
+
+function insertOnce(db: Kysely<DB>, incident: InsertObject<DB, 'systemIncident'>) {
+  return audited(db, RAISE_SERVICE, async (tx) => {
+    await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
+    const { numInsertedOrUpdatedRows } = await tx
+      .insertInto('systemIncident')
+      .values(incident)
+      .onConflict((conflict) => conflict.column('reference').doNothing())
+      .executeTakeFirstOrThrow();
     return numInsertedOrUpdatedRows ? 'raised' : 'written';
-  } catch (error) {
-    if (REFUSED_VALUES.test(postgresFault(error)?.sqlstate ?? '')) return 'unreadable';
-    throw error;
-  }
+  });
 }
 
-/** Writes each unwritten System Incident on the API log file whose reference has no System Incident yet, with the instant its line was logged. */
+async function raise(db: Kysely<DB>, { time, unwrittenSystemIncident: logged }: Static<typeof unwrittenLine>) {
+  const { kind, reference, requestedBy, sessionLabId, step, recordId, errorClass, sqlstate, constraintName } = logged;
+  const facts = { kind, reference, requestedBy, sessionLabId, step, recordId, errorClass, sqlstate, constraintName };
+  let outcome: 'raised' | 'written';
+  try {
+    outcome = await insertOnce(db, { ...facts, loggedAt: sql<Date>`to_timestamp(${time}::double precision / 1000)` });
+  } catch (error) {
+    const fault = postgresFault(error);
+    if (!fault || !REFUSED_VALUES.test(fault.sqlstate)) throw error;
+    return {
+      errorClass: 'RefusedValues',
+      sqlstate: fault.sqlstate,
+      constraintName: fault.constraint,
+    } satisfies Unraisable;
+  }
+  if (outcome === 'raised') return outcome;
+  const same = await db
+    .selectFrom('systemIncident')
+    .select('reference')
+    .where('reference', '=', reference)
+    .where('kind', '=', kind)
+    .where('step', '=', step)
+    .where('errorClass', '=', errorClass)
+    .where('requestedBy', 'is not distinct from', requestedBy)
+    .where('sessionLabId', 'is not distinct from', sessionLabId)
+    .where('recordId', 'is not distinct from', recordId)
+    .where('sqlstate', 'is not distinct from', sqlstate)
+    .where('constraintName', 'is not distinct from', constraintName)
+    .executeTakeFirst();
+  return same ? outcome : ({ errorClass: 'ReferenceTaken' } satisfies Unraisable);
+}
+
+/** A line that cannot be raised is itself a System Incident, under a reference taken from the line's bytes, so it too is written once. */
+function raiseUnraisable(db: Kysely<DB>, line: string, { errorClass, sqlstate, constraintName }: Unraisable) {
+  return insertOnce(db, {
+    kind: 'UnraisableLogLine',
+    reference: referenceOf(createHash('sha256').update(line).digest()),
+    step: 'raiseUnwrittenIncidents',
+    errorClass,
+    sqlstate: sqlstate ?? null,
+    constraintName: constraintName ?? null,
+  });
+}
+
+/**
+ * Writes each unwritten System Incident on the API log file whose reference has no System Incident yet, with the
+ * instant its line was logged; a line it cannot raise is written as an UnraisableLogLine System Incident instead.
+ */
 export async function raiseUnwrittenIncidents(db: Kysely<DB>, file: string, log: FastifyBaseLogger): Promise<void> {
   let lineNumber = 0;
   for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {
     lineNumber += 1;
     const unwritten = unwrittenOn(line);
     if (unwritten === null) continue;
-    const outcome = unwritten === 'unreadable' ? unwritten : await raise(db, unwritten);
-    if (outcome === 'unreadable') log.error({ file, line: lineNumber }, `unreadable ${UNWRITTEN} line`);
+    const outcome =
+      unwritten === 'unreadable' ? ({ errorClass: 'UnreadableLine' } as const) : await raise(db, unwritten);
     if (outcome === 'raised') log.info({ file, line: lineNumber }, `raised ${UNWRITTEN}`);
+    if (typeof outcome === 'object' && (await raiseUnraisable(db, line, outcome)) === 'raised')
+      log.error({ file, line: lineNumber, errorClass: outcome.errorClass }, `unraisable ${UNWRITTEN} line`);
   }
 }

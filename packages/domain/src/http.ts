@@ -194,7 +194,10 @@ const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(cha
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
 const systemIncident = Type.Object({
   reference: Type.String({ pattern: `^${referencePattern}$` }),
-  kind: Type.Enum({ UnexpectedFailure: 'UnexpectedFailure' } as const satisfies { [K in db.IncidentKind]: K }),
+  kind: Type.Enum({
+    UnexpectedFailure: 'UnexpectedFailure',
+    UnraisableLogLine: 'UnraisableLogLine',
+  } as const satisfies { [K in db.IncidentKind]: K }),
   state: Type.Enum({ Open: 'Open' } as const satisfies { [K in db.IncidentState]: K }),
   step: Type.String(),
   recordId: nullable(uuid),
