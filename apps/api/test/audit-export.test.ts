@@ -130,8 +130,10 @@ it("QA's export for one Customer holds the entries of its Submissions, Samples, 
   assert.ok(!data.entries.some((e) => theirIds.has(e.record.id)), "no entry on the other Customer's records");
   for (const file of answer.files) {
     const text = Buffer.from(file.base64, 'base64').toString('latin1');
-    for (const other of [theirs.sampleNumber, theirs.testId, contoso.name, carl.username])
-      assert.ok(!text.includes(other), `${file.name} does not hold ${other}`);
+    for (const other of [theirs.sampleNumber, theirs.testId, contoso.name, carl.username]) {
+      const printed = other.replaceAll('(', '\\(').replaceAll(')', '\\)');
+      assert.ok(!text.includes(other) && !text.includes(printed), `${file.name} does not hold ${other}`);
+    }
   }
   assert.ok(
     data.entries.every((e) => !e.redacted),
