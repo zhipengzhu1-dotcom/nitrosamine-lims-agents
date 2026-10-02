@@ -23,7 +23,7 @@ import type { App } from './app.ts';
 import { type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
-import { type Seen, type Signable, signRecord, statementInForce } from './signing.ts';
+import { proveReauthentication, type Seen, type Signable, signRecord, statementInForce } from './signing.ts';
 
 interface Effect<I> {
   signedRecord?: 'test_report';
@@ -164,12 +164,13 @@ interface Signing {
 
 /** Signs the Test, or the Test Report this step issued on it. */
 async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signing: Signing) {
-  const { table, testId, ...rest } = signing;
+  const { meaning, table, testId, seen, statementVersion, release } = signing;
   const recordId =
     table === 'test'
       ? testId
       : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id;
-  await signRecord(q, ctx, sessionId, { ...rest, table, recordId });
+  const proof = await proveReauthentication(q, ctx, sessionId, meaning);
+  await signRecord(q, { proof, sessionId, meaning, table, recordId, seen, statementVersion, release });
 }
 
 async function seenVersion(scope: LabQueries, testId: string, signature: SigningBody): Promise<Seen> {

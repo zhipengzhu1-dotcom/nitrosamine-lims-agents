@@ -73,21 +73,12 @@ function incidentAction(name: IncidentStepName, view: SystemIncident, onDone: ()
         recordVersion: { version: view.recordVersion.version, contentHash: view.recordVersion.contentHash },
         statementVersion: view.statement.version,
       };
-      await api(incidentStepRoute(name), {
-        reference: view.reference,
-        input: stepInput(name, input),
-        ...(signature && { signature }),
-      });
+      // The fields go as typed; the route's schema refuses an answer or a text it does not take, as stepAction's do.
+      await api(incidentStepRoute(name), { reference: view.reference, input, ...(signature && { signature }) });
       await onDone();
       return ui.done;
     },
   };
-}
-
-function stepInput(name: IncidentStepName, input: Record<string, string>) {
-  if (name === 'answerImpact') return { answer: input.answer === 'No' ? ('No' as const) : ('Yes' as const) };
-  if (name === 'recordImmediateAction' || name === 'recordCorrectiveAction') return { text: input.text ?? '' };
-  return {};
 }
 
 const noIncidents: IncidentRow[] = [];
@@ -95,7 +86,7 @@ const incidentColumns = (open: string | null): Column<IncidentRow>[] => [
   {
     head: 'Reference',
     cell: (i) => (
-      <a href={`#/incidents/${i.reference}`} aria-current={i.reference === open ? 'true' : undefined}>
+      <a className="tap" href={`#/incidents/${i.reference}`} aria-current={i.reference === open ? 'true' : undefined}>
         {i.reference}
       </a>
     ),

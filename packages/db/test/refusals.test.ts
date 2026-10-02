@@ -637,6 +637,9 @@ const AUDIT_CONTEXT = `select set_config('lims.actor', 'person:refusal.admin', t
                               set_config('lims.reason', 'Probe a refusal', true),
                               lims.set_this_transaction('lims.numbering', 'on')`;
 
+/** The role the transaction acts in, as the API sets it from the step registry. */
+const asRole = (role: string) => `select set_config('lims.role', '${role}', true)`;
+
 /** The stamp lims.sign leaves, so a probe row reaches the constraints behind the sign_only trigger. */
 const signingStamp = (row: Row) =>
   typeof row.reauthentication_id === 'string'
@@ -1464,6 +1467,11 @@ describe('the database refuses a value outside its allowed set', () => {
     ...(['immediate', 'corrective'] as const).flatMap((action): Case[] => {
       const partial: [string, Row][] = [
         [`a blank ${action} action`, { [`${action}_action`]: ' ', [`${action}_action_by`]: id.person }],
+        [`a newline-only ${action} action`, { [`${action}_action`]: '\n\t\n', [`${action}_action_by`]: id.person }],
+        [
+          `an ${action} action longer than 2000 characters`,
+          { [`${action}_action`]: 'x'.repeat(2001), [`${action}_action_by`]: id.person },
+        ],
         [`an ${action} action with no recording person`, { [`${action}_action`]: 'Done.' }],
         [`a recording person with no ${action} action`, { [`${action}_action_by`]: id.person }],
       ];
@@ -2175,16 +2183,97 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       await client.query(unrecordedBreak, [id.person, id.lab]);
       await client.query('set local session_replication_role = origin');
       await client.query(AUDIT_CONTEXT);
+      await client.query(asRole('QA'));
       const { rowCount } = await client.query(
-        `update lims.system_incident
-            set impact_answer = 'Yes', impact_answered_by = $1, impact_answered_at = clock_timestamp()
-          where reference = 'RF00000M'`,
-        [id.person],
+        `update lims.system_incident set impact_answer = 'Yes' where reference = 'RF00000M'`,
       );
       assert.equal(rowCount, 1);
     } finally {
       await client.query('rollback');
     }
+  });
+
+  it("a chain-verify System Incident's content carries its break's fingerprint", async () => {
+    const { rows } = await client.query<{ fingerprint: string | null }>(
+      `select lims.incident_content(id) ->> 'fingerprint' as fingerprint from lims.system_incident
+        where reference = 'RF000003'`,
+    );
+    assert.deepEqual(rows, [{ fingerprint: '07'.repeat(32) }]);
+  });
+
+  const stamped =
+    'a System Incident records who recorded each of the three and when from the acting person and the database clock';
+  for (const [what, role, change] of [
+    ["QA's answer", 'QA', "impact_answer = 'Yes'"],
+    ['an immediate action', 'Admin', "immediate_action = 'Reran the entry.'"],
+    ['a corrective action', 'Admin', "corrective_action = 'Added a check.'"],
+  ] as const) {
+    it(`${what} recorded under any role but ${role} is refused`, async () => {
+      for (const other of ['system', role === 'QA' ? 'Admin' : 'QA']) {
+        const error = await refusalOf(
+          `${asRole(other)}; update lims.system_incident set ${change} where id = '${id.systemIncident}'`,
+        );
+        assert.deepEqual(
+          [error.code, error.message],
+          ['LA015', `${what} on a System Incident is recorded by ${role}, not ${other}`],
+          other,
+        );
+      }
+    });
+    it(`${what} recorded by a service identity is refused`, async () => {
+      const error = await refusalOf(
+        `${asRole(role)}; select set_config('lims.actor', 'svc:test', true);
+         update lims.system_incident set ${change} where id = '${id.systemIncident}'`,
+      );
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA015', `${what} on a System Incident is recorded by a person, not svc:test`],
+      );
+    });
+  }
+
+  it(stamped, async () => {
+    for (const [fact, role] of [
+      ['impact_answer', 'QA'],
+      ['immediate_action', 'Admin'],
+      ['corrective_action', 'Admin'],
+    ] as const) {
+      const by = fact === 'impact_answer' ? 'impact_answered_by' : `${fact}_by`;
+      const at = fact === 'impact_answer' ? 'impact_answered_at' : `${fact}_at`;
+      await client.query('begin');
+      try {
+        await client.query(AUDIT_CONTEXT);
+        await client.query(asRole(role));
+        // A hand-written person and instant do not stick: the database writes the actor and its own clock over them.
+        const { rows } = await client.query<Row>(
+          `update lims.system_incident
+              set ${fact} = 'Yes', ${by} = $1, ${at} = '2020-01-01T00:00:00Z'
+            where id = $2
+            returning ${by} as by, ${at} between now() and clock_timestamp() as now, ${at} > '2026-01-01T00:00:00Z' as recent`,
+          [id.person, id.systemIncident],
+        );
+        assert.deepEqual(rows, [{ by: id.admin, now: true, recent: true }], fact);
+      } finally {
+        await client.query('rollback');
+      }
+    }
+  });
+
+  it('the app role holds no update on who recorded each of the three or when', async () => {
+    const { rows } = await client.query<{ privilege: string }>(
+      `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
+        where grantee = 'lims_app' and table_schema = 'lims' and table_name = 'system_incident'
+          and privilege_type = 'UPDATE'
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.privilege),
+      ['UPDATE corrective_action', 'UPDATE immediate_action', 'UPDATE impact_answer', 'UPDATE state'],
+    );
+    const error = await refusalOf(
+      `set local role lims_app; update lims.system_incident set impact_answered_at = clock_timestamp() where id = '${id.systemIncident}'`,
+    );
+    assert.equal(error.code, '42501', error.message);
   });
 
   /** A System Incident inserted with the given recorded fields, past the triggers, as a past write would have left it. */
@@ -2290,27 +2379,32 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
     'a System Incident is Acknowledged only by an Acknowledged Signature on it',
   );
 
-  it('a System Incident with all three records and an Acknowledged Signature on it moves to Acknowledged, then to Closed', async () => {
+  /** An Acknowledged Signature over a Record Version of RF00000N holding `content`, written past the triggers. */
+  const acknowledgedOver = async (content: string) => {
+    await client.query('set local session_replication_role = replica');
+    await client.query(
+      `with incident as (select id from lims.system_incident where reference = 'RF00000N'),
+            version as (
+              insert into lims.record_version (lab_id, id, record_table, record_id, version, canonical_form, content)
+              select $1, $2, 'system_incident', id, 1, 1, ${content} from incident
+              returning id, content_hash, canonical_form)
+       insert into lims.signature (lab_id, id, person_id, printed_name, username, role, meaning, record_version_id,
+                                   content_hash, canonical_form, statement_version, statement_hash, authenticator,
+                                   session_id, app_release, reauthentication_id)
+       select $1, $3, $4, 'Refusal Person', 'refusal.person', 'Admin', 'Acknowledged', id, content_hash,
+              canonical_form, 1, (select statement_hash from lims.signature_statement where version = 1),
+              'Password', $5, 'test', $6
+         from version`,
+      [id.lab, randomUUID(), randomUUID(), id.person, id.session, randomUUID()],
+    );
+    await client.query('set local session_replication_role = origin');
+  };
+
+  it('a System Incident with all three records and an Acknowledged Signature over them moves to Acknowledged, then to Closed', async () => {
     await client.query('begin');
     try {
       await incidentIn('RF00000N', recordedAll);
-      await client.query('set local session_replication_role = replica');
-      await client.query(
-        `with incident as (select id from lims.system_incident where reference = 'RF00000N'),
-              version as (
-                insert into lims.record_version (lab_id, id, record_table, record_id, version, canonical_form, content)
-                select $1, $2, 'system_incident', id, 1, 1, lims.incident_content(id)::text::bytea from incident
-                returning id, content_hash, canonical_form)
-         insert into lims.signature (lab_id, id, person_id, printed_name, username, role, meaning, record_version_id,
-                                     content_hash, canonical_form, statement_version, statement_hash, authenticator,
-                                     session_id, app_release, reauthentication_id)
-         select $1, $3, $4, 'Refusal Person', 'refusal.person', 'Admin', 'Acknowledged', id, content_hash,
-                canonical_form, 1, (select statement_hash from lims.signature_statement where version = 1),
-                'Password', $5, 'test', $6
-           from version`,
-        [id.lab, randomUUID(), randomUUID(), id.person, id.session, randomUUID()],
-      );
-      await client.query('set local session_replication_role = origin');
+      await acknowledgedOver("convert_to(lims.incident_content(id)::text, 'UTF8')");
       const acknowledged = await client.query(
         `update lims.system_incident set state = 'Acknowledged' where reference = 'RF00000N'`,
       );
@@ -2319,6 +2413,33 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
         `update lims.system_incident set state = 'Closed' where reference = 'RF00000N'`,
       );
       assert.equal(closed.rowCount, 1);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  it('a System Incident Acknowledged on a Signature over content that is not its current content is refused', async () => {
+    await client.query('begin');
+    try {
+      await incidentIn('RF00000N', {
+        ...recordedAll,
+        corrective_action: null,
+        corrective_action_by: null,
+        corrective_action_at: null,
+      });
+      // Signed before the corrective action was recorded: the Signature binds a version without it.
+      await acknowledgedOver("convert_to(lims.incident_content(id)::text, 'UTF8')");
+      await client.query(asRole('Admin'));
+      await client.query(
+        `update lims.system_incident set corrective_action = 'Added a check.' where reference = 'RF00000N'`,
+      );
+      await assert.rejects(
+        client.query(`update lims.system_incident set state = 'Acknowledged' where reference = 'RF00000N'`),
+        {
+          code: 'LA014',
+          message: 'a System Incident is Acknowledged only by an Acknowledged Signature over its current content',
+        },
+      );
     } finally {
       await client.query('rollback');
     }
@@ -2808,6 +2929,148 @@ describe('a Signature is written only by the signing function, which refuses eve
       if (typeof c.message === 'string') assert.equal(message, c.message);
       else assert.match(message, c.message);
     });
+
+  describe('Acknowledged is signed once, on an Open System Incident, over all three of its records as they are now', () => {
+    const incident = randomUUID();
+    const holds = (role: string) =>
+      `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', '${role}')`;
+    // The Admin who signs is a person of their own: an Admin holds no business role, and refusal.person is an Analyst.
+    const [signer, signerSession, secondProof] = [randomUUID(), randomUUID(), randomUUID()];
+    const asAdmin = [
+      asPerson('Admin').replace('person:refusal.person', 'person:refusal.acknowledger'),
+      `insert into lims.person (id, username, display_name, password_hash)
+       values ('${signer}', 'refusal.acknowledger', 'Acknowledging Admin', 'not-a-real-hash')`,
+      `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${signer}', 'Admin')`,
+      `insert into lims.session (lab_id, id, person_id, token_hash)
+       values ('${id.lab}', '${signerSession}', '${signer}', decode(repeat('0a', 32), 'hex'))`,
+    ];
+    const adminProof = (proof = id.probeReauthentication) =>
+      `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
+       values ('${id.lab}', '${proof}', '${signerSession}', '${signer}', 'Acknowledged', 'Password')`;
+    const recorded = `impact_answer, impact_answered_by, impact_answered_at, immediate_action, immediate_action_by,
+                      immediate_action_at, corrective_action, corrective_action_by, corrective_action_at`;
+    const recordedValues = `'Yes', '${id.person}', '2026-09-30T00:00:00Z', 'Reran the entry.', '${id.person}',
+                            '2026-09-30T00:00:00Z', 'Added a check.', '${id.person}', '2026-09-30T00:00:00Z'`;
+    /** A System Incident with the three records, in the given state, written past the triggers as a past write left it. */
+    const incidentIn = (state = 'Open') =>
+      `set local session_replication_role = replica;
+       insert into lims.system_incident (id, kind, reference, requested_by, session_lab_id, step, error_class, state, ${recorded})
+       values ('${incident}', 'UnexpectedFailure', 'RF00000P', '${id.person}', '${id.lab}', 'enterResult', 'TypeError', '${state}', ${recordedValues});
+       set local session_replication_role = origin`;
+    /** A Record Version of a System Incident in this Lab holding `content`, as if written earlier. */
+    const versionHolding = (content: string, recordId = incident) =>
+      `insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
+       values ('${id.lab}', 'system_incident', '${recordId}', 1, 1, ${content})`;
+    const current = (recordId = incident) => `convert_to(lims.incident_content('${recordId}'::uuid)::text, 'UTF8')`;
+    const versioned = (proof = id.probeReauthentication) =>
+      `select lims.version_system_incident('${proof}', '${incident}')`;
+    const signAcknowledged = (recordId = incident, proof = id.probeReauthentication) =>
+      sign({
+        reauthentication: proof,
+        session: signerSession,
+        table: 'system_incident',
+        recordId,
+        seen: versionOf(recordId, 1),
+        hash: hashOf(recordId, 1),
+        meaning: 'Acknowledged',
+      });
+    const onlyIncidents =
+      'Acknowledged is the Signature Meaning of a System Incident, and a System Incident is signed only Acknowledged';
+
+    it("the Admin signs a System Incident Acknowledged over the version this signing wrote in the signing session's Lab", async () => {
+      await client.query('begin');
+      try {
+        for (const statement of [incidentIn(), ...asAdmin, adminProof(), versioned(), signAcknowledged()])
+          await client.query(statement);
+        const { rows } = await client.query<Row>(
+          `select v.lab_id, v.version, s.meaning, s.role, v.content_hash = lims.incident_content_hash(v.record_id) as current
+             from lims.signature s join lims.record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
+            where v.record_table = 'system_incident' and v.record_id = $1`,
+          [incident],
+        );
+        assert.deepEqual(rows, [{ lab_id: id.lab, version: 1, meaning: 'Acknowledged', role: 'Admin', current: true }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('versioning a System Incident on a re-authentication record from an earlier transaction, for another Meaning, or that does not exist is refused', async () => {
+      const versioning =
+        'a System Incident is versioned only for the Acknowledged signing re-authenticated in this transaction';
+      assert.equal(await refused(incidentIn(), ...asAdmin, versioned(id.reauthentication)), versioning);
+      assert.equal(await refused(incidentIn(), ...asAdmin, reauthenticate('Performed'), versioned()), versioning);
+      assert.equal(await refused(incidentIn(), ...asAdmin, versioned(missing)), versioning);
+    });
+
+    covered.add('lims.signature.incident_signing');
+    const incidentCases: { name: string; statements: string[]; message: string }[] = [
+      {
+        name: 'signing a Test Acknowledged is refused',
+        statements: [...asAdmin, adminProof(), sign({ session: signerSession, meaning: 'Acknowledged' })],
+        message: onlyIncidents,
+      },
+      {
+        name: 'signing a System Incident Released is refused',
+        statements: [
+          incidentIn(),
+          asPerson('QA'),
+          holds('QA'),
+          versionHolding(current()),
+          reauthenticate('Released'),
+          sign({
+            table: 'system_incident',
+            recordId: incident,
+            seen: versionOf(incident, 1),
+            hash: hashOf(incident, 1),
+            meaning: 'Released',
+          }),
+        ],
+        message: onlyIncidents,
+      },
+      {
+        name: 'signing Acknowledged on a System Incident that is not Open is refused',
+        statements: [incidentIn('Acknowledged'), ...asAdmin, adminProof(), versioned(), signAcknowledged()],
+        message: 'a System Incident is signed Acknowledged while Open, not Acknowledged',
+      },
+      {
+        name: "signing Acknowledged on a System Incident without QA's answer and both actions is refused",
+        statements: [
+          ...asAdmin,
+          adminProof(),
+          versionHolding(current(id.systemIncident), id.systemIncident),
+          signAcknowledged(id.systemIncident),
+        ],
+        message:
+          "a System Incident is signed Acknowledged only once QA's answer, its immediate action and its corrective action are recorded",
+      },
+      {
+        name: 'a second Acknowledged signing on a System Incident is refused',
+        statements: [
+          incidentIn(),
+          ...asAdmin,
+          adminProof(),
+          versioned(),
+          signAcknowledged(),
+          adminProof(secondProof),
+          signAcknowledged(incident, secondProof),
+        ],
+        message: 'a System Incident is signed Acknowledged once',
+      },
+      {
+        name: 'signing Acknowledged over a version that is not the System Incident as it is now is refused',
+        statements: [
+          incidentIn(),
+          ...asAdmin,
+          versionHolding(`'{"stale":true}'::bytea`),
+          adminProof(),
+          signAcknowledged(),
+        ],
+        message:
+          'the Acknowledged Signature binds the System Incident as it is now; it must be read again before signing',
+      },
+    ];
+    for (const c of incidentCases) it(c.name, async () => assert.equal(await refused(...c.statements), c.message));
+  });
 });
 
 describe('a session is locked and unlocked only by lims.lock_session and lims.unlock_session', () => {

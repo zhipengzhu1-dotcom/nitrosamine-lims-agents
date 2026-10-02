@@ -330,6 +330,38 @@ it('the Acknowledged signing goes through the signing function, moves the incide
   );
 });
 
+it('of two answers from QA at once, one is recorded and the other is refused as stale', async () => {
+  const reference = await failedIncident();
+  // Both read the incident unanswered, then wait on the company chain, which is held until both are waiting.
+  let answers: ReturnType<typeof answer>[] = [];
+  await api.superuser.transaction().execute(async (tx) => {
+    await sql`select lims.lock_chains('company')`.execute(tx);
+    answers = [answer(as.quinn, reference, 'Yes'), answer(as.quinn, reference, 'Yes')];
+    await api.untilWaitingOnLocks(2);
+  });
+  const kinds = (await Promise.all(answers)).map((a) => (a.kind === 'reply' ? 'reply' : a.body.kind));
+  assert.deepEqual(kinds.sort(), ['reply', 'stale']);
+  assert.equal((await view(as.quinn, reference)).impact?.answer, 'Yes');
+  assert.equal((await incidentEntries(reference)).filter((e) => e.op === 'UPDATE').length, 1, 'one answer recorded');
+});
+
+it('a corrective action recorded between the signing sheet loading and the signing refuses the signing as recordChanged', async () => {
+  const reference = await failedIncident();
+  ok(await answer(as.quinn, reference, 'Yes'));
+  ok(await immediate(as.ada, reference, 'Reran the entry.'));
+  const sheet = await acknowledgement(as.ada, reference, ada);
+  ok(await corrective(as.ada, reference, 'Added a check.'));
+  refusedWith(
+    await as.ada.call(incidentStepRoute('acknowledge'), { reference, input: {}, signature: sheet }),
+    'recordChanged',
+  );
+  const unsigned = await view(as.ada, reference);
+  assert.equal(unsigned.state, 'Open');
+  assert.equal(unsigned.acknowledged, null, 'nothing was signed');
+  assert.notEqual(unsigned.recordVersion.contentHash, sheet.recordVersion.contentHash);
+  assert.equal(ok(await acknowledge(as.ada, reference, ada)).state, 'Acknowledged');
+});
+
 it('the open System Incident list is read by Admin and QA, newest first, and by no other role', async () => {
   const older = await failedIncident();
   const newer = await failedIncident();

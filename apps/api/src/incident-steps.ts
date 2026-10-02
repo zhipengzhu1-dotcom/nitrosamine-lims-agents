@@ -16,7 +16,7 @@ import type { App } from './app.ts';
 import { reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope } from './scope.ts';
-import { signRecord, statementInForce } from './signing.ts';
+import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
 import { onWallClock } from './trail.ts';
 
 /** System Incidents are company records (map #1, lab-scope-incidents): Admin and QA of any Lab read and act on them. */
@@ -112,6 +112,7 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
     .where('recordVersion.recordTable', '=', 'system_incident')
     .where('recordVersion.recordId', '=', row.id)
     .where('signature.meaning', '=', 'Acknowledged')
+    .orderBy('signature.signedAt')
     .executeTakeFirst();
   const {
     id,
@@ -145,28 +146,21 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
 }
 
 type Change = UpdateObject<DB, 'systemIncident'>;
-const now = sql<Date>`clock_timestamp()`;
+type Recorded = 'impactAnswer' | 'immediateAction' | 'correctiveAction';
 
-/** What each step writes on the incident; the state moves are what the database's trigger allows and nothing else. */
-const changes: { [K in IncidentStepName]: (actor: ActorContext, input: IncidentStepInputs[K]) => Change } = {
-  answerImpact: (actor, input) => ({
-    impactAnswer: input.answer,
-    impactAnsweredBy: actor.person.id,
-    impactAnsweredAt: now,
-  }),
-  recordImmediateAction: (actor, input) => ({
-    immediateAction: input.text,
-    immediateActionBy: actor.person.id,
-    immediateActionAt: now,
-  }),
-  recordCorrectiveAction: (actor, input) => ({
-    correctiveAction: input.text,
-    correctiveActionBy: actor.person.id,
-    correctiveActionAt: now,
-  }),
-  acknowledge: () => ({ state: 'Acknowledged' }),
-  close: () => ({ state: 'Closed' }),
-};
+/**
+ * What each step writes on the incident, and the column that must still be null for the write to land, so that of two
+ * presses at once the second changes nothing and is refused as stale. Who recorded each of the three and when, the
+ * database stamps from the acting person and its clock; the state moves are what its trigger allows and nothing else.
+ */
+const changes: { [K in IncidentStepName]: { set: (input: IncidentStepInputs[K]) => Change; unrecorded: Recorded[] } } =
+  {
+    answerImpact: { set: (input) => ({ impactAnswer: input.answer }), unrecorded: ['impactAnswer'] },
+    recordImmediateAction: { set: (input) => ({ immediateAction: input.text }), unrecorded: ['immediateAction'] },
+    recordCorrectiveAction: { set: (input) => ({ correctiveAction: input.text }), unrecorded: ['correctiveAction'] },
+    acknowledge: { set: () => ({ state: 'Acknowledged' }), unrecorded: [] },
+    close: { set: () => ({ state: 'Closed' }), unrecorded: [] },
+  };
 
 /** The database's own refusal of a move (LA014) means another session changed the incident first; the bench reloads. */
 function movedOn(error: unknown): never {
@@ -217,21 +211,23 @@ function registerIncidentStep<K extends IncidentStepName>(app: App, db: Kysely<D
             'ReauthenticationFailed',
           )
         : undefined;
+    const { set, unrecorded } = changes[name];
     await scope.write(
       name,
       step.role,
       async (q) => {
-        // lock_chain (LA004) wants the company chain declared before this Lab's, which the Signature writes to.
-        await sql`select lims.lock_chains('company', ${actor.lab.id})`.execute(q.company);
         if (step.signs !== null && signature) {
-          const { rows } = await sql<{
-            id: string;
-          }>`select lims.version_system_incident(${actor.lab.id}, ${id}) as id`
+          // lock_chain (LA004) wants the company chain declared before this Lab's, which the Signature writes to.
+          await sql`select lims.lock_chains('company', ${actor.lab.id})`.execute(q.company);
+          const proof = await proveReauthentication(q, actor, sessionId, step.signs);
+          const { rows } = await sql<{ id: string }>`select lims.version_system_incident(${proof}, ${id}) as id`
             .execute(q.company)
-            .catch(movedOn);
+            .catch(signingRefused);
           const [latest] = rows;
           if (!latest) throw new Error('lims.version_system_incident returned no version');
-          await signRecord(q, actor, sessionId, {
+          await signRecord(q, {
+            proof,
+            sessionId,
             meaning: step.signs,
             table: 'system_incident',
             recordId: id,
@@ -239,12 +235,15 @@ function registerIncidentStep<K extends IncidentStepName>(app: App, db: Kysely<D
             statementVersion: signature.statementVersion,
             release,
           });
+        } else {
+          await sql`select lims.lock_chains('company')`.execute(q.company);
         }
         const moved = await q.company
           .updateTable('systemIncident')
-          .set(changes[name](actor, body.input))
+          .set(set(body.input))
           .where('id', '=', id)
           .where('state', '=', view.state)
+          .where((eb) => eb.and(unrecorded.map((column) => eb(column, 'is', null))))
           .executeTakeFirstOrThrow()
           .catch(movedOn);
         if (!moved.numUpdatedRows) refuse('stale', 'The System Incident has moved on. Reload it.');

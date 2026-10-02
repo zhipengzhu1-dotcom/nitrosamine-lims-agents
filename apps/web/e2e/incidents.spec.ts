@@ -58,7 +58,9 @@ const sheetGone = (page: Page) => expect(page.locator('form.sheet')).toHaveCount
 async function openIncident(page: Page, reference: string) {
   await page.getByRole('link', { name: 'Incidents' }).click();
   await expect(page.getByRole('heading', { name: 'Incidents' })).toBeVisible();
-  await page.getByRole('link', { name: reference, exact: true }).click();
+  const open = page.getByRole('link', { name: reference, exact: true });
+  expect((await open.boundingBox())?.height, 'a gloved finger can press it').toBeGreaterThanOrEqual(44);
+  await open.click();
   await expect(page.getByRole('heading', { name: new RegExp(`^${reference} `) })).toBeVisible();
 }
 
