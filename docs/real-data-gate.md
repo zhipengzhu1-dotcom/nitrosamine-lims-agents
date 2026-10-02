@@ -13,7 +13,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 1 | A lockout, a burst of failed sign-ins from one address or against one unknown-ID hash, or repeats against a locked account open a System Incident | [#93](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/93); the per-address rule takes effect in the deploy once [#180](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/180) sets `LIMS_TRUSTED_PROXIES` and Caddy forwards the client's address |
 | 1 | Counters | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
 | 1 | Transaction IDs | [#88](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/88) |
-| 2 | Signing function and Signature fields | |
+| 2 | Signing function and Signature fields | [#95](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/95) |
 | 2 | Record Versions | [#94](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/94) |
 | 2 | Lab at sign-in | [#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98) |
 | 2 | Workstations | [#99](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/99) |

@@ -14,6 +14,7 @@ import {
   type RouteReply,
   readReply,
   routes,
+  type SigningBody,
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import { type AppOptions, buildApp } from '../src/app.ts';
@@ -35,6 +36,8 @@ const STATUS_OF: { readonly [K in RefusalKind]: number } = {
   notFound: 404,
   state: 409,
   stale: 409,
+  recordChanged: 409,
+  signingRefused: 409,
   keyReused: 422,
   accountLocked: 423,
   failure: 500,
@@ -105,6 +108,17 @@ export function ok<R extends Route>(answer: Answer<R>): RouteReply<R> {
     : assert.fail(`expected a reply, got ${answer.status} ${answer.body.kind}: ${answer.body.message}`);
 }
 
+export async function signatureOf(client: Client, testId: string, account: Account): Promise<SigningBody> {
+  const { recordVersion, statement } = ok(await client.call(routes.test, { id: testId }));
+  const { version, contentHash } = recordVersion ?? assert.fail('a signer sees the Record Version of the Test');
+  return {
+    username: account.username,
+    password: account.password,
+    recordVersion: { version, contentHash },
+    statementVersion: statement?.version ?? assert.fail('a signer sees the signature statement'),
+  };
+}
+
 export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKind): string {
   return answer.kind === 'refused' && answer.body.kind === kind
     ? answer.body.message
@@ -114,6 +128,7 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
 }
 
 const accessEventKey = randomBytes(32);
+export const TEST_RELEASE = 'test-release';
 
 interface ListenOptions {
   secureCookie?: boolean;
@@ -143,6 +158,7 @@ async function listen(
     secureCookie,
     accessEventKey,
     login,
+    release: TEST_RELEASE,
     sweepEveryMs,
     trustedProxies,
   });

@@ -111,9 +111,12 @@ const recordVersionRef = Type.Object({
   canonicalForm: Type.Integer({ minimum: 0 }),
   contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
 });
+export type RecordVersionRef = Static<typeof recordVersionRef>;
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
+  username: Type.String(),
+  role: role,
   signedAt: instant,
   record: Type.String(),
   recordVersion: recordVersionRef,
@@ -135,6 +138,9 @@ export const auditedTable = Type.Enum({
   test_report: 'test_report',
   record_version: 'record_version',
   signature: 'signature',
+  signature_statement: 'signature_statement',
+  signing_role: 'signing_role',
+  reauthentication: 'reauthentication',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;
 const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
@@ -231,7 +237,13 @@ const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' })
 /** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
 const username = Type.String({ pattern: '^[a-z][a-z0-9.-]{2,39}$' });
 const reportRef = Type.Object({ id: uuid, number: Type.String() });
-/** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
+/** The signature statement in force: what a signer attests, as QA approved it, with the version a Signature records. */
+const signatureStatement = Type.Object({ version: Type.Integer({ minimum: 1 }), text: Type.String() });
+export type SignatureStatement = Static<typeof signatureStatement>;
+/**
+ * `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a
+ * guessed value be confirmed. `statement` is the signature statement in force, null for a Customer, who never signs.
+ */
 const testView = Type.Object({
   test: testRow,
   recordVersion: nullable(recordVersionRef),
@@ -239,6 +251,7 @@ const testView = Type.Object({
   result: nullable(result),
   signatures: Type.Array(signature),
   next: nullable(Type.Enum(stepNames)),
+  statement: nullable(signatureStatement),
 });
 const testReport = Type.Object({
   report: reportRef,
@@ -300,7 +313,9 @@ export type StepTaken = Static<typeof stepTaken>;
  * `accountLocked`, `labNotChosen` for a sign-in that names no Lab, and `role` for a Lab where the person holds no
  * Membership, come only after the right password. `noSession` covers no session presented and a session that
  * has ended. `sessionLocked` answers every request on a locked session except lock, unlock, sign-out and a sign-in over it. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
- * with a different step or input, or from another session. `notFound` also covers an
+ * with a different step or input, or from another session. `recordChanged` is a signing on sight of a Record Version that is no
+ * longer the record's latest: the screen must show the record again before it is signed. `signingRefused` is what the signing
+ * function refuses once the step's transaction has begun, such as a signature statement no longer in force. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
  */
@@ -316,6 +331,8 @@ export const refusalKinds = [
   'guard',
   'state',
   'stale',
+  'recordChanged',
+  'signingRefused',
   'keyReused',
   'notFound',
   'failure',
@@ -333,6 +350,17 @@ const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, c
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
+/** The Record Version the signer saw, as the screen showed it: the signing is refused if the record has moved on. */
+const seenVersion = Type.Object({ version: recordVersionRef.properties.version, contentHash: sha256Hex }, closed);
+const typedCredentials = Type.Object({ username: text, password: text }, closed);
+/** What a signer types on the signature sheet: their user ID and their password. */
+export type TypedCredentials = Static<typeof typedCredentials>;
+/** What a signing sends: the typed credentials, the Record Version the sheet showed and the signature statement version it showed. */
+const signingBody = Type.Object(
+  { ...typedCredentials.properties, recordVersion: seenVersion, statementVersion: Type.Integer({ minimum: 1 }) },
+  closed,
+);
+export type SigningBody = Static<typeof signingBody>;
 const reauthentication = Type.Object({ password: text }, closed);
 const room = Type.Object({ id: uuid, name: Type.String() });
 const workstation = Type.Object({
@@ -355,7 +383,7 @@ const roomRegistration = Type.Object({ name: text, reason: text }, closed);
 const stepEnvelope = Type.Object({
   commitKey: uuid,
   testId: Type.Optional(uuid),
-  signature: Type.Optional(reauthentication),
+  signature: Type.Optional(signingBody),
 });
 const stepInputs = {
   submit: Type.Object({ methodId: uuid, description: text }, closed),

@@ -8,7 +8,7 @@ import { stepRoutes } from './steps.ts';
 import { workstationRoutes } from './workstations.ts';
 
 /** Every route that needs a session. A locked session reaches only lock, unlock and sign-out; every other route answers sessionLocked. */
-export function sessionRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): void {
+export function sessionRoutes(app: App, db: Kysely<DB>, limits: SessionLimits, release: string): void {
   const withSession = (whileLocked: boolean, routes: (scope: App) => void) =>
     app.register(async (scope) => {
       scope.decorateRequest('actor');
@@ -29,7 +29,7 @@ export function sessionRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): 
     labSwitchRoute(signedIn, db, limits);
     preferenceRoutes(signedIn, db);
     readRoutes(signedIn, db);
-    stepRoutes(signedIn, db);
+    stepRoutes(signedIn, db, release);
     workstationRoutes(signedIn, db);
   });
 }

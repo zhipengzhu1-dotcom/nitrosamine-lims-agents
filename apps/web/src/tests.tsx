@@ -1,7 +1,7 @@
 import { type ActorContext, type Result, routes, type Signature, steps, type TestRow } from '@lims/domain';
 import { useCallback, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
-import { Shell, Status, stepAction } from './rail.tsx';
+import { Shell, Status, stepAction, words } from './rail.tsx';
 import { type Column, StackTable } from './stack.tsx';
 import { time } from './time.ts';
 import { TestTrail } from './trail.tsx';
@@ -46,9 +46,15 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
   const freshState = useFresh(view, (v) => [v.test.state]);
   const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
   const action = view?.next
-    ? stepAction(view.next, id, [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])], async () => {
-        await Promise.all([reload(), reloadTrail()]);
-      })
+    ? stepAction(
+        view.next,
+        id,
+        [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])],
+        async () => {
+          await Promise.all([reload(), reloadTrail()]);
+        },
+        view.recordVersion && view.statement ? { recordVersion: view.recordVersion, statement: view.statement } : null,
+      )
     : null;
   if (!view)
     return (
@@ -142,7 +148,7 @@ const signatureColumns: Column<Signature>[] = [
       </>
     ),
   },
-  { head: 'Signed by', cell: (s) => s.signer },
+  { head: 'Signed by', cell: (s) => `${s.signer} (${s.username}, ${words(s.role)})` },
   { head: 'Time', cell: (s) => time(s.signedAt) },
   { head: 'Record', cell: (s) => s.record },
   { head: 'Record Version', cell: (s) => s.recordVersion.version },
