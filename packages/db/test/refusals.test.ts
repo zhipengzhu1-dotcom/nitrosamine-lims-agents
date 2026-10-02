@@ -640,6 +640,10 @@ const AUDIT_CONTEXT = `select set_config('lims.actor', 'person:refusal.admin', t
 /** The role the transaction acts in, as the API sets it from the step registry. */
 const asRole = (role: string) => `select set_config('lims.role', '${role}', true)`;
 
+/** A person who holds `role` acting in it: Other Person holds QA, the Admin holds Admin. */
+const actingAs = (role: 'QA' | 'Admin') =>
+  `select set_config('lims.actor', 'person:${role === 'QA' ? 'refusal.other' : 'refusal.admin'}', true), set_config('lims.role', '${role}', true)`;
+
 /** The stamp lims.sign leaves, so a probe row reaches the constraints behind the sign_only trigger. */
 const signingStamp = (row: Row) =>
   typeof row.reauthentication_id === 'string'
@@ -2183,7 +2187,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       await client.query(unrecordedBreak, [id.person, id.lab]);
       await client.query('set local session_replication_role = origin');
       await client.query(AUDIT_CONTEXT);
-      await client.query(asRole('QA'));
+      await client.query(actingAs('QA'));
       const { rowCount } = await client.query(
         `update lims.system_incident set impact_answer = 'Yes' where reference = 'RF00000M'`,
       );
@@ -2230,6 +2234,16 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
         ['LA015', `${what} on a System Incident is recorded by a person, not svc:test`],
       );
     });
+    it(`${what} recorded by a person who holds no ${role} membership is refused`, async () => {
+      const error = await refusalOf(
+        `${asRole(role)}; select set_config('lims.actor', 'person:refusal.person', true);
+         update lims.system_incident set ${change} where id = '${id.systemIncident}'`,
+      );
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA015', `${what} on a System Incident is recorded by a person who holds ${role}, not person:refusal.person`],
+      );
+    });
   }
 
   it(stamped, async () => {
@@ -2243,7 +2257,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       await client.query('begin');
       try {
         await client.query(AUDIT_CONTEXT);
-        await client.query(asRole(role));
+        await client.query(actingAs(role));
         // A hand-written person and instant do not stick: the database writes the actor and its own clock over them.
         const { rows } = await client.query<Row>(
           `update lims.system_incident
@@ -2252,7 +2266,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
             returning ${by} as by, ${at} between now() and clock_timestamp() as now, ${at} > '2026-01-01T00:00:00Z' as recent`,
           [id.person, id.systemIncident],
         );
-        assert.deepEqual(rows, [{ by: id.admin, now: true, recent: true }], fact);
+        assert.deepEqual(rows, [{ by: role === 'QA' ? id.otherPerson : id.admin, now: true, recent: true }], fact);
       } finally {
         await client.query('rollback');
       }

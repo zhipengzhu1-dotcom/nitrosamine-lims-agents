@@ -81,7 +81,8 @@ language sql stable as $$
 $$;
 
 -- The person recording one of the three on a System Incident: the transaction's actor, acting in the role the step
--- registry gives the step, so no one records an answer or an action in another's name or role.
+-- registry gives the step and holding that role in a Lab, so no one records an answer or an action in another's name
+-- or in a role they do not hold. A System Incident is a company record, so a membership in any Lab qualifies.
 create function lims.incident_recorder(p_role text, p_what text) returns uuid
 language plpgsql stable set search_path = lims, pg_temp as $$
 declare
@@ -96,6 +97,10 @@ begin
   select id into recorder from person where 'person:' || username = actor;
   if recorder is null then
     raise exception '% on a System Incident is recorded by a person, not %', p_what, coalesce(nullif(actor, ''), 'no actor')
+      using errcode = 'LA015';
+  end if;
+  if not exists (select from membership m where m.person_id = recorder and m.role::text = p_role) then
+    raise exception '% on a System Incident is recorded by a person who holds %, not %', p_what, p_role, actor
       using errcode = 'LA015';
   end if;
   return recorder;
