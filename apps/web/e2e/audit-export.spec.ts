@@ -4,6 +4,7 @@ import { DEMO_PASSWORD } from '../playwright.config.ts';
 import { expect, type Locator, type Page, test } from './walk.ts';
 
 async function signIn(page: Page, username: string) {
+  await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -19,7 +20,11 @@ async function atLeast(target: Locator, width: number, height: number) {
 
 test('QA picks a Customer, generates its Audit Export and downloads the data file and the PDF', async ({ page }) => {
   await page.goto('/');
-  const login = await page.request.post('/api/login', { data: { username: 'cora.customer', password: DEMO_PASSWORD } });
+  const labs: { id: string; code: string }[] = await (await page.request.get('/api/labs')).json();
+  const labId = labs.find((lab) => lab.code === 'RD')?.id;
+  const login = await page.request.post('/api/login', {
+    data: { username: 'cora.customer', password: DEMO_PASSWORD, labId },
+  });
   expect(login.ok()).toBe(true);
   const { methods } = await (await page.request.get('/api/lookups')).json();
   const description = `Metformin HCl 500 mg tablets (fictional, ${test.info().project.name} lot ${randomUUID().slice(0, 8)})`;
