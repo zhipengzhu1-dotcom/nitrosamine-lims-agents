@@ -49,7 +49,8 @@ function opOf(op: string): TimedEntry['op'] {
 
 const inUtc = (at: RawBuilder<unknown>) =>
   sql<Instant>`to_char(${at} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-const onWallClock = (at: RawBuilder<unknown>, zone: RawBuilder<unknown>) => sql<Instant>`
+/** `at` on `zone`'s wall clock, ISO 8601 to the microsecond with the zone's offset, rendered by the database so that no host clock formats it. */
+export const onWallClock = (at: RawBuilder<unknown>, zone: RawBuilder<unknown>) => sql<Instant>`
   to_char(${at} at time zone ${zone}, 'YYYY-MM-DD"T"HH24:MI:SS.US')
     || case when (${at} at time zone ${zone}) < (${at} at time zone 'UTC') then '-' else '+' end
     || to_char(greatest((${at} at time zone ${zone}) - (${at} at time zone 'UTC'),

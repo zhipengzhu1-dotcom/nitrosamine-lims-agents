@@ -89,6 +89,8 @@ const testRow = Type.Object({
   sampleNumber: Type.String(),
   description: Type.String(),
   receivedAt: nullable(instant),
+  /** `receivedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
+  receivedAtLab: nullable(instant),
   customer: Type.String(),
   methodCode: Type.String(),
   methodVersion: Type.String(),
@@ -118,6 +120,8 @@ const signature = Type.Object({
   username: Type.String(),
   role: role,
   signedAt: instant,
+  /** `signedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
+  signedAtLab: instant,
   /** The signed record's glossary noun, such as "Test Report". */
   record: Type.String(),
   recordVersion: recordVersionRef,

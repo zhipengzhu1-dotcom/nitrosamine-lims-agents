@@ -1,0 +1,19 @@
+/** The web's one display function for an instant: the ISO 8601 UTC string from the API, shown to the second. */
+export const time = (iso: string | null) =>
+  // oxlint-disable-next-line no-restricted-globals -- parses an instant to show it; reads no clock
+  iso ? `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')} UTC` : '';
+
+const labTime = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 19)} ${iso.slice(-6)}`;
+
+/** A Lab record's instant as text: UTC, then the Lab's wall clock that the API rendered, when it sent one. */
+export const whenText = (at: string, atLab: string | null) => (atLab ? `${time(at)} · ${labTime(atLab)}` : time(at));
+
+/** A Lab record's instant as `whenText` reads, with the Lab's wall clock muted beside the UTC. */
+export function When({ at, atLab }: { at: string; atLab: string | null }) {
+  return (
+    <>
+      {time(at)}
+      {atLab && <span className="muted"> · {labTime(atLab)}</span>}
+    </>
+  );
+}

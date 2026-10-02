@@ -1,13 +1,15 @@
 import type { DB } from '@lims/db';
-import { nextStep, recordKind, routes } from '@lims/domain';
+import { type Instant, nextStep, recordKind, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
 import { staffRoutes } from './staff.ts';
-import { trailRoutes } from './trail.ts';
+import { onWallClock, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
+
+const onLabClock = (column: string) => onWallClock(sql.ref(column), sql.ref('lab.time_zone'));
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -17,6 +19,7 @@ function visibleTests(scope: Scope) {
     .innerJoin('submission', 'submission.id', 'sample.submissionId')
     .innerJoin('customer', 'customer.id', 'submission.customerId')
     .innerJoin('method', 'method.id', 'test.methodId')
+    .innerJoin('lab', 'lab.labId', 'test.labId')
     .leftJoin('person as assignee', 'assignee.id', 'test.assigneeId')
     .select([
       'test.id',
@@ -25,6 +28,7 @@ function visibleTests(scope: Scope) {
       'sample.number as sampleNumber',
       'sample.description',
       'sample.receivedAt',
+      sql<Instant | null>`${onLabClock('sample.received_at')}`.as('receivedAtLab'),
       'customer.name as customer',
       'method.code as methodCode',
       'method.version as methodVersion',
@@ -72,12 +76,14 @@ async function testView(scope: Scope, id: string) {
     signatures: withheld
       ? []
       : await signedVersions(scope)
+          .innerJoin('lab', 'lab.labId', 'signature.labId')
           .select([
             'signature.meaning',
             'signature.printedName as signer',
             'signature.username',
             'signature.role',
             'signature.signedAt',
+            onLabClock('signature.signed_at').as('signedAtLab'),
             'recordVersion.recordTable as record',
             'recordVersion.version',
             'recordVersion.canonicalForm',

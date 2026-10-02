@@ -382,6 +382,32 @@ it('a stored instant carries its UTC and Lab-zone renderings, a Record kind read
   assert.match(changeOf('record_version', 'content_hash').text, /^[0-9a-f]{64}$/);
 });
 
+it("a Test's Signatures and Received carry UTC and the Lab's wall clock on the Worklist, the Test and its Test Report, as the trail renders the same stored instant", async () => {
+  const id = await submitTestTo('Reported');
+  const { entries } = await trailOf(id);
+  const stored = (table: string, field: string) =>
+    entries.flatMap((e) =>
+      e.record.table === table ? e.changes.flatMap((c) => (c.field === field && c.new?.instant) || []) : [],
+    );
+  const trailed = (at: string) =>
+    [...stored('signature', 'signed_at'), ...stored('sample', 'received_at')].find((i) =>
+      i.at.startsWith(at.slice(0, -1)),
+    ) ?? assert.fail(`no trail entry stores ${at}`);
+  const view = ok(await as.rui.call(routes.test, { id }));
+  const report = ok(await as.cora.call(routes.report, { id }));
+  const row = ok(await as.rui.call(routes.tests)).find((t) => t.id === id) ?? assert.fail('the Worklist row');
+  const shown = [
+    ...[view, report].flatMap((r) => r.signatures.map((s) => ({ at: s.signedAt, atLab: s.signedAtLab }))),
+    ...[view.test, report.test, row].map((t) => ({ at: t.receivedAt ?? '', atLab: t.receivedAtLab })),
+  ];
+  assert.equal(shown.length, 9, 'three Signatures on the Test and on its Test Report, and three Received');
+  for (const { at, atLab } of shown) {
+    const inTrail = trailed(at);
+    assert.equal(atLab, inTrail.atLab, `${at} on the Lab wall clock, as the trail renders it`);
+    assert.equal(atLab, onLabClock(inTrail.at), `${at} on the Lab wall clock, as Intl renders it for the Lab's zone`);
+  }
+});
+
 it('the raw entry under each readable entry keeps the stored values and hashes', async () => {
   const id = await submitTestTo('SubmittedForReview');
   const { entries } = await trailOf(id);
