@@ -1206,6 +1206,28 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'system_incident_session_lab_id_fkey',
     },
     {
+      name: "a System Incident whose QA's answer names a person who does not exist is refused",
+      table: 'lims.system_incident',
+      change: { impact_answer: 'Yes', impact_answered_by: missing, impact_answered_at: '2026-09-30T00:00:00Z' },
+      constraint: 'system_incident_impact_answered_by_fkey',
+    },
+    {
+      name: 'a System Incident whose immediate action names a person who does not exist is refused',
+      table: 'lims.system_incident',
+      change: { immediate_action: 'Reran.', immediate_action_by: missing, immediate_action_at: '2026-09-30T00:00:00Z' },
+      constraint: 'system_incident_immediate_action_by_fkey',
+    },
+    {
+      name: 'a System Incident whose corrective action names a person who does not exist is refused',
+      table: 'lims.system_incident',
+      change: {
+        corrective_action: 'Added a check.',
+        corrective_action_by: missing,
+        corrective_action_at: '2026-09-30T00:00:00Z',
+      },
+      constraint: 'system_incident_corrective_action_by_fkey',
+    },
+    {
       name: 'an Access Event about a person who does not exist is refused',
       table: 'lims.access_event',
       change: { subject_id: missing },
@@ -1264,6 +1286,26 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { [column]: value },
       constraint,
     }));
+  const impactCases: [string, Row][] = [
+    ['an answer with no answering person', { impact_answer: 'Yes', impact_answered_at: '2026-09-30T00:00:00Z' }],
+    [
+      'an answering person with no answer',
+      { impact_answered_by: id.person, impact_answered_at: '2026-09-30T00:00:00Z' },
+    ],
+    [
+      'a No answer on a chain-verify System Incident',
+      {
+        kind: 'ChainVerifyFailure',
+        step: null,
+        error_class: null,
+        chain: 'company',
+        ...oneBreak(3),
+        impact_answer: 'No',
+        impact_answered_by: id.person,
+        impact_answered_at: '2026-09-30T00:00:00Z',
+      },
+    ],
+  ];
   refusesEach('23514', [
     {
       name: 'an Audit Export requested under any role but QA is refused',
@@ -1362,7 +1404,7 @@ describe('the database refuses a value outside its allowed set', () => {
       'test_gxp_class_check',
     ),
     ...each(
-      'a Record Version of a record other than a Test or a Test Report is refused',
+      'a Record Version of a record other than a Test, a Test Report or a System Incident is refused',
       'lims.record_version',
       'record_table',
       ['result', 'sample'],
@@ -1411,6 +1453,27 @@ describe('the database refuses a value outside its allowed set', () => {
       error_class: null,
     }),
     incidentFacts('an unexpected-failure System Incident that names an account', { subject_id: id.person }),
+    ...impactCases.map(
+      ([what, change]): Case => ({
+        name: `${what} is refused`,
+        table: 'lims.system_incident',
+        change,
+        constraint: 'system_incident_impact_answer_check',
+      }),
+    ),
+    ...(['immediate', 'corrective'] as const).flatMap((action): Case[] => {
+      const partial: [string, Row][] = [
+        [`a blank ${action} action`, { [`${action}_action`]: ' ', [`${action}_action_by`]: id.person }],
+        [`an ${action} action with no recording person`, { [`${action}_action`]: 'Done.' }],
+        [`a recording person with no ${action} action`, { [`${action}_action_by`]: id.person }],
+      ];
+      return partial.map(([what, change]) => ({
+        name: `${what} is refused`,
+        table: 'lims.system_incident',
+        change: { [`${action}_action_at`]: '2026-09-30T00:00:00Z', ...change },
+        constraint: `system_incident_${action}_action_check`,
+      }));
+    }),
     incidentFacts('a lockout System Incident that names no account', {
       kind: 'Lockout',
       step: null,
@@ -2105,7 +2168,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
     );
   });
 
-  it('a chain-verify System Incident opened before breaks carried a fingerprint can still move to Closed', async () => {
+  it("a chain-verify System Incident opened before breaks carried a fingerprint still takes QA's answer", async () => {
     await client.query('begin');
     try {
       await client.query('set local session_replication_role = replica');
@@ -2113,9 +2176,149 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       await client.query('set local session_replication_role = origin');
       await client.query(AUDIT_CONTEXT);
       const { rowCount } = await client.query(
-        `update lims.system_incident set state = 'Closed' where reference = 'RF00000M'`,
+        `update lims.system_incident
+            set impact_answer = 'Yes', impact_answered_by = $1, impact_answered_at = clock_timestamp()
+          where reference = 'RF00000M'`,
+        [id.person],
       );
       assert.equal(rowCount, 1);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  /** A System Incident inserted with the given recorded fields, past the triggers, as a past write would have left it. */
+  const incidentIn = async (reference: string, columns: Row) => {
+    const names = Object.keys(columns);
+    await client.query('set local session_replication_role = replica');
+    await client.query(
+      `insert into lims.system_incident (kind, reference, requested_by, session_lab_id, step, error_class${names.map((n) => `, ${pg.escapeIdentifier(n)}`).join('')})
+       values ('UnexpectedFailure', $1, $2, $3, 'enterResult', 'TypeError'${names.map((_, i) => `, $${i + 4}`).join('')})
+       returning id`,
+      [reference, id.person, id.lab, ...Object.values(columns)],
+    );
+    await client.query('set local session_replication_role = origin');
+    await client.query(AUDIT_CONTEXT);
+  };
+  const recordedAll = {
+    impact_answer: 'Yes',
+    impact_answered_by: id.person,
+    impact_answered_at: '2026-09-30T00:00:00Z',
+    immediate_action: 'Reran the entry.',
+    immediate_action_by: id.person,
+    immediate_action_at: '2026-09-30T00:00:00Z',
+    corrective_action: 'Added a check.',
+    corrective_action_by: id.person,
+    corrective_action_at: '2026-09-30T00:00:00Z',
+  };
+  const moveRefused = (name: string, columns: Row, change: string, message: string, values: unknown[] = []) => {
+    it(name, async () => {
+      await client.query('begin');
+      try {
+        await incidentIn('RF00000N', columns);
+        const error = await client
+          .query(`update lims.system_incident set ${change} where reference = 'RF00000N'`, values)
+          .then(
+            () => assert.fail('the database accepted the move'),
+            (e: unknown) => e,
+          );
+        assert.ok(error instanceof pg.DatabaseError, String(error));
+        assert.deepEqual([error.code, error.message], ['LA014', message]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+  };
+  const only = 'a System Incident moves only from Open to Acknowledged to Closed';
+  moveRefused('an Open System Incident moving straight to Closed is refused', recordedAll, "state = 'Closed'", only);
+  moveRefused(
+    'an Acknowledged System Incident moving back to Open is refused',
+    { ...recordedAll, state: 'Acknowledged' },
+    "state = 'Open'",
+    only,
+  );
+  for (const [what, change] of [
+    ['its state', "state = 'Acknowledged'"],
+    ["QA's answer", "impact_answer = 'No'"],
+    ['its immediate action', "immediate_action = 'Changed.'"],
+  ] as const)
+    moveRefused(
+      `a Closed System Incident changing ${what} is refused`,
+      { ...recordedAll, state: 'Closed' },
+      change,
+      'a Closed System Incident never changes',
+    );
+  moveRefused(
+    "a System Incident changing QA's answer once recorded is refused",
+    recordedAll,
+    "impact_answer = 'No'",
+    "QA's answer on a System Incident is recorded once",
+  );
+  moveRefused(
+    'a System Incident changing its immediate action once recorded is refused',
+    recordedAll,
+    "immediate_action = 'Changed.'",
+    "a System Incident's immediate action is recorded once",
+  );
+  moveRefused(
+    'a System Incident changing its corrective action once recorded is refused',
+    recordedAll,
+    "corrective_action = 'Changed.'",
+    "a System Incident's corrective action is recorded once",
+  );
+  for (const [what, held] of [
+    ["QA's answer", { ...recordedAll, impact_answer: null, impact_answered_by: null, impact_answered_at: null }],
+    [
+      'its immediate action',
+      { ...recordedAll, immediate_action: null, immediate_action_by: null, immediate_action_at: null },
+    ],
+    [
+      'its corrective action',
+      { ...recordedAll, corrective_action: null, corrective_action_by: null, corrective_action_at: null },
+    ],
+  ] as const)
+    moveRefused(
+      `a System Incident Acknowledged without ${what} is refused`,
+      held,
+      "state = 'Acknowledged'",
+      "a System Incident is Acknowledged only once QA's answer, its immediate action and its corrective action are recorded",
+    );
+  moveRefused(
+    'a System Incident Acknowledged with no Acknowledged Signature on it is refused',
+    recordedAll,
+    "state = 'Acknowledged'",
+    'a System Incident is Acknowledged only by an Acknowledged Signature on it',
+  );
+
+  it('a System Incident with all three records and an Acknowledged Signature on it moves to Acknowledged, then to Closed', async () => {
+    await client.query('begin');
+    try {
+      await incidentIn('RF00000N', recordedAll);
+      await client.query('set local session_replication_role = replica');
+      await client.query(
+        `with incident as (select id from lims.system_incident where reference = 'RF00000N'),
+              version as (
+                insert into lims.record_version (lab_id, id, record_table, record_id, version, canonical_form, content)
+                select $1, $2, 'system_incident', id, 1, 1, lims.incident_content(id)::text::bytea from incident
+                returning id, content_hash, canonical_form)
+         insert into lims.signature (lab_id, id, person_id, printed_name, username, role, meaning, record_version_id,
+                                     content_hash, canonical_form, statement_version, statement_hash, authenticator,
+                                     session_id, app_release, reauthentication_id)
+         select $1, $3, $4, 'Refusal Person', 'refusal.person', 'Admin', 'Acknowledged', id, content_hash,
+                canonical_form, 1, (select statement_hash from lims.signature_statement where version = 1),
+                'Password', $5, 'test', $6
+           from version`,
+        [id.lab, randomUUID(), randomUUID(), id.person, id.session, randomUUID()],
+      );
+      await client.query('set local session_replication_role = origin');
+      const acknowledged = await client.query(
+        `update lims.system_incident set state = 'Acknowledged' where reference = 'RF00000N'`,
+      );
+      assert.equal(acknowledged.rowCount, 1);
+      const closed = await client.query(
+        `update lims.system_incident set state = 'Closed' where reference = 'RF00000N'`,
+      );
+      assert.equal(closed.rowCount, 1);
     } finally {
       await client.query('rollback');
     }

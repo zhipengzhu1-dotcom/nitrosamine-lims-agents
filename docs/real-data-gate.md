@@ -22,6 +22,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 2 | Admin constraint | [#100](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/100) |
 | 2 | Decided login (TOTP, password rules, lockout 5, pepper) behind the data class; TOTP covers sign-in, signing and the Lab switch, which until then re-authenticates with user ID and password only ([#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98)) | |
 | 2 | Release Log, service identities, real-data gate and banner | |
+| 2 | Close System Incidents with QA's impact answer (QA answers whether the incident could have affected results or records, the Admin records the immediate and corrective actions, signs Acknowledged and closes it; the database allows only Open → Acknowledged → Closed) | [#104](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/104). Unbuilt: the linked Data Integrity Deviation a Yes answer opens, which waits for the Deviation module |
 | 3 | Critical Data Change | |
 | 3 | Return | |
 | 3 | Holds | |

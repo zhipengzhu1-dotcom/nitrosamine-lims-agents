@@ -19,8 +19,8 @@ type Route =
   | { page: 'welcome'; token: string }
   | { page: 'trail'; table: AuditedTable; id: string }
   | { page: 'auditExport' }
-  /** A rail module; `accessEventsOf` names the person whose Access Events the Staff module shows, or null for the module itself. */
-  | { page: 'module'; module: Module; accessEventsOf: string | null };
+  /** A rail module; `open` names the record open beside it: the person whose Access Events the Staff module shows, or the System Incident's reference. */
+  | { page: 'module'; module: Module; open: string | null };
 
 function parse(hash: string): Route {
   const [, a, id, b] = hash.split('/');
@@ -33,7 +33,8 @@ function parse(hash: string): Route {
   if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
   if (!module) return { page: 'tests', open: null };
-  return { page: 'module', module, accessEventsOf: module.key === 'staff' && id && b === 'access-events' ? id : null };
+  if (module.key === 'incidents') return { page: 'module', module, open: id || null };
+  return { page: 'module', module, open: module.key === 'staff' && id && b === 'access-events' ? id : null };
 }
 
 function useRoute(): Route {
@@ -100,14 +101,7 @@ function page(route: Route, me: ActorContext) {
     case 'welcome':
       return <WelcomePage token={route.token} />;
     case 'module':
-      return (
-        <Placeholder
-          key={`${route.module.key}/${route.accessEventsOf}`}
-          me={me}
-          module={route.module}
-          accessEventsOf={route.accessEventsOf}
-        />
-      );
+      return <Placeholder key={`${route.module.key}/${route.open}`} me={me} module={route.module} open={route.open} />;
   }
 }
 

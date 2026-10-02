@@ -1,6 +1,7 @@
 import type * as db from '@lims/db';
 import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
+import type { IncidentStepName } from './incidents.ts';
 import { type Step, type StepName, stepNames, steps } from './steps.ts';
 
 const role = Type.Enum({
@@ -403,6 +404,13 @@ const auditExport = Type.Object({
   files: Type.Tuple([exportedFile, exportedFile]),
 });
 export type AuditExport = Static<typeof auditExport>;
+const impactAnswer = Type.Enum({ Yes: 'Yes', No: 'No' } as const satisfies { [K in db.ImpactAnswer]: K });
+export type ImpactAnswer = Static<typeof impactAnswer>;
+/** Who recorded something on a System Incident. */
+const recorder = Type.Object({ username: Type.String(), displayName: Type.String() });
+/** An action as recorded on a System Incident: its text, who recorded it and the database's time. */
+const recordedText = Type.Object({ text: Type.String(), by: recorder, at: instant });
+export type RecordedText = Static<typeof recordedText>;
 const systemIncident = Type.Object({
   reference: Type.String({ pattern: `^${referencePattern}$` }),
   kind: Type.Enum({
@@ -440,8 +448,39 @@ const systemIncident = Type.Object({
   openedAt: instant,
   /** For an incident the database could not write at the time, the instant its log line was written, from the API host's clock. */
   loggedAt: nullable(instant),
+  /** QA's answer to "could this have affected results or records?", once recorded. */
+  impact: nullable(Type.Object({ answer: impactAnswer, by: recorder, at: instant })),
+  /** The owner's immediate and corrective actions (ISO/IEC 17025 7.11.3 e), once recorded. */
+  immediateAction: nullable(recordedText),
+  correctiveAction: nullable(recordedText),
+  /**
+   * The Record Version an Acknowledged signing from this session binds: the incident's content as it is now, numbered
+   * in this session's Lab, and the version a signing given on sight of it writes if the content is still the same.
+   */
+  recordVersion: recordVersionRef,
+  statement: signatureStatement,
+  /** The Acknowledged Signature, once given. */
+  acknowledged: nullable(
+    Type.Object({
+      signer: Type.String(),
+      username: Type.String(),
+      role,
+      signedAt: instant,
+      signedAtLab: Type.String(),
+    }),
+  ),
 });
 export type SystemIncident = Static<typeof systemIncident>;
+/** One line of the System Incident list: enough to pick one out. */
+const incidentRow = Type.Object({
+  reference: systemIncident.properties.reference,
+  kind: systemIncident.properties.kind,
+  state: incidentState,
+  openedAt: instant,
+  step: nullable(Type.String()),
+  chain: systemIncident.properties.chain,
+});
+export type IncidentRow = Static<typeof incidentRow>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** What a committed step answers, and what a retry of the same press answers again. */
 export type StepTaken = Static<typeof stepTaken>;
@@ -490,6 +529,9 @@ const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, c
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
+const byReference = Type.Object({ reference: Type.String({ pattern: `^${referencePattern}$` }) });
+/** An action as the owner types it on a System Incident: up to a short paragraph, not blank. */
+const actionText = Type.String({ minLength: 1, maxLength: 2000, pattern: '\\S' });
 /** The Record Version the signer saw, as the screen showed it: the signing is refused if the record has moved on. */
 const seenVersion = Type.Object({ version: recordVersionRef.properties.version, contentHash: sha256Hex }, closed);
 const typedCredentials = Type.Object({ username: text, password: text }, closed);
@@ -646,13 +688,35 @@ export const routes = {
     { body: Type.Object({ token: Type.String({ minLength: 1, maxLength: 100 }), password: text }, closed) },
     Type.Object({ username: Type.String() }),
   ),
-  incident: route(
-    'GET',
-    '/api/incidents/:reference',
-    { params: Type.Object({ reference: Type.String({ pattern: `^${referencePattern}$` }) }) },
-    systemIncident,
-  ),
+  /** The System Incidents not yet Closed, newest first, for Admin and QA. */
+  incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
+  incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
 } satisfies Record<string, Route>;
+
+const incidentStepInputs = {
+  answerImpact: Type.Object({ answer: impactAnswer }, closed),
+  recordImmediateAction: Type.Object({ text: actionText }, closed),
+  recordCorrectiveAction: Type.Object({ text: actionText }, closed),
+  acknowledge: Type.Object({}, closed),
+  close: Type.Object({}, closed),
+} satisfies { [K in IncidentStepName]: TObject };
+/** What each System Incident step takes, as its route validates it. */
+export type IncidentStepInputs = { [K in IncidentStepName]: Static<(typeof incidentStepInputs)[K]> };
+/** The body of a System Incident step: the incident, the step's input, and the signature when the step signs. */
+export interface IncidentStepBody<K extends IncidentStepName> {
+  reference: string;
+  input: IncidentStepInputs[K];
+  signature?: SigningBody;
+}
+
+/** The route of one step on a System Incident: the body names the incident, carries the step's input, and a signature when the step signs. */
+export function incidentStepRoute<K extends IncidentStepName>(name: K) {
+  const body = Type.Object(
+    { ...byReference.properties, input: incidentStepInputs[name], signature: Type.Optional(signingBody) },
+    closed,
+  );
+  return route('POST', `/api/incident-steps/${name}`, { body }, systemIncident);
+}
 
 /** The route of one step, whose body requires a Commit Key, a testId when the step starts from a state, and a signature when it signs. */
 export function stepRoute<K extends StepName>(name: K) {
