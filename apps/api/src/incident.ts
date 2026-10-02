@@ -49,7 +49,7 @@ const unwrittenIncident = Type.Object(
   },
   { additionalProperties: false },
 );
-/** The line Pino writes for an incident the database could not write: `time` is the API host's clock, in epoch milliseconds. */
+/** Pino stamps `time` in epoch milliseconds from the API host's clock. */
 const unwrittenLine = Type.Object({
   time: Type.Integer(),
   msg: Type.Literal(UNWRITTEN),
@@ -92,10 +92,7 @@ function unwrittenOn(line: string): Static<typeof unwrittenLine> | 'unreadable' 
   return Value.Check(unwrittenLine, parsed) ? parsed : 'unreadable';
 }
 
-/**
- * Writes once each unwritten System Incident on the API log file whose reference has no System Incident, with the
- * instant its line was logged beside the database's insert time; a reference already written is skipped.
- */
+/** Writes each unwritten System Incident on the API log file whose reference has no System Incident yet, with the instant its line was logged. */
 export async function raiseUnwrittenIncidents(db: Kysely<DB>, file: string, log: FastifyBaseLogger): Promise<void> {
   let lineNumber = 0;
   for await (const line of createInterface({ input: createReadStream(file), crlfDelay: Infinity })) {

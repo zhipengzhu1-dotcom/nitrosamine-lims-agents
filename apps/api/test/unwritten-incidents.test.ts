@@ -46,7 +46,6 @@ function logVolume(name: string, ...lines: string[]): string {
   return file;
 }
 
-/** A clock the test moves by hand: each `advance` runs, and awaits, every task that falls due. */
 function handClock() {
   let now = 0;
   const timers: { due: number; ms: number; task: () => Promise<void> }[] = [];
