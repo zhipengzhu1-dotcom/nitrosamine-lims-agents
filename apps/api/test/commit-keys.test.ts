@@ -4,7 +4,7 @@ import { it } from 'node:test';
 import { type StepBody, type StepName, stepRoute } from '@lims/domain';
 import type { DB } from '@lims/db';
 import { sql, type Transaction } from 'kysely';
-import { type Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_commit_keys_test');
 const [cora, samir, lena, ana] = [api.person('cora'), api.person('samir'), api.person('lena'), api.person('ana')];
@@ -34,8 +34,13 @@ async function assigned(): Promise<string> {
   return testId;
 }
 
-const enterResult = (commitKey: string, testId: string, password = ana.password) =>
-  post(as.ana, 'enterResult', { commitKey, testId, input: result, signature: { password } });
+const enterResult = async (commitKey: string, testId: string, password = ana.password) =>
+  post(as.ana, 'enterResult', {
+    commitKey,
+    testId,
+    input: result,
+    signature: { ...(await signatureOf(as.ana, testId, ana)), password },
+  });
 
 async function writtenBy(testId: string) {
   const db = api.superuser;
@@ -181,7 +186,7 @@ it('the same Commit Key with other input or for another step is refused as a reu
     commitKey: key,
     testId,
     input: { ...result, value: '0.0310' },
-    signature: { password: ana.password },
+    signature: await signatureOf(as.ana, testId, ana),
   });
   refusedWith(otherValue, 'keyReused');
   refusedWith(await post(as.ana, 'submit', { commitKey: key, ...submission }), 'keyReused');

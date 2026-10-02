@@ -60,6 +60,7 @@ const REFUSAL: { readonly [F in SignInFailure]: () => never } = {
   WrongPasswordOnLockedAccount: notValid,
   AccountLocked: () => refuse('accountLocked', 'this account is locked'),
   NoLab: () => refuse('role', 'this account belongs to no Lab'),
+  WrongUserId: notValid,
 };
 
 const record = (tx: Transaction<DB>, event: AccessEvent) => tx.insertInto('accessEvent').values(event).execute();
@@ -116,18 +117,30 @@ export function sourceAddressOf(req: {
   return mapped && isIP(mapped) === 4 ? mapped : address;
 }
 
-/** Proves the signer before a Signature is written: a wrong password refuses as badCredentials, counts toward lockout, and a lockout it applies is an Access Event. */
+/** What a signer re-enters on the signature sheet. */
+export interface TypedCredentials {
+  username: string;
+  password: string;
+}
+
+/**
+ * Proves the signer before the transaction that signs: the typed user ID must be the session's person and the password
+ * theirs. A failure refuses as badCredentials after writing its own committed failed re-authentication Access Event,
+ * which counts toward the lockout, and a lockout it applies is an Access Event too.
+ */
 export async function reauthenticate(
   db: Kysely<DB>,
   { actor, session }: Pick<SignedIn, 'actor' | 'session'>,
-  password: string,
+  typed: TypedCredentials,
   step: string,
   role: Role,
   sourceAddress: string,
 ): Promise<void> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', actor.person.id).executeTakeFirstOrThrow();
   const as = (reason: string) => ({ actor: `person:${person.username}`, role, reason });
-  if (await verifyPassword(password, person.passwordHash)) {
+  const theirs = typed.username === person.username;
+  const proven = await verifyPassword(typed.password, theirs ? person.passwordHash : TIMING_DECOY_HASH);
+  if (theirs && proven) {
     if (person.lockedAt) refuse('accountLocked', 'this account is locked');
     if (person.failedLogins > 0)
       await audited(db, as(`Re-authenticate to sign ${step}`), (tx) =>
@@ -136,16 +149,21 @@ export async function reauthenticate(
     return;
   }
   await audited(db, as('Failed authentication'), async (tx) => {
-    const { lockedNow } = await countFailure(tx, person.id);
-    if (lockedNow)
-      await record(tx, {
-        kind: 'Lockout',
-        subjectId: person.id,
-        roles: actor.roles,
-        sourceAddress,
-        sessionLabId: session.labId,
-        sessionId: session.id,
-      });
+    const { wasLocked, lockedNow } = await countFailure(tx, person.id);
+    const event = {
+      subjectId: person.id,
+      roles: actor.roles,
+      sourceAddress,
+      sessionLabId: session.labId,
+      sessionId: session.id,
+    };
+    const failureReason: SignInFailure = theirs
+      ? wasLocked
+        ? 'WrongPasswordOnLockedAccount'
+        : 'WrongPassword'
+      : 'WrongUserId';
+    await record(tx, { kind: 'ReauthenticationFailed', failureReason, ...event });
+    if (lockedNow) await record(tx, { kind: 'Lockout', ...event });
   });
   notValid();
 }

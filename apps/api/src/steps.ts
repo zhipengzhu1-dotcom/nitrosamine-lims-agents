@@ -4,6 +4,7 @@ import {
   type ActorContext,
   type Meaning,
   type PersonId,
+  type Reauthentication,
   type RouteReply,
   refusal,
   type Step,
@@ -148,13 +149,42 @@ export function latestVersion(q: LabQueries, table: Signable, recordId: string) 
     .executeTakeFirstOrThrow();
 }
 
-async function sign(q: LabQueries, ctx: ActorContext, meaning: Meaning, table: Signable, testId: string) {
+/** The Record Version the signer saw, resolved to its row before the transaction, and the hash as the screen showed it. */
+interface Seen {
+  id: string;
+  contentHash: string;
+}
+
+/**
+ * Writes the re-authentication record and signs through lims.sign in the step's transaction, so the database holds
+ * the only path to a Signature: the record ties the signing to this person, session and meaning, and the function
+ * refuses unless what the signer saw is still the record's latest Record Version.
+ */
+async function sign(
+  q: WriteQueries,
+  ctx: ActorContext,
+  sessionId: string,
+  signing: { meaning: Meaning; table: Signable; testId: string; seen: Seen; release: string },
+) {
+  const { meaning, table, testId, seen, release } = signing;
   const recordId =
     table === 'test'
       ? testId
       : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id;
-  const { id: recordVersionId } = await latestVersion(q, table, recordId);
-  await q.insert('signature', { personId: ctx.person.id, meaning, recordVersionId }).execute();
+  const proof = await q
+    .insert('reauthentication', { sessionId, personId: ctx.person.id, meaning, authenticator: 'Password' })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  await sql`select lims.sign(${proof.id}, ${table}, ${recordId}, ${seen.id}, decode(${seen.contentHash}, 'hex'),
+                             ${meaning}, ${release})`.execute(q.company);
+}
+
+/** The signer's typed credentials and the Record Version they saw, refused as recordChanged when the Test has moved on since. */
+async function seenVersion(scope: LabQueries, testId: string, signature: Reauthentication): Promise<Seen> {
+  const latest = await latestVersion(scope, 'test', testId);
+  if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
+    refuse('recordChanged', 'the Test changed since this screen loaded it; read it again before signing');
+  return { id: latest.id, contentHash: signature.recordVersion.contentHash };
 }
 
 type KeptCommit = Pick<Selectable<DB['commitKey']>, 'sessionId' | 'requestHash' | 'testId' | 'state'>;
@@ -167,7 +197,7 @@ function receiptOf(kept: KeptCommit, sessionId: string, requestHash: Buffer): St
   return { testId: kept.testId, state: kept.state };
 }
 
-function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): void {
+function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, release: string): void {
   const step: Step = steps[name];
   const effect: Effect<StepInput<K>> = effects[name];
   const route = stepRoute(name);
@@ -195,9 +225,13 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
       req.log.info({ step: name, testId: first.testId }, 'step replayed');
       return receiptOf(first, sessionId, requestHash);
     }
+    let signing: Parameters<typeof sign>[3] | null = null;
     if (step.signs) {
-      const { password } = body.signature ?? refuse('malformed', `${name} needs the signer's password`);
-      await reauthenticate(db, { actor, session: req.sessionKey }, password, name, step.role, sourceAddressOf(req));
+      const signature = body.signature ?? refuse('malformed', `${name} needs the signer's credentials`);
+      const testId = test?.id ?? refuse('malformed', `${name} signs a Test`);
+      const seen = await seenVersion(scope, testId, signature);
+      await reauthenticate(db, { actor, session: req.sessionKey }, signature, name, step.role, sourceAddressOf(req));
+      signing = { meaning: step.signs, table: effect.signedRecord ?? 'test', testId, seen, release };
     }
 
     const claim = { testId: test?.id ?? randomUUID(), state: step.to };
@@ -221,7 +255,7 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
         if (!moved.numUpdatedRows) refuse('stale', 'the Test has moved on; reload it');
       }
       await effect.write(q, actor, testId, body.input);
-      if (step.signs) await sign(q, actor, step.signs, effect.signedRecord ?? 'test', testId);
+      if (signing) await sign(q, actor, sessionId, signing);
       return { receipt: claim, replayed: false };
     });
     req.log.info({ step: name, testId: receipt.testId }, replayed ? 'step replayed' : 'step taken');
@@ -230,6 +264,6 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K): vo
 }
 
 /** `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema. */
-export function stepRoutes(app: App, db: Kysely<DB>): void {
-  for (const name of stepNames) registerStep(app, db, name);
+export function stepRoutes(app: App, db: Kysely<DB>, release: string): void {
+  for (const name of stepNames) registerStep(app, db, name, release);
 }

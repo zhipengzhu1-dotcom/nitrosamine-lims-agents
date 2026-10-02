@@ -103,6 +103,7 @@ const recordVersionRef = Type.Object({
   canonicalForm: Type.Integer({ minimum: 0 }),
   contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
 });
+export type RecordVersionRef = Static<typeof recordVersionRef>;
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
@@ -127,6 +128,8 @@ export const auditedTable = Type.Enum({
   test_report: 'test_report',
   record_version: 'record_version',
   signature: 'signature',
+  signature_statement: 'signature_statement',
+  reauthentication: 'reauthentication',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;
 const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
@@ -190,6 +193,10 @@ const trail = Type.Object({ record: recordRef, labZone: Type.String(), entries: 
 export type Trail = Static<typeof trail>;
 const reportRef = Type.Object({ id: uuid, number: Type.String() });
 /** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
+/** The signature statement in force: what a signer attests, as QA approved it, with the version a Signature records. */
+const signatureStatement = Type.Object({ version: Type.Integer({ minimum: 1 }), text: Type.String() });
+export type SignatureStatement = Static<typeof signatureStatement>;
+/** `statement` is the signature statement in force when `next` is a step that signs, and null otherwise. */
 const testView = Type.Object({
   test: testRow,
   recordVersion: nullable(recordVersionRef),
@@ -197,6 +204,7 @@ const testView = Type.Object({
   result: nullable(result),
   signatures: Type.Array(signature),
   next: nullable(Type.Enum(stepNames)),
+  statement: nullable(signatureStatement),
 });
 const testReport = Type.Object({
   report: reportRef,
@@ -257,7 +265,8 @@ export type StepTaken = Static<typeof stepTaken>;
  * `badCredentials` is the one answer to every sign-in failure;
  * `accountLocked`, and `role` for an account with no Lab, come only after the right password. `noSession` covers no session presented and a session that
  * has ended. `stale` asks the person to reload; `state` says the step does not apply. `keyReused` is a Commit Key sent again
- * with a different step or input, or from another session. `notFound` also covers an
+ * with a different step or input, or from another session. `recordChanged` is a signing on sight of a Record Version that is no
+ * longer the record's latest: the screen must show the record again before it is signed. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
  */
@@ -271,6 +280,7 @@ export const refusalKinds = [
   'guard',
   'state',
   'stale',
+  'recordChanged',
   'keyReused',
   'notFound',
   'failure',
@@ -286,7 +296,11 @@ const credentials = Type.Object({ username: text, password: text }, closed);
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
-const reauthentication = Type.Object({ password: text }, closed);
+/** The Record Version the signer saw, as the screen showed it: the signing is refused if the record has moved on. */
+const seenVersion = Type.Object({ version: recordVersionRef.properties.version, contentHash: sha256Hex }, closed);
+/** What a signer re-enters and attests: their user ID and password, and the Record Version they saw. */
+const reauthentication = Type.Object({ username: text, password: text, recordVersion: seenVersion }, closed);
+export type Reauthentication = Static<typeof reauthentication>;
 const stepEnvelope = Type.Object({
   commitKey: uuid,
   testId: Type.Optional(uuid),

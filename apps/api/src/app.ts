@@ -61,6 +61,8 @@ export interface AppOptions {
   /** The proxies whose X-Forwarded-For names the source address of a request; none means the socket's peer is the source. */
   trustedProxies: string[];
   login: Login;
+  /** The app release every Signature records. */
+  release: string;
   /** How often to run the expiry sweep, or null for an API whose caller runs it. */
   sweepEveryMs: number | null;
 }
@@ -92,7 +94,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
     });
     logoutRoute(signedIn, db, limits);
     readRoutes(signedIn, db);
-    stepRoutes(signedIn, db);
+    stepRoutes(signedIn, db, options.release);
   });
   if (options.sweepEveryMs !== null) scheduleExpirySweep(app, db, limits, options.sweepEveryMs);
   return app;

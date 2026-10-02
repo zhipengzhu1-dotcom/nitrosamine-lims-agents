@@ -7,6 +7,7 @@ import { migrate } from '@lims/db/migrate';
 import { type SeededAccount, seed } from '@lims/db/seed';
 import {
   pathOf,
+  type Reauthentication,
   type RefusalKind,
   type Reply,
   type Route,
@@ -33,6 +34,7 @@ const STATUS_OF: { readonly [K in RefusalKind]: number } = {
   notFound: 404,
   state: 409,
   stale: 409,
+  recordChanged: 409,
   keyReused: 422,
   accountLocked: 423,
   failure: 500,
@@ -90,6 +92,13 @@ export function ok<R extends Route>(answer: Answer<R>): RouteReply<R> {
     : assert.fail(`expected a reply, got ${answer.status} ${answer.body.kind}: ${answer.body.message}`);
 }
 
+/** What a signer sends from the signature sheet: their typed user ID and password, and the Record Version the Test page showed them. */
+export async function signatureOf(client: Client, testId: string, account: Account): Promise<Reauthentication> {
+  const { recordVersion } = ok(await client.call(routes.test, { id: testId }));
+  const { version, contentHash } = recordVersion ?? assert.fail('a signer sees the Record Version of the Test');
+  return { username: account.username, password: account.password, recordVersion: { version, contentHash } };
+}
+
 export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKind): string {
   return answer.kind === 'refused' && answer.body.kind === kind
     ? answer.body.message
@@ -99,6 +108,8 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
 }
 
 const accessEventKey = randomBytes(32);
+/** The app release the test API records on every Signature. */
+export const TEST_RELEASE = 'test-release';
 
 interface ListenOptions {
   secureCookie?: boolean;
@@ -128,6 +139,7 @@ async function listen(
     secureCookie,
     accessEventKey,
     login,
+    release: TEST_RELEASE,
     sweepEveryMs,
     trustedProxies,
   });

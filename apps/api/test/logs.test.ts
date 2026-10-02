@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Client, ok, startApi } from './harness.ts';
+import { type Client, ok, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_logs_test');
 const lou = await api.addPerson('lou.analyst', ['Analyst'], { trained: true });
@@ -62,7 +62,7 @@ it('an unexpected failure answers a generic 500 that names a reference, not the 
     commitKey: randomUUID(),
     testId,
     input: result(PROBE),
-    signature: { password: lou.password },
+    signature: await signatureOf(as.lou, testId, lou),
   });
   assert.equal(failed.status, 500);
   assert.match(failed.text, /^\{"kind":"failure","message":"[^"]*"\}$/, 'the 500 body has the one refusal shape');
@@ -76,7 +76,7 @@ it('a refusal and a request that fails validation answer with their own status, 
     commitKey: randomUUID(),
     testId,
     input: {},
-    signature: { password: 'x' },
+    signature: { username: 'cora.customer', password: 'x', recordVersion: { version: 1, contentHash: '0'.repeat(64) } },
   });
   assert.deepEqual(refused, {
     status: 409,
@@ -96,7 +96,7 @@ it("a signed step logs its step name and the Test's id, and never the signer's p
       commitKey: randomUUID(),
       testId,
       input: result('RD-NB-0007-012'),
-      signature: { password: lou.password },
+      signature: await signatureOf(as.lou, testId, lou),
     }),
   );
   assert.ok(
@@ -114,7 +114,7 @@ it("a failed signed step logs the failure without the password or the Result's c
     commitKey: randomUUID(),
     testId,
     input: result(PROBE),
-    signature: { password: lou.password },
+    signature: await signatureOf(as.lou, testId, lou),
   });
   const reference = referenceIn(failed.text);
   const logged = api.logLines().find((line) => line.level === 50 && line.reqId === reference);
@@ -138,7 +138,7 @@ it('each unexpected failure gets a reference no restart of the API reuses, and t
     const failed = await post(
       as.lou,
       stepRoute('enterResult').url,
-      { commitKey: randomUUID(), testId, input: result(PROBE), signature: { password: lou.password } },
+      { commitKey: randomUUID(), testId, input: result(PROBE), signature: await signatureOf(as.lou, testId, lou) },
       another.base,
     );
     assert.equal(failed.status, 500);

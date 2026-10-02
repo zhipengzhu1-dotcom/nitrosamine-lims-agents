@@ -1,5 +1,5 @@
 import type { DB } from '@lims/db';
-import { nextStep, routes } from '@lims/domain';
+import { nextStep, routes, type SignatureStatement, steps } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
@@ -43,6 +43,7 @@ async function testView(scope: Scope, id: string) {
   const isCustomer = scope.ctx.person.customerId !== null;
   const visibleToActor = !isCustomer || test.state === 'Reported';
   const latest = visibleToActor ? await latestVersion(scope, 'test', id) : null;
+  const next = nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test));
   return {
     test,
     recordVersion: latest && {
@@ -92,8 +93,18 @@ async function testView(scope: Scope, id: string) {
             })),
           )
       : [],
-    next: nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test)),
+    next,
+    statement: next !== null && steps[next].signs !== null ? await statementInForce(scope) : null,
   };
+}
+
+/** The signature statement with the highest version: what the sheet shows and what lims.sign records. */
+function statementInForce(scope: Scope): Promise<SignatureStatement> {
+  return scope.company
+    .selectFrom('signatureStatement')
+    .select(['version', sql<string>`convert_from(statement, 'UTF8')`.as('text')])
+    .orderBy('version', 'desc')
+    .executeTakeFirstOrThrow();
 }
 
 export function readRoutes(app: App, db: Kysely<DB>): void {

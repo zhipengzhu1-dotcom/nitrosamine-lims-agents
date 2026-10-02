@@ -7,7 +7,7 @@ import { after, it } from 'node:test';
 import { stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
 import { logFile } from '../src/log.ts';
-import { type Client, ok, startApi } from './harness.ts';
+import { type Client, ok, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_incidents_test');
 const lou = await api.addPerson('lou.analyst', ['Analyst'], { trained: true });
@@ -53,7 +53,7 @@ async function failEnterResult(client: Client, testId: string, base = api.base) 
         notebookRef: PROBE,
         performedOn: '2026-09-30',
       },
-      signature: { password: lou.password },
+      signature: await signatureOf(client, testId, lou),
     }),
   });
   const text = await res.text();
