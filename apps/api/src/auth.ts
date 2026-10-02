@@ -29,7 +29,7 @@ const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', re
 const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
 
 /** Signing out, locking and unlocking act on the person's own session, under no role of the Lab. */
-const NO_ROLE = 'none';
+const NO_ROLE = 'none' as const;
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest();
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
@@ -89,7 +89,7 @@ export async function reauthenticate(
   { actor, session }: SignedIn,
   password: string,
   purpose: string,
-  role: string,
+  role: Role | typeof NO_ROLE,
   sourceAddress: string,
   failureEvent?: 'UnlockFailed',
 ): Promise<void> {
@@ -118,6 +118,9 @@ export async function reauthenticate(
   });
   notValid();
 }
+
+const lockedMessage = (displayName: string) =>
+  `this screen is locked; ${displayName} unlocks it with their password, or another person signs in with Switch user`;
 
 /** A session past its idle or absolute limit, or whose person's account is locked, has ended even before the sweep reaches it. */
 const expired = sql<boolean>`person.locked_at is not null
@@ -168,11 +171,7 @@ export async function actorFor(
     await db.updateTable('session').set({ endedAt: sql`now()` }).where('id', '=', session.id).execute();
     refuse('noSession', 'the session has ended; sign in again');
   }
-  if (session.locked && !whileLocked)
-    refuse(
-      'sessionLocked',
-      `this screen is locked; ${session.displayName} unlocks it with their password, or another person signs in with Switch user`,
-    );
+  if (session.locked && !whileLocked) refuse('sessionLocked', lockedMessage(session.displayName));
   if (!session.locked)
     await db.updateTable('session').set({ lastSeenAt: sql`now()` }).where('id', '=', session.id).execute();
   const { workstationName, roomName } = session;
@@ -210,7 +209,8 @@ const openSession = async (db: Kysely<DB>, token: string | undefined) =>
 /**
  * Signs a person in. Every attempt, refused or not, writes its Access Event in a transaction of its own that commits.
  * An enrolled browser's sign-in carries its Workstation and opens in the Workstation's Lab. A sign-in over a live session
- * on the same browser (Switch user) ends that session with a takeover Access Event in the same transaction.
+ * on the same browser (Switch user) ends that session with a takeover Access Event in the same transaction; the takeover
+ * names the earlier session's Workstation and the new sign-in names this browser's, which on one bench PC are the same.
  */
 export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, secureCookie: boolean): void {
   app.register(cookie, { parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: secureCookie } });
@@ -220,6 +220,8 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
       const { username, password } = req.body;
       const sourceAddress = req.ip;
       const device = await deviceOf(db, req.cookies[DEVICE_COOKIE]);
+      // A token no Workstation holds any more (enrolled again elsewhere) is dropped, so the browser shows as unregistered.
+      if (req.cookies[DEVICE_COOKIE] && !device) reply.clearCookie(DEVICE_COOKIE);
       const workstationId = device?.id ?? null;
       const person = await db.selectFrom('person').selectAll().where('username', '=', username).executeTakeFirst();
       if (!person) {
@@ -239,14 +241,14 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
 
       const proven = await verifyPassword(password, person.passwordHash);
       const defaultLabId = await lowestIdMembershipLab(db, person.id);
-      const inDeviceLab = device && (await rolesIn(db, person.id, device.labId)).length > 0;
-      const labId = device ? (inDeviceLab ? device.labId : undefined) : defaultLabId;
-      const rolesLabId = labId ?? defaultLabId;
+      // On a Workstation the attempt is against its Lab, so the roles recorded are the ones held there, even none.
+      const rolesLabId = device ? device.labId : defaultLabId;
       const roles: Role[] = rolesLabId
         ? await rolesIn(db, person.id, rolesLabId)
         : person.customerId
           ? ['Customer']
           : [];
+      const labId = device ? (roles.length > 0 ? device.labId : undefined) : defaultLabId;
       const subject = { subjectId: person.id, roles, sourceAddress, workstationId };
 
       if (!proven || person.lockedAt || !labId) {
@@ -374,7 +376,7 @@ export function lockRoutes(app: App, db: Kysely<DB>): void {
     ...routes.lock,
     handler: async (req) => {
       await onOwnSession(db, req)('Lock', 'Lock', req.ip, (tx) => setLocked(tx, req.sessionKey, true));
-      return { locked: true } as const;
+      return { locked: true, message: lockedMessage(req.actor.person.displayName) } as const;
     },
   });
 

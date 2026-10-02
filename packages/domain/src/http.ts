@@ -297,7 +297,12 @@ function route<
 export const routes = {
   login: route('POST', '/api/login', { body: credentials }, actorContext),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
-  lock: route('POST', '/api/lock', { body: noBody }, Type.Object({ locked: Type.Literal(true) })),
+  lock: route(
+    'POST',
+    '/api/lock',
+    { body: noBody },
+    Type.Object({ locked: Type.Literal(true), message: Type.String() }),
+  ),
   unlock: route('POST', '/api/unlock', { body: reauthentication }, actorContext),
   workstations: route('GET', '/api/workstations', {}, workstations),
   registerRoom: route('POST', '/api/rooms', { body: roomRegistration }, room),

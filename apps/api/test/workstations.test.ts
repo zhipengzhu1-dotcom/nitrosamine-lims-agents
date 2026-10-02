@@ -166,6 +166,7 @@ describe('the device token', () => {
     const again = await api.login(ada);
     ok(await again.call(routes.enrolWorkstation, { workstationId: workstation.id, reason: 'Enrol again' }));
     assert.equal((await signInOn(stale, plain)).workstation, null, 'the replaced token names no Workstation');
+    assert.equal(stale.jar.get('lims_device'), undefined, 'the replaced token is dropped from the browser');
 
     const [first, second] = await sessionsOf(plain.id);
     assert.deepEqual([first?.workstationId, second?.workstationId], [null, null]);
@@ -210,7 +211,7 @@ describe('the device token', () => {
       kind: 'SignInFailed',
       failureReason: 'NotInWorkstationLab',
       workstationId: workstation.id,
-      roles: ['Analyst'],
+      roles: [],
     });
     assert.equal((await signInOn(new Client(api.base), outsider)).workstation, null, 'elsewhere the account works');
   });
@@ -265,7 +266,10 @@ describe('Lock and Switch user', () => {
     const [test] = ok(await browser.call(routes.tests));
     assert.ok(test, 'the Lab has a Test to read');
 
-    assert.deepEqual(ok(await browser.call(routes.lock)), { locked: true });
+    assert.deepEqual(ok(await browser.call(routes.lock)), {
+      locked: true,
+      message: `this screen is locked; ${ana.username} unlocks it with their password, or another person signs in with Switch user`,
+    });
     const servedWhileLocked = new Set<Route>([routes.login, routes.lock, routes.unlock, routes.logout]);
     const everyOther = [...Object.values(routes), ...stepNames.map((name) => stepRoute(name))].filter(
       (route) => !servedWhileLocked.has(route),
