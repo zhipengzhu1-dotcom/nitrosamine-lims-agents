@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { DB } from '@lims/db';
+import { type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
   type Meaning,
   type PersonId,
   type RouteReply,
+  type SignatureStatement,
   type SigningBody,
   refusal,
   type Step,
@@ -175,15 +176,35 @@ async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signi
     .returning('id')
     .executeTakeFirstOrThrow();
   await sql`select lims.sign(${proof.id}, ${sessionId}, ${table}, ${recordId}, ${seen.id},
-                             decode(${seen.contentHash}, 'hex'), ${statementVersion}, ${meaning}, ${release})`.execute(
-    q.company,
-  );
+                             decode(${seen.contentHash}, 'hex'), ${statementVersion}, ${meaning}, ${release})`
+    .execute(q.company)
+    .catch(signingRefused);
+}
+
+/** lims.sign's own refusal (LA010) reaches the bench as a refusal; any other failure is thrown with its cause. */
+function signingRefused(error: unknown): never {
+  if (postgresFault(error)?.sqlstate === 'LA010' && error instanceof Error) refuse('signingRefused', error.message);
+  throw new Error('signing failed', { cause: error });
+}
+
+/** The signature statement with the highest version: what the sheet shows and what lims.sign records. */
+export function statementInForce(scope: LabQueries): Promise<SignatureStatement> {
+  return scope.company
+    .selectFrom('signatureStatement')
+    .select(['version', sql<string>`convert_from(statement, 'UTF8')`.as('text')])
+    .orderBy('version', 'desc')
+    .executeTakeFirstOrThrow();
 }
 
 async function seenVersion(scope: LabQueries, testId: string, signature: SigningBody): Promise<Seen> {
   const latest = await latestVersion(scope, 'test', testId);
   if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
     refuse('recordChanged', 'the Test changed since this screen loaded it; read it again before signing');
+  if ((await statementInForce(scope)).version !== signature.statementVersion)
+    refuse(
+      'signingRefused',
+      'the signature statement changed since this screen loaded it; read it again before signing',
+    );
   return { id: latest.id, contentHash: signature.recordVersion.contentHash };
 }
 

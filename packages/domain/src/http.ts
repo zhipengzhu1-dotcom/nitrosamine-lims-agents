@@ -308,7 +308,8 @@ export type StepTaken = Static<typeof stepTaken>;
  * Membership, come only after the right password. `noSession` covers no session presented and a session that
  * has ended. `sessionLocked` answers every request on a locked session except lock, unlock, sign-out and a sign-in over it. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
  * with a different step or input, or from another session. `recordChanged` is a signing on sight of a Record Version that is no
- * longer the record's latest: the screen must show the record again before it is signed. `notFound` also covers an
+ * longer the record's latest: the screen must show the record again before it is signed. `signingRefused` is what the signing
+ * function refuses once the step's transaction has begun, such as a signature statement no longer in force. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
  */
@@ -325,6 +326,7 @@ export const refusalKinds = [
   'state',
   'stale',
   'recordChanged',
+  'signingRefused',
   'keyReused',
   'notFound',
   'failure',

@@ -47,10 +47,9 @@ function login(value: string | undefined): Login {
   throw new Error(`LIMS_LOGIN must be decided or demo, not ${JSON.stringify(value)}`);
 }
 
-function release(value: string | undefined, production: boolean): string {
+function release(value: string | undefined): string {
   if (value) return value;
-  if (production) throw new Error('In production the API needs LIMS_RELEASE: every Signature records the app release');
-  return 'development';
+  throw new Error('The API needs LIMS_RELEASE: every Signature records the app release');
 }
 
 /** Reads the API's environment once, at start: a missing or malformed value stops the process here. */
@@ -76,6 +75,6 @@ export function apiConfig(): ApiConfig {
       .map((proxy) => proxy.trim())
       .filter(Boolean),
     login: login(env.LIMS_LOGIN),
-    release: release(env.LIMS_RELEASE, secureCookie),
+    release: release(env.LIMS_RELEASE),
   };
 }

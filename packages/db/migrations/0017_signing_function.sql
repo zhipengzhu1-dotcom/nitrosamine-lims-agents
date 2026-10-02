@@ -114,11 +114,11 @@ create trigger sign_only before insert on lims.signature
 -- True for a row this transaction wrote at its top level: a row written inside a plpgsql exception block carries a
 -- subtransaction id and reads as another transaction's.
 create function lims.written_here(x xid) returns boolean
-language sql volatile as $$ select age(x) = 0 $$;
+language sql volatile as $$ select x = pg_current_xact_id()::xid $$;
 
 -- The one way a Signature is written (#45 gaps 3 and 9; #85 Signing): the signer is the transaction's actor, and the
--- record signed is the latest Record Version of (p_record_table, p_record_id), which is the one the signer saw or one
--- this transaction created on sight of it, such as the Test Report a release issues.
+-- record signed is the latest Record Version of (p_record_table, p_record_id), which is the one the signer saw or the
+-- Test Report this transaction created on the Test shown.
 create function lims.sign(p_reauthentication_id uuid, p_session_id uuid, p_record_table text, p_record_id uuid,
                           p_seen_version uuid, p_seen_hash bytea, p_statement_version integer, p_meaning lims.meaning,
                           p_app_release text)
@@ -135,6 +135,11 @@ declare
   shown        signature_statement;
   signature_id uuid := gen_random_uuid();
 begin
+  if num_nulls(p_reauthentication_id, p_session_id, p_record_table, p_record_id, p_seen_version, p_seen_hash,
+               p_statement_version, p_meaning, p_app_release) > 0 then
+    raise exception 'a signing names its re-authentication record, session, record, shown version and hash, statement version, meaning and release'
+      using errcode = 'LA010';
+  end if;
   if actor is null or actor not like 'person:%' then
     raise exception 'only a person signs; % is a service identity', coalesce(actor, 'no actor') using errcode = 'LA010';
   end if;
@@ -195,11 +200,17 @@ begin
   if signed.id is null then
     raise exception 'there is no Record Version of % % to sign', p_record_table, p_record_id using errcode = 'LA010';
   end if;
-  if (signed.record_table, signed.record_id) <> (seen.record_table, seen.record_id)
-     and exists (select from record_version v
-                  where v.lab_id = signed.lab_id and v.record_table = signed.record_table and v.record_id = signed.record_id
-                    and not written_here(v.xmin)) then
-    raise exception 'the % signed is not the record shown, nor one this signing created', p_record_table using errcode = 'LA010';
+  if (signed.record_table, signed.record_id) <> (seen.record_table, seen.record_id) then
+    if exists (select from record_version v
+                where v.lab_id = signed.lab_id and v.record_table = signed.record_table and v.record_id = signed.record_id
+                  and not written_here(v.xmin)) then
+      raise exception 'the % signed is not the record shown, nor one this signing created', p_record_table using errcode = 'LA010';
+    end if;
+    if not exists (select from test_report r
+                    where r.lab_id = signed.lab_id and r.id = signed.record_id and signed.record_table = 'test_report'
+                      and seen.record_table = 'test' and r.test_id = seen.record_id) then
+      raise exception 'the % signed is not built on the Test shown', p_record_table using errcode = 'LA010';
+    end if;
   end if;
 
   select * into shown from signature_statement order by version desc limit 1;

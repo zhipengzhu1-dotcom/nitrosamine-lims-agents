@@ -1,10 +1,10 @@
 import type { DB } from '@lims/db';
-import { nextStep, routes, type SignatureStatement } from '@lims/domain';
+import { nextStep, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { factsFor, latestVersion, signedVersions } from './steps.ts';
+import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
 import { staffRoutes } from './staff.ts';
 import { trailRoutes } from './trail.ts';
 
@@ -96,14 +96,6 @@ async function testView(scope: Scope, id: string) {
     next,
     statement: isCustomer ? null : await statementInForce(scope),
   };
-}
-
-function statementInForce(scope: Scope): Promise<SignatureStatement> {
-  return scope.company
-    .selectFrom('signatureStatement')
-    .select(['version', sql<string>`convert_from(statement, 'UTF8')`.as('text')])
-    .orderBy('version', 'desc')
-    .executeTakeFirstOrThrow();
 }
 
 export function readRoutes(app: App, db: Kysely<DB>): void {

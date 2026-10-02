@@ -37,6 +37,7 @@ const id = {
   reauthentication: randomUUID(),
   secondReauthentication: randomUUID(),
   probeReauthentication: randomUUID(),
+  probeReport: randomUUID(),
   secondSession: randomUUID(),
   admin: randomUUID(),
   operator: randomUUID(),
@@ -2296,6 +2297,22 @@ describe('a Signature is written only by the signing function, which refuses eve
       name: 'signing a record other than the one shown, which this transaction did not create, is refused',
       statements: [asPerson(), reauthenticate(), sign({ recordId: id.untested })],
       message: 'the test signed is not the record shown, nor one this signing created',
+    },
+    {
+      name: 'signing a Test Report that is not built on the Test shown is refused',
+      statements: [
+        asPerson('QA'),
+        `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', 'QA')`,
+        reauthenticate('Released'),
+        `insert into lims.test_report (lab_id, id, test_id, number) values ('${id.lab}', '${id.probeReport}', '${id.untested}', 'RF-R-2026-000008')`,
+        sign({ table: 'test_report', recordId: id.probeReport, meaning: 'Released' }),
+      ],
+      message: 'the test_report signed is not built on the Test shown',
+    },
+    {
+      name: 'signing with a null argument is refused rather than skipping the check it feeds',
+      statements: [asPerson(), reauthenticate(), sign({ hash: 'null' })],
+      message: /^a signing names its re-authentication record/,
     },
     {
       name: 'signing a record with no Record Version is refused',

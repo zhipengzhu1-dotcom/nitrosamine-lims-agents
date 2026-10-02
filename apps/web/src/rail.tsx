@@ -317,6 +317,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     try {
       const text = await a.run(values, a.signs ? { username, password } : null);
       setNote({ text, tone: 'ok', n: ++count.current, action: a.label });
+      setUsername('');
       returnFocus.current = true;
       if (sheet) close(true);
     } catch (e) {
@@ -331,7 +332,6 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     } finally {
       inFlight.current = false;
       setBusy(false);
-      setUsername('');
       setPassword('');
     }
   }
@@ -421,6 +421,11 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
                         <code className="hash">{shown.signs.recordVersion.contentHash}</code>
                       </dd>
                     </dl>
+                    {(shown.fields.length > 0 || shown.signs.what.length > 1) && (
+                      <p className="muted">
+                        The Signature binds the Record Version this step writes from what is shown and entered.
+                      </p>
+                    )}
                   </section>
                   <section className="card">
                     <h3>Who is signing</h3>

@@ -410,6 +410,28 @@ it('a typed user ID that is not the session person is refused like a wrong passw
   assert.equal(await failures(), 0, 'a signing that proves the person clears the count');
 });
 
+it('a signing on sight of a signature statement version that is not in force is refused, with no System Incident', async () => {
+  const id = await submitTestTo('Assigned');
+  const seen = await signatureOf(as.ana, id, ana);
+  const refused = await as.ana.call(stepRoute('enterResult'), {
+    commitKey: randomUUID(),
+    testId: id,
+    input: result,
+    signature: { ...seen, statementVersion: 999 },
+  });
+  assert.equal(
+    refusedWith(refused, 'signingRefused'),
+    'the signature statement changed since this screen loaded it; read it again before signing',
+  );
+  assert.deepEqual((await view(id, as.ana)).signatures, [], 'nothing was signed');
+  const { n } = await api.superuser
+    .selectFrom('systemIncident')
+    .select(sql<number>`count(*)::int`.as('n'))
+    .where('step', '=', 'enterResult')
+    .executeTakeFirstOrThrow();
+  assert.equal(n, 0, 'a refused signing opens no System Incident');
+});
+
 it('a signing on sight of a Record Version that is no longer the latest is refused with its own kind and writes no Signature', async () => {
   const id = await submitTestTo('Assigned');
   assert.equal((await take(as.ana, 'enterResult', id, result, ana)).status, 200);
