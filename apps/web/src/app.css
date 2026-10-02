@@ -421,9 +421,9 @@ td a,
 }
 .sig-line {
   display: inline-flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 8px;
+  white-space: nowrap;
 }
 .row--unsigned .sig {
   color: var(--ink-3);
