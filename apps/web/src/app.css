@@ -583,7 +583,8 @@ td a,
   max-height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
-  scroll-padding-bottom: var(--foot-h);
+  /* A field scrolled into view stops clear of the sticky foot, not on its edge. */
+  scroll-padding-bottom: calc(var(--foot-h) + 8px);
   background: var(--canvas);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -12px 40px rgb(0 0 0 / 0.25);

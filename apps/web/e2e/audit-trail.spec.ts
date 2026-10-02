@@ -104,7 +104,8 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await page.getByLabel('Order').selectOption('Newest first');
   await expect(entries.first()).toContainText('Signature Performed');
   const signed = entries.first();
-  const versioned = entries.filter({ has: page.locator('details.long') }).first();
+  // The Signature entry above it also has long values (its copied hashes), so the Record Version is found by its content.
+  const versioned = entries.filter({ has: page.locator('details.long', { hasText: '"analyte"' }) }).first();
   await expect(versioned).toContainText('Record Version');
   await expect(versioned.locator('details.long'), 'the signed Record Version and its SHA-256 are long').toHaveCount(2);
   const long = versioned.locator('details.long').first();
@@ -129,6 +130,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await search.fill('Reviewed');
   await expect(entries).toHaveCount(0);
   await page.getByRole('button', { name: 'Review', exact: true }).click();
+  await page.getByLabel(/User ID/).fill('rui.reviewer');
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign as Reviewed' }).click();
   await expect(page.getByRole('status')).toContainText('now Reviewed');

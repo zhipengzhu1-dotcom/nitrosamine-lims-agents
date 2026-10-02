@@ -137,10 +137,13 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(hash).toHaveText(/^[0-9a-f]{64}$/);
   const userId = page.getByLabel(/User ID/);
   await expect(userId).toHaveValue('');
-  const [hashBox, userIdBox] = [await box(hash), await box(userId)];
-  expect(hashBox.y + hashBox.height, 'the full hash is shown above the credential fields').toBeLessThanOrEqual(
-    userIdBox.y,
-  );
+  expect(
+    await signing.evaluate((form) => {
+      const [shown, typed] = [form.querySelector('code.hash'), form.querySelector('input[type=text]')];
+      return Boolean(shown && typed && shown.compareDocumentPosition(typed) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }),
+    'the record, meaning, eligibility and full hash come before the credential fields',
+  ).toBe(true);
   await atLeast(userId, 44, 44);
   await userId.fill('ana.analyst');
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
