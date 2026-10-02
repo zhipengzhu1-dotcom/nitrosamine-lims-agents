@@ -72,9 +72,7 @@ const unsignedWords = { signature: 'Unsigned', record: 'Signatures unsigned' } a
  * A Test state with its track, or the unsigned mark of a Signature or of a record with an unsigned Signature. `fresh` marks
  * a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them.
  */
-export function Status(
-  props: { state: TestState; fresh?: boolean } | { unsigned: keyof typeof unsignedWords },
-): ReactNode {
+export function Status(props: { state: TestState; fresh?: boolean } | { unsigned: keyof typeof unsignedWords }) {
   if ('unsigned' in props)
     return (
       <span className="status status--bad">

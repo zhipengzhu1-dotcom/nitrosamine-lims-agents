@@ -26,7 +26,6 @@ async function signOut(page: Page) {
 const signatureRow = (page: Page, meaning: string) =>
   page.locator('tr', { has: page.locator('td[data-label="Meaning"] .sig', { hasText: meaning }) });
 
-/** Every Signature row marks its meaning Unsigned through Status, on the meaning's own line. */
 async function unsignedBesideMeanings(page: Page) {
   for (const meaning of ['Performed', 'Reviewed', 'Released']) {
     const cell = signatureRow(page, meaning).locator('td[data-label="Meaning"]');
@@ -328,8 +327,8 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     ['Performed', 'Test'],
     ['Reviewed', 'Test'],
     ['Released', 'Test Report'],
-  ])
-    await expect(signatureRow(page, meaning ?? '').locator('td[data-label="Record"]')).toHaveText(record ?? '');
+  ] as const)
+    await expect(signatureRow(page, meaning).locator('td[data-label="Record"]')).toHaveText(record);
   await railSays(page, 'Unsigned: Performed, Reviewed, Released. The record changed after signing.');
   await shot(page, 'test-unsigned');
   await page.getByRole('button', { name: 'Verify chain' }).click();
