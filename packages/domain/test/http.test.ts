@@ -19,6 +19,7 @@ const row = {
   sampleNumber: 'RD-S00001',
   description: 'Metformin HCl tablets (fictional)',
   receivedAt: null,
+  receivedAtLab: null,
   customer: 'Northwind Generics (fictional)',
   methodCode: 'RD-MTH-0001',
   methodVersion: '1',

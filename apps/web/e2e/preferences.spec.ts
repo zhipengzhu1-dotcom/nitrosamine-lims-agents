@@ -76,10 +76,10 @@ async function setReducedMotion(page: Page, on: boolean) {
   await expect(box, 'the saved setting stays shown after the save').toBeChecked({ checked: on });
 }
 
-test('on a shared iPad the reduced-motion preference follows each person through Switch user, without a reload', async ({
+test('on a shared bench workstation the reduced-motion preference follows each person through Switch user, without a reload', async ({
   page,
 }) => {
-  test.skip(test.info().project.name !== 'ipad', 'the shared bench tablet');
+  test.skip(test.info().project.name !== 'desktop', 'the shared bench workstation');
   // The stored preference is shared server state: only Theo, whom no other walk signs in as, ever turns it on.
   await page.goto('/');
   await signIn(page, 'theo.untrained');
@@ -270,7 +270,7 @@ test('every font family the stylesheet names is loaded by the app or is a system
     }
     return { families, faces };
   });
-  const system = new Set(['Segoe UI', 'system-ui', 'sans-serif', 'Consolas', 'ui-monospace', 'monospace']);
+  const system = new Set(['Segoe UI', 'system-ui', 'sans-serif', 'Consolas', 'ui-monospace', 'Menlo', 'monospace']);
   expect(named.families.filter(Boolean).length, 'the stylesheet names its fonts').toBeGreaterThan(0);
   const unloaded = named.families.filter(
     (f) => f && !f.startsWith('var(') && !named.faces.includes(f) && !system.has(f),

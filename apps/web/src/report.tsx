@@ -2,7 +2,7 @@ import { type ActorContext, routes } from '@lims/domain';
 import { useApi } from './api.ts';
 import { demoSigning, Shell, Status } from './rail.tsx';
 import { Signatures, unsignedNotice } from './tests.tsx';
-import { time } from './time.ts';
+import { When } from './time.tsx';
 
 export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
   const { data, error } = useApi(routes.report, { id });
@@ -28,7 +28,7 @@ export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
               {data.test.sampleNumber}, {data.test.description}
             </dd>
             <dt>Received</dt>
-            <dd>{time(data.test.receivedAt)}</dd>
+            <dd>{data.test.receivedAt && <When at={data.test.receivedAt} atLab={data.test.receivedAtLab} />}</dd>
             <dt>Method</dt>
             <dd>
               {data.test.methodCode} v{data.test.methodVersion}, {data.test.methodTitle}

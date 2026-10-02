@@ -113,7 +113,7 @@ test('the same entries after a dropped Submit, a sign-out and a sign-in are refu
     return (await page.getByRole('status').textContent()) ?? '';
   };
   const first = await press();
-  expect(first).toContain('this press was already saved before the latest sign-in; reload to see what was saved');
+  expect(first).toContain('This press was already saved before the latest sign-in. Reload to see what was saved.');
   expect(await press(), 'the second press is refused with the same message').toBe(first);
   expect(commitKeys, 'both presses resend the Commit Key of the saved press').toHaveLength(3);
   expect(new Set(commitKeys).size).toBe(1);

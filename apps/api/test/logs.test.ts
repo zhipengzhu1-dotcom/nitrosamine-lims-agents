@@ -54,7 +54,8 @@ async function post(
   return { status: res.status, text: await res.text() };
 }
 
-const referenceIn = (text: string) => /reference (\w+)"/.exec(text)?.[1] ?? assert.fail(`no reference in ${text}`);
+const referenceIn = (text: string) =>
+  /reference (\w+), then reload/.exec(text)?.[1] ?? assert.fail(`no reference in ${text}`);
 
 it('an unexpected failure answers a generic 500 that names a reference, not the database error', async () => {
   const testId = await assignedToLou();
@@ -85,12 +86,12 @@ it('a refusal and a request that fails validation answer with their own status, 
   });
   assert.deepEqual(refused, {
     status: 409,
-    text: '{"kind":"state","message":"review needs a Test in SubmittedForReview state, not Assigned"}',
+    text: '{"kind":"state","message":"The review step needs a Test in SubmittedForReview state, not Assigned."}',
   });
   const invalid = await post(as.lou, stepRoute('enterResult').url, { commitKey: randomUUID(), testId, input: {} });
   assert.deepEqual(invalid, {
     status: 400,
-    text: `{"kind":"malformed","message":"body must have required property 'signature'"}`,
+    text: `{"kind":"malformed","message":"The LIMS cannot read this request: body must have required property 'signature'."}`,
   });
 });
 

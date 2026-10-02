@@ -1,6 +1,17 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useId, useState } from 'react';
 import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
-import { api, type LockMode, setPreferences, signIn, signOut, switchLab, unlock, useApi } from './api.ts';
+import {
+  api,
+  failureText,
+  type LockMode,
+  Refused,
+  setPreferences,
+  signIn,
+  signOut,
+  switchLab,
+  unlock,
+  useApi,
+} from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
 import { field, useCommit } from './form.tsx';
 
@@ -25,6 +36,8 @@ function CredentialsForm({
 }) {
   const [error, setError] = useState(notice);
   const offered = labs.data?.filter((lab) => lab.id !== except);
+  const noOtherLab = offered?.length === 0;
+  const reasonId = useId();
   const [busy, setBusy] = useState(false);
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -36,7 +49,7 @@ function CredentialsForm({
     };
     setBusy(true);
     onSubmit({ username: field('username'), password: field('password'), labId: field('labId') })
-      .catch((err: Error) => setError(err.message))
+      .catch((err: unknown) => setError(failureText(err)))
       .finally(() => setBusy(false));
   }
   return (
@@ -44,19 +57,20 @@ function CredentialsForm({
       <fieldset disabled={busy}>
         <h1>{title}</h1>
         {intro && <p className="muted">{intro}</p>}
-        <fieldset className="labs">
-          <legend>Lab</legend>
-          {labs.error && <p className="note--bad">{labs.error}</p>}
-          {offered?.length === 0 && <p className="muted">There is no other Lab to work in.</p>}
-          {offered?.map((lab) => (
-            <label key={lab.id} className="labs__option">
-              <input type="radio" name="labId" value={lab.id} required />
-              <span>
-                <b>{lab.code}</b> {lab.name}
-              </span>
-            </label>
-          ))}
-        </fieldset>
+        {!noOtherLab && (
+          <fieldset className="labs">
+            <legend>Lab</legend>
+            {labs.error && <p className="note--bad">{labs.error}</p>}
+            {offered?.map((lab) => (
+              <label key={lab.id} className="labs__option">
+                <input type="radio" name="labId" value={lab.id} required />
+                <span>
+                  <b>{lab.code}</b> {lab.name}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        )}
         <label>
           Username
           <input name="username" required autoComplete="username" />
@@ -70,7 +84,18 @@ function CredentialsForm({
             {error}
           </p>
         )}
-        <button type="submit" className="rbtn" aria-busy={busy} disabled={!offered?.length}>
+        {noOtherLab && (
+          <p id={reasonId} className="muted">
+            There is no other Lab to work in.
+          </p>
+        )}
+        <button
+          type="submit"
+          className="rbtn"
+          aria-busy={busy}
+          disabled={!offered?.length}
+          aria-describedby={noOtherLab ? reasonId : undefined}
+        >
           {commit}
         </button>
       </fieldset>
@@ -178,8 +203,8 @@ export function LockScreen({
     setError('');
     unlock(typeof password === 'string' ? password : '')
       .then(onIn)
-      .catch((err: Error) => {
-        setError(err.message);
+      .catch((err: unknown) => {
+        setError(failureText(err));
         setBusy(false);
       });
   }
@@ -206,7 +231,7 @@ export function LockScreen({
           <>
             <CredentialsForm
               title="Switch user"
-              intro={`${message}.`}
+              intro={message}
               labs={labs}
               commit="Sign in on this screen"
               onSubmit={(c) => signIn(c).then(onIn)}
@@ -217,7 +242,7 @@ export function LockScreen({
           <form className="signin card" onSubmit={submit} aria-labelledby="lock-title">
             <fieldset className="lock__set" disabled={busy}>
               <h1 id="lock-title">Locked</h1>
-              <p className="muted">{message}.</p>
+              <p className="muted">{message}</p>
               <label>
                 Password
                 <input name="password" type="password" required autoComplete="current-password" />
@@ -263,7 +288,7 @@ export function WelcomePage({ token }: { token: string }) {
             onSubmit={(e) =>
               commit(e, async (form) => {
                 const password = field(form, 'password');
-                if (password !== field(form, 'confirm')) throw new Error('the two passwords differ');
+                if (password !== field(form, 'confirm')) throw new Refused('malformed', 'The two passwords differ.');
                 const set = await api(routes.setPasswordThroughLink, { token, password });
                 setUsername(set.username);
                 history.replaceState(null, '', location.pathname);

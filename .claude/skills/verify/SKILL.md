@@ -45,7 +45,7 @@ try {
   await page.getByRole('button', { name: 'Assign' }).click();
   await page.getByLabel('Analyst').selectOption({ label: 'Theo Brandt' });
   await page.getByRole('button', { name: 'Assign' }).click();
-  await v.railSays('Refused: the assignee must be an Analyst');
+  await v.railSays('Refused: The assignee must be an Analyst');
   await v.shot('refused');
   v.sql('test', `select state, assignee_id from lims.test`);
 } finally {

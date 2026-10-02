@@ -102,7 +102,7 @@ describe('registering a Workstation', () => {
       for (const answer of answers)
         assert.equal(
           refusedWith(answer, 'role'),
-          'registering Rooms and Workstations and enrolling browsers is an Admin action',
+          'Registering Rooms and Workstations and enrolling browsers is an Admin action.',
           name,
         );
       assert.equal(client.jar.get('lims_device'), undefined, `${name} got no device token`);
@@ -122,7 +122,7 @@ describe('registering a Workstation', () => {
     assert.deepEqual(entry, { chain: api.labId, actor: `person:${ada.username}`, role: 'Admin', reason: 'New Room' });
     assert.ok(ok(await admin.call(routes.workstations)).rooms.some((r) => r.id === room.id));
     const twice = await admin.call(routes.registerRoom, { name: room.name, reason: 'Again' });
-    assert.equal(refusedWith(twice, 'guard'), `a Room named ${room.name} is already registered in this Lab`);
+    assert.equal(refusedWith(twice, 'guard'), `A Room named ${room.name} is already registered in this Lab.`);
   });
 
   it('a Room of no Lab of the Admin and a second Workstation of the same name are refused', async () => {
@@ -133,11 +133,11 @@ describe('registering a Workstation', () => {
       name: 'RD-BENCH-NOWHERE',
       roomId: randomUUID(),
     });
-    assert.equal(refusedWith(noRoom, 'notFound'), 'no such Room in this Lab');
+    assert.equal(refusedWith(noRoom, 'notFound'), 'This Lab has no such Room.');
     const twice = await admin.call(routes.registerWorkstation, { ...registration, name: taken.name });
-    assert.equal(refusedWith(twice, 'guard'), `a Workstation named ${taken.name} is already registered in this Lab`);
+    assert.equal(refusedWith(twice, 'guard'), `A Workstation named ${taken.name} is already registered in this Lab.`);
     const noWorkstation = await admin.call(routes.enrolWorkstation, { workstationId: randomUUID(), reason: 'Enrol' });
-    assert.equal(refusedWith(noWorkstation, 'notFound'), 'no such Workstation in this Lab');
+    assert.equal(refusedWith(noWorkstation, 'notFound'), 'This Lab has no such Workstation.');
   });
 });
 
@@ -204,7 +204,7 @@ describe('the device token', () => {
       password: lena.password,
       labId: api.qcLabId,
     });
-    assert.match(refusedWith(refused, 'state'), /^this Workstation belongs to /);
+    assert.match(refusedWith(refused, 'state'), /^This Workstation belongs to /);
     assert.equal(ok(await browser.call(routes.me)).lab.id, api.labId);
   });
 
@@ -221,7 +221,7 @@ describe('the device token', () => {
       await tx.insertInto('membership').values({ labId: otherLabId, personId: outsider.id, role: 'Analyst' }).execute();
     });
     const refused = await browser.call(routes.login, { username: outsider.username, password: outsider.password });
-    assert.equal(refusedWith(refused, 'role'), "this account belongs to no role in this Workstation's Lab");
+    assert.equal(refusedWith(refused, 'role'), "You hold no Membership in this Workstation's Lab.");
     const [event] = await api.superuser
       .selectFrom('accessEvent')
       .select(['kind', 'failureReason', 'workstationId', sql<string[]>`roles::text[]`.as('roles')])
@@ -295,7 +295,7 @@ describe('Lock and Switch user', () => {
 
     assert.deepEqual(ok(await browser.call(routes.lock)), {
       locked: true,
-      message: `this screen is locked; ${ana.username} unlocks it with their password, or another person signs in with Switch user`,
+      message: `This screen is locked. ${ana.username} unlocks it with their password, or another person signs in with Switch user.`,
     });
     const servedWhileLocked = new Set<Route>([
       routes.labs,
@@ -314,7 +314,7 @@ describe('Lock and Switch user', () => {
     for (const answer of locked)
       assert.equal(
         refusedWith(answer, 'sessionLocked'),
-        `this screen is locked; ${ana.username} unlocks it with their password, or another person signs in with Switch user`,
+        `This screen is locked. ${ana.username} unlocks it with their password, or another person signs in with Switch user.`,
       );
     assert.ok(!JSON.stringify(locked).includes(test.sampleNumber), 'no record content while locked');
 
@@ -334,6 +334,12 @@ describe('Lock and Switch user', () => {
       ok(await browser.call(routes.tests)).some((t) => t.id === test.id),
       'reads return after unlock',
     );
+    const unlocked = await api.superuser
+      .selectFrom('person')
+      .select('failedLogins')
+      .where('id', '=', ana.id)
+      .executeTakeFirstOrThrow();
+    assert.equal(unlocked.failedLogins, 0, 'the unlock clears the failure count');
 
     const [session] = await sessionsOf(ana.id);
     assert.deepEqual(
@@ -345,6 +351,39 @@ describe('Lock and Switch user', () => {
         ['UnlockFailed', workstation.id, session?.id],
         ['Unlock', workstation.id, session?.id],
       ],
+    );
+  });
+
+  it('a Lockout committed after the unlock password was checked refuses the unlock as UnlockFailed and keeps the failure count', async () => {
+    const ana = await api.addPerson(`ana.locked-out-at-unlock-${randomUUID()}`, ['Analyst']);
+    const browser = await api.login(ana);
+    ok(await browser.call(routes.lock));
+    refusedWith(await browser.call(routes.unlock, { password: 'not-the-password' }), 'badCredentials');
+
+    const unlock = await api.lockOutWhile(ana, () => browser.call(routes.unlock, { password: ana.password }));
+
+    assert.equal(refusedWith(unlock, 'accountLocked'), 'This account is locked.');
+    const person = await api.superuser
+      .selectFrom('person')
+      .select('failedLogins')
+      .where('id', '=', ana.id)
+      .executeTakeFirstOrThrow();
+    assert.equal(person.failedLogins, 1, 'a locked account keeps the failures that led to it');
+    assert.deepEqual(
+      (await eventsOf(ana.id)).map((e) => e.kind),
+      ['SignInSucceeded', 'Lock', 'UnlockFailed', 'UnlockFailed'],
+      'the refused unlock is an Access Event, as a sign-in refused by a Lockout is',
+    );
+    const reasons = await api.superuser
+      .selectFrom('auditEntry')
+      .select('reason')
+      .where('tableName', '=', 'access_event')
+      .where(sql<boolean>`new_row->>'subject_id' = ${ana.id} and new_row->>'kind' = 'UnlockFailed'`)
+      .execute();
+    assert.deepEqual(
+      reasons,
+      [{ reason: 'Failed authentication' }, { reason: 'Failed authentication' }],
+      'both failed unlocks are recorded as failed authentication',
     );
   });
 

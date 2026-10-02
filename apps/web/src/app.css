@@ -22,7 +22,7 @@
   --bad: #b3261e;
   --bad-tint: #fce8e5;
   --font: "Segoe UI", system-ui, sans-serif;
-  --mono: Consolas, ui-monospace, monospace;
+  --mono: Consolas, ui-monospace, Menlo, monospace;
   --top-h: 48px;
   --rail-h: 76px;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -35,7 +35,6 @@
   --dur-fade: 150ms;
   --dur-accent: 1600ms;
   font: 400 14px / 1.3 var(--font);
-  font-variant-numeric: tabular-nums slashed-zero;
   color: var(--ink);
   background: var(--canvas);
 }
@@ -62,9 +61,13 @@ button {
   user-select: none;
   -webkit-user-select: none;
 }
+small {
+  font-size: 12px;
+}
 code {
   font-family: var(--mono);
   font-size: 12px;
+  font-variant-numeric: slashed-zero;
 }
 a {
   color: var(--act);
@@ -90,6 +93,10 @@ p {
 }
 .muted {
   color: var(--ink-3);
+}
+/* A date, or a clock with its zone, never breaks inside itself. */
+.when {
+  white-space: nowrap;
 }
 :focus-visible {
   outline: 2px solid var(--focus);
@@ -245,6 +252,7 @@ table {
 }
 th,
 td {
+  font-variant-numeric: tabular-nums;
   text-align: left;
   padding: 6px 8px;
   border-bottom: 1px solid var(--line);
@@ -413,6 +421,7 @@ th {
 .value {
   font-size: 20px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 td a,
 .facts a {
@@ -558,7 +567,9 @@ td a,
   font-size: 13px;
   color: var(--on-bench-2);
 }
-.who__clock time {
+.who__clock time,
+.entry__seq,
+.entry__time {
   font-variant-numeric: tabular-nums;
 }
 .who > * {
@@ -708,7 +719,6 @@ td a,
 }
 .sheet h2 .fict {
   margin-left: 0;
-  font-size: 11px;
 }
 .sheet__body {
   display: grid;
