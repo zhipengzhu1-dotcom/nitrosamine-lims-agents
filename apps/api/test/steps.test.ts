@@ -347,7 +347,7 @@ it('a signing with a wrong password is refused and changes nothing, and a signin
 
   assert.equal(
     refusedWith(await enter({ ...seen, password: 'not-the-password' }), 'badCredentials'),
-    'the credentials are not valid',
+    'the user ID or password is not valid',
   );
   assert.deepEqual(
     await view(id),
@@ -378,12 +378,12 @@ it('a typed user ID that is not the session person is refused like a wrong passw
 
   assert.equal(
     refusedWith(await attempt({ ...seen, username: ana.username }), 'badCredentials'),
-    'the credentials are not valid',
+    'the user ID or password is not valid',
   );
   assert.equal(await failures(), 1, "another person's user ID with the right password counts one failure");
   assert.equal(
     refusedWith(await attempt({ ...seen, password: 'wrong' }), 'badCredentials'),
-    'the credentials are not valid',
+    'the user ID or password is not valid',
   );
   assert.equal(await failures(), 2);
   const { id: sessionId } = await api.superuser

@@ -77,7 +77,7 @@ test('on an enrolled bench browser, Lock hides the records until the same person
 
   await page.getByLabel('Password').fill('not-the-password');
   await page.getByRole('button', { name: 'Unlock' }).click();
-  await expect(page.getByRole('alert')).toContainText('the credentials are not valid');
+  await expect(page.getByRole('alert')).toContainText('the user ID or password is not valid');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Unlock' }).click();
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();

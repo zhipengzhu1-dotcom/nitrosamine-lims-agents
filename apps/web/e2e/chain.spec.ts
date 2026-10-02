@@ -147,11 +147,28 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     }),
     'the record, meaning, eligibility and full hash come before the credential fields',
   ).toBe(true);
-  await atLeast(userId, 44, 44);
+  const passwordField = page.getByLabel(/Password/);
+  for (const field of [userId, passwordField]) {
+    await atLeast(field, 44, 44);
+    await expect(field, 'a credential field keeps 16px text so a phone does not zoom').toHaveCSS('font-size', '16px');
+  }
   await userId.fill('ana.analyst');
-  await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
+  await passwordField.fill(DEMO_PASSWORD);
   await shot(page, 'test-signature-sheet');
+  await sign(page, 'Performed', 'not-the-password');
+  await railSays(page, 'Refused: the user ID or password is not valid. Nothing has been signed.');
+  await expect(signing.locator('.refusal')).toBeVisible();
+  const heldPerformed = Promise.withResolvers<void>();
+  await page.route('**/api/steps/enterResult', async (route) => {
+    await heldPerformed.promise;
+    await route.continue();
+  });
   await sign(page, 'Performed');
+  await expect(
+    signing.locator('.refusal'),
+    'a new attempt clears the earlier refusal before the server answers',
+  ).toHaveCount(0);
+  heldPerformed.resolve();
   await railSays(page, 'now Submitted For Review');
   await signOut(page);
 
@@ -176,7 +193,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(sheet.locator('code.hash')).toHaveText(/^[0-9a-f]{64}$/);
   const height = (await box(sheet)).height;
   await sign(page, 'Reviewed', 'not-the-password');
-  await railSays(page, 'Refused: the credentials are not valid. Nothing has been signed.');
+  await railSays(page, 'Refused: the user ID or password is not valid. Nothing has been signed.');
   const refusal = sheet.locator('.refusal');
   await expect(refusal).toBeInViewport({ ratio: 1 });
   const [inSheet, inRefusal] = [await box(sheet), await box(refusal)];
@@ -302,7 +319,7 @@ test('a wrong password and an unknown user ID show the same failure message', as
   };
   const wrongPassword = await attempt('rui.reviewer', 'not-the-password');
   const unknownUserId = await attempt(`nobody-${randomUUID()}`, DEMO_PASSWORD);
-  expect(wrongPassword).toBe('the credentials are not valid');
+  expect(wrongPassword).toBe('the user ID or password is not valid');
   expect(unknownUserId).toBe(wrongPassword);
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 });

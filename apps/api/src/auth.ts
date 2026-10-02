@@ -70,7 +70,7 @@ export async function deviceOf(
     .where('deviceTokenHash', '=', hashToken(token))
     .executeTakeFirst();
 }
-const notValid = () => refuse('badCredentials', 'the credentials are not valid');
+const notValid = () => refuse('badCredentials', 'the user ID or password is not valid');
 const linkNotValid = () =>
   refuse('badCredentials', 'this link has been used, replaced or has expired; ask the Admin for a new one');
 

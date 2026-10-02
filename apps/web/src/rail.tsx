@@ -323,6 +323,7 @@ function Rail({ me, action, notice }: { me: ActorContext; action: RailAction | n
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
+    setRefusal(null);
     try {
       const text = await a.run(values, a.signs ? { username, password } : null);
       setNote({ text, tone: 'ok', n: ++count.current, action: a.label });
