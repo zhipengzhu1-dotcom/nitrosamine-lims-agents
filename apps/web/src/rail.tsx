@@ -199,6 +199,8 @@ interface Note {
   text: string;
   tone: 'ok' | 'bad';
   n: number;
+  /** The action whose answer this is, so opening another action clears it. */
+  action?: string;
 }
 /** The sheet keeps the action it opened for, so its closing frames never show the step that came next. */
 type Sheet = { action: RailAction; closing: boolean } | null;
@@ -270,6 +272,7 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
     if (inFlight.current) return;
     clearTimeout(fallback.current);
     setRefusal(null);
+    setNote((n) => (n?.action === a.label ? n : null));
     setSheet({ action: a, closing: false });
   }
   function close(clear: boolean) {
@@ -291,11 +294,16 @@ function Rail({ me, action }: { me: ActorContext; action: RailAction | null }) {
     setBusy(true);
     try {
       const text = await a.run(values, a.signs ? password : null);
-      setNote({ text, tone: 'ok', n: ++count.current });
+      setNote({ text, tone: 'ok', n: ++count.current, action: a.label });
       returnFocus.current = true;
       if (sheet) close(true);
     } catch (e) {
-      const unanswered: Note = { text: unansweredText(e, a.signs !== null), tone: 'bad', n: ++count.current };
+      const unanswered: Note = {
+        text: unansweredText(e, a.signs !== null),
+        tone: 'bad',
+        n: ++count.current,
+        action: a.label,
+      };
       setNote(unanswered);
       if (sheet) setRefusal(unanswered);
     } finally {

@@ -57,6 +57,10 @@ export function workstationRoutes(app: App, db: Kysely<DB>): void {
       return {
         rooms: await scope.from('room').select(['id', 'name']).orderBy('name').execute(),
         workstations: await listed(scope).orderBy('workstation.name').execute(),
+        thisBrowser: await listed(scope)
+          .where('workstation.deviceTokenHash', '=', hashDeviceToken(req.cookies[DEVICE_COOKIE] ?? ''))
+          .executeTakeFirst()
+          .then((w) => w ?? null),
       };
     },
   });

@@ -242,7 +242,12 @@ const workstation = Type.Object({
   enrolled: Type.Boolean(),
 });
 export type Workstation = Static<typeof workstation>;
-const workstations = Type.Object({ rooms: Type.Array(room), workstations: Type.Array(workstation) });
+const workstations = Type.Object({
+  rooms: Type.Array(room),
+  workstations: Type.Array(workstation),
+  /** The Workstation this browser's device token enrols it as now, which the next sign-in on it carries. */
+  thisBrowser: nullable(workstation),
+});
 const workstationRegistration = Type.Object({ name: text, roomId: uuid, browserPolicy: text, reason: text }, closed);
 const enrolment = Type.Object({ workstationId: uuid, reason: text }, closed);
 const roomRegistration = Type.Object({ name: text, reason: text }, closed);

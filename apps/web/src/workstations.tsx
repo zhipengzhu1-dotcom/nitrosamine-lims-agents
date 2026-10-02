@@ -70,13 +70,25 @@ export function WorkstationsPage({ me }: { me: ActorContext }) {
   return (
     <Shell me={me} active="workstations" action={action}>
       <h1>Workstations</h1>
-      <p className="muted">
-        This browser signs in as{' '}
-        <b>
-          {me.workstation ? `Workstation ${me.workstation.name} in ${me.workstation.room}` : 'an unregistered device'}
-        </b>
-        .
-      </p>
+      {data && (
+        <p className="muted">
+          {data.thisBrowser ? (
+            <>
+              This browser is enrolled as{' '}
+              <b>
+                Workstation {data.thisBrowser.name} in {data.thisBrowser.room}
+              </b>
+              {me.workstation?.name === data.thisBrowser.name
+                ? '.'
+                : '; the next sign-in on it carries the Workstation.'}
+            </>
+          ) : (
+            <>
+              This browser is <b>not enrolled</b>; it signs in as an unregistered device.
+            </>
+          )}
+        </p>
+      )}
       {error && <p className="note--bad">{error}</p>}
       {data && (
         <p>

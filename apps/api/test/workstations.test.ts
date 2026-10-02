@@ -235,6 +235,12 @@ describe('the device token', () => {
     assert.equal(JSON.parse(body).enrolled, true);
 
     browser.jar.set('lims_device', token);
+    assert.equal(
+      ok(await browser.call(routes.workstations)).thisBrowser?.id,
+      workstation.id,
+      'the page sees this browser',
+    );
+    assert.equal(ok(await admin.call(routes.workstations)).thisBrowser, null, 'another browser is not enrolled');
     await signInOn(browser, api.person('ana'));
 
     const stored = await api.superuser

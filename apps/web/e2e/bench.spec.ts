@@ -24,7 +24,18 @@ test('on an enrolled bench browser, Lock hides the records until the same person
   const bench = `RD-BENCH-${test.info().project.name}-${randomUUID().slice(0, 8)}`;
   const sheet = page.locator('form.sheet');
 
+  const description = `Metformin HCl tablets (fictional, bench ${test.info().project.name} ${randomUUID()})`;
+  const record = page.getByText(description);
+
   await page.goto('/');
+  await signIn(page, 'cora.customer');
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await sheet.getByLabel('Method').selectOption({ index: 1 });
+  await sheet.getByLabel('Sample description').fill(description);
+  await sheet.getByRole('button', { name: 'Submit' }).click();
+  await railSays(page, 'now Requested');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+
   await signIn(page, 'ada.admin');
   await expect(page.locator('.rail')).toContainText('Unregistered device');
   await page.getByRole('link', { name: 'Workstations' }).click();
@@ -44,20 +55,24 @@ test('on an enrolled bench browser, Lock hides the records until the same person
   await sheet.getByRole('button', { name: 'Enrol this browser' }).click();
   await railSays(page, `This browser is enrolled as ${bench}`);
   await expect(row).toContainText('Enrolled');
+  await expect(page.getByText(`This browser is enrolled as Workstation ${bench}`)).toBeVisible();
   await page.getByRole('button', { name: 'Sign out' }).click();
 
   await signIn(page, 'ana.analyst');
   await expect(page.locator('.rail')).toContainText(`${bench} · LC-MS/MS Room (fictional)`);
   for (const name of ['Switch user', 'Lock', 'Sign out']) await atLeast44(page, name);
+  await expect(record, 'the Test is on screen before the lock').toBeVisible();
 
   await page.getByRole('button', { name: 'Lock', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Locked' })).toBeVisible();
   await expect(page.getByText(/this screen is locked; Ana Ferreira unlocks it/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Tests' })).toHaveCount(0);
+  await expect(record, 'no record content while locked').toHaveCount(0);
   await expect(page.locator('.rail')).toHaveCount(0);
 
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Locked' }), 'a reload stays locked').toBeVisible();
+  await expect(record, 'no record content after a reload while locked').toHaveCount(0);
 
   await page.getByLabel('Password').fill('not-the-password');
   await page.getByRole('button', { name: 'Unlock' }).click();
@@ -70,10 +85,12 @@ test('on an enrolled bench browser, Lock hides the records until the same person
   await page.getByRole('button', { name: 'Switch user' }).click();
   await expect(page.getByRole('heading', { name: 'Switch user' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Tests' })).toHaveCount(0);
+  await expect(record, 'no record content while switching').toHaveCount(0);
   await page.getByLabel('Username').fill('rui.reviewer');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in on this screen' }).click();
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
   await expect(page.locator('.rail')).toContainText('Rui Tanaka');
+  await expect(page.locator('.rail')).not.toContainText('Ana Ferreira');
   await expect(page.locator('.rail')).toContainText(bench);
 });
