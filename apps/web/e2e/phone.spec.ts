@@ -148,17 +148,19 @@ test('on the narrowest phone the folded rail shows the whole session countdown a
   await signInAsCustomer(page);
   const clock = page.locator('.rail__toggle .who__clock');
   await expect(clock).toContainText(/Session ends in \d/);
-  const [clipped, mark, toggleRight, switchLeft] = await page
+  const [clipped, shortened, mark, toggleRight, switchLeft] = await page
     .locator('.rail__toggle')
     .evaluate((toggle: HTMLElement) => {
       const countdown = toggle.querySelector<HTMLElement>('.who__clock') ?? toggle;
       const chevron = toggle.querySelector<HTMLElement>('.rail__chevron');
+      const name = toggle.querySelector<HTMLElement>('b') ?? toggle;
       const switchUser = [...document.querySelectorAll<HTMLElement>('.rail__session .rbtn')].find(
         (b) => b.textContent === 'Switch user',
       );
       const box = chevron?.getBoundingClientRect();
       return [
         countdown.scrollWidth > countdown.clientWidth || toggle.scrollWidth > toggle.clientWidth,
+        name.scrollWidth > name.clientWidth,
         box ? { width: box.width, right: box.right } : { width: 0, right: Infinity },
         toggle.getBoundingClientRect().right,
         switchUser?.getBoundingClientRect().left ?? 0,
@@ -166,6 +168,7 @@ test('on the narrowest phone the folded rail shows the whole session countdown a
     });
   expect(clipped, 'the countdown fits inside the session block button').toBe(false);
   expect(toggleRight, 'the session block button ends before Switch user begins').toBeLessThanOrEqual(switchLeft);
+  expect(shortened, 'the name is too long for the button, so the walk sees it shortened').toBe(true);
   expect(mark.width, 'the mark that the name opens the session block is drawn').toBeGreaterThan(0);
   expect(mark.right, 'a shortened name keeps the mark inside the button').toBeLessThanOrEqual(toggleRight);
   for (const name of ['Switch user', 'Lock']) await laidOutAtLeast(page.getByRole('button', { name, exact: true }), 44);
