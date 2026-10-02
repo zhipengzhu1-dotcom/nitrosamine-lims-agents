@@ -4,7 +4,7 @@ import { it } from 'node:test';
 import { audited, type Role } from '@lims/db';
 import { routes } from '@lims/domain';
 import { sql } from 'kysely';
-import { LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
+import { LOCKOUT_AFTER_FAILURES, SESSION_LIMITS } from '../src/auth.ts';
 import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_access_events_test');
@@ -305,6 +305,8 @@ it("under a Lockout, the Admin sees each of the person's sessions in this Lab th
   await audited(api.superuser, SYSTEM, (tx) =>
     tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
   );
+  await api.login(person);
+  await api.advanceClock(person, SESSION_LIMITS.decided.idleMs + 60_000);
   ok(await (await api.login(person)).call(routes.logout));
   const noticed = await api.login(person);
   await api.login(person);
@@ -312,8 +314,9 @@ it("under a Lockout, the Admin sees each of the person's sessions in this Lab th
   await lockOut(person);
   refusedWith(await noticed.call(routes.me), 'noSession');
 
-  const [signedOut, ended, notYetNoticed, inQc] = await sessionsOf(person);
-  assert.ok(signedOut?.endedAt && ended?.endedAt && notYetNoticed && inQc, 'four sessions');
+  const [idleBefore, signedOut, ended, notYetNoticed, inQc] = await sessionsOf(person);
+  assert.ok(idleBefore && signedOut?.endedAt && ended?.endedAt && notYetNoticed && inQc, 'five sessions');
+  assert.equal(idleBefore.endedAt, null, 'no request or sweep has ended the session idle before the Lockout');
   assert.equal(notYetNoticed.endedAt, null, 'no request or sweep has ended the second live session yet');
   const { person: listed, events, earlierNotListed } = ok(await ada.call(routes.accessEvents, { id: person.id }));
   assert.deepEqual(listed, { id: person.id, printedName: person.username, username: person.username });
@@ -326,7 +329,7 @@ it("under a Lockout, the Admin sees each of the person's sessions in this Lab th
       [ended.id, null],
       [notYetNoticed.id, null],
     ],
-    'the sessions in this Lab live at the Lockout, not the one signed out before it, nor the one in the QC Lab',
+    'the sessions in this Lab live at the Lockout, not one idle or signed out before it, nor the one in the QC Lab',
   );
   assert.deepEqual(
     events.map((e) => e.kind),
@@ -336,6 +339,7 @@ it("under a Lockout, the Admin sees each of the person's sessions in this Lab th
       'SignInSucceeded',
       'SignInSucceeded',
       'SignOut',
+      'SignInSucceeded',
       'SignInSucceeded',
     ],
     'newest first, with no event of the session in the QC Lab',

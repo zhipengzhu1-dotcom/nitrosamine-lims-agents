@@ -307,8 +307,8 @@ export async function reauthenticate(
 const interval = (ms: number) => sql<string>`${ms} * interval '1 millisecond'`;
 
 /**
- * When the joined `session` row ended, or, if nothing has ended it yet, when it lapses: so a session that a Lockout
- * ended reads as ended at the Lockout's instant before any request or sweep has noticed.
+ * When the joined `session` row ended, or, if nothing has ended it yet, when it lapses under its joined `person` row's
+ * lock: so a session that a Lockout ended reads as ended at the Lockout's instant before any request or sweep has noticed.
  */
 export const sessionEnd = (limits: SessionLimits) =>
   sql<Date>`coalesce(session.ended_at, lims.session_lapse(session.last_seen_at, session.created_at, person.locked_at,
