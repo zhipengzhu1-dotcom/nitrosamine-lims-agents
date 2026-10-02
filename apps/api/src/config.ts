@@ -4,11 +4,12 @@ export interface ApiConfig {
   databaseUrl: string;
   listen: { port: number; host: string };
   log: boolean;
+  logFile: string | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
 }
 
-const API_SETTINGS = ['LIMS_LOG', 'LIMS_ACCESS_EVENT_KEY'];
+const API_SETTINGS = ['LIMS_LOG', 'LIMS_LOG_FILE', 'LIMS_ACCESS_EVENT_KEY'];
 
 function port(value: string | undefined): number {
   if (value === undefined) return 3000;
@@ -30,11 +31,19 @@ function accessEventKey(value: string | undefined): Buffer {
 export function apiConfig(): ApiConfig {
   const env = process.env;
   const { server, database } = dbConfig(API_SETTINGS);
+  const log = env.LIMS_LOG === '1';
+  const logFile = env.LIMS_LOG_FILE || null;
+  const secureCookie = env.NODE_ENV === 'production';
+  if (secureCookie && !log && !logFile)
+    throw new Error(
+      'In production the API needs LIMS_LOG_FILE: its log is the only witness of an unwritten System Incident',
+    );
   return {
     databaseUrl: databaseUrl(server, database, 'lims_app'),
     listen: { port: port(env.PORT), host: env.HOST ?? '127.0.0.1' },
-    log: env.LIMS_LOG === '1',
-    secureCookie: env.NODE_ENV === 'production',
+    log,
+    logFile,
+    secureCookie,
     accessEventKey: accessEventKey(env.LIMS_ACCESS_EVENT_KEY),
   };
 }

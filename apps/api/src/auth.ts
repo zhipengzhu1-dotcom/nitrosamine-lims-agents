@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, verifyPassword } from '@lims/db/credentials';
 import { type ActorContext, routes } from '@lims/domain';
@@ -203,7 +204,8 @@ function typedUserIdDigest(key: Buffer, typed: string) {
 }
 
 /** The routes before a session: the Labs to choose from, and sign-in. Every sign-in attempt, refused or not, writes its Access Event in a transaction of its own that commits. */
-export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): void {
+export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, secureCookie: boolean): void {
+  app.register(cookie, { parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: secureCookie } });
   app.route({
     ...routes.labs,
     handler: () => db.selectFrom('lab').select(['labId as id', 'code', 'name']).orderBy('code').execute(),
