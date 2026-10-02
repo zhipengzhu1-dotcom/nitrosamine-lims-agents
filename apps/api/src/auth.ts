@@ -531,11 +531,6 @@ async function endSession(
   return rows[0]?.ended === true;
 }
 
-/**
- * Runs the expiry sweep every `everyMs` until the API closes. A failed sweep opens a System Incident and the next one
- * retries, writing the same record, since each expiry is stamped at its computed end. A tick skips while a sweep is
- * still running, and close waits for it.
- */
 function typedUserIdDigest(key: Buffer, typed: string) {
   return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: typed.length };
 }
@@ -661,12 +656,18 @@ export function loginRoutes(
   });
   app.route({
     ...routes.enrolAuthenticator,
-    // Enrolment proves the person by their own password and needs no session, so no other account, an Admin's included,
-    // can enrol for them. The secret is shown once: a second enrolment is refused and shows nothing.
+    // Enrolment proves the person by their own password and needs no session. A browser where someone else is signed in,
+    // such as the Admin who created the account, is refused. The secret is shown once: a second enrolment shows nothing.
     handler: async (req) => {
       const { username, password } = req.body;
       const sourceAddress = sourceAddressOf(req);
       const person = await db.selectFrom('person').selectAll().where('username', '=', username).executeTakeFirst();
+      const signedIn = await browserSession(db, req.cookies[SESSION_COOKIE]);
+      if (signedIn && signedIn.personId !== person?.id)
+        refuse(
+          'guard',
+          'Sign out first. Only the holder of an account enrols its authenticator, in a browser where no one else is signed in.',
+        );
       const proven = await verifyPassword(password, person?.passwordHash ?? TIMING_DECOY_HASH, pepper);
       if (!person || !person.passwordHash || !proven || person.lockedAt) {
         if (person?.passwordHash && !proven)

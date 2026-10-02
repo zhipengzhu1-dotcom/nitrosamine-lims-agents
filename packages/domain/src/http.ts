@@ -496,7 +496,6 @@ const labSwitch = Type.Object({ username: text, password: text, code, labId: uui
 const authenticatorEnrolment = Type.Object({ username: text, password: text }, closed);
 /** An enrolled authenticator's secret, shown once: as text, and as the otpauth URI its QR code carries. */
 const enrolled = Type.Object({ secret: Type.String(), otpauth: Type.String() });
-export type Enrolled = Static<typeof enrolled>;
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });

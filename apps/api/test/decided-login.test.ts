@@ -210,6 +210,34 @@ it('a password under 15 characters or missing a character type is refused with a
   );
 });
 
+it('an Admin signed in on their own browser cannot enrol the authenticator of an account they created; its holder then enrols it', async () => {
+  const ada = await api.login(api.person('ada'));
+  const verification = ok(
+    await ada.call(routes.recordIdentityVerification, {
+      printedName: 'Paz Holder',
+      evidence: 'Passport seen in person (fictional)',
+    }),
+  );
+  const { person, link } = ok(
+    await ada.call(routes.createAccount, { identityVerificationId: verification.id, username: 'paz.holder' }),
+  );
+  const password = 'Benchline-2026-holder';
+  ok(await new Client(decided.base).call(routes.setPasswordThroughLink, { token: link.token, password }));
+  assert.equal(
+    refusedWith(await ada.call(routes.enrolAuthenticator, { username: 'paz.holder', password }), 'guard'),
+    'Sign out first. Only the holder of an account enrols its authenticator, in a browser where no one else is signed in.',
+  );
+  assert.deepEqual(
+    (await eventsOf(person.id)).map((event) => event.kind),
+    ['PasswordSet'],
+  );
+  ok(await new Client(decided.base).call(routes.enrolAuthenticator, { username: 'paz.holder', password }));
+  assert.deepEqual(
+    (await eventsOf(person.id)).map((event) => event.kind),
+    ['PasswordSet', 'AuthenticatorEnrolled'],
+  );
+});
+
 it('a signed-in person changes their password with the current password and a fresh code; a weak new password is refused first', async () => {
   const { account, code } = await enrolled('cal.change');
   const client = new Client(decided.base);
@@ -253,6 +281,7 @@ it('5 consecutive failures, mixing sign-in and signing, lock the account; only t
       code: code(),
     }),
   );
+  const wrong = [code(-1), code(), code(1)].includes('000000') ? '111111' : '000000';
   const testId = await assignedTo(account);
   for (let i = 0; i < 2; i++) refusedWith(await signIn(account, 'not-the-password', code(1)), 'badCredentials');
   for (let i = 0; i < 2; i++)
@@ -260,13 +289,13 @@ it('5 consecutive failures, mixing sign-in and signing, lock the account; only t
       await enterResult(client, testId, account, { password: 'not-the-password', code: code(1) }),
       'badCredentials',
     );
-  refusedWith(await signIn(account, account.password, '000000'), 'badCredentials');
+  refusedWith(await signIn(account, account.password, wrong), 'badCredentials');
   const kinds = (await eventsOf(account.id)).map((event) => event.kind);
   assert.deepEqual(kinds.slice(-2), ['SignInFailed', 'Lockout']);
   assert.equal(kinds.filter((kind) => kind === 'Lockout').length, 1);
 
   assert.equal(refusedWith(await signIn(account, 'not-the-password', code(1)), 'badCredentials'), NOT_VALID);
-  assert.equal(refusedWith(await signIn(account, account.password, '000000'), 'badCredentials'), NOT_VALID);
+  assert.equal(refusedWith(await signIn(account, account.password, wrong), 'badCredentials'), NOT_VALID);
   assert.equal(
     refusedWith(await signIn(account, account.password, code(1)), 'accountLocked'),
     'This account is locked.',
