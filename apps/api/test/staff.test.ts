@@ -237,15 +237,28 @@ it('every staff-account route refuses a person who is not an Admin', async () =>
 
 it('a business role for an Admin, or Admin for a holder of a business role, is refused with a kind', async () => {
   const apart = 'a person who holds Admin or Platform Operator holds no business role, in any Lab';
-  const ana = api.person('ana');
+  const { person: admin } = await newStarter();
+  const { person: analyst } = await newStarter();
+  ok(await as.ada.call(routes.grantMembership, { personId: admin.id, role: 'Admin', reason: 'Second Admin' }));
+  ok(await as.ada.call(routes.grantMembership, { personId: analyst.id, role: 'Analyst', reason: 'New starter' }));
   for (const [personId, role] of [
-    [ada.id, 'Analyst'],
-    [ana.id, 'Admin'],
+    [admin.id, 'Analyst'],
+    [analyst.id, 'Admin'],
   ] as const)
     assert.equal(
       refusedWith(await as.ada.call(routes.grantMembership, { personId, role, reason: 'Try it' }), 'guard'),
       apart,
     );
+});
+
+it('a staff role goes only to an account with an Identity Verification, so not to a seeded demo account', async () => {
+  assert.equal(
+    refusedWith(
+      await as.ada.call(routes.grantMembership, { personId: api.person('ana').id, role: 'Reviewer', reason: 'Cover' }),
+      'guard',
+    ),
+    'a staff role goes only to a staff account with an Identity Verification',
+  );
 });
 
 it('an Identity Verification gives one account, and a username is given once', async () => {

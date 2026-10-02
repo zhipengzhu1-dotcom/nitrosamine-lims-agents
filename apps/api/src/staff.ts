@@ -146,6 +146,8 @@ export function staffRoutes(app: App, db: Kysely<DB>): void {
       return adminScope(db, req.actor).write(reason, 'Admin', async (q) => {
         const person = await onePerson(q, labId, personId);
         if (person.roles.includes(role)) refuse('state', `${person.printedName} already holds ${role} in this Lab`);
+        if (!person.identityVerifiedAt)
+          refuse('guard', 'a staff role goes only to a staff account with an Identity Verification');
         await q.insert('membership', { personId, role }).execute().catch(heldApart);
         return onePerson(q, labId, personId);
       });

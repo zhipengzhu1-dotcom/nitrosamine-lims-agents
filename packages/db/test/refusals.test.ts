@@ -1491,6 +1491,7 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
     ],
     ['lims.session.session_lab_id_id_person_id_key', 'unreachable: (lab_id, id) is already the key'],
     ['lims.person.staff_account_through_identity_verification', 'staff-accounts.test.ts'],
+    ['lims.membership.staff_role_needs_identity_verification', 'staff-accounts.test.ts'],
     [
       'lims.signature.signature_username_not_null',
       'unreachable: sign_as_the_person sets it with printed_name, whose not null refuses first',

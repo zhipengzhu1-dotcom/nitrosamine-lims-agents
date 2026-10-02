@@ -183,7 +183,7 @@ it('roles are those in the session Lab after sign-in and in the default Lab befo
       .executeTakeFirstOrThrow(),
   );
   const person = await api.addPerson('access.roles', ['Analyst']);
-  await audited(api.db, SYSTEM, (tx) =>
+  await audited(api.superuser, SYSTEM, (tx) =>
     tx.insertInto('membership').values({ labId: otherLab.labId, personId: person.id, role: 'QA' }).execute(),
   );
   const customerOnly = await api.addPerson('access.customer', [], { customerId: await customerId() });
@@ -256,7 +256,7 @@ it('sign-out writes a sign-out Access Event, and a read or a page refresh writes
 it('a person whose Membership moved to another Lab during the session can still sign out, and the event records no roles', async () => {
   const person = await api.addPerson('access.removed', ['Analyst']);
   const client = await api.login(person);
-  await audited(api.db, SYSTEM, async (tx) => {
+  await audited(api.superuser, SYSTEM, async (tx) => {
     const elsewhere = await tx
       .insertInto('lab')
       .values({ code: 'ACMV', name: 'Lab the Membership moved to', timeZone: 'UTC' })

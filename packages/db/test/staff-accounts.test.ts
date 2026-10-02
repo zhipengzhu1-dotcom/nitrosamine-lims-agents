@@ -179,6 +179,49 @@ describe('the app role reaches a password only through a one-time link', () => {
     );
   });
 
+  it('rewriting every person row first does not make the app role a seeding transaction', async () => {
+    await assert.rejects(
+      inTransaction(app, [
+        ['update lims.person set failed_logins = failed_logins'],
+        [`insert into lims.person (username, display_name, password_hash) values ('sneaky.seed', 'Sneaky', 'x')`],
+      ]),
+      sqlstate('LA007'),
+    );
+  });
+
+  it('the app role cannot give a staff role to a Customer User or to an account with no Identity Verification', async () => {
+    const [customer] = await inTransaction(owner, [
+      [`insert into lims.customer (name) values ('Grants Customer (fictional)') returning id`],
+    ]);
+    const [portal] = await inTransaction(app, [
+      [
+        `insert into lims.person (username, display_name, customer_id, password_hash)
+         values ('carl.customer', 'Carl Customer', $1, 'scrypt$x$y') returning id`,
+        [customer?.rows[0]?.id],
+      ],
+    ]);
+    const [unchecked] = await inTransaction(owner, [
+      [`insert into lims.person (username, display_name) values ('owner.made', 'Owner Made') returning id`],
+    ]);
+    for (const person of [portal?.rows[0]?.id, unchecked?.rows[0]?.id])
+      await assert.rejects(
+        inTransaction(app, [
+          ['insert into lims.membership (lab_id, person_id, role) values ($1, $2, $3)', [ids.lab, person, 'Analyst']],
+        ]),
+        (error: unknown) =>
+          sqlstate('LA007')(error) &&
+          error instanceof Error &&
+          error.cause instanceof Error &&
+          error.cause.message === 'a staff role goes only to a staff account with an Identity Verification',
+      );
+    await inTransaction(app, [
+      [
+        'insert into lims.membership (lab_id, person_id, role) values ($1, $2, $3)',
+        [ids.lab, portal?.rows[0]?.id, 'Customer'],
+      ],
+    ]);
+  });
+
   it('the app role cannot mark a link used, date a check, or date a link itself', async () => {
     await assert.rejects(
       inTransaction(app, [['update lims.credential_link set used_at = clock_timestamp()']]),

@@ -45,16 +45,20 @@ alter table lims.person
   add column identity_verification_id uuid unique references lims.identity_verification;
 
 -- A staff account is created with no password, naming its Identity Verification, so the person sets their own
--- password through a one-time link. Two writers are exempt: the transaction that seeds an empty database (ADR
--- 0002's demo-login exception, and the first Admin, whom no Admin can check), and the database owner acting outside
--- the LIMS, whose writes the Audit Trail still captures. Customer Users get portal accounts, which this rule leaves
--- alone.
+-- password through a one-time link, and only such an account holds a staff role. Two writers are exempt: the
+-- transaction that seeds an empty database (ADR 0002's demo-login exception, and the first Admin, whom no Admin can
+-- check), and the database owner acting outside the LIMS, whose writes the Audit Trail still captures. "Empty" is
+-- read from the Audit Trail, which the app role cannot rewrite: no person was written by an earlier transaction.
+create function lims.seeding_or_owner() returns boolean language sql stable as $$
+  select (select rolsuper from pg_roles where rolname = current_user)
+      or not exists (select from lims.audit_entry where table_name = 'person' and at < now())
+$$;
+
 create function lims.staff_account_through_identity_verification() returns trigger language plpgsql as $$
 begin
   if new.customer_id is null
      and (new.identity_verification_id is null or new.password_hash is not null)
-     and not (select rolsuper from pg_roles where rolname = current_user)
-     and exists (select from lims.person p where not (p.xmin = pg_current_xact_id()::xid)) then
+     and not lims.seeding_or_owner() then
     raise exception 'a staff account names its Identity Verification and has no password until its person sets one'
       using errcode = 'LA007';
   end if;
@@ -62,6 +66,20 @@ begin
 end $$;
 create trigger staff_account_through_identity_verification before insert on lims.person
   for each row execute function lims.staff_account_through_identity_verification();
+
+-- A Customer User holds only the Customer role; a staff role goes to an account with an Identity Verification.
+create function lims.staff_role_needs_identity_verification() returns trigger language plpgsql as $$
+begin
+  if new.role::text <> 'Customer'
+     and exists (select from lims.person p where p.id = new.person_id
+                   and (p.customer_id is not null or p.identity_verification_id is null))
+     and not lims.seeding_or_owner() then
+    raise exception 'a staff role goes only to a staff account with an Identity Verification' using errcode = 'LA007';
+  end if;
+  return new;
+end $$;
+create trigger staff_role_needs_identity_verification before insert or update on lims.membership
+  for each row execute function lims.staff_role_needs_identity_verification();
 
 create function lims.keep_identity() returns trigger language plpgsql as $$
 begin
@@ -211,3 +229,4 @@ grant insert (person_id, token_hash) on lims.credential_link to lims_app;
 revoke update on lims.person from lims_app;
 grant update (display_name, failed_logins, locked_at) on lims.person to lims_app;
 grant execute on function lims.set_password_through_link(text, text) to lims_app;
+grant execute on function lims.seeding_or_owner() to lims_app;
