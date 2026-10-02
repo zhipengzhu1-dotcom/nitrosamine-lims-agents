@@ -1,12 +1,13 @@
 set local role lims_owner;
 
--- A person is inserted unlocked, so every lock lands through lock_once. A person inserted with locked_at set was
--- locked without it: no stamp at the database clock, no company chain taken, and no Lockout Access Event, which the
--- API writes only after the lock it applies by update.
+-- A person is inserted without a lockout, so every lockout lands by update through lock_once. A person inserted with
+-- locked_at set was locked out without it: no stamp at the database clock, no company chain taken, and no Lockout
+-- Access Event, which the API writes only after the lockout it applies by update.
 create function lims.refuse_locked_insert() returns trigger
 language plpgsql as $$
 begin
-  raise exception 'a person is inserted unlocked; a lock lands only through lock_once' using errcode = '23514';
+  raise exception 'a person is inserted without a lockout; a lockout lands only on a person already recorded'
+    using errcode = '23514';
 end $$;
 
 create trigger insert_unlocked before insert on lims.person

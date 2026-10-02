@@ -66,9 +66,7 @@ const fixtureContent = Buffer.from('{"id":"fixture"}');
 /** Signature statement 1's hash, read from the migrated database before the fixtures are written. */
 let statementHash: Buffer = zeros;
 
-type Fixture = [string, Row] | { statement: string; values: unknown[] };
-
-const fixture: Fixture[] = [
+const fixture: [string, Row][] = [
   ['lims.customer', { id: id.customer, name: 'Refusal Customer (fictional)' }],
   [
     'lims.person',
@@ -89,8 +87,6 @@ const fixture: Fixture[] = [
       password_hash: 'not-a-real-hash',
     },
   ],
-  { statement: 'update lims.person set locked_at = clock_timestamp() where id = $1', values: [id.lockedOut] },
-  ['lims.access_event', { kind: 'Lockout', subject_id: id.lockedOut, source_address: '192.0.2.1', roles: '{}' }],
   ['lims.method', { id: id.method, code: 'RF-MTH-0001', version: '1', title: 'NDMA by LC-MS/MS (fictional)' }],
   [
     'lims.submission',
@@ -692,15 +688,25 @@ before(async () => {
         'select statement_hash as "statementHash" from lims.signature_statement where version = 1',
       )
     ).rows[0] ?? assert.fail('the migration seeds signature statement 1'));
-  for (const entry of fixture) {
+  for (const [table, row] of fixture) {
     await client.query('begin');
     await client.query(AUDIT_CONTEXT);
-    if (Array.isArray(entry)) {
-      await signingStamp(entry[1]);
-      await client.query(...insert(...entry));
-    } else await client.query(entry.statement, entry.values);
+    await signingStamp(row);
+    await client.query(...insert(table, row));
     await client.query('commit');
   }
+  await client.query('begin');
+  await client.query(AUDIT_CONTEXT);
+  await client.query('update lims.person set locked_at = clock_timestamp() where id = $1', [id.lockedOut]);
+  await client.query(
+    ...insert('lims.access_event', {
+      kind: 'Lockout',
+      subject_id: id.lockedOut,
+      source_address: '192.0.2.1',
+      roles: '{}',
+    }),
+  );
+  await client.query('commit');
 });
 
 after(() => client.end());
@@ -2769,17 +2775,18 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
   });
 });
 
-describe('a person is inserted unlocked, so every lock lands through lock_once', () => {
+describe('a person is inserted without a lockout, so the database stamps every lockout', () => {
   covered.add('lims.person.insert_unlocked');
   // A Customer User, the one person the app role may insert without an Identity Verification.
-  const bornLocked = `insert into lims.person (username, display_name, customer_id, locked_at)
-    values ('refusal.born-locked', 'Born Locked', '${id.customer}', clock_timestamp())`;
-  it('a person inserted already locked is refused, for the app role and for the superuser', async () => {
+  const bornLockedOut = `insert into lims.person (username, display_name, customer_id, locked_at)
+    select 'refusal.born-locked-out', 'Born Locked Out', id, clock_timestamp() from lims.customer
+     where name = 'Refusal Customer (fictional)'`;
+  it('a person inserted already locked out is refused, for the app role and for the superuser', async () => {
     for (const asRole of ['set local role lims_app; ', '']) {
-      const error = await refusalOf(`${asRole}${bornLocked}`);
+      const error = await refusalOf(`${asRole}${bornLockedOut}`);
       assert.deepEqual(
         [error.code, error.message],
-        ['23514', 'a person is inserted unlocked; a lock lands only through lock_once'],
+        ['23514', 'a person is inserted without a lockout; a lockout lands only on a person already recorded'],
         asRole || 'as the superuser',
       );
     }
