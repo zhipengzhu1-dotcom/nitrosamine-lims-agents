@@ -54,10 +54,21 @@ export function enrolmentRoute(app: App, db: Kysely<DB>, accessEventKey: Buffer,
         );
         return REFUSAL[failure]();
       }
-      // A lock is told only to a sign-in that proves the code too; a password alone learns the uniform sentence.
-      if (person.lockedAt) return failed('AccountLocked', REFUSAL.WrongPassword);
       const secret = newTotpSecret();
-      const enrolled = await audited(db, asOwnAccount(username, 'Enrol an authenticator'), async (tx) => {
+      const refused = await audited(db, asOwnAccount(username, 'Enrol an authenticator'), async (tx) => {
+        // The lock is read under the person's row lock, so a Lockout lands wholly before the enrolment, which it then
+        // refuses, or wholly after it. A lock is told only to a sign-in that proves the code too; a password alone
+        // learns the uniform sentence.
+        const { lockedAt } = await tx
+          .selectFrom('person')
+          .select('lockedAt')
+          .where('id', '=', person.id)
+          .forNoKeyUpdate()
+          .executeTakeFirstOrThrow();
+        if (lockedAt) {
+          await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...own });
+          return REFUSAL.WrongPassword;
+        }
         const added = await tx
           .insertInto('authenticator')
           .values({ personId: person.id, secretCiphertext: sealSecret(credentials.totpKey, secret) })
@@ -65,12 +76,12 @@ export function enrolmentRoute(app: App, db: Kysely<DB>, accessEventKey: Buffer,
           .executeTakeFirst();
         if (!added.numInsertedOrUpdatedRows) {
           await record(tx, { kind: 'SignInFailed', failureReason: 'AlreadyEnrolled', ...own });
-          return false;
+          return REFUSAL.AlreadyEnrolled;
         }
         await record(tx, { kind: 'AuthenticatorEnrolled', ...own });
-        return true;
+        return null;
       });
-      if (!enrolled) return REFUSAL.AlreadyEnrolled();
+      if (refused) return refused();
       return { secret: base32(secret), otpauth: otpauthUri(username, secret) };
     },
   });

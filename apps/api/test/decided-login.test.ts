@@ -291,6 +291,26 @@ it('enrolment refuses an unknown user ID, an account with no credential yet and 
   assert.deepEqual(await eventsOf(locked.id), [{ kind: 'SignInFailed', failureReason: 'AccountLocked' }]);
 });
 
+it('a Lockout that lands after the enrolment checked the password refuses it with the uniform sentence, and no authenticator is kept', async () => {
+  const account = await api.addPerson('lex.lockedlate', ['Analyst']);
+  const answer = await api.lockOutWhile(account, () =>
+    new Client(decided.base).call(routes.enrolAuthenticator, {
+      username: account.username,
+      password: account.password,
+    }),
+  );
+  assert.equal(refusedWith(answer, 'badCredentials'), NOT_VALID);
+  assert.deepEqual(await eventsOf(account.id), [{ kind: 'SignInFailed', failureReason: 'AccountLocked' }]);
+  assert.equal(
+    await api.superuser
+      .selectFrom('authenticator')
+      .select('personId')
+      .where('personId', '=', account.id)
+      .executeTakeFirst(),
+    undefined,
+  );
+});
+
 it('under the decided login, unlocking a locked session needs the password and a fresh code', async () => {
   const { account, code } = await enrolled('ulla.unlock');
   const client = new Client(decided.base);
