@@ -46,7 +46,7 @@ function pageNow(): number {
 }
 
 /**
- * The session's ends by the page's clock. Each reply to a person's request restarts the idle count from when the
+ * The session's end by the page's clock. Each reply to a person's request restarts the idle count from when the
  * request left, which is no later than the server restarts its own. Only such a reply restarts it: a refusal or a
  * failure may not have reached the session, and the countdown's own check does not count as activity.
  */
