@@ -1,6 +1,7 @@
 import {
   type ActorContext,
   isRefusalKind,
+  isSentence,
   pathOf,
   type Preferences,
   type RefusalKind,
@@ -28,10 +29,7 @@ function refusedBy(json: unknown, fallback: Sentence): Refused {
   const body: object = typeof json === 'object' && json !== null ? json : {};
   return new Refused(
     'kind' in body && isRefusalKind(body.kind) ? body.kind : 'failure',
-    'message' in body && typeof body.message === 'string'
-      ? // oxlint-disable-next-line typescript/consistent-type-assertions -- the API's message is typed Sentence where it is written, and the API tests check every refused answer is one
-        (body.message as Sentence)
-      : fallback,
+    'message' in body && typeof body.message === 'string' && isSentence(body.message) ? body.message : fallback,
   );
 }
 
