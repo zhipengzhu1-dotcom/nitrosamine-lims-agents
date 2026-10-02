@@ -100,7 +100,8 @@ p {
   display: grid;
   grid-template: auto minmax(0, 1fr) auto / minmax(0, 1fr);
   height: 100dvh;
-  overflow: hidden;
+  /* Hidden would still scroll: typing in a sheet still sliding in pulled the frame up and the rail over the sheet. */
+  overflow: clip;
 }
 .frame > .plane,
 .sheet {
@@ -501,7 +502,7 @@ td a,
 }
 
 .rail {
-  grid-row: 3;
+  grid-area: 3 / 1;
   z-index: 2;
   min-height: var(--rail-h);
   display: flex;
@@ -956,6 +957,7 @@ a.btn {
     border-top: 1px solid var(--line);
   }
   .top nav a {
+    min-height: 44px;
     padding: 0 10px;
   }
   .plane {
@@ -1014,7 +1016,12 @@ a.btn {
   }
   .sheet {
     --foot-h: 156px;
+    grid-row: 2 / 4;
+    z-index: 3;
     padding: 12px 12px 0;
+  }
+  .frame:has(> .sheet:not([data-closing])) .rail__session {
+    visibility: hidden;
   }
   .sheet h2 {
     flex-wrap: wrap;
@@ -1024,7 +1031,7 @@ a.btn {
   .sheet__foot {
     flex-wrap: wrap;
     gap: 8px;
-    padding: 10px 0 12px;
+    padding: 10px 0 max(12px, env(safe-area-inset-bottom));
   }
   .sheet__line {
     --lines: 3;

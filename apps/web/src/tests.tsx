@@ -105,7 +105,9 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         )}
       </dl>
       <h2>Result</h2>
-      {result ? (
+      {view.withheld ? (
+        <p className="muted">The Result is not released yet. It shows here when the Test Report is released.</p>
+      ) : result ? (
         <dl className="facts">
           <dt>{result.analyte}</dt>
           <dd className="value">
@@ -122,7 +124,11 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         <p className="muted">No Result entered.</p>
       )}
       <h2>Signatures</h2>
-      <Signatures rows={view.signatures} fresh={freshSignatures} />
+      {view.withheld ? (
+        <p className="muted">The Signatures are not released yet. They show here with the Result.</p>
+      ) : (
+        <Signatures rows={view.signatures} fresh={freshSignatures} />
+      )}
       {me.person.customerId === null && <TestTrail me={me} id={id} onReload={onTrailReload} />}
     </Shell>
   );

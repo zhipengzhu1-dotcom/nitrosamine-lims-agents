@@ -48,6 +48,8 @@ test('the tab bar fades where more tabs lie beyond, and the last tab scrolls cle
       return { fade, room: n.getBoundingClientRect().right - fade - last };
     });
   expect((await clearOfFade()).fade, 'the right edge fades while more tabs lie beyond it').toBeGreaterThan(0);
+  for (const tab of await nav.getByRole('link').all())
+    expect((await tab.boundingBox())?.height, 'each tab is a 44 px touch target').toBeGreaterThanOrEqual(44);
   await nav.evaluate((n) => n.scrollTo({ left: n.scrollWidth }));
   await expect
     .poll(async () => (await clearOfFade()).room, 'the last tab ends before the fade')

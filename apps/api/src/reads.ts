@@ -41,9 +41,8 @@ async function testView(scope: Scope, id: string) {
     (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ?? refuse('notFound', 'no such Test');
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
-  const isCustomer = scope.ctx.person.customerId !== null;
-  const visibleToActor = !isCustomer || test.state === 'Reported';
-  const latest = visibleToActor ? await latestVersion(scope, 'test', id) : null;
+  const withheld = scope.ctx.person.customerId !== null && test.state !== 'Reported';
+  const latest = withheld ? null : await latestVersion(scope, 'test', id);
   return {
     test,
     recordVersion: latest && {
@@ -52,8 +51,9 @@ async function testView(scope: Scope, id: string) {
       contentHash: latest.contentHash,
     },
     report: report ? { id: report.id, number: report.number } : null,
-    result: visibleToActor
-      ? ((await scope
+    result: withheld
+      ? null
+      : ((await scope
           .from('result')
           .select([
             'analyte',
@@ -64,10 +64,10 @@ async function testView(scope: Scope, id: string) {
             sql<string>`performed_on::text`.as('performedOn'),
           ])
           .where('testId', '=', id)
-          .executeTakeFirst()) ?? null)
-      : null,
-    signatures: visibleToActor
-      ? await signedVersions(scope)
+          .executeTakeFirst()) ?? null),
+    signatures: withheld
+      ? []
+      : await signedVersions(scope)
           .select([
             'signature.meaning',
             'signature.printedName as signer',
@@ -90,8 +90,8 @@ async function testView(scope: Scope, id: string) {
               ...signature,
               recordVersion: { version, canonicalForm, contentHash },
             })),
-          )
-      : [],
+          ),
+    withheld,
     next: nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test)),
   };
 }

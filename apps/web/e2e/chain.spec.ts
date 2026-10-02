@@ -67,6 +67,42 @@ async function atLeast(target: Locator, width: number, height: number) {
   expect(b.height + 0.01, 'touch target height').toBeGreaterThanOrEqual(height);
 }
 
+const PHONE = { width: 390, height: 844 };
+const DESKTOP = { width: 1360, height: 900 };
+
+const uncovered = (target: Locator) =>
+  target.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const corners = [
+      [r.left + 12, r.top + 12],
+      [r.right - 12, r.top + 12],
+      [r.left + 12, r.bottom - 12],
+      [r.right - 12, r.bottom - 12],
+    ] as const;
+    return corners.every(([x, y]) => el.contains(document.elementFromPoint(x, y)));
+  });
+
+async function typeWhileTheSheetSlidesIn(page: Page, type: () => Promise<void>) {
+  await type();
+  const own = page.viewportSize() ?? DESKTOP;
+  const rail = await box(page.locator('footer.rail'));
+  expect(rail.y + rail.height, 'the rail stays at the foot of the screen').toBeCloseTo(own.height, 0);
+  const sheet = page.locator('form.sheet');
+  await sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+  const what = sheet.locator('section').filter({ has: page.getByRole('heading', { name: 'What you are signing' }) });
+  const sign = sheet.getByRole('button', { name: /^Sign as / });
+  for (const size of [own, PHONE, DESKTOP]) {
+    const at = `at ${size.width}x${size.height}`;
+    await page.setViewportSize(size);
+    await what.scrollIntoViewIfNeeded();
+    await expect(what, `What you are signing is whole on screen ${at}`).toBeInViewport({ ratio: 1 });
+    expect(await uncovered(what), `nothing covers What you are signing ${at}`).toBe(true);
+    await expect(sign, `the Sign button is on screen ${at}`).toBeInViewport({ ratio: 1 });
+    await sign.click({ trial: true });
+  }
+  await page.setViewportSize(own);
+}
+
 test('the whole chain through the UI, ending in a Test Report with three Signatures', async ({ page }) => {
   const description = `Metformin HCl 500 mg tablets, lot NW-0042 (fictional, ${test.info().project.name} ${randomUUID()})`;
   const openTheTest = async () => {
@@ -129,7 +165,9 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     'Notebook reference': 'RD-NB-0007-012',
     'Performed on': '2026-09-30',
   };
-  for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
+  await typeWhileTheSheetSlidesIn(page, async () => {
+    for (const [label, value] of Object.entries(result)) await page.getByLabel(label, { exact: true }).fill(value);
+  });
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
   await shot(page, 'test-signature-sheet');
   await sign(page, 'Performed');
@@ -150,6 +188,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(review).toBeFocused();
 
   await review.click();
+  await typeWhileTheSheetSlidesIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
   const height = (await box(sheet)).height;
   await sign(page, 'Reviewed', 'not-the-password');
   await railSays(page, 'Refused: the credentials are not valid. Nothing has been signed.');
@@ -202,9 +241,18 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(page.getByRole('status'), 'with no step left, focus goes to the status line').toBeFocused();
   await signOut(page);
 
+  await signIn(page, 'cora.customer');
+  await openTheTest();
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Reviewed');
+  await expect(page.getByText('The Result is not released yet.')).toBeVisible();
+  await expect(page.getByText('The Signatures are not released yet.')).toBeVisible();
+  await expect(page.getByText(/No Result entered|No Signatures yet/), 'never that none exists').toHaveCount(0);
+  await signOut(page);
+
   await signIn(page, 'quinn.qa');
   await openTheTest();
   await page.getByRole('button', { name: 'Release' }).click();
+  await typeWhileTheSheetSlidesIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
   let dropped = false;
   await page.route('**/api/steps/release', async (route) => {
     if (dropped) return route.continue();

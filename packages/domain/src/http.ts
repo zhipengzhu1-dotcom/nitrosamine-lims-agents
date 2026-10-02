@@ -228,13 +228,17 @@ const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' })
 /** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
 const username = Type.String({ pattern: '^[a-z][a-z0-9.-]{2,39}$' });
 const reportRef = Type.Object({ id: uuid, number: Type.String() });
-/** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
+/**
+ * `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed.
+ * `withheld` is true while the Result, Signatures and Record Version are held back from a Customer until release, so their absence never reads as none.
+ */
 const testView = Type.Object({
   test: testRow,
   recordVersion: nullable(recordVersionRef),
   report: nullable(reportRef),
   result: nullable(result),
   signatures: Type.Array(signature),
+  withheld: Type.Boolean(),
   next: nullable(Type.Enum(stepNames)),
 });
 const testReport = Type.Object({
