@@ -147,6 +147,7 @@ export function stepAction(
         : null,
     async run(input, credentials) {
       // Kept until the server answers, even across a reload, so the same press after no answer resends its Commit Key.
+      // A keyReused answer keeps it too: the LIMS already holds that press, and a fresh key would record it again.
       // The slot names the press by a digest, so no entries are kept in the browser.
       const slot = await commitKeySlot(pressText(name, testId, input));
       const commitKey = sessionStorage.getItem(slot) ?? crypto.randomUUID();
@@ -164,7 +165,6 @@ export function stepAction(
             },
           }),
       }).catch(async (e: unknown) => {
-        // A keyReused refusal means the LIMS holds this key's press: a fresh key would record the press a second time.
         if (e instanceof Refused && e.kind !== 'failure' && e.kind !== 'keyReused') sessionStorage.removeItem(slot);
         // The record or the statement moved on: the page reads it again, so the next sheet shows what is current.
         if (e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) await onDone();

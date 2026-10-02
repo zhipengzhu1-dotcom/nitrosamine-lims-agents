@@ -49,6 +49,20 @@ async function signInDropOneSubmitAndReload(page: Page, description: string) {
   return commitKeys;
 }
 
+function countSubmissionsInTheAuditTrail(description: string) {
+  const count = execFileSync(
+    '../../scripts/pg.sh',
+    ['psql', '-qtA', '-v', 'ON_ERROR_STOP=1', '-d', E2E_DATABASE, '-v', `description=${description}`],
+    {
+      input: `select count(*) from lims.audit_entry
+               where table_name = 'submission' and op = 'INSERT'
+                 and new_row ->> 'id' in (select submission_id::text from lims.sample where description = :'description');`,
+      encoding: 'utf8',
+    },
+  );
+  return Number(count.trim());
+}
+
 test('a Submission with other entries after a dropped Submit and a reload is recorded at the first press', async ({
   page,
 }) => {
@@ -102,21 +116,7 @@ test('the same entries pressed twice after a dropped Submit, a sign-out and a si
   expect(await press(), 'the second press is refused with the same message').toBe(first);
   expect(commitKeys, 'both presses resend the Commit Key of the saved press').toHaveLength(3);
   expect(new Set(commitKeys).size).toBe(1);
-  expect(submissionsInTheAuditTrail(dropped), 'the Audit Trail holds one Submission for the entries').toBe(1);
+  expect(countSubmissionsInTheAuditTrail(dropped), 'the Audit Trail holds one Submission for the entries').toBe(1);
   await page.reload();
   await expect(page.getByRole('row', { name: dropped }), 'the Submission is saved once').toHaveCount(1);
 });
-
-function submissionsInTheAuditTrail(description: string) {
-  const count = execFileSync(
-    '../../scripts/pg.sh',
-    ['psql', '-qtA', '-v', 'ON_ERROR_STOP=1', '-d', E2E_DATABASE, '-v', `description=${description}`],
-    {
-      input: `select count(*) from lims.audit_entry
-               where table_name = 'submission' and op = 'INSERT'
-                 and new_row ->> 'id' in (select submission_id::text from lims.sample where description = :'description');`,
-      encoding: 'utf8',
-    },
-  );
-  return Number(count.trim());
-}
