@@ -2766,9 +2766,7 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
 
 describe("a Lab's time zone changes only through a migration, and a Signature and a Received keep the zone in force when written", () => {
   it("the app role holds no update on a Lab's time zone, so a statement that changes it is refused", async () => {
-    const error = await refusalOf(
-      `set local role lims_app; update lims.lab set time_zone = 'Asia/Tokyo' where lab_id = '${id.lab}'`,
-    );
+    const error = await refusalOf("set local role lims_app; update lims.lab set time_zone = 'Asia/Tokyo'");
     assert.equal(error.code, '42501', error.message);
     const { rows } = await client.query<{ privilege: string }>(
       `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
@@ -2817,13 +2815,8 @@ describe("a Lab's time zone changes only through a migration, and a Signature an
         id: sample,
         received_time_zone: 'Asia/Tokyo',
       });
-      const zone = async (change: string) =>
-        (
-          await client.query<{ zone: string | null }>(
-            `update lims.sample set ${change} where id = $1 returning received_time_zone as zone`,
-            [sample],
-          )
-        ).rows[0]?.zone;
+      const zone = async (update: string, ...rest: unknown[]) =>
+        (await client.query<{ zone: string | null }>(update, [sample, ...rest])).rows[0]?.zone;
       const inserted = await client.query<{ zone: string | null }>(
         `${statement} returning received_time_zone as zone`,
         values,
@@ -2831,10 +2824,21 @@ describe("a Lab's time zone changes only through a migration, and a Signature an
       assert.deepEqual(
         [
           inserted.rows[0]?.zone,
-          await zone(`received_time_zone = 'Asia/Tokyo'`),
-          await zone('received_at = clock_timestamp()'),
-          await zone(`received_time_zone = 'Asia/Tokyo', description = 'Capsules, relabelled'`),
-          await zone('received_time_zone = null'),
+          await zone(
+            'update lims.sample set received_time_zone = $2 where id = $1 returning received_time_zone as zone',
+            'Asia/Tokyo',
+          ),
+          await zone(
+            'update lims.sample set received_at = clock_timestamp() where id = $1 returning received_time_zone as zone',
+          ),
+          await zone(
+            'update lims.sample set received_time_zone = $2, description = $3 where id = $1 returning received_time_zone as zone',
+            'Asia/Tokyo',
+            'Capsules, relabelled',
+          ),
+          await zone(
+            'update lims.sample set received_time_zone = null where id = $1 returning received_time_zone as zone',
+          ),
         ],
         [null, null, 'America/New_York', 'America/New_York', 'America/New_York'],
       );
