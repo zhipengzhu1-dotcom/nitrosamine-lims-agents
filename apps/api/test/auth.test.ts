@@ -67,10 +67,9 @@ it('a session ends when idle too long, when too old, and on logout', async () =>
     .execute();
   assert.equal((await sessions.out.call(routes.logout)).status, 200);
 
-  const ended = SESSION_ENDED;
   for (const [name, client, message] of [
-    ['idle', sessions.idle, ended],
-    ['old', sessions.old, ended],
+    ['idle', sessions.idle, SESSION_ENDED],
+    ['old', sessions.old, SESSION_ENDED],
     ['out', sessions.out, 'sign in first'],
   ] as const)
     assert.equal(refusedWith(await client.call(routes.me), 'noSession'), message, name);

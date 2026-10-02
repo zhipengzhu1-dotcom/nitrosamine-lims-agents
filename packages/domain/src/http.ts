@@ -64,7 +64,7 @@ const sessionClock = Type.Object({
   absoluteLeftMs: Type.Integer({ minimum: 0 }),
 });
 export type SessionClock = Static<typeof sessionClock>;
-/** What a person is told when their session has ended, by the API's refusal or by the web's countdown. */
+/** What a person is told when the API refuses a session that has ended; the web shows it as the API sends it. */
 export const SESSION_ENDED = 'Your session has ended. Sign in again.';
 const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock });
 export type SignedInView = Static<typeof signedIn>;

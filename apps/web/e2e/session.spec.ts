@@ -8,9 +8,12 @@ const database = execFileSync(process.execPath, ['../../packages/db/src/checkout
   encoding: 'utf8',
 }).trim();
 
-/** Puts this page's session past the demo idle limit on the server, as nine hours without a request would. */
+/**
+ * Puts this page's session past the demo idle limit on the server, as nine hours without a request would. A walk has no
+ * clock seam into the API, and the session row is working state the Audit Trail does not hold.
+ */
 async function idleOnTheServer(page: Page) {
-  const token = (await page.context().cookies()).find((c) => c.name === 'lims_session')?.value;
+  const token = (await page.context().cookies()).find((cookie) => cookie.name === 'lims_session')?.value;
   if (!token) throw new Error('the page holds no session cookie');
   execFileSync(
     '../../scripts/pg.sh',
@@ -22,6 +25,8 @@ async function idleOnTheServer(page: Page) {
     },
   );
 }
+
+const FULL_COUNT = /^Session ends in (8:00:00|7:59:\d\d)$/;
 
 const answered = (page: Page, status: number) =>
   page.waitForResponse((res) => res.url().endsWith('/api/me') && res.status() === status);
@@ -44,14 +49,12 @@ test('the Bench Rail counts down to the idle end, and returns to sign-in only wh
   await page.getByRole('link', { name: 'Equipment' }).click();
   await page.getByRole('link', { name: 'Tests' }).click();
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
-  await expect(countdown, 'a request restarts the idle count').toHaveText(/^Session ends in (8:00:00|7:59:\d\d)$/);
+  await expect(countdown, 'a request restarts the idle count').toHaveText(FULL_COUNT);
 
   const kept = answered(page, 200);
   await page.clock.fastForward('08:00:10');
   await kept;
-  await expect(countdown, 'the server still holds the session, so the count restarts').toHaveText(
-    /^Session ends in (8:00:00|7:59:\d\d)$/,
-  );
+  await expect(countdown, 'the server still holds the session, so the count restarts').toHaveText(FULL_COUNT);
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
 
   await idleOnTheServer(page);

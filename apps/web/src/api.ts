@@ -62,7 +62,7 @@ function setSecondsLeft(left: number | null) {
 
 /** Longer than any request takes, so that by then the server's own count has run out too. */
 const END_GRACE_MS = 5000;
-let asking = false;
+let askedAt: number | null = null;
 
 /**
  * Counts down, and once the page's count has run out by more than END_GRACE_MS asks the server. Only the server's
@@ -73,14 +73,14 @@ function tick() {
   const now = pageNow();
   const endsAt = Math.min(session.lastSentAt + session.idleLimitMs, session.absoluteEndsAt);
   setSecondsLeft(Math.max(0, Math.ceil((endsAt - now) / 1000)));
-  if (now < endsAt + END_GRACE_MS || asking) return;
-  asking = true;
-  // A noSession refusal ends the session in call(); any other failure is asked again on the next tick.
-  resume()
-    .catch(() => {})
-    .finally(() => {
-      asking = false;
-    });
+  if (now < endsAt + END_GRACE_MS || (askedAt !== null && now < askedAt + END_GRACE_MS)) return;
+  askedAt = now;
+  // A noSession refusal ends the session in call(). Any other failure is asked again a grace period later, and is
+  // rethrown with its context, so it reaches the console instead of vanishing.
+  resume().catch((err: unknown) => {
+    if (err instanceof Refused && err.kind === 'noSession') return;
+    throw new Error('could not ask the LIMS whether the session has ended', { cause: err });
+  });
 }
 
 function endSession(message: string) {
