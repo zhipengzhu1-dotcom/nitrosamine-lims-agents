@@ -112,7 +112,10 @@ async function recordsByCustomer(scope: Scope) {
 }
 
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
-const shownText = (value: ShownValue | null) => value?.text ?? '';
+const shownText = (value: ShownValue | null) =>
+  value?.instant
+    ? `${value.instant.at}${value.instant.atLab ? ` (Lab: ${value.instant.atLab})` : ''}`
+    : (value?.text ?? '');
 const rawText = (value: unknown) =>
   value === undefined || value === null ? '' : typeof value === 'string' ? value : JSON.stringify(value);
 const chainWords = { lab: 'Lab chain', company: 'Company chain' } as const;

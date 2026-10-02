@@ -151,7 +151,7 @@ export async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<Ro
   return images;
 }
 
-/** Each stored instant as the database renders it, in UTC and on the Lab's wall clock, so that no host clock formats one. */
+/** Each stored instant as the database renders it, in UTC and on `zone`'s wall clock, so that no host clock formats one. */
 export async function storedInstantsIn(
   scope: Scope,
   zone: string,

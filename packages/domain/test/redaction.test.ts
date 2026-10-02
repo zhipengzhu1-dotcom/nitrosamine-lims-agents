@@ -148,6 +148,19 @@ describe("an Audit Export replaces another Customer's identifiers and keeps the 
     assert.deepEqual([out.raw.hash, out.raw.prevHash], [HASH, HASH]);
   });
 
+  it("a stored instant's UTC and Lab renderings pass through as the database gave them", () => {
+    const atLab = Value.Decode(instant, '2026-10-01T08:00:00.000000-04:00');
+    const entry = entryNaming('RD-S-2026-000002');
+    const change = {
+      field: 'received_at',
+      label: 'Received',
+      old: null,
+      new: { text: at, ref: null, instant: { at, atLab } },
+    };
+    const out = redact({ ...entry, changes: [change] });
+    assert.deepEqual(out.changes[0]?.new?.instant, { at, atLab });
+  });
+
   it('with no other Customer, a value naming no record is unchanged', () => {
     const entry = entryNaming('NDMA by LC-MS/MS');
     assert.deepEqual(redactionFor(own, [], [])(entry), { ...entry, redacted: false });

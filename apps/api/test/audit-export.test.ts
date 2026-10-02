@@ -177,6 +177,36 @@ it("an entry on a shared record that names another Customer's Sample shows it re
   }
 });
 
+it("a stored instant such as a Sample's receipt shows in UTC and on the Lab's clock, as the database renders it, in the JSON and the CSV", async () => {
+  await submitted(as.cora);
+  const json = await generate(northwindId, 'JSON');
+  const csv = await generate(northwindId, 'CSV');
+  const entry = dataOf(json).entries.find(
+    (e) => e.record.table === 'sample' && e.changes.some((c) => c.field === 'received_at' && c.new !== null),
+  );
+  assert.ok(entry, 'a Sample receipt is in the export');
+  const stored = String(entry.raw.newRow?.received_at);
+  const shown = entry.changes.find((c) => c.field === 'received_at')?.new?.instant;
+  assert.ok(shown?.atLab, 'the receipt carries its Lab time');
+  assert.match(shown.at, /Z$/);
+  assert.match(shown.atLab, /[+-]\d{2}:\d{2}$/);
+  const { rows: compared } = await sql<{ same: boolean }>`
+    select ${shown.at}::timestamptz = ${stored}::timestamptz
+       and ${shown.atLab}::timestamptz = ${stored}::timestamptz as same`.execute(api.db);
+  assert.deepEqual(compared, [{ same: true }], 'both renderings are the stored instant');
+
+  const [header, ...rows] = fileText(csv.files[0])
+    .trimEnd()
+    .split('\r\n')
+    .map((line) => line.split(','));
+  assert.ok(header);
+  const row = rows.find(
+    (r) => r[header.indexOf('Record ID')] === entry.record.id && r[header.indexOf('Field')] === 'received_at',
+  );
+  assert.equal(row?.[header.indexOf('New value')], `${shown.at} (Lab: ${shown.atLab})`);
+  assert.equal(row?.[header.indexOf('New raw value')], stored);
+});
+
 it('the export comes as JSON or CSV with a PDF, each entry carrying its chain, entry number, actor and role, field, old and new value, reason and time', async () => {
   const mine = await submitted(as.cora);
   const json = await generate(northwindId, 'JSON');
@@ -221,10 +251,6 @@ it('the export comes as JSON or CSV with a PDF, each entry carrying its chain, e
       seq: true,
     },
   );
-  const received = dataOf(json)
-    .entries.flatMap((e) => (e.record.table === 'sample' ? e.changes : []))
-    .find((c) => c.field === 'received_at' && c.new !== null);
-  assert.ok(received?.new?.instant?.at && received.new.instant.atLab, 'a stored instant carries its UTC and Lab time');
 
   const [header, ...rows] = fileText(csv.files[0])
     .trimEnd()
