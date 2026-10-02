@@ -27,7 +27,8 @@ test('the Admin records an Identity Verification, creates the account and grants
   await page.getByRole('button', { name: 'Record the Identity Verification' }).click();
   await expect(
     page.getByRole('status').filter({ hasText: `Identity Verification of ${printedName} recorded` }),
-  ).toBeVisible();
+    'a company record time shows in UTC only',
+  ).toHaveText(/ recorded at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC\.$/);
 
   const account = page.getByRole('form', { name: `Account for ${printedName}` });
   await account.getByLabel('Username').fill(username);

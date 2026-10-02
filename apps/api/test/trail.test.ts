@@ -116,9 +116,9 @@ it("the Test's trail lists the Test's, its Result's and Signatures' entries with
   assert.ok(!entries.some((e) => otherTrail.entries.some((o) => o.raw.chain === e.raw.chain && o.seq === e.seq)));
 });
 
-function onLabClock(at: string): string {
+function onLabClock(at: string, timeZone = 'America/New_York'): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'America/New_York',
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -380,6 +380,61 @@ it('a stored instant carries its UTC and Lab-zone renderings, a Record kind read
   }
   assert.equal(changeOf('record_version', 'record_table').text, 'Test');
   assert.match(changeOf('record_version', 'content_hash').text, /^[0-9a-f]{64}$/);
+});
+
+it("a Test's Signatures and Received carry UTC and its Lab's wall clock on the Worklist, the Test and its Test Report, as the trail renders the same stored instant", async () => {
+  const setZone = (timeZone: string) =>
+    audited(
+      api.db,
+      { actor: 'svc:test', role: 'system', reason: 'Show the Lab clock in a zone no other Lab has' },
+      (tx) => tx.updateTable('lab').set({ timeZone }).where('labId', '=', api.labId).execute(),
+    );
+  const { timeZone: before } = await api.db
+    .selectFrom('lab')
+    .select('timeZone')
+    .where('labId', '=', api.labId)
+    .executeTakeFirstOrThrow();
+  const id = await submitTestTo('Reported');
+  await setZone('Asia/Tokyo');
+  try {
+    const { entries, labZone } = await trailOf(id);
+    assert.equal(labZone, 'Asia/Tokyo');
+    const trailed = (table: string, field: string, at: string) =>
+      entries
+        .flatMap((e) => (e.record.table === table ? e.changes : []))
+        .flatMap((c) => (c.field === field && c.new?.instant) || [])
+        .find((i) => i.at.startsWith(at.slice(0, -1))) ?? assert.fail(`no ${table} ${field} in the trail stores ${at}`);
+    const view = ok(await as.rui.call(routes.test, { id }));
+    const report = ok(await as.cora.call(routes.report, { id }));
+    const row = ok(await as.rui.call(routes.tests)).find((t) => t.id === id) ?? assert.fail('the Worklist row');
+    const shown = [
+      ...[view, report].flatMap((r) =>
+        r.signatures.map((s) => ({ table: 'signature', field: 'signed_at', at: s.signedAt, atLab: s.signedAtLab })),
+      ),
+      ...[view.test, report.test, row].map((t) => ({
+        table: 'sample',
+        field: 'received_at',
+        at: t.receivedAt ?? assert.fail('the Received time'),
+        atLab: t.receivedAtLab,
+      })),
+    ];
+    assert.equal(shown.length, 9, 'three Signatures on the Test and on its Test Report, and three Received');
+    for (const { table, field, at, atLab } of shown) {
+      const inTrail = trailed(table, field, at);
+      assert.match(atLab ?? '', /\+09:00$/, `${at} on the Tokyo Lab's clock, not another Lab's`);
+      assert.equal(atLab, inTrail.atLab, `${at} on the Lab wall clock, as the trail renders it`);
+      assert.equal(atLab, onLabClock(inTrail.at, labZone), `${at} on the Lab wall clock, as Intl renders it`);
+    }
+  } finally {
+    await setZone(before);
+  }
+});
+
+it("an unreceived Sample's Received is empty in both renderings on the Worklist and the Test", async () => {
+  const id = await submitTestTo('Requested');
+  const view = ok(await as.rui.call(routes.test, { id }));
+  const row = ok(await as.rui.call(routes.tests)).find((t) => t.id === id) ?? assert.fail('the Worklist row');
+  for (const t of [view.test, row]) assert.deepEqual([t.receivedAt, t.receivedAtLab], [null, null]);
 });
 
 it('the raw entry under each readable entry keeps the stored values and hashes', async () => {

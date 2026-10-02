@@ -6,7 +6,7 @@ import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
 import { staffRoutes } from './staff.ts';
-import { trailRoutes } from './trail.ts';
+import { onWallClock, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
@@ -17,6 +17,7 @@ function visibleTests(scope: Scope) {
     .innerJoin('submission', 'submission.id', 'sample.submissionId')
     .innerJoin('customer', 'customer.id', 'submission.customerId')
     .innerJoin('method', 'method.id', 'test.methodId')
+    .innerJoin('lab', 'lab.labId', 'test.labId')
     .leftJoin('person as assignee', 'assignee.id', 'test.assigneeId')
     .select([
       'test.id',
@@ -25,6 +26,7 @@ function visibleTests(scope: Scope) {
       'sample.number as sampleNumber',
       'sample.description',
       'sample.receivedAt',
+      onWallClock(sql.ref<Date | null>('sample.received_at'), sql.ref('lab.time_zone')).as('receivedAtLab'),
       'customer.name as customer',
       'method.code as methodCode',
       'method.version as methodVersion',
@@ -73,12 +75,14 @@ async function testView(scope: Scope, id: string) {
     signatures: withheld
       ? []
       : await signedVersions(scope)
+          .innerJoin('lab', 'lab.labId', 'signature.labId')
           .select([
             'signature.meaning',
             'signature.printedName as signer',
             'signature.username',
             'signature.role',
             'signature.signedAt',
+            onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('lab.time_zone')).as('signedAtLab'),
             'recordVersion.recordTable as record',
             'recordVersion.version',
             'recordVersion.canonicalForm',
