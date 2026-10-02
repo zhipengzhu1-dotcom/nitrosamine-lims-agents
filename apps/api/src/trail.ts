@@ -185,6 +185,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'test':
     case 'result':
     case 'test_report':
+    case 'record_version':
     case 'signature':
       return true;
   }
@@ -213,6 +214,11 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
               eb(rowId, 'in', ids),
               eb(sql<string>`coalesce(new_row, old_row)->>'test_id'`, '=', id),
               eb(sql<string>`coalesce(new_row, old_row)->>'record_id'`, 'in', ids),
+              eb(
+                sql<string>`coalesce(new_row, old_row)->>'record_version_id'`,
+                'in',
+                scope.from('recordVersion').select(sql<string>`id::text`.as('id')).where('recordId', 'in', ids),
+              ),
             ]),
           ]),
           eb.and([eb('chain', '=', 'company'), eb('tableName', '=', 'submission'), eb(rowId, '=', test.submissionId)]),

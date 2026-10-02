@@ -43,9 +43,17 @@ async function writtenBy(testId: string) {
     .selectFrom('auditEntry')
     .select(['tableName', 'op'])
     .where('reason', '=', 'enterResult')
-    .where(sql<boolean>`coalesce(new_row ->> 'test_id', new_row ->> 'record_id', new_row ->> 'id') = ${testId}`)
+    .where(
+      sql<boolean>`coalesce(new_row ->> 'test_id', new_row ->> 'record_id', new_row ->> 'id') = ${testId}
+        or new_row ->> 'record_version_id' in (select id::text from lims.record_version where record_id = ${testId})`,
+    )
     .execute();
-  const signatures = await db.selectFrom('signature').select('meaning').where('recordId', '=', testId).execute();
+  const signatures = await db
+    .selectFrom('signature')
+    .innerJoin('recordVersion', 'recordVersion.id', 'signature.recordVersionId')
+    .select('signature.meaning')
+    .where('recordVersion.recordId', '=', testId)
+    .execute();
   return {
     stateMoves: entries.filter((e) => e.tableName === 'test' && e.op === 'UPDATE').length,
     signatures: signatures.map((s) => s.meaning),
@@ -72,7 +80,7 @@ const totals = async () => ({
 const once = {
   stateMoves: 1,
   signatures: ['Performed'],
-  auditEntries: ['INSERT result', 'INSERT signature', 'UPDATE test'],
+  auditEntries: ['INSERT record_version', 'INSERT result', 'INSERT signature', 'UPDATE test'],
 };
 
 it('a signing step sent twice with the same Commit Key answers the first receipt and commits once', async () => {

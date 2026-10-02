@@ -24,6 +24,7 @@ const id = {
   untested: randomUUID(),
   result: randomUUID(),
   testReport: randomUUID(),
+  laterRecordVersion: randomUUID(),
   signature: randomUUID(),
   session: randomUUID(),
   otherSession: randomUUID(),
@@ -81,15 +82,25 @@ const fixture: [string, Row][] = [
   ],
   ['lims.test_report', { lab_id: id.lab, id: id.testReport, test_id: id.test, number: 'RF-R-2026-000001' }],
   [
+    'lims.record_version',
+    {
+      lab_id: id.lab,
+      id: id.laterRecordVersion,
+      record_table: 'test',
+      record_id: id.untested,
+      version: 2,
+      canonical_form: 0,
+      content: Buffer.from('{"id":"fixture"}'),
+    },
+  ],
+  [
     'lims.signature',
     {
       lab_id: id.lab,
       id: id.signature,
       person_id: id.person,
       meaning: 'Performed',
-      record_table: 'test',
-      record_id: id.test,
-      content: Buffer.from('{"id":"fixture"}'),
+      record_version_id: id.laterRecordVersion,
     },
   ],
   ['lims.session', { lab_id: id.lab, id: id.session, person_id: id.person, token_hash: token }],
@@ -240,17 +251,22 @@ const tables = {
     row: { lab_id: id.lab, test_id: id.untested, number: 'RF-R-2026-000002' },
     notNull: ['lab_id', 'id', 'test_id', 'number'],
   },
-  'lims.signature': {
-    noun: 'Signature',
+  'lims.record_version': {
+    noun: 'Record Version',
     row: {
       lab_id: id.lab,
-      person_id: id.person,
-      meaning: 'Reviewed',
       record_table: 'test',
-      record_id: id.test,
-      content: Buffer.from('{"id":"second"}'),
+      record_id: id.untested,
+      version: 3,
+      canonical_form: 1,
+      content: Buffer.from('{"id":"third"}'),
     },
-    notNull: ['lab_id', 'id', 'person_id', 'meaning', 'record_table', 'record_id', 'content', 'signed_at'],
+    notNull: ['lab_id', 'id', 'record_table', 'record_id', 'version', 'canonical_form', 'content', 'saved_at'],
+  },
+  'lims.signature': {
+    noun: 'Signature',
+    row: { lab_id: id.lab, person_id: id.person, meaning: 'Reviewed', record_version_id: id.laterRecordVersion },
+    notNull: ['lab_id', 'id', 'person_id', 'meaning', 'record_version_id', 'signed_at'],
   },
   'lims.session': {
     noun: 'session',
@@ -270,7 +286,7 @@ const tables = {
       sqlstate: '23514',
       constraint_name: 'result_value_check',
     },
-    notNull: ['id', 'kind', 'reference', 'opened_at', 'step', 'error_class', 'state'],
+    notNull: ['id', 'kind', 'reference', 'opened_at', 'state'],
   },
   'lims.commit_key': {
     noun: 'Commit Key',
@@ -298,7 +314,7 @@ const tables = {
       source_address: '192.0.2.1',
       roles: '{Analyst}',
     },
-    notNull: ['id', 'kind', 'source_address', 'roles', 'at'],
+    notNull: ['id', 'kind', 'roles', 'at'],
   },
   'lims.audit_chain': {
     noun: 'Audit Trail chain head',
@@ -343,6 +359,7 @@ const auditedTables: Table[] = [
   'lims.test',
   'lims.result',
   'lims.test_report',
+  'lims.record_version',
   'lims.signature',
   'lims.system_incident',
   'lims.access_event',
@@ -442,6 +459,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.test': { id: id.test },
     'lims.result': { id: id.result },
     'lims.test_report': { id: id.testReport },
+    'lims.record_version': { id: id.laterRecordVersion },
     'lims.signature': { id: id.signature },
     'lims.session': { id: id.session },
     'lims.system_incident': { id: id.systemIncident },
@@ -536,6 +554,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.test_report',
       change: { test_id: id.test },
       constraint: 'test_report_lab_id_test_id_key',
+    },
+    {
+      name: 'a second Record Version with the number of an existing one is refused',
+      table: 'lims.record_version',
+      change: { version: 2 },
+      constraint: 'record_version_lab_id_record_table_record_id_version_key',
     },
     {
       name: 'a second counter for one kind in one Lab is refused',
@@ -668,12 +692,25 @@ describe('the database refuses a reference to a row that does not exist', () => 
       change: { lab_id: id.otherLab },
       constraint: 'test_report_lab_id_test_id_fkey',
     },
+    noLab('lims.record_version', 'Record Version'),
     noLab('lims.signature', 'Signature'),
     {
       name: 'a Signature by a person who does not exist is refused',
       table: 'lims.signature',
       change: { person_id: missing },
       constraint: 'signature_person_id_fkey',
+    },
+    {
+      name: 'a Signature on a Record Version that does not exist is refused',
+      table: 'lims.signature',
+      change: { record_version_id: missing },
+      constraint: 'signature_lab_id_record_version_id_fkey',
+    },
+    {
+      name: 'a Signature on a Record Version in another Lab is refused',
+      table: 'lims.signature',
+      change: { lab_id: id.otherLab },
+      constraint: 'signature_lab_id_record_version_id_fkey',
     },
     noLab('lims.session', 'session'),
     noLab('lims.counter', 'counter'),
@@ -695,6 +732,12 @@ describe('the database refuses a reference to a row that does not exist', () => 
       table: 'lims.system_incident',
       change: { requested_by: missing },
       constraint: 'system_incident_requested_by_fkey',
+    },
+    {
+      name: 'a lockout System Incident naming an account that does not exist is refused',
+      table: 'lims.system_incident',
+      change: { kind: 'Lockout', subject_id: missing, step: null, error_class: null },
+      constraint: 'system_incident_subject_id_fkey',
     },
     {
       name: 'a System Incident in a Lab that does not exist is refused',
@@ -748,7 +791,13 @@ describe('the database refuses a reference to a row that does not exist', () => 
 });
 
 describe('the database refuses a value outside its allowed set', () => {
-  const each = (name: string, table: Table, column: string, values: string[], constraint: string): Case[] =>
+  const incidentFacts = (what: string, change: Row): Case => ({
+    name: `${what} is refused`,
+    table: 'lims.system_incident',
+    change,
+    constraint: 'system_incident_facts_check',
+  });
+  const each = (name: string, table: Table, column: string, values: unknown[], constraint: string): Case[] =>
     values.map((value) => ({
       name: `${name}: ${JSON.stringify(value)}`,
       table,
@@ -778,11 +827,25 @@ describe('the database refuses a value outside its allowed set', () => {
       'test_gxp_class_check',
     ),
     ...each(
-      'a Signature on a record other than a Test or a Test Report is refused',
-      'lims.signature',
+      'a Record Version of a record other than a Test or a Test Report is refused',
+      'lims.record_version',
       'record_table',
       ['result', 'sample'],
-      'signature_record_table_check',
+      'record_version_record_table_check',
+    ),
+    ...each(
+      'a Record Version numbered below 1 is refused',
+      'lims.record_version',
+      'version',
+      [0, -1],
+      'record_version_version_check',
+    ),
+    ...each(
+      'a Record Version in a canonical form the LIMS has never written is refused',
+      'lims.record_version',
+      'canonical_form',
+      [2, -1],
+      'record_version_canonical_form_check',
     ),
     ...each(
       'an Audit Trail entry for an operation other than insert, update or delete is refused',
@@ -805,6 +868,48 @@ describe('the database refuses a value outside its allowed set', () => {
       ['2351', '235140', '2351a'],
       'system_incident_sqlstate_check',
     ),
+    incidentFacts('an unexpected-failure System Incident without its step', { step: null, error_class: null }),
+    incidentFacts('an unexpected-failure System Incident without its error class', { error_class: null }),
+    incidentFacts('an unraisable-log-line System Incident without its step', {
+      kind: 'UnraisableLogLine',
+      step: null,
+      error_class: null,
+    }),
+    incidentFacts('an unexpected-failure System Incident that names an account', { subject_id: id.person }),
+    incidentFacts('a lockout System Incident that names no account', {
+      kind: 'Lockout',
+      step: null,
+      error_class: null,
+    }),
+    incidentFacts('a lockout System Incident with a failing step', { kind: 'Lockout', subject_id: id.person }),
+    incidentFacts('a sign-in burst System Incident that names no address', {
+      kind: 'SignInBurstFromAddress',
+      step: null,
+      error_class: null,
+    }),
+    incidentFacts('an unknown-ID burst System Incident that names no hash', {
+      kind: 'SignInBurstOnUnknownUserId',
+      step: null,
+      error_class: null,
+    }),
+    incidentFacts('a locked-account System Incident that also names an address', {
+      kind: 'RepeatedSignInOnLockedAccount',
+      subject_id: id.person,
+      source_address: '192.0.2.9',
+      step: null,
+      error_class: null,
+    }),
+    {
+      name: 'an unknown-ID burst System Incident whose hash is not 32 bytes is refused',
+      table: 'lims.system_incident',
+      change: {
+        kind: 'SignInBurstOnUnknownUserId',
+        typed_user_id_hmac: Buffer.alloc(16, 3),
+        step: null,
+        error_class: null,
+      },
+      constraint: 'system_incident_typed_user_id_hmac_check',
+    },
     {
       name: 'an Audit Trail entry without a transaction ID is refused',
       table: 'lims.audit_entry',
@@ -848,6 +953,26 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { kind, failure_reason: null },
       constraint: 'access_event_session_kind_check',
     })),
+    ...(['IdleExpiry', 'AbsoluteExpiry'] as const).flatMap((kind) => [
+      {
+        name: `an Access Event of kind ${kind} without a session is refused`,
+        table: 'lims.access_event' as const,
+        change: { kind, failure_reason: null, source_address: null },
+        constraint: 'access_event_session_kind_check',
+      },
+      {
+        name: `an Access Event of kind ${kind} with a source address is refused`,
+        table: 'lims.access_event' as const,
+        change: { kind, failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+        constraint: 'access_event_source_address_check',
+      },
+    ]),
+    {
+      name: 'an Access Event of a kind other than expiry without a source address is refused',
+      table: 'lims.access_event',
+      change: { source_address: null },
+      constraint: 'access_event_source_address_check',
+    },
     {
       name: 'a failed sign-in Access Event without a failure reason is refused',
       table: 'lims.access_event',
@@ -1064,8 +1189,27 @@ describe('an audited write without an actor, a role and a reason is refused', ()
   }
 });
 
-describe('a Signature, an Access Event, an Audit Trail entry, a Commit Key or a System Incident is never changed or removed, even by the superuser', () => {
+describe('a Signature, a Record Version, an Access Event, an Audit Trail entry, a Commit Key or a System Incident is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
+    {
+      name: 'updating a Record Version is refused',
+      table: 'lims.record_version',
+      trigger: 'refuse_change',
+      statement: `update lims.record_version set version = version + 10`,
+    },
+    {
+      name: 'deleting a Record Version is refused',
+      table: 'lims.record_version',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.record_version',
+    },
+    {
+      // Postgres refuses to truncate a foreign-key target on its own, so the Signatures are named with it.
+      name: 'truncating the Record Versions is refused',
+      table: 'lims.record_version',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.record_version, lims.signature',
+    },
     {
       name: 'updating a Signature is refused',
       table: 'lims.signature',
@@ -1160,6 +1304,9 @@ describe('a Signature, an Access Event, an Audit Trail entry, a Commit Key or a 
       error_class: 'TypeError',
       sqlstate: null,
       constraint_name: null,
+      subject_id: id.person,
+      source_address: '192.0.2.9',
+      typed_user_id_hmac: Buffer.alloc(32, 9),
     };
     for (const [column, value] of Object.entries(changes)) {
       const error = await refusalOf(
@@ -1191,12 +1338,23 @@ it('every lims table is captured in the Audit Trail except the sessions, the Com
 it('every constraint and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
+    ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
     ['public.schema_migration.refuse_change', 'migrate.test.ts'],
     ['public.schema_migration.refuse_truncate', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_not_null', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_check', 'migrate.test.ts'],
-    ['lims.signature.signature_content_hash_not_null', 'unreachable: generated from content, which is not null'],
+    [
+      'lims.record_version.record_version_content_hash_not_null',
+      'unreachable: generated from content, which is not null',
+    ],
     ['lims.session.session_lab_id_id_person_id_key', 'unreachable: (lab_id, id) is already the key'],
+    ['lims.test.version_record', 'record-version.test.ts'],
+    ['lims.result.version_record', 'record-version.test.ts'],
+    ['lims.test_report.version_record', 'record-version.test.ts'],
+    ['lims.sample.version_record', 'record-version.test.ts'],
+    ['lims.submission.version_record', 'record-version.test.ts'],
+    ['lims.method.version_record', 'record-version.test.ts'],
+    ['lims.customer.version_record', 'record-version.test.ts'],
   ]);
   const { rows } = await client.query<{ rule: string }>(
     `select n.nspname || '.' || c.relname || '.' || k.conname as rule

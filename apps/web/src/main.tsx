@@ -1,7 +1,7 @@
-import { type ActorContext, type AuditedTable, isAuditedTable, routes } from '@lims/domain';
+import { type ActorContext, type AuditedTable, isAuditedTable } from '@lims/domain';
 import { Fragment, StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { api, onActorChanged, onSignedOut } from './api.ts';
+import { onActorChanged, onSignedOut, resume } from './api.ts';
 import { Placeholder } from './placeholder.tsx';
 import { ReportPage } from './report.tsx';
 import { LabSwitchPage, SignIn } from './signin.tsx';
@@ -47,7 +47,7 @@ function App() {
       setMe(null);
       setNotice(message);
     });
-    api(routes.me).then(setMe, () => setNotice(''));
+    resume().then(setMe, () => setNotice(''));
   }, []);
 
   if (me === undefined) return null;

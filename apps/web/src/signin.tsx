@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
-import { api, switchLab, useApi } from './api.ts';
+import { signIn, switchLab, useApi } from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
 
 type Credentials = RouteInput<typeof routes.switchLab>[0];
@@ -88,7 +88,7 @@ export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorConte
           labs={labs}
           commit="Sign in"
           notice={notice}
-          onSubmit={(c) => api(routes.login, c).then(onIn)}
+          onSubmit={(c) => signIn(c).then(onIn)}
         />
       </main>
     </div>

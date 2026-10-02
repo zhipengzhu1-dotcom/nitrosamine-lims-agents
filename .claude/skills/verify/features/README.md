@@ -35,5 +35,6 @@ Each feature file starts with an H1 and one paragraph on the behaviour a user se
 - [Take a Test through its steps](./test-steps.md) covers Receive, Assign, Enter Result, Review and Release, with their Signatures and refusals.
 - [Test Report](./test-report.md) covers the released report and its three Signatures.
 - [Test Audit Trail](./test-audit-trail.md) covers the Audit Trail panel on a Test page, the entries behind it, raw entries, record links and QA's Verify chain.
+- [Record Versions and unsigned Signatures](./record-versions.md) covers the Record Version a Test shows, the version each Signature binds to, and the `unsigned` marker after a change behind the chain.
 
 Not mapped yet: the nav modules (Equipment, Inventory, Deviations, Documents, Training, Stability, Notebooks, Dashboards). Each is a placeholder page at `#/<module>` that says what it will hold. Add a feature file when one of them gets behaviour.

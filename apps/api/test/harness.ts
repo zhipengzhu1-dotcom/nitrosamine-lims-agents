@@ -51,8 +51,11 @@ export type Answer<R extends Route> = Exclude<Reply<R>, { kind: 'breach' }>;
 export class Client {
   cookie = '';
   base: string;
-  constructor(base: string) {
+  /** The source address the test's proxy forwards, or none for the socket's own address. */
+  from: string | null;
+  constructor(base: string, from: string | null = null) {
     this.base = base;
+    this.from = from;
   }
 
   call<R extends Route>(route: R, ...request: RouteInput<R>): Promise<Answer<R>> {
@@ -63,7 +66,11 @@ export class Client {
     const post = route.method === 'POST';
     const res = await fetch(this.base + pathOf(route, request), {
       method: route.method,
-      headers: { cookie: this.cookie, ...(post ? { 'content-type': 'application/json' } : {}) },
+      headers: {
+        cookie: this.cookie,
+        ...(post ? { 'content-type': 'application/json' } : {}),
+        ...(this.from ? { 'x-forwarded-for': this.from } : {}),
+      },
       ...(post ? { body: JSON.stringify(request ?? {}) } : {}),
     });
     for (const header of res.headers.getSetCookie()) {
@@ -94,9 +101,37 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
 
 const accessEventKey = randomBytes(32);
 
-async function listen(db: Kysely<DB>, { secureCookie = false, log }: { secureCookie?: boolean; log?: LogSink } = {}) {
+interface ListenOptions {
+  secureCookie?: boolean;
+  log?: LogSink;
+  login?: AppOptions['login'];
+  sweepEveryMs?: number | null;
+  logVolume?: AppOptions['logVolume'];
+  trustedProxies?: string[];
+}
+
+/** Listens on 127.0.0.1 and trusts it as a proxy unless told otherwise, so a Client's `from` sets the source address. */
+async function listen(
+  db: Kysely<DB>,
+  {
+    secureCookie = false,
+    log,
+    login = 'decided',
+    sweepEveryMs = null,
+    logVolume = null,
+    trustedProxies = ['127.0.0.1'],
+  }: ListenOptions = {},
+) {
   const lines: string[] = [];
-  const app = buildApp(db, { log: log ?? { write: (line) => lines.push(line) }, secureCookie, accessEventKey });
+  const app = buildApp(db, {
+    log: log ?? { write: (line) => lines.push(line) },
+    logVolume,
+    secureCookie,
+    accessEventKey,
+    login,
+    sweepEveryMs,
+    trustedProxies,
+  });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
   after(() => app.close());
   return {
@@ -107,7 +142,10 @@ async function listen(db: Kysely<DB>, { secureCookie = false, log }: { secureCoo
   };
 }
 
-/** A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API that keeps its log lines, torn down after the file's tests. */
+/**
+ * A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API with the decided
+ * login and no sweep of its own, that keeps its log lines, torn down after the file's tests.
+ */
 export async function startApi(name: string) {
   const database = checkoutDatabase(name);
   const admin = createDb(databaseUrl(server, 'postgres'));
@@ -136,7 +174,17 @@ export async function startApi(name: string) {
     accessEventKey,
     log,
     logLines,
-    startAnotherApi: (options: { secureCookie?: boolean; log?: LogSink } = {}) => listen(db, options),
+    startAnotherApi: (options: ListenOptions = {}) => listen(db, options),
+    /** The clock seam: moves a person's open sessions `ms` into the past, as a clock advanced by `ms` would leave them. */
+    async advanceClock(account: Account, ms: number): Promise<void> {
+      const by = sql`${ms} * interval '1 millisecond'`;
+      await superuser
+        .updateTable('session')
+        .set({ createdAt: sql`created_at - ${by}`, lastSeenAt: sql`last_seen_at - ${by}` })
+        .where('personId', '=', account.id)
+        .where('endedAt', 'is', null)
+        .execute();
+    },
     labId,
     qcLabId,
     methodId,

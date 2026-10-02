@@ -16,7 +16,8 @@ alter table lims.access_event
   drop constraint access_event_session_kind_check,
   drop constraint access_event_failure_check,
   add constraint access_event_session_kind_check check (
-    (session_id is not null or kind::text not in ('SignInSucceeded', 'SignOut', 'LabSwitch', 'LabSwitchFailed'))
+    (session_id is not null
+     or kind::text not in ('SignInSucceeded', 'SignOut', 'IdleExpiry', 'AbsoluteExpiry', 'LabSwitch', 'LabSwitchFailed'))
     and (session_id is null or kind <> 'SignInFailed')
   ),
   add constraint access_event_failure_check check (

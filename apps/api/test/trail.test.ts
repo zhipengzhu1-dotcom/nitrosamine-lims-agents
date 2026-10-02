@@ -90,7 +90,15 @@ it("the Test's trail lists the Test's, its Result's and Signatures' entries with
   assert.deepEqual(record, { table: 'test', id, kind: 'Test', label: entries[1]?.record.label });
   assert.equal(labZone, 'America/New_York');
   const tables = new Set(entries.map((e) => e.record.table));
-  assert.deepEqual([...tables].sort(), ['result', 'sample', 'signature', 'submission', 'test', 'test_report']);
+  assert.deepEqual([...tables].sort(), [
+    'record_version',
+    'result',
+    'sample',
+    'signature',
+    'submission',
+    'test',
+    'test_report',
+  ]);
   assert.deepEqual(
     entries.filter((e) => e.record.table === 'test').map((e) => e.op),
     ['INSERT', 'UPDATE', 'UPDATE', 'UPDATE', 'UPDATE', 'UPDATE', 'UPDATE'],
@@ -333,8 +341,11 @@ it('the raw entry under each readable entry keeps the stored values and hashes',
     .where('seq', '=', signature.seq)
     .executeTakeFirstOrThrow();
   assert.deepEqual([signature.raw.hash, signature.raw.newRow], [stored.hash, stored.newRow]);
-  const content = signature.changes.find((c) => c.field === 'content');
-  assert.equal(content?.label, 'Signed Record Version');
+  assert.equal(signature.changes.find((c) => c.field === 'record_version_id')?.label, 'Record Version');
+  const version =
+    entries.findLast((e) => e.record.table === 'record_version') ?? assert.fail('the Record Version entry');
+  const content = version.changes.find((c) => c.field === 'content');
+  assert.equal(content?.label, 'Canonical content');
   assert.equal(JSON.parse(content?.new?.text ?? '').analyte, 'NDMA', 'the signed bytes read as the Record Version');
 });
 

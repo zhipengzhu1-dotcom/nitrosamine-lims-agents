@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { createHash, randomUUID } from 'node:crypto';
 import { it } from 'node:test';
-import { audited } from '@lims/db';
+import { audited, type Json, type JsonObject } from '@lims/db';
 import { sql } from 'kysely';
 import { routes, type StepInput, type StepName, stepNames, stepRoute, steps } from '@lims/domain';
 import { LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
@@ -73,6 +73,34 @@ async function submitTestTo(state: 'Requested' | 'Ready' | 'Assigned', analyst: 
 
 const view = async (id: string, client = as.lena) => ok(await client.call(routes.test, { id }));
 
+/** Narrows a canonical content value to the object it is, so a test reads its fields without a cast. */
+function object(json: Json | undefined): JsonObject {
+  return typeof json === 'object' && json !== null && !Array.isArray(json) ? json : assert.fail('not an object');
+}
+
+function recordVersions(table: 'test' | 'test_report', recordId: string) {
+  return api.db
+    .selectFrom('recordVersion')
+    .select([
+      'version',
+      'canonicalForm',
+      'content as bytes',
+      sql<string>`encode(content_hash, 'hex')`.as('contentHash'),
+      sql<JsonObject>`convert_from(content, 'UTF8')::jsonb`.as('content'),
+    ])
+    .where('recordTable', '=', table)
+    .where('recordId', '=', recordId)
+    .orderBy('version')
+    .execute();
+}
+
+const changeResult = (testId: string, value: string) =>
+  audited(
+    api.superuser,
+    { actor: 'svc:test', role: 'system', reason: 'Change a signed Result from outside the chain' },
+    (tx) => tx.updateTable('result').set({ value }).where('testId', '=', testId).execute(),
+  );
+
 it('the chain walks a submitted Test to Reported with three Signatures and an audit entry for every step', async () => {
   const id = await submitTestTo('Assigned');
   assert.equal((await take(as.ana, 'enterResult', id, result, ana)).status, 200);
@@ -81,6 +109,11 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     refusedWith(await as.cora.call(routes.report, { id }), 'notFound'),
     'this Test has no released Test Report',
     'no Test Report for the Customer before release',
+  );
+  assert.deepEqual(
+    [(await view(id, as.cora)).recordVersion, (await view(id, as.cora)).signatures],
+    [null, []],
+    'before release the Customer gets no Record Version hash, which could confirm a guessed Result',
   );
   assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
 
@@ -100,12 +133,13 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     'the Audit Trail shows each row snapshot under its stored column names',
   );
   assert.deepEqual(
-    reported.signatures.map((s) => [s.meaning, s.signer, s.record]),
+    reported.signatures.map((s) => [s.meaning, s.signer, s.record, s.recordVersion.version, s.unsigned]),
     [
-      ['Performed', 'Ana Ferreira', 'test'],
-      ['Reviewed', 'Rui Tanaka', 'test'],
-      ['Released', 'Quinn Adeyemi', 'test_report'],
+      ['Performed', 'Ana Ferreira', 'test', 3, false],
+      ['Reviewed', 'Rui Tanaka', 'test', 3, false],
+      ['Released', 'Quinn Adeyemi', 'test_report', 1, false],
     ],
+    'Performed and Reviewed bind to the Record Version the Result made; Released to the Test Report',
   );
   const actors = {
     submit: cora,
@@ -122,52 +156,65 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     assert.ok(entries.length > 0, `an audit entry for ${name}`);
     for (const e of entries)
       assert.deepEqual([e.actor, e.role], [`person:${actors[name].username}`, steps[name].role], name);
+    assert.equal(
+      entries.filter((e) => e.table === 'signature').length,
+      steps[name].signs ? 1 : 0,
+      `the Signature ${name} wrote is in the Test's Audit Trail`,
+    );
   }
 
   const report = ok(await as.cora.call(routes.report, { id }));
   assert.match(report.report.number, /^RD-R-\d{4}-\d{6}$/);
   const printed = report.test;
-  const signed = await api.db
-    .selectFrom('signature')
-    .select('content')
-    .where((eb) =>
-      eb.or([
-        eb('recordId', '=', id),
-        eb('recordId', 'in', eb.selectFrom('testReport').select('id').where('testId', '=', id)),
-      ]),
-    )
-    .execute();
-  assert.equal(signed.length, 3);
-  for (const { content } of signed) {
-    const version = JSON.parse(content.toString());
-    assert.deepEqual(
-      Object.keys(version),
-      [
-        'id',
-        'customer',
-        'sample',
-        'description',
-        'receivedAt',
-        'method',
-        'methodVersion',
-        'methodTitle',
-        'gxpClass',
-        'analyte',
-        'value',
-        'unit',
-        'injectionSequenceRef',
-        'notebookRef',
-        'performedOn',
-        'report',
-      ],
-      'each signed Record Version names its fields in one fixed order',
+  const testVersions = await recordVersions('test', id);
+  assert.deepEqual(
+    testVersions.map((v) => [v.version, v.canonicalForm, v.content.receivedAt !== null, v.content.value]),
+    [
+      [1, 1, false, null],
+      [2, 1, true, null],
+      [3, 1, true, '0.0300'],
+    ],
+    'submit, receive and the Result each saved a Record Version in canonical form 1, and the earlier ones are readable',
+  );
+  for (const v of testVersions)
+    assert.equal(
+      v.contentHash,
+      createHash('sha256').update(v.bytes).digest('hex'),
+      'the hash is the SHA-256 of the content',
     );
-    assert.deepEqual(
-      [version.customer, version.description, version.receivedAt, version.methodTitle],
-      [printed.customer, printed.description, printed.receivedAt, printed.methodTitle],
-      'each Signature covers what the Test Report prints',
-    );
-  }
+  const current = testVersions[2] ?? assert.fail();
+  const { receivedAt, ...content } = current.content;
+  assert.ok(
+    typeof receivedAt === 'string' && receivedAt.startsWith(String(printed.receivedAt).slice(0, -1)),
+    'the content keeps the microseconds the database clock gave; the wire rounds to milliseconds',
+  );
+  assert.deepEqual(
+    content,
+    {
+      id,
+      customer: printed.customer,
+      sample: printed.sampleNumber,
+      description: printed.description,
+      method: printed.methodCode,
+      methodVersion: printed.methodVersion,
+      methodTitle: printed.methodTitle,
+      gxpClass: printed.gxpClass,
+      ...result,
+    },
+    'the signed content is what the Test Report prints, with the Result as typed',
+  );
+  assert.deepEqual(reported.recordVersion, { version: 3, canonicalForm: 1, contentHash: current.contentHash });
+  const reportId = reported.report?.id ?? assert.fail();
+  const [reportVersion] = await recordVersions('test_report', reportId);
+  assert.deepEqual(
+    reported.signatures.map((s) => s.recordVersion.contentHash),
+    [current.contentHash, current.contentHash, reportVersion?.contentHash],
+  );
+  assert.deepEqual(
+    reportVersion?.content,
+    { id: reportId, number: report.report.number, test: current.content },
+    'the Test Report is built on the Test content it was released with',
+  );
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   assert.deepEqual(
     verified.chains.map((c) => [c.chain, c.firstFailure]),
@@ -180,6 +227,71 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     .selectNoFrom(sql<boolean>`${verified.at}::timestamptz between now() - interval '1 minute' and now()`.as('recent'))
     .executeTakeFirstOrThrow();
   assert.ok(recent, 'the server states when it checked, by the database clock');
+});
+
+it('a change to a signed Test re-versions it and its Test Report, and every Signature on the earlier version is returned as unsigned', async () => {
+  const id = await submitTestTo('Assigned');
+  assert.equal((await take(as.ana, 'enterResult', id, result, ana)).status, 200);
+  assert.equal((await take(as.rui, 'review', id, {}, rui)).status, 200);
+  assert.equal((await take(as.quinn, 'release', id, {}, quinn)).status, 200);
+  const signed = await view(id, as.quinn);
+  const reportId = signed.report?.id ?? assert.fail();
+  const before = signed.recordVersion ?? assert.fail();
+
+  await changeResult(id, '0.0380');
+  const changed = await view(id, as.quinn);
+  const after = changed.recordVersion ?? assert.fail();
+  assert.deepEqual(
+    [after.version, after.contentHash === before.contentHash],
+    [before.version + 1, false],
+    'the Test moved to a new Record Version with another hash',
+  );
+  assert.deepEqual(
+    changed.signatures.map((s) => [s.meaning, s.recordVersion.version, s.unsigned]),
+    [
+      ['Performed', 3, true],
+      ['Reviewed', 3, true],
+      ['Released', 1, true],
+    ],
+    'each Signature keeps the version it was given on and is returned as unsigned',
+  );
+  assert.deepEqual(
+    (await recordVersions('test_report', reportId)).map((v) => [v.version, object(v.content.test).value]),
+    [
+      [1, '0.0300'],
+      [2, '0.0380'],
+    ],
+    'the Test Report built on the Test has a new Record Version too',
+  );
+  assert.ok(
+    ok(await as.cora.call(routes.report, { id })).signatures.every((s) => s.unsigned),
+    'the Customer sees the Released signature as unsigned on the Test Report',
+  );
+  assert.ok(
+    ok(await as.quinn.call(routes.testTrail, { id })).entries.some(
+      (e) => e.raw.table === 'record_version' && e.reason === 'Change a signed Result from outside the chain',
+    ),
+    'the new Record Version is in the Audit Trail under the change that made it',
+  );
+
+  await changeResult(id, '0.038');
+  const narrower = (await view(id, as.quinn)).recordVersion ?? assert.fail();
+  assert.notEqual(
+    narrower.contentHash,
+    after.contentHash,
+    '0.038 is not 0.0380: the content keeps the digits as typed',
+  );
+  await changeResult(id, '0.0380');
+  const again = await view(id, as.quinn);
+  assert.deepEqual(
+    [again.recordVersion?.contentHash, again.recordVersion?.version],
+    [after.contentHash, before.version + 3],
+    'the same content gives the same hash, on a new Record Version',
+  );
+  assert.ok(
+    again.signatures.every((s) => s.unsigned),
+    'a Signature on an earlier version stays unsigned even when the content comes back',
+  );
 });
 
 it('a step by the wrong role is refused', async () => {
@@ -274,6 +386,12 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
     { kind: 'SignInSucceeded', sessionId: session.id, roles: ['Analyst'] },
     { kind: 'Lockout', sessionId: session.id, roles: ['Analyst'] },
   ]);
+  const incidents = await api.superuser
+    .selectFrom('systemIncident')
+    .select('kind')
+    .where('subjectId', '=', signer.id)
+    .execute();
+  assert.deepEqual(incidents, [{ kind: 'Lockout' }], 'the lockout at signing opens a System Incident');
   const roles = await api.superuser
     .selectFrom('auditEntry')
     .select('role')

@@ -395,7 +395,7 @@ A record that pauses a Test or Sample for a stated reason (a Deviation, a receip
 _Avoid_: On hold (as a status), suspension, quarantine
 
 **System Incident**:
-A record that the LIMS itself failed or misbehaved (an unexpected failure answered with a reference the person can quote, an alarm, a missed backup or anchor, a failed restore drill, a clock step), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
+A record that the LIMS itself failed or misbehaved (an unexpected failure answered with a reference the person can quote, an alarm, a missed backup or anchor, a failed restore drill, a clock step), or that someone may be attacking sign-in (a lockout, a burst of failed sign-ins from one address or against one unknown user ID, repeated attempts against a locked account), closed once its immediate and corrective actions are recorded and acknowledged. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
 _Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failures)
 
 **Training Record**:
@@ -489,7 +489,7 @@ _Avoid_: Scan (alone), certified copy, electronic copy
 ### Records and signatures
 
 **Record Version**:
-One saved state of a record that can be signed. Changing a signable record makes a new Record Version; earlier versions are kept.
+One saved state of a record that can be signed: the record's canonical content, the SHA-256 of that content and the canonical form that rendered it. A change to the record, to a child of it, or to a record it names (for a Test: its Result, Sample, Method or Customer) makes a new Record Version of it and of every record built on it, such as the Test Report on a Test; a save that leaves the content as it was, such as a step forward, makes none. Earlier versions are kept, and a Signature given on one shows as unsigned once a later version exists, even if the content comes back.
 _Avoid_: Revision, edit
 
 **Audit Trail**:
@@ -497,7 +497,7 @@ The permanent, system-generated history of every change to records, accounts and
 _Avoid_: Log, history, change log
 
 **Access Event**:
-The Audit Trail record of one sign-in (succeeded or failed), sign-out, lock, unlock, lockout, takeover, Lab switch, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
+The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock, lockout, takeover, Lab switch, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
 _Avoid_: Login log, session log, access log
 
 **Lab switch**:
