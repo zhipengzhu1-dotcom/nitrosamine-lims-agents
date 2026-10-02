@@ -1,5 +1,5 @@
 import type { DB } from '@lims/db';
-import type { ActorContext, Instant, SessionClock } from '@lims/domain';
+import type { ActorContext, Instant, SignedInView } from '@lims/domain';
 import Fastify, {
   type FastifyBaseLogger,
   type FastifyInstance,
@@ -20,7 +20,7 @@ declare module 'fastify' {
     actor: ActorContext;
     requester: ActorContext | null;
     sessionKey: SessionKey;
-    sessionClock: SessionClock;
+    signedInView: SignedInView;
   }
 }
 

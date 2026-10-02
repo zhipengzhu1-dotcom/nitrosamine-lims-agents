@@ -21,8 +21,8 @@
   --ok: #17724a;
   --bad: #b3261e;
   --bad-tint: #fce8e5;
-  --font: "Atkinson Hyperlegible Next", "Segoe UI", system-ui, sans-serif;
-  --mono: "Atkinson Hyperlegible Mono", Consolas, ui-monospace, monospace;
+  --font: "Segoe UI", system-ui, sans-serif;
+  --mono: Consolas, ui-monospace, monospace;
   --top-h: 48px;
   --rail-h: 76px;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -546,6 +546,14 @@ td a,
   font-size: 20px;
   font-weight: 800;
 }
+.who a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: inherit;
+  text-decoration-color: var(--bench-line);
+  text-underline-offset: 4px;
+}
 .who span {
   font-size: 13px;
   color: var(--on-bench-2);
@@ -629,7 +637,6 @@ td a,
   cursor: pointer;
   transition:
     transform var(--dur-press) var(--ease-out),
-    filter var(--dur-press) var(--ease-out),
     opacity var(--dur-enter) var(--ease-out);
 }
 @starting-style {
@@ -647,9 +654,9 @@ td a,
     filter: brightness(1.08);
   }
 }
+/* The press scales only. A filter transition on the press crashes Playwright's Linux WebKit renderer (WPE SIGSEGV). */
 .rbtn:active:not(:disabled) {
   transform: scale(0.97);
-  filter: brightness(0.92);
 }
 .rbtn:disabled {
   opacity: 0.6;
@@ -754,6 +761,9 @@ td a,
   color: var(--ink);
   border-color: var(--line-2);
 }
+.prefs {
+  max-width: 560px;
+}
 .card {
   min-width: 0;
   background: var(--sheet);
@@ -823,7 +833,8 @@ select {
   font-weight: 600;
   margin-bottom: 4px;
 }
-.labs__option {
+.labs__option,
+.check {
   flex-direction: row;
   align-items: center;
   gap: 12px;
@@ -832,7 +843,8 @@ select {
   font-weight: 400;
   cursor: pointer;
 }
-.labs__option input {
+.labs__option input,
+.check input {
   flex: none;
   width: 24px;
   height: 24px;
@@ -902,7 +914,8 @@ a.btn {
   text-decoration: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
+/* motion.ts sets data-reduce-motion when the device or the signed-in person asks for reduced motion. */
+:where(:root[data-reduce-motion]) {
   .rbtn:active:not(:disabled) {
     transform: none;
   }
@@ -955,7 +968,6 @@ a.btn {
   .rail__context {
     order: 1;
     flex-basis: 100%;
-    min-height: 2lh;
     font-size: 14px;
   }
   .rbtn--commit {
@@ -999,6 +1011,15 @@ a.btn {
     gap: 4px 12px;
     font-size: 22px;
   }
+  .record-head {
+    position: sticky;
+    top: -12px;
+    z-index: 1;
+    margin-inline: -12px;
+    padding: 8px 12px;
+    background: var(--canvas);
+    border-bottom: 1px solid var(--line);
+  }
   .facts dd {
     overflow-wrap: anywhere;
   }
@@ -1022,8 +1043,17 @@ a.btn {
   .stack tr {
     display: block;
   }
+  /* The table contains its hidden head: placed from the page instead, the head sits below the frame on a long record and lets the page scroll under the sheet. */
+  .stack {
+    position: relative;
+  }
   .stack thead {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .stack tr {
     padding: 8px 12px;
@@ -1038,6 +1068,7 @@ a.btn {
   }
   .stack td::before {
     content: attr(data-label);
+    content: attr(data-label) / "";
     color: var(--ink-3);
     font-size: 12px;
     font-weight: 700;
