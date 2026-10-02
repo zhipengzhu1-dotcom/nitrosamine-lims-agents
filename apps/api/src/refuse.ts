@@ -12,6 +12,7 @@ const STATUS: { readonly [K in RefusalKind]: number } = {
   badCredentials: 401,
   labNotChosen: 400,
   noSession: 401,
+  sessionLocked: 423,
   role: 403,
   guard: 403,
   notFound: 404,

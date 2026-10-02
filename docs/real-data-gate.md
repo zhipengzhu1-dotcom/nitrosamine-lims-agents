@@ -16,7 +16,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 2 | Signing function and Signature fields | |
 | 2 | Record Versions | [#94](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/94) |
 | 2 | Lab at sign-in | [#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98) |
-| 2 | Workstations | |
+| 2 | Workstations | [#99](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/99) |
 | 2 | Identity Verification | |
 | 2 | Unlock | |
 | 2 | Admin constraint | |

@@ -29,6 +29,7 @@ const STATUS_OF: { readonly [K in RefusalKind]: number } = {
   badCredentials: 401,
   labNotChosen: 400,
   noSession: 401,
+  sessionLocked: 423,
   role: 403,
   guard: 403,
   notFound: 404,
@@ -49,7 +50,19 @@ type SeededName = SeededAccount['username'] extends infer U ? (U extends `${infe
 export type Answer<R extends Route> = Exclude<Reply<R>, { kind: 'breach' }>;
 
 export class Client {
-  cookie = '';
+  /** The browser's cookies: the session and, once the browser is enrolled, its device token. */
+  jar = new Map<string, string>();
+  get cookie(): string {
+    return [...this.jar].map(([name, value]) => `${name}=${value}`).join('; ');
+  }
+  set cookie(header: string) {
+    this.jar = new Map(
+      header.split('; ').flatMap((pair): [string, string][] => {
+        const at = pair.indexOf('=');
+        return at > 0 ? [[pair.slice(0, at), pair.slice(at + 1)]] : [];
+      }),
+    );
+  }
   base: string;
   /** The source address the test's proxy forwards, or none for the socket's own address. */
   from: string | null;
@@ -74,8 +87,9 @@ export class Client {
       ...(post ? { body: JSON.stringify(request ?? {}) } : {}),
     });
     for (const header of res.headers.getSetCookie()) {
-      const session = /^lims_session=[^;]*/.exec(header);
-      if (session) this.cookie = session[0];
+      const [, name = '', value = ''] = /^([^=]+)=([^;]*)/.exec(header) ?? [];
+      if (value) this.jar.set(name, value);
+      else this.jar.delete(name);
     }
     const answer = readReply(route, res.status, await res.json());
     if (answer.kind === 'breach') assert.fail(answer.problem);

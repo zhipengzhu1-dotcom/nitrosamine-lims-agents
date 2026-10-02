@@ -1,10 +1,10 @@
 import { type ActorContext, type AuditedTable, isAuditedTable } from '@lims/domain';
 import { Fragment, StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { onActorChanged, onSignedOut, resume } from './api.ts';
+import { type LockMode, onActorChanged, onLocked, onSignedOut, resume } from './api.ts';
 import { Placeholder } from './placeholder.tsx';
 import { ReportPage } from './report.tsx';
-import { LabSwitchPage, SignIn } from './signin.tsx';
+import { LabSwitchPage, LockScreen, SignIn } from './signin.tsx';
 import { TestPage, Worklist } from './tests.tsx';
 import { TrailPage } from './trail.tsx';
 import { type Module, modules } from './rail.tsx';
@@ -40,20 +40,35 @@ function useRoute(): Route {
 function App() {
   const [me, setMe] = useState<ActorContext | null>();
   const [notice, setNotice] = useState('');
+  const [locked, setLocked] = useState<{ message: string; mode: LockMode } | null>(null);
   const route = useRoute();
   useEffect(() => {
     onActorChanged(setMe);
     onSignedOut((message) => {
+      setLocked(null);
       setMe(null);
       setNotice(message);
     });
+    onLocked((message, mode) => setLocked({ message, mode }));
     resume().then(setMe, () => setNotice(''));
   }, []);
 
+  if (locked)
+    return (
+      <LockScreen
+        key={locked.mode}
+        message={locked.message}
+        mode={locked.mode}
+        onIn={(next) => {
+          setLocked(null);
+          setMe(next);
+        }}
+      />
+    );
   if (me === undefined) return null;
   if (me === null) return <SignIn notice={notice} onIn={setMe} />;
-  // Keyed by the Lab, so that after a Lab switch no page keeps what it read in the Lab before.
-  return <Fragment key={me.lab.id}>{page(route, me)}</Fragment>;
+  // Keyed by the Lab and the person, so that after a Lab switch or Switch user no page keeps what it read before.
+  return <Fragment key={`${me.lab.id}:${me.person.id}`}>{page(route, me)}</Fragment>;
 }
 
 function page(route: Route, me: ActorContext) {

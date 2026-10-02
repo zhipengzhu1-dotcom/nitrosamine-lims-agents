@@ -33,9 +33,13 @@ const id = {
   transaction: randomUUID(),
   accessEvent: randomUUID(),
   otherPerson: randomUUID(),
+  room: randomUUID(),
+  otherLabRoom: randomUUID(),
+  workstation: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
+const deviceToken = Buffer.alloc(32, 2);
 const zeros = Buffer.alloc(32);
 
 const fixture: [string, Row][] = [
@@ -101,6 +105,19 @@ const fixture: [string, Row][] = [
       person_id: id.person,
       meaning: 'Performed',
       record_version_id: id.laterRecordVersion,
+    },
+  ],
+  ['lims.room', { lab_id: id.lab, id: id.room, name: 'LC-MS/MS Room (fictional)' }],
+  ['lims.room', { lab_id: id.otherLab, id: id.otherLabRoom, name: 'Other Lab Room (fictional)' }],
+  [
+    'lims.workstation',
+    {
+      lab_id: id.lab,
+      id: id.workstation,
+      name: 'RF-BENCH-01',
+      room_id: id.room,
+      browser_policy: 'Managed Chrome',
+      device_token_hash: deviceToken,
     },
   ],
   ['lims.session', { lab_id: id.lab, id: id.session, person_id: id.person, token_hash: token }],
@@ -172,6 +189,14 @@ const unknownUserIdAttempt: Row = {
   typed_user_id_hmac: Buffer.alloc(32, 3),
   typed_user_id_length: 12,
   roles: '{}',
+};
+
+const takeover: Row = {
+  kind: 'Takeover',
+  failure_reason: null,
+  session_lab_id: id.lab,
+  session_id: id.session,
+  taken_by_id: id.otherPerson,
 };
 
 const tables = {
@@ -305,6 +330,16 @@ const tables = {
     row: { lab_id: id.lab, kind: 'TestReport' },
     notNull: ['kind'],
   },
+  'lims.room': {
+    noun: 'Room',
+    row: { lab_id: id.lab, name: 'Sample Preparation Room (fictional)' },
+    notNull: ['lab_id', 'id', 'name'],
+  },
+  'lims.workstation': {
+    noun: 'Workstation',
+    row: { lab_id: id.lab, name: 'RF-BENCH-02', room_id: id.room, browser_policy: 'Managed Chrome' },
+    notNull: ['lab_id', 'id', 'name', 'room_id', 'browser_policy'],
+  },
   'lims.access_event': {
     noun: 'Access Event',
     row: {
@@ -363,6 +398,8 @@ const auditedTables: Table[] = [
   'lims.signature',
   'lims.system_incident',
   'lims.access_event',
+  'lims.room',
+  'lims.workstation',
 ];
 
 const bare = (table: string) => table.slice(table.indexOf('.') + 1);
@@ -465,6 +502,8 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.system_incident': { id: id.systemIncident },
     'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
+    'lims.room': { id: id.room },
+    'lims.workstation': { id: id.workstation },
     'lims.audit_chain': { chain: 'company' },
     'lims.audit_entry': { seq: 1 },
     'public.schema_migration': { name: '0001_roles.sql' },
@@ -578,6 +617,30 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.session',
       change: { token_hash: token },
       constraint: 'session_token_hash_key',
+    },
+    {
+      name: 'a second Room of the same name in one Lab is refused',
+      table: 'lims.room',
+      change: { name: 'LC-MS/MS Room (fictional)' },
+      constraint: 'room_lab_id_name_key',
+    },
+    {
+      name: 'a second Workstation of the same name in one Lab is refused',
+      table: 'lims.workstation',
+      change: { name: 'RF-BENCH-01' },
+      constraint: 'workstation_lab_id_name_key',
+    },
+    {
+      name: 'a Workstation with the ID of one in another Lab is refused',
+      table: 'lims.workstation',
+      change: { lab_id: id.otherLab, id: id.workstation, room_id: id.otherLabRoom },
+      constraint: 'workstation_id_key',
+    },
+    {
+      name: 'a second Workstation enrolled with the same device token is refused',
+      table: 'lims.workstation',
+      change: { device_token_hash: deviceToken },
+      constraint: 'workstation_device_token_hash_key',
     },
     {
       name: 'a second System Incident with the same reference is refused',
@@ -713,6 +776,31 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'signature_lab_id_record_version_id_fkey',
     },
     noLab('lims.session', 'session'),
+    noLab('lims.room', 'Room'),
+    {
+      name: 'a Workstation in a Room of another Lab is refused',
+      table: 'lims.workstation',
+      change: { room_id: id.otherLabRoom },
+      constraint: 'workstation_lab_id_room_id_fkey',
+    },
+    {
+      name: 'a session on a Workstation of another Lab is refused',
+      table: 'lims.session',
+      change: { lab_id: id.otherLab, workstation_id: id.workstation },
+      constraint: 'session_lab_id_workstation_id_fkey',
+    },
+    {
+      name: 'an Access Event on a Workstation that does not exist is refused',
+      table: 'lims.access_event',
+      change: { workstation_id: missing },
+      constraint: 'access_event_workstation_id_fkey',
+    },
+    {
+      name: 'a takeover Access Event by a person who does not exist is refused',
+      table: 'lims.access_event',
+      change: { ...takeover, taken_by_id: missing },
+      constraint: 'access_event_taken_by_id_fkey',
+    },
     noLab('lims.counter', 'counter'),
     {
       name: 'a session of a person who does not exist is refused',
@@ -947,10 +1035,10 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { session_id: id.session },
       constraint: 'access_event_session_check',
     },
-    ...(['SignInSucceeded', 'SignOut'] as const).map((kind) => ({
+    ...(['SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'] as const).map((kind) => ({
       name: `an Access Event of kind ${kind} without a session is refused`,
       table: 'lims.access_event' as const,
-      change: { kind, failure_reason: null },
+      change: { kind, failure_reason: null, ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }) },
       constraint: 'access_event_session_kind_check',
     })),
     ...(['IdleExpiry', 'AbsoluteExpiry'] as const).flatMap((kind) => [
@@ -972,6 +1060,24 @@ describe('the database refuses a value outside its allowed set', () => {
       table: 'lims.access_event',
       change: { source_address: null },
       constraint: 'access_event_source_address_check',
+    },
+    {
+      name: 'a takeover Access Event that names no person taking over is refused',
+      table: 'lims.access_event',
+      change: { ...takeover, taken_by_id: null },
+      constraint: 'access_event_takeover_check',
+    },
+    {
+      name: 'a lock Access Event that names a person taking over is refused',
+      table: 'lims.access_event',
+      change: { ...takeover, kind: 'Lock' },
+      constraint: 'access_event_takeover_check',
+    },
+    {
+      name: 'a Workstation device token hash that is not 32 bytes is refused',
+      table: 'lims.workstation',
+      change: { device_token_hash: Buffer.alloc(16, 2) },
+      constraint: 'workstation_device_token_hash_check',
     },
     {
       name: 'a failed sign-in Access Event without a failure reason is refused',

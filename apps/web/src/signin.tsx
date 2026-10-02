@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react';
 import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
-import { signIn, switchLab, useApi } from './api.ts';
+import { type LockMode, signIn, signOut, switchLab, unlock, useApi } from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
 
 type Credentials = RouteInput<typeof routes.switchLab>[0];
@@ -108,5 +108,89 @@ export function LabSwitchPage({ me }: { me: ActorContext }) {
         onSubmit={switchLab}
       />
     </Shell>
+  );
+}
+
+/** Hides every record while the session is locked: the same person unlocks it with their password, or another person signs in over it. */
+export function LockScreen({
+  message,
+  mode: opened,
+  onIn,
+}: {
+  message: string;
+  mode: LockMode;
+  onIn: (me: ActorContext) => void;
+}) {
+  const [mode, setMode] = useState(opened);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const labs = useApi(routes.labs);
+
+  function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy) return;
+    const password = new FormData(e.currentTarget).get('password');
+    setBusy(true);
+    setError('');
+    unlock(typeof password === 'string' ? password : '')
+      .then(onIn)
+      .catch((err: Error) => {
+        setError(err.message);
+        setBusy(false);
+      });
+  }
+  const otherWay = (
+    <div className="lock__set">
+      <button
+        type="button"
+        className="rbtn rbtn--plain"
+        onClick={() => setMode(mode === 'unlock' ? 'switch' : 'unlock')}
+      >
+        {mode === 'unlock' ? 'Switch user' : 'Back to unlock'}
+      </button>
+      <button type="button" className="rbtn rbtn--plain" onClick={() => void signOut()}>
+        Sign out
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="frame frame--bare">
+      <TopBar />
+      <main className="plane">
+        {mode === 'switch' ? (
+          <>
+            <CredentialsForm
+              title="Switch user"
+              intro={`${message}.`}
+              labs={labs}
+              commit="Sign in on this screen"
+              onSubmit={(c) => signIn(c).then(onIn)}
+            />
+            <div className="signin">{otherWay}</div>
+          </>
+        ) : (
+          <form className="signin card" onSubmit={submit} aria-labelledby="lock-title">
+            <fieldset className="lock__set" disabled={busy}>
+              <h1 id="lock-title">Locked</h1>
+              <p className="muted">{message}.</p>
+              <label>
+                Password
+                <input name="password" type="password" required autoComplete="current-password" />
+              </label>
+              {error && (
+                <p className="note--bad" role="alert">
+                  {error}
+                </p>
+              )}
+              <button type="submit" className="rbtn" aria-busy={busy}>
+                Unlock
+              </button>
+              {otherWay}
+            </fieldset>
+          </form>
+        )}
+      </main>
+    </div>
   );
 }

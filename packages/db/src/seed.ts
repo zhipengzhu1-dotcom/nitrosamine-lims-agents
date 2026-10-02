@@ -28,7 +28,7 @@ const secondLab = { code: 'QC', name: 'QC Laboratory (fictional)', members: ['le
 
 const SEED = { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' };
 
-/** Seeds two Labs, one Customer, one Method and the demo people, who all share one password, into an empty database. */
+/** Seeds two Labs, two Rooms in the first, one Customer, one Method and the demo people, who all share one password, into an empty database. */
 export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('base64url')): Promise<SeededAccount[]> {
   if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
@@ -49,6 +49,13 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
       .values({ code: 'RD', name: 'R&D Laboratory (fictional)', timeZone: 'America/New_York' })
       .returning('labId')
       .executeTakeFirstOrThrow();
+    await tx
+      .insertInto('room')
+      .values([
+        { labId, name: 'LC-MS/MS Room (fictional)' },
+        { labId, name: 'Sample Preparation Room (fictional)' },
+      ])
+      .execute();
     const out: SeededAccount[] = [];
     for (const p of people) {
       const { id } = await tx
