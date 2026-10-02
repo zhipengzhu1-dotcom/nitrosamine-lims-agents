@@ -42,10 +42,14 @@ async function testView(scope: Scope, id: string) {
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
   const visibleToActor = !isCustomer || test.state === 'Reported';
-  const { version, canonicalForm, contentHash } = await latestVersion(scope, 'test', id);
+  const latest = visibleToActor ? await latestVersion(scope, 'test', id) : null;
   return {
     test,
-    recordVersion: visibleToActor ? { version, canonicalForm, contentHash } : null,
+    recordVersion: latest && {
+      version: latest.version,
+      canonicalForm: latest.canonicalForm,
+      contentHash: latest.contentHash,
+    },
     report: report ? { id: report.id, number: report.number } : null,
     result: visibleToActor
       ? ((await scope

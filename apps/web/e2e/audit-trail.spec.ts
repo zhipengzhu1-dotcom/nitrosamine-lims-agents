@@ -98,10 +98,11 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
 
   await page.getByLabel('Order').selectOption('Newest first');
   await expect(entries.first()).toContainText('Signature Performed');
-  const signed = entries.nth(1);
-  await expect(signed).toContainText('Record Version');
-  await expect(signed.locator('details.long'), 'the signed Record Version and its SHA-256 are long').toHaveCount(2);
-  const long = signed.locator('details.long').first();
+  const signed = entries.first();
+  const versioned = entries.filter({ has: page.locator('details.long') }).first();
+  await expect(versioned).toContainText('Record Version');
+  await expect(versioned.locator('details.long'), 'the signed Record Version and its SHA-256 are long').toHaveCount(2);
+  const long = versioned.locator('details.long').first();
   await expect(long.locator('summary')).toContainText('…');
   await atLeast(long.locator('summary'), 44, 44);
   await long.locator('summary').click();
@@ -114,7 +115,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: /^Raw entry \d+, Lab chain$/ })).toBeVisible();
   await expect(dialog.locator('pre')).toContainText(/"hash": "[0-9a-f]{64}"/);
-  await expect(dialog.locator('pre')).toContainText('"record_table": "test"');
+  await expect(dialog.locator('pre')).toContainText('"record_version_id": "');
   await dialog.getByRole('button', { name: 'Close' }).click();
   await expect(dialog).toBeHidden();
 
