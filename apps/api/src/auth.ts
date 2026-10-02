@@ -51,8 +51,15 @@ const SWEEP_SERVICE: AuditContext = {
 
 const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
 
-/** The Audit Trail's role for a step a person takes on their own account, under no role of the Lab. */
-export const NEEDS_NO_ROLE = 'none' as const;
+/** Signing out, locking, unlocking, switching Lab and setting preferences act on the person's own account, under no role of the Lab. */
+const NEEDS_NO_ROLE = 'none' as const;
+
+/** The Audit Trail context for a step a person takes on their own account: them as actor, under no role of the Lab. */
+export const asOwnAccount = (username: string, reason: string): AuditContext => ({
+  actor: `person:${username}`,
+  role: NEEDS_NO_ROLE,
+  reason,
+});
 
 /** A session or device token as stored: its SHA-256, never the token. */
 export const hashToken = (token: string) => createHash('sha256').update(token).digest();
@@ -611,7 +618,7 @@ function onOwnSession(
 ) {
   const { actor, sessionKey: session } = req;
   const reason = kind === 'SignOut' ? 'Sign out' : kind;
-  return audited(db, { actor: `person:${actor.person.username}`, role: NEEDS_NO_ROLE, reason }, async (tx) => {
+  return audited(db, asOwnAccount(actor.person.username, reason), async (tx) => {
     if (!(await change(tx))) return;
     await record(tx, {
       kind,
@@ -701,7 +708,7 @@ export function labSwitchRoute(app: App, db: Kysely<DB>, limits: SessionLimits):
         .selectAll()
         .where('id', '=', actor.person.id)
         .executeTakeFirstOrThrow();
-      const as = { actor: `person:${person.username}`, role: NEEDS_NO_ROLE, reason: 'Switch Lab' };
+      const as = asOwnAccount(person.username, 'Switch Lab');
       const sameUserId = username === person.username;
       const proven =
         (await verifyPassword(password, (sameUserId && person.passwordHash) || TIMING_DECOY_HASH)) && sameUserId;

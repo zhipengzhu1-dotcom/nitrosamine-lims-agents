@@ -226,6 +226,21 @@ describe('an entry reads in glossary words with labels as they stood at its time
     );
   });
 
+  it("reads a person's reduced-motion save as Reduce motion, not as a change after first save", () => {
+    const saved = entry({
+      table: 'person',
+      chain: 'company',
+      atLab: null,
+      oldRow: { id: 'p2', display_name: 'Ana Ferreira', reduced_motion: false },
+      newRow: { id: 'p2', display_name: 'Ana Ferreira', reduced_motion: true },
+    });
+    const [described] = describeTrail([saved], images, LAB, new Map());
+    assert.deepEqual(
+      [described?.afterFirstSave, described?.changes.map((c) => [c.label, c.old?.text, c.new?.text])],
+      [false, [['Reduce motion', 'false', 'true']]],
+    );
+  });
+
   it("collects every record the given rows reference, each row's own record included", () =>
     assert.deepEqual(
       referencedRecords([
