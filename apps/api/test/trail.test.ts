@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
 import {
-  type AuditedTable,
   auditedRecords,
   auditedTables,
+  isAuditedTable,
   routes,
   type StepInput,
   type StepName,
@@ -292,7 +292,8 @@ it('every column a row snapshot stores has a glossary label in the registry, oth
   assert.deepEqual(
     rows.filter(
       ({ table, column }) =>
-        !['id', 'lab_id'].includes(column) && !Object.hasOwn(auditedRecords[table as AuditedTable].fields, column),
+        !['id', 'lab_id'].includes(column) &&
+        !(isAuditedTable(table) && Object.hasOwn(auditedRecords[table].fields, column)),
     ),
     [],
   );
