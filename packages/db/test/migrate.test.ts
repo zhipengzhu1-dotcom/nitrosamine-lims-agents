@@ -206,8 +206,10 @@ describe('the SHA-256 of each applied migration', () => {
     const database = checkoutDatabase('lims_migrate_clash');
     await dropDatabase(database);
     await writeFile(new URL('0005_clash.sql', folder), probe);
+    await writeFile(new URL('13_unpadded.sql', folder), probe);
     await assert.rejects(migrate(server, database, folder), {
-      message: /0005_clash\.sql and 0005_counters_and_transaction_ids\.sql share a migration number/,
+      message:
+        /0005_clash\.sql and 0005_counters_and_transaction_ids\.sql; 0013_lab_switch\.sql and 13_unpadded\.sql share a migration number/,
     });
     const [exists] = await asSuperuser<{ count: string }>(
       'postgres',

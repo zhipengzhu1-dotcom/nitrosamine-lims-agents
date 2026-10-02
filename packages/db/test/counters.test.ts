@@ -42,7 +42,7 @@ before(async () => {
     await cp(new URL(name, repo), join(folder, name));
   const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
-  await admin.query(`drop database if exists ${DATABASE} with (force)`);
+  await admin.query(`drop database if exists ${pg.escapeIdentifier(DATABASE)} with (force)`);
   await admin.end();
   await migrate(server, DATABASE, pathToFileURL(`${folder}/`));
   await client.connect();

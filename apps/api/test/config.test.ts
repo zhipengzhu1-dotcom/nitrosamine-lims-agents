@@ -31,6 +31,13 @@ it('a LIMS_ variable the API does not read stops it at start and names the close
   );
 });
 
+it('an empty LIMS_DB stops the API at start and names LIMS_DB', () => {
+  const started = start({ LIMS_DB: '' });
+  assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+  assert.notEqual(started.status, 0);
+  assert.ok(started.stderr.includes('LIMS_DB is not set'), `stderr was: ${started.stderr}`);
+});
+
 it('in production the API will not start without a log', () => {
   const started = start({ NODE_ENV: 'production' });
   assert.equal(started.signal, null, 'the API stopped by itself instead of listening');

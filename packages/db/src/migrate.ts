@@ -44,13 +44,13 @@ const REFUSAL = [
  * as the superuser and records the SHA-256 of its bytes.
  */
 export async function migrate(server: string, database: string, folder: URL = migrations): Promise<string[]> {
+  const files = await readMigrations(folder);
   const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   try {
     // Runners on one cluster take turns, because the migrations create cluster-wide roles. An advisory lock belongs
     // to one database, so every runner takes it in `postgres`, under the same arbitrary key, until `admin` ends.
     await admin.query('select pg_advisory_lock($1)', [runnerLock]);
-    const files = await readMigrations(folder);
     const { rowCount } = await admin.query('select from pg_database where datname = $1', [database]);
     if (!rowCount) await admin.query(`create database ${pg.escapeIdentifier(database)}`);
     return await applyPending(databaseUrl(server, database), database, files);
@@ -61,12 +61,16 @@ export async function migrate(server: string, database: string, folder: URL = mi
 
 async function readMigrations(folder: URL): Promise<Migration[]> {
   const names = (await readdir(folder)).filter((f) => f.endsWith('.sql')).sort();
-  const clashes = [...Map.groupBy(names, (name) => name.slice(0, 4)).values()]
+  const migrationNumber = (name: string) => {
+    const digits = name.match(/^\d+/)?.[0];
+    return digits ? Number(digits) : name;
+  };
+  const clashes = [...Map.groupBy(names, migrationNumber).values()]
     .filter((same) => same.length > 1)
     .map((same) => same.join(' and '));
   if (clashes.length > 0)
     throw new Error(
-      `migrate refused to run: ${clashes.join('; ')} share a migration number. Give the unmerged file the next free number.`,
+      `migrate refused to run: ${clashes.join('; ')} share a migration number. Renumber the file that no database has applied yet to the next free number.`,
     );
   return Promise.all(
     names.map(async (name) => {

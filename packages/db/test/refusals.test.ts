@@ -405,7 +405,7 @@ before(async () => {
   const admin = new pg.Client({ connectionString: databaseUrl(server, 'postgres') });
   await admin.connect();
   try {
-    await admin.query(`drop database if exists ${DATABASE} with (force)`);
+    await admin.query(`drop database if exists ${pg.escapeIdentifier(DATABASE)} with (force)`);
   } finally {
     await admin.end();
   }
