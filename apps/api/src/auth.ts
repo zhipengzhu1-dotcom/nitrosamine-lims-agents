@@ -152,6 +152,7 @@ export const refusalsUnder = (policy: LoginPolicy): Refusals => {
     WrongUserId: notValid,
     WrongCode: notValid,
     NoAuthenticator: notValid,
+    CodeAlreadyUsed: notValid,
     AlreadyEnrolled: notValid,
     OtherPersonSignedIn: () =>
       refuse(
@@ -168,6 +169,41 @@ export const refusalsUnder = (policy: LoginPolicy): Refusals => {
 
 /** Writes one Access Event in the caller's transaction. */
 export const record = (tx: Transaction<DB>, event: AccessEvent) => tx.insertInto('accessEvent').values(event).execute();
+
+/** Thrown inside a transaction when another request spent the checked code first, so that it rolls back with nothing written. */
+class CodeSpent extends Error {}
+
+/** Spends the checked code in `tx`, or throws `CodeSpent` for `auditedUnlessCodeSpent` to record and refuse. */
+async function spendCodeOrThrow(tx: Transaction<DB>, personId: string, proof: CodeProof): Promise<void> {
+  if (!(await spendCode(tx, personId, proof))) throw new CodeSpent('another request spent this code first');
+}
+
+/** How a write refused because its code was spent first is recorded, under which context, and the sentence it answers. */
+interface SpentCode {
+  event: AccessEvent;
+  recordedAs: AuditContext;
+  sentence: Sentence;
+}
+
+/**
+ * Runs `write` audited under `ctx`. When `write` throws `CodeSpent`, the rollback keeps nothing of it; `spent.event`
+ * is then written in a transaction of its own, not counted toward the lockout because the code was right, and the
+ * write is refused as badCredentials with `spent.sentence`.
+ */
+async function auditedUnlessCodeSpent<R>(
+  db: Kysely<DB>,
+  ctx: AuditContext,
+  write: (tx: Transaction<DB>) => Promise<R>,
+  spent: SpentCode,
+): Promise<R> {
+  try {
+    return await audited(db, ctx, write);
+  } catch (error) {
+    if (!(error instanceof CodeSpent)) throw error;
+    await audited(db, spent.recordedAs, (tx) => record(tx, spent.event));
+    return refuse('badCredentials', spent.sentence);
+  }
+}
 
 async function rolesIn(db: Kysely<DB>, personId: string, labId: string): Promise<Role[]> {
   const rows = await db
@@ -313,12 +349,20 @@ class Reauthenticated {
   readonly codeSpent: Sentence;
   /** The Access Event that records the write refused because a Lockout landed after the password was checked. */
   readonly refusedByLockout: AccessEvent;
-  constructor(personId: string, code: CodeProof, codeSpent: Sentence, refusedByLockout: AccessEvent) {
+  /** The Access Event that records the write refused because another request spent the code first. */
+  readonly codeAlreadyUsed: AccessEvent;
+  constructor(
+    personId: string,
+    code: CodeProof,
+    codeSpent: Sentence,
+    refused: { byLockout: AccessEvent; codeAlreadyUsed: AccessEvent },
+  ) {
     this.personId = personId;
     this.code = code;
     this.authenticator = code.step === null ? 'Password' : 'PasswordAndCode';
     this.codeSpent = codeSpent;
-    this.refusedByLockout = refusedByLockout;
+    this.refusedByLockout = refused.byLockout;
+    this.codeAlreadyUsed = refused.codeAlreadyUsed;
   }
 }
 export type { Reauthenticated };
@@ -327,8 +371,8 @@ export type { Reauthenticated };
  * Runs `write` in one audited transaction that holds the re-authenticated person's row first, so a Lockout lands wholly
  * before the write, which it then refuses as accountLocked and records as a failed authentication, or wholly after it.
  * The checked code is spent next, in the same transaction, so a refused write leaves it unspent, and a code another
- * request spent first refuses the write as badCredentials with nothing written. The transaction is stamped with the
- * person re-authenticated, which lims.unlock_session requires.
+ * request spent first refuses the write as badCredentials with nothing of it written, recorded afterwards as a code
+ * already used. The transaction is stamped with the person re-authenticated, which lims.unlock_session requires.
  */
 export async function auditedAfterReauthentication<R>(
   db: Kysely<DB>,
@@ -337,15 +381,20 @@ export async function auditedAfterReauthentication<R>(
   write: (tx: Transaction<DB>) => Promise<R>,
 ): Promise<R> {
   if (!reauthenticated) return audited(db, ctx, write);
-  const done = await audited(db, ctx, async (tx) => {
-    if (await resetFailuresUnlessLocked(tx, reauthenticated.personId)) return null;
-    if (!(await spendCode(tx, reauthenticated.personId, reauthenticated.code)))
-      refuse('badCredentials', reauthenticated.codeSpent);
-    await sql`select lims.set_this_transaction('lims.reauthenticated', ${reauthenticated.personId})`.execute(tx);
-    return { written: await write(tx) };
-  });
+  const failedAuthentication = { ...ctx, reason: 'Failed authentication' };
+  const done = await auditedUnlessCodeSpent(
+    db,
+    ctx,
+    async (tx) => {
+      if (await resetFailuresUnlessLocked(tx, reauthenticated.personId)) return null;
+      await spendCodeOrThrow(tx, reauthenticated.personId, reauthenticated.code);
+      await sql`select lims.set_this_transaction('lims.reauthenticated', ${reauthenticated.personId})`.execute(tx);
+      return { written: await write(tx) };
+    },
+    { event: reauthenticated.codeAlreadyUsed, recordedAs: failedAuthentication, sentence: reauthenticated.codeSpent },
+  );
   if (done) return done.written;
-  await audited(db, { ...ctx, reason: 'Failed authentication' }, (tx) => record(tx, reauthenticated.refusedByLockout));
+  await audited(db, failedAuthentication, (tx) => record(tx, reauthenticated.refusedByLockout));
   return refuse('accountLocked', 'This account is locked.');
 }
 
@@ -391,7 +440,10 @@ export async function reauthenticate(
       ? { ...event, kind: failureEvent, failureReason }
       : { ...event, kind: failureEvent };
   if (theirs && proven && person.passwordHash && !('refused' in checked))
-    return new Reauthenticated(person.id, checked, notValid, failed('AccountLocked'));
+    return new Reauthenticated(person.id, checked, notValid, {
+      byLockout: failed('AccountLocked'),
+      codeAlreadyUsed: failed('CodeAlreadyUsed'),
+    });
   await audited(db, { actor: `person:${person.username}`, role, reason: 'Failed authentication' }, async (tx) => {
     const { wasLocked, locksOut } = await countFailure(tx, person.id, credentials.policy.lockoutAfter);
     let failureReason: SignInFailure = codeFailure ?? 'WrongUserId';
@@ -556,8 +608,9 @@ export const browserSession = async (db: Kysely<DB>, token: string | undefined) 
 /**
  * The routes before a session but enrolment: the Labs to choose from, sign-in, a password set through a link, and
  * how long a session has left without touching it.
- * Every sign-in attempt, refused or not, writes its Access Event in a transaction of its own that commits, except one
- * whose code another request spent first: it is refused with nothing written, as a wrong code would be. An enrolled
+ * Every sign-in attempt, refused or not, writes its Access Event in a transaction of its own that commits. One whose
+ * code another request spent first rolls back with nothing of the sign-in written, then records that the code was
+ * already used, which counts toward no lockout. An enrolled
  * browser's sign-in carries its Workstation and opens in the Workstation's Lab. A sign-in over a live session on the
  * same browser (Switch user) ends it with a takeover Access Event in the same transaction; the takeover names the
  * earlier session's Workstation. An earlier session that has lapsed ends at its lapse instead, with no takeover. A
@@ -642,27 +695,36 @@ export function loginRoutes(
       const earlier = await browserSession(db, req.cookies[SESSION_COOKIE]);
       const earlierRoles = earlier ? await rolesIn(db, earlier.personId, earlier.labId) : [];
       const token = randomBytes(32).toString('base64url');
-      const locked = await audited(db, SIGN_IN_SERVICE, async (tx) => {
-        if (await resetFailuresUnlessLocked(tx, person.id)) {
-          await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...subject });
-          return true;
-        }
-        if (!(await spendCode(tx, person.id, checked))) return notValid();
-        if (earlier && (await endSession(tx, earlier, limits)))
-          await record(tx, {
-            kind: 'Takeover',
-            subjectId: earlier.personId,
-            takenById: person.id,
-            roles: earlierRoles,
-            sourceAddress,
-            workstationId: earlier.workstationId,
-            sessionLabId: earlier.labId,
-            sessionId: earlier.id,
-          });
-        const session = await openSession(tx, person.id, choice.labId, token, workstationId);
-        await record(tx, { kind: 'SignInSucceeded', ...subject, sessionLabId: session.labId, sessionId: session.id });
-        return false;
-      });
+      const locked = await auditedUnlessCodeSpent(
+        db,
+        SIGN_IN_SERVICE,
+        async (tx) => {
+          if (await resetFailuresUnlessLocked(tx, person.id)) {
+            await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...subject });
+            return true;
+          }
+          await spendCodeOrThrow(tx, person.id, checked);
+          if (earlier && (await endSession(tx, earlier, limits)))
+            await record(tx, {
+              kind: 'Takeover',
+              subjectId: earlier.personId,
+              takenById: person.id,
+              roles: earlierRoles,
+              sourceAddress,
+              workstationId: earlier.workstationId,
+              sessionLabId: earlier.labId,
+              sessionId: earlier.id,
+            });
+          const session = await openSession(tx, person.id, choice.labId, token, workstationId);
+          await record(tx, { kind: 'SignInSucceeded', ...subject, sessionLabId: session.labId, sessionId: session.id });
+          return false;
+        },
+        {
+          event: { kind: 'SignInFailed', failureReason: 'CodeAlreadyUsed', ...subject },
+          recordedAs: SIGN_IN_SERVICE,
+          sentence: credentialsNotValid(limits, 'userId'),
+        },
+      );
       if (locked) return REFUSAL.AccountLocked();
       reply.setCookie(SESSION_COOKIE, token);
       return (await actorFor(db, token, limits)).view;
@@ -818,7 +880,6 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, credentials: Credenti
 export function labSwitchRoute(app: App, db: Kysely<DB>, credentials: Credentials): void {
   const limits = credentials.policy;
   const REFUSAL = refusalsUnder(limits);
-  const notValid = REFUSAL.WrongPassword;
   app.route({
     ...routes.switchLab,
     handler: async (req, reply) => {
@@ -873,30 +934,39 @@ export function labSwitchRoute(app: App, db: Kysely<DB>, credentials: Credential
       }
 
       const token = randomBytes(32).toString('base64url');
-      const outcome = await audited(db, as, async (tx): Promise<'AccountLocked' | 'SessionEnded' | 'Switched'> => {
-        if (await resetFailuresUnlessLocked(tx, person.id)) {
-          await record(tx, { kind: 'LabSwitchFailed', failureReason: 'AccountLocked', ...inSession });
-          return 'AccountLocked';
-        }
-        if (!(await endSession(tx, session, limits))) {
-          await record(tx, { kind: 'LabSwitchFailed', failureReason: 'SessionEnded', ...inSession });
-          return 'SessionEnded';
-        }
-        // Spent only once the switch is sure to happen, so a session that ended first leaves the code for the next sign-in.
-        if (!(await spendCode(tx, person.id, checked))) return notValid();
-        const opened = await openSession(tx, person.id, choice.labId, token, null);
-        await record(tx, {
-          kind: 'LabSwitch',
-          subjectId: person.id,
-          roles: choice.roles,
-          sourceAddress: sourceAddressOf(req),
-          sessionLabId: opened.labId,
-          sessionId: opened.id,
-          previousSessionLabId: session.labId,
-          previousSessionId: session.id,
-        });
-        return 'Switched';
-      });
+      const outcome = await auditedUnlessCodeSpent(
+        db,
+        as,
+        async (tx): Promise<'AccountLocked' | 'SessionEnded' | 'Switched'> => {
+          if (await resetFailuresUnlessLocked(tx, person.id)) {
+            await record(tx, { kind: 'LabSwitchFailed', failureReason: 'AccountLocked', ...inSession });
+            return 'AccountLocked';
+          }
+          if (!(await endSession(tx, session, limits))) {
+            await record(tx, { kind: 'LabSwitchFailed', failureReason: 'SessionEnded', ...inSession });
+            return 'SessionEnded';
+          }
+          // Spent only once the switch is sure to happen, so a session that ended first leaves the code for the next sign-in.
+          await spendCodeOrThrow(tx, person.id, checked);
+          const opened = await openSession(tx, person.id, choice.labId, token, null);
+          await record(tx, {
+            kind: 'LabSwitch',
+            subjectId: person.id,
+            roles: choice.roles,
+            sourceAddress: sourceAddressOf(req),
+            sessionLabId: opened.labId,
+            sessionId: opened.id,
+            previousSessionLabId: session.labId,
+            previousSessionId: session.id,
+          });
+          return 'Switched';
+        },
+        {
+          event: { kind: 'LabSwitchFailed', failureReason: 'CodeAlreadyUsed', ...inSession },
+          recordedAs: as,
+          sentence: credentialsNotValid(limits, 'userId'),
+        },
+      );
       if (outcome !== 'Switched') return REFUSAL[outcome]();
       reply.setCookie(SESSION_COOKIE, token);
       return (await actorFor(db, token, limits)).view;

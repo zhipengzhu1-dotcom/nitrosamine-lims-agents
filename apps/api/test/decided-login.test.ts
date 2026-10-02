@@ -84,6 +84,10 @@ const enterResult = async (
     signature: { ...(await signatureOf(client, testId, signer)), ...signature },
   });
 
+const failedLoginsOf = async (personId: string) =>
+  (await api.superuser.selectFrom('person').select('failedLogins').where('id', '=', personId).executeTakeFirstOrThrow())
+    .failedLogins;
+
 const eventsOf = (personId: string) =>
   api.superuser
     .selectFrom('accessEvent')
@@ -182,7 +186,7 @@ it('a signing refused because the Test moved on spends no code; the same code th
   ok(await enterResult(client, fresh, account, { code: code(1) }));
 });
 
-it('two sign-ins racing with one code give one session and one refusal, and no failure is recorded against the person', async () => {
+it('two sign-ins racing with one code give one session and one refusal, recorded as a code already used that counts toward no lockout', async () => {
   const { account, code } = await enrolled('rae.race');
   const answers = await Promise.all([
     signIn(account, account.password, code()),
@@ -195,7 +199,9 @@ it('two sign-ins racing with one code give one session and one refusal, and no f
   assert.deepEqual(await eventsOf(account.id), [
     { kind: 'AuthenticatorEnrolled', failureReason: null },
     { kind: 'SignInSucceeded', failureReason: null },
+    { kind: 'SignInFailed', failureReason: 'CodeAlreadyUsed' },
   ]);
+  assert.equal(await failedLoginsOf(account.id), 0, 'a code spent by a racing request is not a wrong code');
 });
 
 it('under the decided login, signing refuses without the typed user ID, the password and a fresh code', async () => {

@@ -8,6 +8,9 @@ alter type lims.sign_in_failure add value 'NoAuthenticator';
 -- holds another person's live session. Neither counts toward the lockout.
 alter type lims.sign_in_failure add value 'AlreadyEnrolled';
 alter type lims.sign_in_failure add value 'OtherPersonSignedIn';
+-- A code that another request spent first: the losing request rolls back with nothing written, then records this, which
+-- counts toward no lockout, because the code was right.
+alter type lims.sign_in_failure add value 'CodeAlreadyUsed';
 
 -- The enrolment reasons, like the sign-in-only ones before them, belong to a failed sign-in and to no other kind.
 alter table lims.access_event

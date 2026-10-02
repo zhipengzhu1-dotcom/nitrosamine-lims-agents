@@ -273,6 +273,7 @@ const signInFailure = Type.Enum({
   NoAuthenticator: 'NoAuthenticator',
   AlreadyEnrolled: 'AlreadyEnrolled',
   OtherPersonSignedIn: 'OtherPersonSignedIn',
+  CodeAlreadyUsed: 'CodeAlreadyUsed',
 } as const satisfies { [K in db.SignInFailure]: K });
 /** A session a Lockout ended, at the Lockout's instant: when it was signed in, and on which Workstation. */
 const endedSession = Type.Object({ id: uuid, signedInAt: instant, workstation: nullable(Type.String()) });
