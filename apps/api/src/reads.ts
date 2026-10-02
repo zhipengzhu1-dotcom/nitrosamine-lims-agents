@@ -9,7 +9,7 @@ import { staffRoutes } from './staff.ts';
 import { onWallClock, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
-const onLabClock = (column: string) => onWallClock(sql.ref(column), sql.ref('lab.time_zone'));
+const labClockOf = (column: string) => onWallClock(sql.ref(column), sql.ref('lab.time_zone'));
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -28,7 +28,7 @@ function visibleTests(scope: Scope) {
       'sample.number as sampleNumber',
       'sample.description',
       'sample.receivedAt',
-      sql<Instant | null>`${onLabClock('sample.received_at')}`.as('receivedAtLab'),
+      labClockOf('sample.received_at').$castTo<Instant | null>().as('receivedAtLab'),
       'customer.name as customer',
       'method.code as methodCode',
       'method.version as methodVersion',
@@ -83,7 +83,7 @@ async function testView(scope: Scope, id: string) {
             'signature.username',
             'signature.role',
             'signature.signedAt',
-            onLabClock('signature.signed_at').as('signedAtLab'),
+            labClockOf('signature.signed_at').as('signedAtLab'),
             'recordVersion.recordTable as record',
             'recordVersion.version',
             'recordVersion.canonicalForm',

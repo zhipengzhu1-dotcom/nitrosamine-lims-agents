@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, test } from './walk.ts';
+import { expect, type Locator, type Page, test, utcThenLabClock } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string, lab = /R&D Laboratory/) {
@@ -15,8 +15,6 @@ async function signOut(page: Page) {
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 }
-
-const labRecordTime = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/;
 
 async function atLeast(target: Locator, width: number, height: number) {
   const b = await target.boundingBox();
@@ -85,7 +83,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await signIn(page, 'rui.reviewer');
   const receivedOnWorklist = page.getByRole('row', { name: description }).locator('td[data-label="Received"]');
   await expect(receivedOnWorklist, 'the Worklist shows Received in UTC, then on the Lab wall clock').toHaveText(
-    labRecordTime,
+    utcThenLabClock,
   );
   const received = await receivedOnWorklist.textContent();
   await openTheTest();
@@ -152,7 +150,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     page.locator('td[data-label="Time"]'),
     "the Signatures table's Time is the Audit Trail's Signed at, in UTC then on the Lab wall clock",
   ).toHaveText([signedAt ?? '']);
-  await expect(page.locator('td[data-label="Time"]')).toHaveText([labRecordTime]);
+  await expect(page.locator('td[data-label="Time"]')).toHaveText([utcThenLabClock]);
   const receipt = entries.filter({ has: page.locator('dt:text-is("Received")') });
   await expect(
     receipt.locator('dt:text-is("Received") + dd'),

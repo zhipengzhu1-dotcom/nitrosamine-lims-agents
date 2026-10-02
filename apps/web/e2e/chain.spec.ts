@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, test } from './walk.ts';
+import { expect, type Locator, type Page, test, utcThenLabClock } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {
@@ -401,14 +401,13 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     /^1 · [0-9a-f]{64}$/,
   );
   await expect(signatureRow(page, 'Released').locator('td[data-label="Record Version"]')).toHaveText('1');
-  const labRecordTime = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/;
   const reportTimes = page.locator('td[data-label="Time"]');
   await expect(reportTimes, 'each Signature time in UTC, then on the Lab wall clock').toHaveText([
-    labRecordTime,
-    labRecordTime,
-    labRecordTime,
+    utcThenLabClock,
+    utcThenLabClock,
+    utcThenLabClock,
   ]);
-  await expect(page.locator('dl.facts dt:text-is("Received") + dd')).toHaveText(labRecordTime);
+  await expect(page.locator('dl.facts dt:text-is("Received") + dd')).toHaveText(utcThenLabClock);
   const timesOnReport = await reportTimes.allTextContents();
   const receivedOnReport = await page.locator('dl.facts dt:text-is("Received") + dd').textContent();
   await shot(page, 'test-report');

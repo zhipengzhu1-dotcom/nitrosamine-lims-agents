@@ -1,4 +1,4 @@
-/** The web's one display function for an instant: the ISO 8601 UTC string from the API, shown to the second. */
+/** An instant in UTC only, shown to the second: a company record's time, or one that belongs to no Lab record. */
 export const time = (iso: string | null) =>
   // oxlint-disable-next-line no-restricted-globals -- parses an instant to show it; reads no clock
   iso ? `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')} UTC` : '';
