@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {

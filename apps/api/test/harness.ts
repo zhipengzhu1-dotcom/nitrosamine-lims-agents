@@ -189,6 +189,23 @@ export async function startApi(name: string) {
     log,
     logLines,
     startAnotherApi: (options: ListenOptions = {}) => listen(db, options),
+    /**
+     * Resolves once `sessions` backends of this database wait on a lock, polled on a connection of its own, because a
+     * transaction sees one frozen snapshot of `pg_stat_activity`; fails after about 10 s.
+     */
+    async untilWaitingOnLocks(sessions: number): Promise<void> {
+      for (let polls = 0; polls < 200; polls++) {
+        const { waiting } = await superuser
+          .selectNoFrom(
+            sql<number>`(select count(*)::int from pg_stat_activity
+              where datname = current_database() and wait_event_type = 'Lock')`.as('waiting'),
+          )
+          .executeTakeFirstOrThrow();
+        if (waiting >= sessions) return;
+        await sql`select pg_sleep(0.05)`.execute(superuser);
+      }
+      assert.fail(`${sessions} sessions never waited on a lock`);
+    },
     /** The clock seam: moves a person's open sessions `ms` into the past, as a clock advanced by `ms` would leave them. */
     async advanceClock(account: Account, ms: number): Promise<void> {
       const by = sql`${ms} * interval '1 millisecond'`;

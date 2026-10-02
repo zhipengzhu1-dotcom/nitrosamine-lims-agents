@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, test } from '@playwright/test';
+import { expect, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 const PROBE = 'E2E-FAILURE-PROBE';

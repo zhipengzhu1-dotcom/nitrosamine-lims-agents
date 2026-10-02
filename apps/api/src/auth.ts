@@ -163,13 +163,13 @@ async function recordWrongCredential(
   return reason;
 }
 
-/** Locks the person's row for the session about to open; answers true, and resets nothing, if a lock landed since the password was checked. */
+/** Locks the person's row for the session about to open, without blocking a key-share lock from a step that holds the company chain; answers true, and resets nothing, if a lock landed since the password was checked. */
 async function resetFailuresUnlessLocked(tx: Transaction<DB>, personId: string): Promise<boolean> {
   const { lockedAt, failedLogins } = await tx
     .selectFrom('person')
     .select(['lockedAt', 'failedLogins'])
     .where('id', '=', personId)
-    .forUpdate()
+    .forNoKeyUpdate()
     .executeTakeFirstOrThrow();
   if (lockedAt) return true;
   if (failedLogins > 0) await tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', personId).execute();
