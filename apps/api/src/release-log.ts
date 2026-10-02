@@ -88,6 +88,9 @@ function signingRefused(error: unknown): never {
   throw new Error('signing failed', { cause: error });
 }
 
+/** The version a new signature statement must take: the one after the statement in force, so versions never skip or collide. */
+const nextStatementVersion = async (scope: Scope) => (await statementInForce(scope)).version + 1;
+
 async function seenEntryVersion(scope: Scope, entryId: string, signing: SigningBody) {
   const latest = await scope
     .companyVersions()
@@ -140,13 +143,15 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
       const role =
         req.actor.roles.find((r) => r === approverOf({ statementVersion: declared.statementVersion ?? null })) ??
         req.actor.roles.find((r) => RECORDERS.has(r)) ??
-        refuse('role', 'A Release Log entry is recorded by the PlatformOperator or QA.');
+        refuse('role', 'A Release Log entry is recorded by the Platform Operator or QA.');
       if (declared.kind === 'Release' && declared.release === undefined)
         refuse('guard', 'A Release entry names its release.');
       if (declared.setsDataClass !== undefined && declared.fileVaultPersonalKey === undefined)
         refuse('guard', 'An entry setting the data class records whether the host holds a personal FileVault key.');
       if ((declared.statementVersion === undefined) !== (statement === undefined))
         refuse('guard', 'A new signature statement comes with its version, and a version with its statement.');
+      if (declared.statementVersion !== undefined && declared.statementVersion !== (await nextStatementVersion(scope)))
+        refuse('guard', 'A new signature statement takes the version after the one in force.');
       if (declared.setsDataClass === 'real') await gateReal(scope, login, declared.fileVaultPersonalKey ?? false);
       const id = await scope.write(reason, role, async (q) => {
         const entry = await q.company
@@ -175,9 +180,11 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
       if (!req.actor.roles.includes(role))
         refuse(
           'role',
-          `A Release Log entry ${entry.statementVersion === null ? 'of the system' : 'bringing a signature statement into force'} is approved by ${role}.`,
+          `A Release Log entry ${entry.statementVersion === null ? 'of the system' : 'bringing a signature statement into force'} is approved by ${role === 'QA' ? 'QA' : 'the Platform Operator'}.`,
         );
       if (entry.approved) refuse('state', 'This Release Log entry is already approved.');
+      if (entry.statementVersion !== null && entry.statementVersion !== (await nextStatementVersion(scope)))
+        refuse('state', 'Another signature statement came into force since this entry was recorded. Record it again.');
       const seen = await seenEntryVersion(scope, entry.id, signing);
       if (entry.setsDataClass === 'real') await gateReal(scope, login, entry.fileVaultPersonalKey ?? false);
       const reauthenticated = await reauthenticate(

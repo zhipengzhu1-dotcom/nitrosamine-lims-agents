@@ -9,7 +9,7 @@ import { staffRoutes } from './staff.ts';
 import { stepRoutes } from './steps.ts';
 import { workstationRoutes } from './workstations.ts';
 
-/** Every route that needs a session. A locked session reaches only lock, unlock and sign-out; every other route answers sessionLocked. */
+/** The public deployment read, then every route that needs a session. A locked session reaches only lock, unlock and sign-out; every other route answers sessionLocked. */
 export function sessionRoutes(app: App, db: Kysely<DB>, limits: SessionLimits, login: Login, release: string): void {
   deploymentRoute(app, db);
   const withSession = (whileLocked: boolean, routes: (scope: App) => void) =>

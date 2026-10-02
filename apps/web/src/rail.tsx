@@ -281,13 +281,17 @@ export function Shell({
   );
 }
 
+/** The words every screen carries unless the deployment's data class is real. */
+function FictionalBanner() {
+  return useFictional() ? <span className="fict">Fictional data only</span> : null;
+}
+
 export function TopBar({ lab, children }: { lab?: Lab; children?: ReactNode }) {
-  const fictional = useFictional();
   return (
     <header className="top">
       <span className="brand">{lab && <b title={lab.name}>{lab.code}</b>}Nitrosamine LIMS</span>
       {children}
-      {fictional && <span className="fict">Fictional data only</span>}
+      <FictionalBanner />
     </header>
   );
 }
@@ -458,7 +462,6 @@ function Rail({
 
   const direct = action && !action.fields.length && !action.signs;
   const shown = sheet?.action;
-  const fictional = useFictional();
   return (
     <>
       {shown && (
@@ -478,7 +481,7 @@ function Rail({
           <fieldset className="sheet__set" disabled={busy}>
             <h2 id="sheet-title">
               {shown.signs ? `Sign ${shown.signs.meaning}` : shown.label}
-              {fictional && <span className="fict">Fictional data only</span>}
+              <FictionalBanner />
             </h2>
             <div className="sheet__body">
               {shown.fields.length > 0 && (

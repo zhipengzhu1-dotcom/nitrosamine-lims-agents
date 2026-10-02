@@ -111,6 +111,7 @@ describe('recording a Release Log entry', () => {
       assert.deepEqual(await versionsOf(entry.id), [{ version: 1, labId: null }]);
     }
     assert.equal(entries[0]?.release, '2026.10.2');
+    for (const entry of entries) assert.equal(ok(await approve(operator, entry, ada)).approved, true, entry.kind);
   });
 
   it('an entry declaring service identities is versioned again once they are inserted, and lists them', async () => {
@@ -125,7 +126,7 @@ describe('recording a Release Log entry', () => {
   });
 
   it('QA records an entry that brings a new signature statement version in, which is not in force until approved', async () => {
-    const version = (await statementInForce()) + 10;
+    const version = (await statementInForce()) + 1;
     const entry = await record(qa, { statementVersion: version, statement: 'I attest, under this new statement.' });
     assert.equal(entry.statementVersion, version);
     assert.equal(entry.statement, 'I attest, under this new statement.');
@@ -136,7 +137,7 @@ describe('recording a Release Log entry', () => {
     const analyst = await api.login(api.person('ana'));
     assert.match(
       refusedWith(await analyst.call(routes.recordReleaseLogEntry, draft()), 'role'),
-      /PlatformOperator or QA/,
+      /Platform Operator or QA/,
     );
     const customer = await api.login(api.person('cora'));
     assert.match(refusedWith(await customer.call(routes.recordReleaseLogEntry, draft()), 'role'), /staff/);
@@ -157,6 +158,17 @@ describe('recording a Release Log entry', () => {
         'guard',
       ),
       /version/,
+    );
+    const skipped = (await statementInForce()) + 2;
+    assert.match(
+      refusedWith(
+        await operator.call(
+          routes.recordReleaseLogEntry,
+          draft({ statementVersion: skipped, statement: 'Skips one.' }),
+        ),
+        'guard',
+      ),
+      /version after the one in force/,
     );
   });
 
@@ -217,9 +229,9 @@ describe('approving a Release Log entry', () => {
 
   it('a system entry is refused from QA, and a statement entry from the operator', async () => {
     const system = await record(operator);
-    assert.match(refusedWith(await approve(qa, system, quinn), 'role'), /PlatformOperator/);
+    assert.match(refusedWith(await approve(qa, system, quinn), 'role'), /Platform Operator/);
     const statement = await record(qa, {
-      statementVersion: (await statementInForce()) + 20,
+      statementVersion: (await statementInForce()) + 1,
       statement: 'A new statement.',
     });
     assert.match(refusedWith(await approve(operator, statement, ada), 'role'), /QA/);
@@ -229,9 +241,11 @@ describe('approving a Release Log entry', () => {
     const version = (await statementInForce()) + 1;
     const entry = await record(qa, { statementVersion: version, statement: 'I attest that this record is true.' });
     assert.notEqual(await statementInForce(), version);
+    const overtaken = await record(qa, { statementVersion: version, statement: 'Recorded before, approved after.' });
     ok(await approve(qa, entry, quinn));
     assert.equal(await statementInForce(), version);
     assert.equal(ok(await qa.call(routes.releaseLog)).statement.text, 'I attest that this record is true.');
+    assert.match(refusedWith(await approve(qa, overtaken, quinn), 'state'), /came into force/);
   });
 
   it('a wrong password, a changed Record Version and a stale statement version are each refused, leaving the entry unapproved', async () => {

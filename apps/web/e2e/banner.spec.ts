@@ -1,5 +1,5 @@
 import { SHOTS } from '../playwright.config.ts';
-import { expect, type Page, signInByApi, test } from './walk.ts';
+import { expect, type Page, signInByApi, TABLET, test } from './walk.ts';
 
 /** The banner the deployment's data class puts on every screen while it is fictional, as #102 decided. */
 const banner = (page: Page) => page.locator('header.top').getByText('Fictional data only');
@@ -21,6 +21,16 @@ test('the Bench Rail carries the fictional-data banner for staff', async ({ page
   await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
   await expect(banner(page)).toHaveText('Fictional data only');
   await shot(page, 'bench-rail');
+});
+
+test('at tablet width the Bench Rail carries the fictional-data banner', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'one tablet-width walk, on the desktop browser');
+  await page.setViewportSize(TABLET);
+  await signInByApi(page, 'ana.analyst');
+  await page.goto('/#/tests');
+  await expect(page.getByRole('heading', { name: 'Tests' })).toBeVisible();
+  await expect(banner(page)).toHaveText('Fictional data only');
+  await shot(page, 'bench-rail-tablet');
 });
 
 test('the Customer portal carries the fictional-data banner', async ({ page }) => {

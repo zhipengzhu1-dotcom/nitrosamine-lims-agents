@@ -1,8 +1,10 @@
+import type { DemoException } from './http.ts';
 import type { Sentence } from './sentence.ts';
 
 /** One row of the control list in docs/real-data-gate.md: a control that must be built before the data class can be real. */
 export interface Control {
-  phase: number;
+  /** The build-order phase, or `task` for one of the four tasks the spec names outside the phases. */
+  phase: number | 'task';
   control: string;
   built: 'yes' | 'partly' | 'no';
 }
@@ -12,8 +14,14 @@ export function parseControlList(markdown: string): Control[] {
   const controls: Control[] = [];
   for (const line of markdown.split('\n')) {
     const cells = line.split('|').map((cell) => cell.trim());
-    const phase = Number(cells[1]);
-    if (cells.length !== 5 || !Number.isInteger(phase) || cells[2] === undefined || cells[3] === undefined) continue;
+    const phase = cells[1] === 'task' ? 'task' : Number(cells[1]);
+    if (
+      cells.length !== 5 ||
+      (phase !== 'task' && !Number.isInteger(phase)) ||
+      cells[2] === undefined ||
+      cells[3] === undefined
+    )
+      continue;
     const built = cells[3] === '' ? 'no' : cells[3].startsWith('Partly') ? 'partly' : 'yes';
     controls.push({ phase, control: cells[2], built });
   }
@@ -106,6 +114,10 @@ export const controls: Control[] = [
   { phase: 13, control: 'Withdrawal notices', built: 'no' },
   { phase: 13, control: 'Downloads', built: 'no' },
   { phase: 13, control: 'Check a copy', built: 'no' },
+  { phase: 'task', control: 'Penetration test', built: 'no' },
+  { phase: 'task', control: 'Supplier quality agreements', built: 'no' },
+  { phase: 'task', control: 'The VPS move', built: 'no' },
+  { phase: 'task', control: 'IT supplier evaluation', built: 'no' },
 ];
 
 /** The login configurations the API runs under; `decided` is the one ADR 0002 decided for real data. */
@@ -127,7 +139,7 @@ export interface DeploymentFacts {
   anchoringLive: boolean;
   fileVaultPersonalKey: boolean;
   /** Demo exceptions recorded by an approved Release Log entry and not yet lapsed by one. */
-  openExceptions: string[];
+  openExceptions: DemoException[];
   /** The tables holding a record created under the fictional data class, from `lims.fictional_records()`. */
   fictionalRecords: string[];
 }
