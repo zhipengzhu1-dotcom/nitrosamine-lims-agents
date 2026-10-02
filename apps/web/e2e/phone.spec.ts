@@ -38,13 +38,46 @@ test('the Submit sheet and its long Method name fit a 390 px phone with no sidew
   }
 });
 
-test('an open sheet hides the session buttons and Cancel brings them back', async ({ page }) => {
+test('an open sheet hides the session buttons and the preferences link, and Cancel brings them back', async ({
+  page,
+}) => {
   await signInAsCustomer(page);
   const signOut = page.getByRole('button', { name: 'Sign out' });
+  const preferences = page.getByRole('link', { name: /your preferences/ });
   await expect(signOut, 'the rail offers Sign out before a sheet opens').toBeVisible();
+  await expect(preferences, 'the rail offers the preferences link before a sheet opens').toBeVisible();
   await page.getByRole('button', { name: 'Submit' }).click();
   await expect(page.locator('form.sheet')).toBeVisible();
   await expect(signOut, 'the open sheet hides Sign out').toBeHidden();
+  await expect(preferences, 'the open sheet hides the preferences link it covers').toBeHidden();
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(signOut, 'Sign out is back once the sheet closes').toBeVisible();
+  await expect(preferences, 'the preferences link is back once the sheet closes').toBeVisible();
+});
+
+test('a phone held sideways hides the top bar under an open sheet, and Cancel brings it back', async ({ page }) => {
+  await signInAsCustomer(page);
+  await page.setViewportSize({ width: 844, height: 390 });
+  const tabs = page.locator('header.top nav');
+  const preferences = page.getByRole('link', { name: /your preferences/ });
+  await expect(tabs, 'the top bar shows its tabs before a sheet opens').toBeVisible();
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(page.locator('form.sheet')).toBeVisible();
+  await expect(tabs, 'the open sheet hides the tabs it covers').toBeHidden();
+  await expect(preferences, 'the open sheet hides the preferences link it covers').toBeHidden();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(tabs, 'the tabs are back once the sheet closes').toBeVisible();
+  await expect(preferences, 'the preferences link is back once the sheet closes').toBeVisible();
+});
+
+test('an upright phone with its keyboard up keeps the top bar above an open sheet', async ({ page }) => {
+  await signInAsCustomer(page);
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(page.locator('form.sheet')).toBeVisible();
+  // An Android keyboard shrinks the layout viewport (index.html asks for resizes-content).
+  await page.setViewportSize({ width: 360, height: 480 });
+  const stays = await page
+    .locator('header.top')
+    .evaluate((bar) => getComputedStyle(bar).visibility === 'visible' && bar.getAnimations().length === 0);
+  expect(stays, 'the top bar is neither hidden nor about to hide').toBe(true);
 });
