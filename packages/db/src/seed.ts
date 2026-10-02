@@ -71,7 +71,8 @@ const ENTRIES: { title: string; summary: string; recordsExceptions?: [DemoExcept
   },
   {
     title: 'Demo exception: FileVault without a personal recovery key',
-    summary: 'The Mac that hosts the demo has no personal FileVault key recorded; each entry that sets the data class records the fdesetup result.',
+    summary:
+      'The Mac that hosts the demo has no personal FileVault key recorded; each entry that sets the data class records the fdesetup result.',
     recordsExceptions: ['FileVault'],
   },
   {

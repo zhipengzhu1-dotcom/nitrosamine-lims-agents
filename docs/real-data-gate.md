@@ -1,6 +1,6 @@
 # The real-data gate's control list
 
-The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the-owners-mac-then-a-us-vps.md); spec [#85](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/85), Further Notes) refuses the `real` data class while any control on this list is unbuilt. The list is one of the gate's conditions; the others (every login value at its decided value, every demo exception recorded as lapsed, live anchoring, a personal FileVault key, no record created under `fictional`) are in ADR 0002 and the spec. The list is every control of a build-order phase marked "before real data", plus the four tasks the spec names. Each pull request that builds a control marks its row Built with a link to its ticket. [Release Log, service identities, real-data gate and banner](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/102) turns this list into the registry the server reads; until then this document is the list.
+The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the-owners-mac-then-a-us-vps.md); spec [#85](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/85), Further Notes) refuses the `real` data class while any control on this list is unbuilt. The list is one of the gate's conditions; the others (every login value at its decided value, every demo exception recorded as lapsed, live anchoring, a personal FileVault key, no record created under `fictional`) are in ADR 0002 and the spec. The list is every control of a build-order phase marked "before real data", plus the four tasks the spec names. Each pull request that builds a control marks its row Built with a link to its ticket. [Release Log, service identities, real-data gate and banner](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/102) turned this list into the registry the server reads, `controls` in `packages/domain/src/real-data-gate.ts`; a domain test holds the registry and this table together, so a pull request that builds a control marks both.
 
 | Phase | Control | Built |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 2 | Unlock | |
 | 2 | Admin constraint | [#100](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/100) |
 | 2 | Decided login (TOTP, password rules, lockout 5, pepper) behind the data class; TOTP covers sign-in, signing and the Lab switch, which until then re-authenticates with user ID and password only ([#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98)) | |
-| 2 | Release Log, service identities, real-data gate and banner | |
+| 2 | Release Log, service identities, real-data gate and banner | [#102](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/102) |
 | 3 | Critical Data Change | |
 | 3 | Return | |
 | 3 | Holds | |

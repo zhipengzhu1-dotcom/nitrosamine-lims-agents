@@ -133,7 +133,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   const testInsert = auditTrail.find((e) => e.table === 'test' && e.op === 'INSERT')?.newRow;
   assert.deepEqual(
     Object.keys(testInsert ?? {}).sort(),
-    ['assignee_id', 'gxp_class', 'id', 'lab_id', 'method_id', 'sample_id', 'state'],
+    ['assignee_id', 'data_class', 'gxp_class', 'id', 'lab_id', 'method_id', 'sample_id', 'state'],
     'the Audit Trail shows each row snapshot under its stored column names',
   );
   assert.deepEqual(

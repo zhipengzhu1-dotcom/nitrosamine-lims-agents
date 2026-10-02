@@ -84,7 +84,12 @@ const fixture: [string, Row][] = [
   ['lims.person', { id: id.admin, username: 'refusal.admin', display_name: 'Refusal Admin' }],
   [
     'lims.person',
-    { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator', password_hash: 'not-a-real-hash' },
+    {
+      id: id.operator,
+      username: 'refusal.operator',
+      display_name: 'Refusal Operator',
+      password_hash: 'not-a-real-hash',
+    },
   ],
   [
     'lims.person',
@@ -746,7 +751,11 @@ before(async () => {
     }),
   );
   await client.query(
-    ...insert('lims.service_identity', { name: 'svc:refusal', scope: ['customer:INSERT'], created_by_entry_id: id.entry }),
+    ...insert('lims.service_identity', {
+      name: 'svc:refusal',
+      scope: ['customer:INSERT'],
+      created_by_entry_id: id.entry,
+    }),
   );
   await client.query('commit');
   await app.connect();
@@ -3005,7 +3014,11 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
   covered.add('lims.service_identity.service_identity_through_release_log');
   it('a service identity is declared only by a Release Log entry written in the same transaction', async () => {
     const error = await refusalOf(
-      ...insert('lims.service_identity', { name: 'svc:late', scope: ['customer:INSERT'], created_by_entry_id: id.entry }),
+      ...insert('lims.service_identity', {
+        name: 'svc:late',
+        scope: ['customer:INSERT'],
+        created_by_entry_id: id.entry,
+      }),
     );
     assert.deepEqual(
       [error.code, error.message],
@@ -3067,7 +3080,11 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
 
   it('a record keeps the data class it was created under', async () => {
     assert.equal(
-      await refusedWith('LA011', AUDIT_CONTEXT, `update lims.customer set data_class = 'real' where id = '${id.customer}'`),
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `update lims.customer set data_class = 'real' where id = '${id.customer}'`,
+      ),
       'a record keeps the data class it was created under',
     );
   });

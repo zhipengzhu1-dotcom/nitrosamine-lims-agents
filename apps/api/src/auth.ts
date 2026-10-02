@@ -3,7 +3,14 @@ import { isIP } from 'node:net';
 import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from '@lims/db/credentials';
-import { type ActorContext, routes, type Sentence, SESSION_ENDED, type SignedInView } from '@lims/domain';
+import {
+  type ActorContext,
+  type LoginConfiguration,
+  routes,
+  type Sentence,
+  SESSION_ENDED,
+  type SignedInView,
+} from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
 import { openJobIncident } from './incident.ts';
@@ -26,7 +33,7 @@ const HOUR_MS = 60 * MINUTE_MS;
 export const SESSION_LIMITS = {
   decided: { idleMs: 15 * MINUTE_MS, absoluteMs: 12 * HOUR_MS },
   demo: { idleMs: 8 * HOUR_MS, absoluteMs: 12 * HOUR_MS },
-} as const satisfies Record<string, SessionLimits>;
+} as const satisfies Record<LoginConfiguration, SessionLimits>;
 export type Login = keyof typeof SESSION_LIMITS;
 
 type AccessEvent = Insertable<DB['accessEvent']>;

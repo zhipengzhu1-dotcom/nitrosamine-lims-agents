@@ -209,7 +209,7 @@ it('an Admin grants a Membership for a Lab and role with a reason, and the Audit
       reason: 'Joins goods-in',
       op: 'INSERT',
       chain: api.labId,
-      newRow: { lab_id: api.labId, person_id: person.id, role: 'SampleCustodian' },
+      newRow: { data_class: 'fictional', lab_id: api.labId, person_id: person.id, role: 'SampleCustodian' },
     },
   ]);
 });

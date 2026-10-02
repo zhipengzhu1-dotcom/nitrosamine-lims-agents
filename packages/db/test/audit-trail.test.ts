@@ -265,12 +265,15 @@ describe('chain verification reports every break in a chain, each once, in entry
   ];
   for (const [i, c] of cases.entries())
     it(c.name, async () => {
-      const { labId: chain } = await audited(service, { actor: 'svc:test', role: 'system', reason: 'Add a Lab' }, (tx) =>
-        tx
-          .insertInto('lab')
-          .values({ code: `K${String.fromCodePoint(65 + i)}`, name: 'Broken Lab', timeZone: 'UTC' })
-          .returning('labId')
-          .executeTakeFirstOrThrow(),
+      const { labId: chain } = await audited(
+        service,
+        { actor: 'svc:test', role: 'system', reason: 'Add a Lab' },
+        (tx) =>
+          tx
+            .insertInto('lab')
+            .values({ code: `K${String.fromCodePoint(65 + i)}`, name: 'Broken Lab', timeZone: 'UTC' })
+            .returning('labId')
+            .executeTakeFirstOrThrow(),
       );
       for (const n of [2, 3, 4, 5, 6])
         await audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
@@ -456,12 +459,16 @@ it('a chain or a Lab that does not exist is refused, and a number is taken only 
 });
 
 it("one transaction keeps one ID when it changes the session's time zone and date style between writes", async () => {
-  await audited(service, { actor: 'svc:test', role: 'system', reason: 'Change display settings mid-write' }, async (tx) => {
-    await tx.insertInto('customer').values({ name: 'Before The Zone Change' }).execute();
-    await sql`set local timezone = 'Asia/Tokyo'`.execute(tx);
-    await sql`set local datestyle = 'SQL, DMY'`.execute(tx);
-    await tx.insertInto('customer').values({ name: 'After The Zone Change' }).execute();
-  });
+  await audited(
+    service,
+    { actor: 'svc:test', role: 'system', reason: 'Change display settings mid-write' },
+    async (tx) => {
+      await tx.insertInto('customer').values({ name: 'Before The Zone Change' }).execute();
+      await sql`set local timezone = 'Asia/Tokyo'`.execute(tx);
+      await sql`set local datestyle = 'SQL, DMY'`.execute(tx);
+      await tx.insertInto('customer').values({ name: 'After The Zone Change' }).execute();
+    },
+  );
   const ids = (await transactionIds(['Before The Zone Change', 'After The Zone Change'])).map((e) => e.transactionId);
   assert.equal(ids.length, 2);
   assert.equal(ids[0], ids[1]);

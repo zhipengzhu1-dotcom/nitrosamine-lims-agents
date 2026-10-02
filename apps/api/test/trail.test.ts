@@ -292,7 +292,7 @@ it('every column a row snapshot stores has a glossary label in the registry, oth
   assert.deepEqual(
     rows.filter(
       ({ table, column }) =>
-        !['id', 'lab_id'].includes(column) &&
+        !['id', 'lab_id', 'data_class'].includes(column) &&
         !(isAuditedTable(table) && Object.hasOwn(auditedRecords[table].fields, column)),
     ),
     [],
