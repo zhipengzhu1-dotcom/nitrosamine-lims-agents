@@ -279,73 +279,78 @@ export function StaffPage({ me }: { me: ActorContext }) {
   const linkUrl = link && `${location.origin}${location.pathname}#/welcome/${link.token}`;
   return (
     <Shell me={me} active="staff" action={null}>
-      <h1>Staff accounts</h1>
-      {error && <p className="note--bad">{error}</p>}
-      <RecordVerification onDone={reload} />
-      {link && (
-        <section className="card" aria-label="One-time link">
-          <h2>One-time link for {link.printedName}</h2>
-          <p>
-            Give this link to {link.printedName} in person. They choose their own password with it. It works once and
-            expires at {time(link.expiresAt)}; the LIMS keeps no copy of it.
-          </p>
-          <p className="long">
-            <code>{linkUrl}</code>
-          </p>
-          <button type="button" className="btn" onClick={() => setLink(null)}>
-            Done
-          </button>
-        </section>
-      )}
-      {data && data.awaitingAccount.length > 0 && (
-        <section>
-          <h2>Checked, awaiting an account</h2>
-          {data.awaitingAccount.map((verification) => (
-            <CreateAccount
-              key={verification.id}
-              verification={verification}
-              onCreated={async (created) => {
-                await reload();
-                setLink(created);
-              }}
-            />
-          ))}
-        </section>
-      )}
-      <h2>Staff in {me.lab.name}</h2>
-      <div className="wide">
-        <table className="stack">
-          <thead>
-            <tr>
-              <th>Printed name</th>
-              <th>Username</th>
-              <th>Roles</th>
-              <th>Password</th>
-              <th>Identity verified</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data?.people.map((p) => (
-              <tr
-                key={p.id}
-                className={fresh.has(`${p.id}:${p.roles.join()}:${p.printedName}`) ? 'row--fresh' : undefined}
-              >
-                <td data-label="Printed name">{p.printedName}</td>
-                <td data-label="Username">
-                  <code>{p.username}</code>
-                </td>
-                <td data-label="Roles">{p.roles.map(words).join(', ') || 'No Membership yet'}</td>
-                <td data-label="Password">{p.credentialSet ? 'Set' : <NewLink person={p} onIssued={setLink} />}</td>
-                <td data-label="Identity verified">
-                  {p.identityVerifiedAt ? time(p.identityVerifiedAt) : 'Not recorded (seeded demo account)'}
-                </td>
-              </tr>
+      {/* The next press anywhere on the page takes the one-time link off the screen. */}
+      <div onSubmitCapture={() => setLink(null)}>
+        <h1>Staff accounts</h1>
+        {error && <p className="note--bad">{error}</p>}
+        <RecordVerification onDone={reload} />
+        {link && (
+          <section className="card" aria-label="One-time link">
+            <h2>One-time link for {link.printedName}</h2>
+            <p>
+              Give this link to {link.printedName} in person. They choose their own password with it. It works once and
+              expires at {time(link.expiresAt)}; the LIMS keeps no copy of it.
+            </p>
+            <p className="long">
+              <code>{linkUrl}</code>
+            </p>
+            <button type="button" className="btn" onClick={() => setLink(null)}>
+              Done
+            </button>
+          </section>
+        )}
+        {data && data.awaitingAccount.length > 0 && (
+          <section>
+            <h2>Identity verified, awaiting an account</h2>
+            {data.awaitingAccount.map((verification) => (
+              <CreateAccount
+                key={verification.id}
+                verification={verification}
+                onCreated={async (created) => {
+                  await reload();
+                  setLink(created);
+                }}
+              />
             ))}
-          </tbody>
-        </table>
+          </section>
+        )}
+        <h2>Staff in {me.lab.name}</h2>
+        <div className="wide">
+          <table className="stack">
+            <thead>
+              <tr>
+                <th>Printed name</th>
+                <th>Username</th>
+                <th>Roles</th>
+                <th>Password</th>
+                <th>Identity verified</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data?.people.map((p) => (
+                <tr
+                  key={p.id}
+                  className={fresh.has(`${p.id}:${p.roles.join()}:${p.printedName}`) ? 'row--fresh' : undefined}
+                >
+                  <td data-label="Printed name">{p.printedName}</td>
+                  <td data-label="Username">
+                    <code>{p.username}</code>
+                  </td>
+                  <td data-label="Roles">{p.roles.map(words).join(', ') || 'No Membership yet'}</td>
+                  <td data-label="Password">{p.credentialSet ? 'Set' : <NewLink person={p} onIssued={setLink} />}</td>
+                  <td data-label="Identity verified">
+                    {p.identityVerifiedAt
+                      ? `${time(p.identityVerifiedAt)} by ${p.identityVerifiedBy}: ${p.identityEvidence}`
+                      : 'Not recorded (seeded demo account)'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {data && <GrantMembership me={me} people={data.people} onDone={reload} />}
+        {data && <ChangePrintedName people={data.people} onDone={reload} />}
       </div>
-      {data && <GrantMembership me={me} people={data.people} onDone={reload} />}
-      {data && <ChangePrintedName people={data.people} onDone={reload} />}
     </Shell>
   );
 }

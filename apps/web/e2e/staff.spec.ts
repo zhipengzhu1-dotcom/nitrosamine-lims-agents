@@ -48,6 +48,7 @@ test('the Admin records an Identity Verification, creates the account and grants
   await grant.getByRole('button', { name: 'Grant' }).click();
   await expect(grant.getByRole('status')).toHaveText(`${printedName} holds Analyst in R&D Laboratory (fictional).`);
   await expect(row).toContainText('Analyst');
+  await expect(link, 'the next press takes the one-time link off the screen').toHaveCount(0);
   await shot('04-granted');
 
   await grant.getByLabel('Person').selectOption({ label: `${printedName} (${username})` });
@@ -69,7 +70,9 @@ test('the Admin records an Identity Verification, creates the account and grants
   await expect(page.getByRole('status')).toContainText(`Your password is set for ${username}`);
   await shot('07-password-set');
 
-  await page.getByRole('link', { name: 'Sign in' }).click();
+  const signIn = page.getByRole('link', { name: 'Sign in' });
+  expect((await signIn.boundingBox())?.height, 'a gloved finger can press it').toBeGreaterThanOrEqual(44);
+  await signIn.click();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill('nell-chose-this');
   await page.getByRole('button', { name: 'Sign in' }).click();

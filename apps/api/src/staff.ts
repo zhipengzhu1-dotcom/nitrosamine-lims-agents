@@ -20,12 +20,15 @@ async function staffOf(q: LabQueries, labId: string, only?: string) {
   let people = q.company
     .selectFrom('person')
     .leftJoin('identityVerification as iv', 'iv.id', 'person.identityVerificationId')
+    .leftJoin('person as checker', 'checker.id', 'iv.checkedBy')
     .select([
       'person.id',
       'person.username',
       'person.displayName as printedName',
       sql<boolean>`person.password_hash is not null`.as('credentialSet'),
       'iv.checkedAt as identityVerifiedAt',
+      'checker.displayName as identityVerifiedBy',
+      'iv.evidence as identityEvidence',
     ])
     .where((eb) =>
       eb.or([...(members.length > 0 ? [eb('person.id', 'in', members)] : []), eb('iv.checkedInLabId', '=', labId)]),

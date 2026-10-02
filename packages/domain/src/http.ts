@@ -181,6 +181,9 @@ const staffPerson = Type.Object({
   /** True once the person has set a password through their one-time link. */
   credentialSet: Type.Boolean(),
   identityVerifiedAt: nullable(instant),
+  /** Who checked the person's identity and what they checked; null for a seeded demo account. */
+  identityVerifiedBy: nullable(Type.String()),
+  identityEvidence: nullable(Type.String()),
 });
 export type StaffPerson = Static<typeof staffPerson>;
 const identityVerification = Type.Object({
