@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { audited } from '@lims/db';
-import { type Route, type RouteInput, routes, stepNames, stepRoute } from '@lims/domain';
+import { type Route, type RouteInput, routes, SESSION_ENDED, stepNames, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { SESSION_LIMITS } from '../src/auth.ts';
+import { endLapsedSessions, SESSION_LIMITS } from '../src/auth.ts';
 import { type Account, type Answer, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_workstations_test');
@@ -384,6 +384,56 @@ describe('Lock and Switch user', () => {
       reasons,
       [{ reason: 'Failed authentication' }, { reason: 'Failed authentication' }],
       'both failed unlocks are recorded as failed authentication',
+    );
+  });
+
+  it('a Lockout committed while a lock waits for the company chain refuses the lock as noSession, ends the session at the Lockout and writes no Lock Access Event', async () => {
+    const ana = await api.addPerson(`ana.locked-out-at-lock-${randomUUID()}`, ['Analyst']);
+    const browser = await api.login(ana);
+
+    const lock = await api.lockOutWhile(ana, () => browser.call(routes.lock));
+
+    assert.equal(refusedWith(lock, 'noSession'), SESSION_ENDED);
+    assert.equal(refusedWith(await browser.call(routes.me), 'noSession'), SESSION_ENDED);
+    const { lockedAt } = await api.superuser
+      .selectFrom('person')
+      .select('lockedAt')
+      .where('id', '=', ana.id)
+      .executeTakeFirstOrThrow();
+    const { endedAt, locked } = await api.superuser
+      .selectFrom('session')
+      .select(['endedAt', sql<boolean>`locked_at is not null`.as('locked')])
+      .where('personId', '=', ana.id)
+      .executeTakeFirstOrThrow();
+    assert.deepEqual(
+      [endedAt, locked],
+      [lockedAt, false],
+      'the next request ended the session at the Lockout, and the lock press never locked it',
+    );
+    assert.deepEqual(
+      (await eventsOf(ana.id)).map((e) => e.kind),
+      ['SignInSucceeded'],
+      'no Lock Access Event after the Lockout',
+    );
+  });
+
+  it("the sweep's expiry Access Event carries the session's Workstation", async () => {
+    const { workstation, browser } = await enrolledBrowser();
+    const ana = await api.addPerson(`ana.expired-on-bench-${randomUUID()}`, ['Analyst']);
+    await signInOn(browser, ana);
+    await api.advanceClock(ana, SESSION_LIMITS.decided.idleMs + 60_000);
+
+    await endLapsedSessions(api.db, SESSION_LIMITS.decided);
+
+    const events = await eventsOf(ana.id);
+    assert.deepEqual(
+      events.map((e) => e.kind).sort(),
+      ['IdleExpiry', 'SignInSucceeded'],
+      'the expiry is stamped at last activity plus the idle limit, which advanceClock moved before the sign-in event',
+    );
+    assert.deepEqual(
+      events.map((e) => e.workstationId),
+      [workstation.id, workstation.id],
     );
   });
 
