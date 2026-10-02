@@ -257,6 +257,7 @@ export async function reauthenticate(
     } else if (failureEvent) await record(tx, { kind: failureEvent, ...event });
     if (lockedNow) await record(tx, { kind: 'Lockout', ...event });
   });
+  if (typed.username === undefined) refuse('badCredentials', 'the password is not valid');
   notValid();
 }
 
