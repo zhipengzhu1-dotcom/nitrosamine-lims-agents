@@ -1302,7 +1302,7 @@ describe('the database refuses a value outside its allowed set', () => {
       'a re-authentication by an authenticator the LIMS does not have is refused',
       'lims.reauthentication',
       'authenticator',
-      ['Totp', 'password', ''],
+      ['Totp', 'Code', 'password', ''],
       'reauthentication_authenticator_check',
     ),
     {

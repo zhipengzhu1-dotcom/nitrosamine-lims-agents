@@ -298,12 +298,17 @@ export function sourceAddressOf(req: {
   return mapped && isIP(mapped) === 4 ? mapped : address;
 }
 
+/** What proved the person: their password alone under the demo login, or their password and an authenticator code. */
+export type Authenticator = 'Password' | 'PasswordAndCode';
+
 /** The credentials `reauthenticate` checked; only this module makes one, so a write cannot claim a proof it was not given. */
 class Reauthenticated {
   declare private readonly madeByReauthenticate: never;
   readonly personId: string;
   /** The checked code, which the write that this proof enables spends in its own transaction. */
   readonly code: CodeProof;
+  /** What the Signature this proof enables records as having proved the signer. */
+  readonly authenticator: Authenticator;
   /** The sentence the write refuses with when the code was spent by another request first. */
   readonly codeSpent: Sentence;
   /** The Access Event that records the write refused because a Lockout landed after the password was checked. */
@@ -311,6 +316,7 @@ class Reauthenticated {
   constructor(personId: string, code: CodeProof, codeSpent: Sentence, refusedByLockout: AccessEvent) {
     this.personId = personId;
     this.code = code;
+    this.authenticator = code.step === null ? 'Password' : 'PasswordAndCode';
     this.codeSpent = codeSpent;
     this.refusedByLockout = refusedByLockout;
   }

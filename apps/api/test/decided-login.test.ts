@@ -353,6 +353,31 @@ it('under the decided login, a Lab switch needs the user ID, the password and a 
   ]);
 });
 
+it('a Signature given under the decided login records that the password and a code proved the signer; under the demo login, the password alone', async () => {
+  const { account, code } = await enrolled('pam.proof');
+  const client = new Client(decided.base);
+  ok(
+    await client.call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId: api.labId,
+      code: code(),
+    }),
+  );
+  ok(await enterResult(client, await assignedTo(account), account, { code: code(1) }));
+  const demo = await api.addPerson('dan.demo', ['Analyst'], { trained: true });
+  ok(await enterResult(await api.login(demo), await assignedTo(demo), demo, {}));
+  const proofsOf = (personId: string) =>
+    api.superuser
+      .selectFrom('signature')
+      .innerJoin('reauthentication', 'reauthentication.id', 'signature.reauthenticationId')
+      .select(['signature.authenticator', 'reauthentication.authenticator as proved'])
+      .where('signature.personId', '=', personId)
+      .execute();
+  assert.deepEqual(await proofsOf(account.id), [{ authenticator: 'PasswordAndCode', proved: 'PasswordAndCode' }]);
+  assert.deepEqual(await proofsOf(demo.id), [{ authenticator: 'Password', proved: 'Password' }]);
+});
+
 it('a password under 15 characters or missing a character type is refused with a sentence; a password that meets the rule is set', async () => {
   const ada = await api.login(api.person('ada'));
   const verification = ok(

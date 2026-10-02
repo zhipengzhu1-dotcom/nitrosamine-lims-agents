@@ -170,15 +170,20 @@ interface Signing {
   release: string;
 }
 
-/** Signs through lims.sign, the only path to a Signature, against a re-authentication record written here. */
+/** Signs through lims.sign, the only path to a Signature, against a re-authentication record written here that names what proved the signer. */
 async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signing: Signing) {
-  const { meaning, table, testId, seen, statementVersion, release } = signing;
+  const { reauthenticated, meaning, table, testId, seen, statementVersion, release } = signing;
   const recordId =
     table === 'test'
       ? testId
       : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id;
   const proof = await q
-    .insert('reauthentication', { sessionId, personId: ctx.person.id, meaning, authenticator: 'Password' })
+    .insert('reauthentication', {
+      sessionId,
+      personId: ctx.person.id,
+      meaning,
+      authenticator: reauthenticated.authenticator,
+    })
     .returning('id')
     .executeTakeFirstOrThrow();
   await sql`select lims.sign(${proof.id}, ${sessionId}, ${table}, ${recordId}, ${seen.id},

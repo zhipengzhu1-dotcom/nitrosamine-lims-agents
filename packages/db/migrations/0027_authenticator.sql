@@ -19,6 +19,12 @@ alter table lims.access_event
     and (failure_reason::text <> 'WrongUserId' or kind::text = 'ReauthenticationFailed')
   );
 
+-- A Re-authentication under the decided login proves the signer by password and code, and the Signature it enables
+-- records so.
+alter table lims.reauthentication
+  drop constraint reauthentication_authenticator_check,
+  add constraint reauthentication_authenticator_check check (authenticator in ('Password', 'PasswordAndCode'));
+
 -- A person's TOTP authenticator: its secret encrypted under the API's TOTP key, and the last time step a code was
 -- accepted at. Working state like the session, so the Audit Trail never copies the secret; the AuthenticatorEnrolled
 -- Access Event records the enrolment.
