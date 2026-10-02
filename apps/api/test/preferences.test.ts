@@ -35,7 +35,7 @@ describe('the reduced-motion preference', () => {
 
     const entries = await api.superuser
       .selectFrom('auditEntry')
-      .select(['actor', 'role', 'reason', 'op', sql<unknown>`new_row->'reduced_motion'`.as('reducedMotion')])
+      .select(['actor', 'role', 'reason', 'op', sql`new_row->'reduced_motion'`.as('reducedMotion')])
       .where('tableName', '=', 'person')
       .where('op', '=', 'UPDATE')
       .where(sql`new_row->>'id'`, '=', cora.id)

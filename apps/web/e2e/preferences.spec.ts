@@ -92,7 +92,12 @@ test('a device set to reduce motion keeps motion reduced for a person whose pref
   expect(await pressedTransform(page), 'full motion while the device asks for it').toBe(PRESSED);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   // A page hears of a media change in its next rendering step.
-  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await page.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => done()));
+      }),
+  );
   expect(await pressedTransform(page), 'the device setting holds when the preference is off').toBe('none');
 });
 
@@ -184,7 +189,7 @@ test('the rail with nothing on its second line renders no empty second line', as
   await expect(line).toHaveText('Nothing for you to commit here.');
   const [height, lineHeight] = await line.evaluate((el) => {
     const p = el.querySelector('p') ?? el;
-    return [el.getBoundingClientRect().height, Number.parseFloat(getComputedStyle(p).lineHeight)];
+    return [el.getBoundingClientRect().height, Number(getComputedStyle(p).lineHeight.replace('px', ''))];
   });
   expect(height, 'one line tall').toBeLessThan(lineHeight * 1.5);
 });
@@ -192,29 +197,27 @@ test('the rail with nothing on its second line renders no empty second line', as
 test('every font family the stylesheet names is loaded by the app or is a system font', async ({ page }) => {
   await page.goto('/');
   const named = await page.evaluate(() => {
-    const families = new Set<string>();
-    const faces = new Set<string>();
-    const rules = [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules]);
-    const walk = (list: CSSRule[]) => {
-      for (const rule of list) {
-        if (rule instanceof CSSFontFaceRule) faces.add(rule.style.getPropertyValue('font-family').replaceAll('"', ''));
-        if (rule instanceof CSSStyleRule || rule instanceof CSSGroupingRule) {
-          const style = 'style' in rule ? (rule.style as CSSStyleDeclaration) : null;
-          for (const property of style ? [...style] : [])
-            if (property === 'font-family' || property.startsWith('--font') || property === '--mono')
-              for (const family of style?.getPropertyValue(property).split(',') ?? [])
-                families.add(family.trim().replaceAll('"', ''));
-          walk([...rule.cssRules]);
-        }
-      }
-    };
-    walk(rules);
-    return { families: [...families], faces: [...faces] };
+    const families: string[] = [];
+    const faces: string[] = [];
+    const namesOf = (style: CSSStyleDeclaration, property: string) =>
+      style
+        .getPropertyValue(property)
+        .split(',')
+        .map((f) => f.trim().replaceAll('"', ''));
+    const pending: CSSRule[] = [];
+    for (const sheet of document.styleSheets) pending.push(...sheet.cssRules);
+    for (let rule = pending.pop(); rule; rule = pending.pop()) {
+      if (rule instanceof CSSFontFaceRule) faces.push(...namesOf(rule.style, 'font-family'));
+      if (rule instanceof CSSStyleRule)
+        for (const property of ['font-family', '--font', '--mono']) families.push(...namesOf(rule.style, property));
+      if (rule instanceof CSSStyleRule || rule instanceof CSSGroupingRule) pending.push(...rule.cssRules);
+    }
+    return { families, faces };
   });
-  const system = ['Segoe UI', 'system-ui', 'sans-serif', 'Consolas', 'ui-monospace', 'monospace'];
-  expect(named.families.length, 'the stylesheet names its fonts').toBeGreaterThan(0);
+  const system = new Set(['Segoe UI', 'system-ui', 'sans-serif', 'Consolas', 'ui-monospace', 'monospace']);
+  expect(named.families.filter(Boolean).length, 'the stylesheet names its fonts').toBeGreaterThan(0);
   const unloaded = named.families.filter(
-    (f) => f && !f.startsWith('var(') && !named.faces.includes(f) && !system.includes(f),
+    (f) => f && !f.startsWith('var(') && !named.faces.includes(f) && !system.has(f),
   );
   expect(unloaded).toEqual([]);
 });
