@@ -810,7 +810,8 @@ a.btn {
   text-decoration: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
+/* motion.ts sets data-reduce-motion when the device or the signed-in person asks for reduced motion. */
+:root[data-reduce-motion] {
   .rbtn:active:not(:disabled) {
     transform: none;
   }

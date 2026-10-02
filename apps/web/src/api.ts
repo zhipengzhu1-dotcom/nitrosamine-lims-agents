@@ -2,6 +2,7 @@ import {
   type ActorContext,
   isRefusalKind,
   pathOf,
+  type Preferences,
   type RefusalKind,
   type Route,
   type RouteInput,
@@ -11,6 +12,7 @@ import {
   type SignedInView,
 } from '@lims/domain';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { setPersonReducesMotion } from './motion.ts';
 
 export class Refused extends Error {
   kind: RefusalKind;
@@ -101,6 +103,7 @@ function endSession(message: string) {
   clearInterval(ticker);
   session = null;
   setSecondsLeft(null);
+  setPersonReducesMotion(false);
   signedOut(message);
 }
 
@@ -108,6 +111,7 @@ async function startSession(request: () => Promise<SignedInView>): Promise<Signe
   const sentAt = pageNow();
   const view = await request();
   setClock(sentAt, view.session);
+  setPersonReducesMotion(view.preferences.reducedMotion);
   clearInterval(ticker);
   ticker = window.setInterval(tick, 1000);
   tick();
@@ -188,6 +192,13 @@ export async function switchLab(body: RouteInput<typeof routes.switchLab>[0]): P
   const me = await startSession(() => api(routes.switchLab, body));
   location.hash = '';
   actorChanged(me);
+}
+
+/** Saves the person's own preferences and applies them once the server has them. */
+export async function setPreferences(preferences: Preferences): Promise<Preferences> {
+  const saved = await api(routes.setPreferences, preferences);
+  setPersonReducesMotion(saved.reducedMotion);
+  return saved;
 }
 
 export async function signOut(): Promise<void> {

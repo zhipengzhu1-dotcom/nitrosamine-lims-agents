@@ -13,6 +13,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
+import { reducedMotion } from './motion.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room';
 export interface Field<N extends string = string> {
@@ -213,7 +214,6 @@ type Sheet = { action: RailAction; closing: boolean } | null;
 
 /** Longer than --dur-sheet-out, so the sheet unmounts even when no transitionend fires. */
 const EXIT_FALLBACK_MS = 400;
-const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function unansweredText(e: unknown, signs: boolean): string {
   if (!(e instanceof Refused))

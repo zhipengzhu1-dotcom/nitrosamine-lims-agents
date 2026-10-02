@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from '@lims/db/credentials';
-import { type ActorContext, routes, SESSION_ENDED, type SessionClock } from '@lims/domain';
+import { type ActorContext, routes, SESSION_ENDED, type SignedInView } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
 import { openJobIncident } from './incident.ts';
@@ -38,7 +38,8 @@ export interface SessionKey {
 export interface SignedIn {
   actor: ActorContext;
   session: SessionKey;
-  clock: SessionClock;
+  /** What the API answers a person with about their own session: who, how long it has left, and their preferences. */
+  view: SignedInView;
 }
 
 const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', reason: 'Sign in' };
@@ -299,6 +300,7 @@ export async function actorFor(
         'person.username',
         'person.displayName',
         'person.customerId',
+        'person.reducedMotion',
         'lab.labId',
         'lab.code',
         'lab.name',
@@ -324,20 +326,25 @@ export async function actorFor(
   }
   if (absoluteLeftMs === null) return refuse('noSession', SESSION_ENDED);
   const { workstationName, roomName } = session;
-  return {
-    actor: {
-      person: {
-        id: session.personId,
-        username: session.username,
-        displayName: session.displayName,
-        customerId: session.customerId,
-      },
-      lab: { id: session.labId, code: session.code, name: session.name },
-      roles: await rolesIn(db, session.personId, session.labId),
-      workstation: workstationName === null || roomName === null ? null : { name: workstationName, room: roomName },
+  const actor: ActorContext = {
+    person: {
+      id: session.personId,
+      username: session.username,
+      displayName: session.displayName,
+      customerId: session.customerId,
     },
+    lab: { id: session.labId, code: session.code, name: session.name },
+    roles: await rolesIn(db, session.personId, session.labId),
+    workstation: workstationName === null || roomName === null ? null : { name: workstationName, room: roomName },
+  };
+  return {
+    actor,
     session: key,
-    clock: { idleLimitMs: limits.idleMs, idleLeftMs, absoluteLeftMs },
+    view: {
+      ...actor,
+      session: { idleLimitMs: limits.idleMs, idleLeftMs, absoluteLeftMs },
+      preferences: { reducedMotion: session.reducedMotion },
+    },
   };
 }
 
@@ -497,8 +504,7 @@ export function loginRoutes(
       });
       if (locked) return REFUSAL.AccountLocked();
       reply.setCookie(SESSION_COOKIE, token);
-      const { actor, clock } = await actorFor(db, token, limits);
-      return { ...actor, session: clock };
+      return (await actorFor(db, token, limits)).view;
     },
   });
   app.route({
@@ -635,8 +641,7 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
         'UnlockFailed',
       );
       await onOwnSession(db, req, 'Unlock', (tx) => setLocked(tx, req.sessionKey, false));
-      const { actor, clock } = await actorFor(db, req.cookies[SESSION_COOKIE], limits);
-      return { ...actor, session: clock };
+      return (await actorFor(db, req.cookies[SESSION_COOKIE], limits)).view;
     },
   });
 }
@@ -708,8 +713,7 @@ export function labSwitchRoute(app: App, db: Kysely<DB>, limits: SessionLimits):
       });
       if (outcome !== 'Switched') return REFUSAL[outcome]();
       reply.setCookie(SESSION_COOKIE, token);
-      const { actor: switched, clock } = await actorFor(db, token, limits);
-      return { ...switched, session: clock };
+      return (await actorFor(db, token, limits)).view;
     },
   });
 }
