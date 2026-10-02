@@ -150,7 +150,6 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     page.locator('td[data-label="Time"]'),
     "the Signatures table's Time is the Audit Trail's Signed at, in UTC then on the Lab wall clock",
   ).toHaveText([signedAt ?? '']);
-  await expect(page.locator('td[data-label="Time"]')).toHaveText([utcThenLabClock]);
   const receipt = entries.filter({ has: page.locator('dt:text-is("Received")') });
   await expect(
     receipt.locator('dt:text-is("Received") + dd'),

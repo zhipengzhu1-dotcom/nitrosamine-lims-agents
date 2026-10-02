@@ -91,6 +91,10 @@ p {
 .muted {
   color: var(--ink-3);
 }
+/* A time breaks only between its UTC and Lab halves, never inside a date or before its offset. */
+.when {
+  white-space: nowrap;
+}
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;

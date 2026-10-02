@@ -1,4 +1,4 @@
-/** An instant in UTC only, shown to the second: a company record's time, or one that belongs to no Lab record. */
+/** An instant in UTC only, shown to the second: a company record's time, or the time an action ran, such as an Audit Export's Generated. */
 export const time = (iso: string | null) =>
   // oxlint-disable-next-line no-restricted-globals -- parses an instant to show it; reads no clock
   iso ? `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')} UTC` : '';
@@ -12,8 +12,13 @@ export const whenText = (at: string, atLab: string | null) => (atLab ? `${time(a
 export function When({ at, atLab }: { at: string; atLab: string | null }) {
   return (
     <span>
-      {time(at)}
-      {atLab && <span className="muted"> · {labTime(atLab)}</span>}
+      <span className="when">{time(at)}</span>
+      {atLab && (
+        <span className="muted">
+          {' '}
+          · <span className="when">{labTime(atLab)}</span>
+        </span>
+      )}
     </span>
   );
 }

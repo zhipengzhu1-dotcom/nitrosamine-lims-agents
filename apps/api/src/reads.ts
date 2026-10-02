@@ -1,5 +1,5 @@
 import type { DB } from '@lims/db';
-import { type Instant, nextStep, recordKind, routes } from '@lims/domain';
+import { nextStep, recordKind, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
@@ -8,8 +8,6 @@ import { factsFor, latestVersion, signedVersions, statementInForce } from './ste
 import { staffRoutes } from './staff.ts';
 import { onWallClock, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
-
-const labClockOf = (column: string) => onWallClock(sql.ref(column), sql.ref('lab.time_zone'));
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -28,7 +26,7 @@ function visibleTests(scope: Scope) {
       'sample.number as sampleNumber',
       'sample.description',
       'sample.receivedAt',
-      labClockOf('sample.received_at').$castTo<Instant | null>().as('receivedAtLab'),
+      onWallClock(sql.ref<Date | null>('sample.received_at'), sql.ref('lab.time_zone')).as('receivedAtLab'),
       'customer.name as customer',
       'method.code as methodCode',
       'method.version as methodVersion',
@@ -83,7 +81,7 @@ async function testView(scope: Scope, id: string) {
             'signature.username',
             'signature.role',
             'signature.signedAt',
-            labClockOf('signature.signed_at').as('signedAtLab'),
+            onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('lab.time_zone')).as('signedAtLab'),
             'recordVersion.recordTable as record',
             'recordVersion.version',
             'recordVersion.canonicalForm',
