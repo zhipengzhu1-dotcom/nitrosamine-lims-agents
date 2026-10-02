@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
 import {
+  type AuditedTable,
   auditedRecords,
   auditedTables,
   routes,
@@ -282,6 +283,20 @@ it("a company record out of this Lab's sight is not found: a person of another L
     await api.db.selectFrom('customer').select('id').where('name', 'like', 'Northwind%').executeTakeFirstOrThrow()
   ).id;
   assert.ok(ok(await as.rui.call(routes.recordTrail, { table: 'customer', id: customerId })).entries.length > 0);
+});
+
+it('every column a row snapshot stores has a glossary label in the registry, other than the id and the Lab', async () => {
+  await submitTestTo('Reported');
+  const { rows } = await sql<{ table: string; column: string }>`
+    select distinct table_name as "table", jsonb_object_keys(coalesce(new_row, old_row)) as "column"
+      from lims.audit_entry where table_name = any(${auditedTables}::text[])`.execute(api.db);
+  assert.deepEqual(
+    rows.filter(
+      ({ table, column }) =>
+        !['id', 'lab_id'].includes(column) && !Object.hasOwn(auditedRecords[table as AuditedTable].fields, column),
+    ),
+    [],
+  );
 });
 
 it("the registry's chain for each audited table matches whether the table carries a lab_id column", async () => {

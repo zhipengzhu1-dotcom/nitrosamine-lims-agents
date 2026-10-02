@@ -45,6 +45,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       username: { label: 'Username' },
       display_name: { label: 'Printed name' },
       customer_id: { label: 'Customer', ref: 'customer' },
+      identity_verification_id: { label: 'Identity Verification' },
       failed_logins: { label: 'Failed sign-ins', movedByStep: true },
       locked_at: { label: 'Locked at', shows: 'instant', movedByStep: true },
     },
@@ -60,6 +61,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     chain: 'company',
     label: (row, labelOf) => `from ${labelOf('customer', row.customer_id)}`,
     fields: {
+      number: { label: 'Number' },
       customer_id: { label: 'Customer', ref: 'customer' },
       submitted_by: { label: 'Submitted by', ref: 'person' },
     },
@@ -129,6 +131,8 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     fields: {
       meaning: { label: 'Meaning' },
       person_id: { label: 'Signer', ref: 'person' },
+      username: { label: 'Username' },
+      printed_name: { label: 'Printed name' },
       record_version_id: { label: 'Record Version', ref: 'record_version' },
       signed_at: { label: 'Signed at', shows: 'instant' },
     },

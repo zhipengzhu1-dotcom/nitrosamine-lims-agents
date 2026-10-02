@@ -109,6 +109,14 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await page.getByLabel('Order').selectOption('Newest first');
   await expect(entries.first()).toContainText('Signature Performed');
   const signed = entries.first();
+  await expect(signed.locator('.changes dt')).toHaveText([
+    'Meaning',
+    'Signer',
+    'Username',
+    'Printed name',
+    'Record Version',
+    'Signed at',
+  ]);
   await expect(signed.locator('dt:text-is("Signed at") + dd')).toHaveText(
     /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d -0[45]:00$/,
   );
