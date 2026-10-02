@@ -278,7 +278,7 @@ const lookups = Type.Object({
 /** How a recomputed chain stands: Intact through its last entry, or Broken from its first break on. */
 export const chainVerdict = Type.Union([Type.Literal('Intact'), Type.Literal('Broken')]);
 export type ChainVerdict = Static<typeof chainVerdict>;
-/** Where a System Incident stands: Open until its actions are recorded and signed Acknowledged, then Closed. */
+/** Where a System Incident stands: Open until its actions are recorded and acknowledged, then Closed. */
 const incidentState = Type.Enum({
   Open: 'Open',
   Acknowledged: 'Acknowledged',

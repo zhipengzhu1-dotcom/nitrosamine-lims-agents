@@ -5,6 +5,7 @@ import {
   type AuditedTable,
   auditedRecords,
   type AuditTrailVerification,
+  breakLine,
   isTestState,
   type ShownValue,
   routes,
@@ -182,7 +183,7 @@ function VerifyChain() {
                     <ul className="breaks">
                       {c.breaks.map((b) => (
                         <li key={b.entry}>
-                          {b.failure}, recorded as System Incident {b.incident} <Status mark={b.incidentState} />
+                          {breakLine(b)} <Status mark={b.incidentState} />
                         </li>
                       ))}
                     </ul>

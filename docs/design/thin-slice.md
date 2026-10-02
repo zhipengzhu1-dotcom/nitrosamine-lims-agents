@@ -37,9 +37,9 @@ Lab-owned, `lab_id NOT NULL` and first in every primary key, children referencin
 `audit_entry` (chain, seq, at, actor, role, reason, table_name, op, old_row, new_row, prev_hash, hash), chained per `audit_chain`: one chain per Lab plus a `company` chain for company-owned rows.
 
 - One capture trigger on every table except `audit_entry` and `session` writes the entry. Actor, role and reason come from `set_config('lims.*', …, true)`; a write missing any of them is refused. Time is `clock_timestamp()` read under the chain lock. Credential columns are dropped from the stored row images.
-- `hash = sha256(prev_hash || entry_bytes)`, where `entry_bytes` is a fixed rendering of the entry's columns. `lims.chain_breaks(chain)` recomputes it and returns every break's first failing `seq` in order, resuming from the stored entry after each; `lims.verify_chain(chain)` returns the first, or null.
+- `hash = sha256(prev_hash || entry_bytes)`, where `entry_bytes` is a fixed rendering of the entry's columns. `lims.chain_breaks(chain)` recomputes it and returns every break in order, each with its first failing `seq` and its kind (`Changed`, `Missing` or `HeadMoved`), resuming on the next entry's own link after each; `lims.verify_chain(chain)` returns the first, or null.
 - Blocking triggers refuse UPDATE, DELETE and TRUNCATE on `audit_entry` and `signature`.
-- `lims_owner` (NOLOGIN) owns everything. `lims_app` logs in, owns nothing, holds SELECT, INSERT and UPDATE on business tables, SELECT and INSERT on `signature`, SELECT on `audit_entry`, no DELETE anywhere, and EXECUTE only on `verify_chain`.
+- `lims_owner` (NOLOGIN) owns everything. `lims_app` logs in, owns nothing, holds SELECT, INSERT and UPDATE on business tables, SELECT and INSERT on `signature`, SELECT on `audit_entry`, no DELETE anywhere, and EXECUTE on the functions it calls, such as `verify_chain` and `chain_breaks`.
 
 ## Module layout and line budget
 

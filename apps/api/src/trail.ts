@@ -33,7 +33,7 @@ import {
 import type { FastifyBaseLogger } from 'fastify';
 import { Value } from 'typebox/value';
 import type { App } from './app.ts';
-import { openChainIncident } from './incident.ts';
+import { openChainIncidents } from './incident.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 
@@ -301,13 +301,7 @@ export async function chainVerifications(
   chains: RecomputedChain[],
 ): Promise<ChainVerification[]> {
   const verified = [];
-  for (const { chain, chainId, lastEntry, breaks } of chains) {
-    const found = [];
-    for (const entry of breaks) {
-      const { reference, state } = await openChainIncident(db, log, requester, chainId, entry);
-      found.push({ entry, incident: reference, incidentState: state });
-    }
-    verified.push(chainVerification(chain, lastEntry, found));
-  }
+  for (const { chain, chainId, lastEntry, breaks } of chains)
+    verified.push(chainVerification(chain, lastEntry, await openChainIncidents(db, log, requester, chainId, breaks)));
   return verified;
 }

@@ -1,5 +1,12 @@
 import { audited, type DB } from '@lims/db';
-import { type ActorContext, type NumberedKind, type NumberTaken, type Role, recordNumber } from '@lims/domain';
+import {
+  type ActorContext,
+  type BreakKind,
+  type NumberedKind,
+  type NumberTaken,
+  type Role,
+  recordNumber,
+} from '@lims/domain';
 import {
   type Insertable,
   type Kysely,
@@ -72,7 +79,12 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
       const lastEntry = (chain: string) =>
         sql<string>`coalesce((select seq from lims.audit_chain where chain = ${chain}), 0)::text`;
       const breaks = (chain: string) =>
-        sql<string[]>`array(select b.seq::text from lims.chain_breaks(${chain}) as b(seq) order by b.seq)`;
+        sql<{ entry: string; kind: BreakKind; through: string }[]>`coalesce((
+          select json_agg(
+            json_build_object('entry', b.seq::text, 'kind', b.kind, 'through', b.through::text) order by b.seq
+          )
+          from lims.chain_breaks(${chain}) as b
+        ), '[]')`;
       const found = await db
         .selectNoFrom([
           sql<Date>`now()`.as('at'),

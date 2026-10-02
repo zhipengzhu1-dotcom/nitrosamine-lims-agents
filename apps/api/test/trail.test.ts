@@ -417,6 +417,7 @@ const chainIncidents = (chain: string) =>
     .select(['reference', 'firstFailure'])
     .where('kind', '=', 'ChainVerifyFailure')
     .where('chain', '=', chain)
+    .orderBy('firstFailure')
     .execute();
 
 it('after an entry is altered by the database owner, Verify chain names it as the first failure, reports intact only through the entry before it, and opens one System Incident naming the chain and that entry, requested by the QA; verifying again, by the same QA or another, at once or later, opens no other; and a verification whose System Incident cannot be written shows no verdict', async () => {
@@ -592,6 +593,30 @@ it('Verify chain reports both broken entries of a chain with two, each with its 
   );
   assert.equal(alarmsFor(references).length, 2, 'and raises no alarm again');
   assert.equal((await chainIncidents(lab.labId)).length, 2);
+});
+
+it('Verify chain names a deleted entry as missing, and an entry whose stored hash is altered as one break, each with one System Incident and one alarm', async () => {
+  const lab = await labOfItsOwn('GON', 6);
+  const [gone, forged] = [String(lab.last - 4n), String(lab.last - 1n)] as const;
+  await api.superuser.transaction().execute(async (tx) => {
+    await sql`set local session_replication_role = replica`.execute(tx);
+    await sql`delete from lims.audit_entry where chain = ${lab.labId} and seq = ${gone}`.execute(tx);
+    await sql`update lims.audit_entry set hash = sha256('forged') where chain = ${lab.labId} and seq = ${forged}`.execute(
+      tx,
+    );
+  });
+
+  const verified = await lab.verify();
+  assert.deepEqual(
+    verified.breaks.map(({ entry, failure }) => ({ entry, failure })),
+    [
+      { entry: gone, failure: `entry ${gone} is missing` },
+      { entry: forged, failure: `entry ${forged} fails to verify` },
+    ],
+  );
+  const references = verified.breaks.map((b) => b.incident);
+  assert.equal((await chainIncidents(lab.labId)).length, 2);
+  assert.equal(alarmsFor(references).length, 2);
 });
 
 it('Verify chain on a break whose System Incident is Closed still reports the chain Broken and names that incident as Closed, opening no other and raising no alarm; a break at another entry opens its own and raises the alarm', async () => {

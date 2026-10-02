@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Value } from 'typebox/value';
 import {
+  type BreakKind,
   breakReport,
   type ChainBreakFound,
   chainVerification,
@@ -18,7 +19,19 @@ import {
 const at = (s: string) => Value.Decode(instant, s);
 
 describe('a recomputed chain reads as how far it is intact, and names each break with its System Incident', () => {
-  const open = (entry: string, incident: string) => ({ entry, incident, incidentState: 'Open' as const });
+  const open = (entry: string, incident: string, kind: BreakKind = 'Changed', through = entry) => ({
+    entry,
+    incident,
+    incidentState: 'Open' as const,
+    kind,
+    through,
+  });
+  const read = ({ entry, incident, incidentState }: ChainBreakFound, failure: string) => ({
+    entry,
+    incident,
+    incidentState,
+    failure,
+  });
   const cases: {
     name: string;
     last: string;
@@ -57,33 +70,33 @@ describe('a recomputed chain reads as how far it is intact, and names each break
         verdict: 'Broken',
         lastEntry: '12',
         intactThrough: '4',
-        breaks: [{ ...open('5', 'RF000001'), failure: 'entry 5 fails to verify' }],
+        breaks: [read(open('5', 'RF000001'), 'entry 5 fails to verify')],
         report: 'intact through entry 4',
       },
     },
     {
       name: 'a moved chain head is a break after the last entry',
       last: '12',
-      breaks: [open('13', 'RF000001')],
+      breaks: [open('13', 'RF000001', 'HeadMoved')],
       expected: {
         verdict: 'Broken',
         lastEntry: '12',
         intactThrough: '12',
-        breaks: [{ ...open('13', 'RF000001'), failure: 'the chain head does not match entry 12' }],
+        breaks: [read(open('13', 'RF000001', 'HeadMoved'), 'the chain head does not match entry 12')],
         report: 'intact through entry 12',
       },
     },
     {
       name: 'every break is named with its own System Incident in its state, and the first sets how far the chain is intact',
       last: '12',
-      breaks: [{ entry: '3', incident: 'RF000001', incidentState: 'Closed' }, open('9', 'RF000002')],
+      breaks: [{ ...open('3', 'RF000001'), incidentState: 'Closed' }, open('7', 'RF000002', 'Missing', '8')],
       expected: {
         verdict: 'Broken',
         lastEntry: '12',
         intactThrough: '2',
         breaks: [
           { entry: '3', incident: 'RF000001', incidentState: 'Closed', failure: 'entry 3 fails to verify' },
-          { ...open('9', 'RF000002'), failure: 'entry 9 fails to verify' },
+          { entry: '7', incident: 'RF000002', incidentState: 'Open', failure: 'entries 7 to 8 are missing' },
         ],
         report: 'intact through entry 2',
       },
@@ -94,8 +107,8 @@ describe('a recomputed chain reads as how far it is intact, and names each break
 
   it('a break reads as where the chain fails and its System Incident in its state', () => {
     const [closed, head] = chainVerification('lab', '12', [
-      { entry: '3', incident: 'RF000001', incidentState: 'Closed' },
-      open('13', 'RF000002'),
+      { ...open('3', 'RF000001'), incidentState: 'Closed' },
+      open('13', 'RF000002', 'HeadMoved'),
     ]).breaks;
     assert.deepEqual(
       [closed, head].map((b) => b && breakReport(b)),

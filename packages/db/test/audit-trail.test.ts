@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { after, before, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 import { sql } from 'kysely';
 import pg from 'pg';
 import { audited, checkoutDatabase, createDb, databaseUrl, dbServer } from '../src/db.ts';
@@ -152,43 +152,140 @@ it("the Lab's chain verifies; an entry the database owner alters is the first fa
   assert.equal(await verify(), '2', 'the earliest altered entry is the first failure; entry 1 verifies');
 });
 
-it('chain verification reports every break in a chain, each once, in entry order', async () => {
-  const lab = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a Lab to break' }, (tx) =>
-    tx
-      .insertInto('lab')
-      .values({ code: 'BK', name: 'Broken Lab', timeZone: 'UTC' })
-      .returning('labId')
-      .executeTakeFirstOrThrow(),
-  );
-  for (const name of ['Broken Lab 2', 'Broken Lab 3', 'Broken Lab 4', 'Broken Lab 5', 'Broken Lab 6'])
-    await audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
-      tx.updateTable('lab').set({ name }).where('labId', '=', lab.labId).execute(),
-    );
-  const breaks = async () =>
-    (await sql<{ seq: string }>`select seq::text from lims.chain_breaks(${lab.labId}) as seq`.execute(app)).rows.map(
-      (r) => r.seq,
-    );
-  const firstFailure = async () =>
-    (await sql<{ broken: string | null }>`select lims.verify_chain(${lab.labId}) as broken`.execute(app)).rows[0]
-      ?.broken;
-  assert.deepEqual(await breaks(), []);
-
-  const asOwner = async (statement: string, seq: number) => {
+describe('chain verification reports every break in a chain, each once, in entry order, with its kind', () => {
+  const owner = async (statements: string[]) => {
     await superuser.query('begin');
     await superuser.query('set local session_replication_role = replica');
-    await superuser.query(statement, [lab.labId, seq]);
+    for (const statement of statements) await superuser.query(statement);
     await superuser.query('commit');
   };
-  await asOwner(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = $2`, 2);
-  await asOwner(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = $2`, 4);
-  assert.deepEqual(await breaks(), ['2', '4'], 'both altered entries, and no entry after them');
-  assert.equal(await firstFailure(), '2', 'verify_chain still answers the first');
-
-  await asOwner('delete from lims.audit_entry where chain = $1 and seq = $2', 5);
-  assert.deepEqual(await breaks(), ['2', '4', '5'], 'a removed entry is one break at its place; entry 6 verifies');
-
-  await superuser.query(`update lims.audit_chain set head = sha256('moved') where chain = $1`, [lab.labId]);
-  assert.deepEqual(await breaks(), ['2', '4', '5', '7'], 'a moved head is a break after the last entry');
+  const entry = (seq: number) => `chain = '$CHAIN' and seq = ${seq}`;
+  const altered = (seq: number) => `update lims.audit_entry set reason = 'Routine update' where ${entry(seq)}`;
+  const recomputed = (seq: number) =>
+    `update lims.audit_entry a set hash = sha256(a.prev_hash || lims.audit_entry_bytes(a)) where ${entry(seq)}`;
+  const deleted = (seq: number) => `delete from lims.audit_entry where ${entry(seq)}`;
+  const movedHead = `update lims.audit_chain set head = sha256('moved') where chain = '$CHAIN'`;
+  const cases: { name: string; tamper: string[]; breaks: ([number, string] | [number, string, number])[] }[] = [
+    { name: 'an untouched chain has no break', tamper: [], breaks: [] },
+    {
+      name: 'two altered entries are two breaks, and the entries after each still verify',
+      tamper: [altered(2), altered(4)],
+      breaks: [
+        [2, 'Changed'],
+        [4, 'Changed'],
+      ],
+    },
+    {
+      name: "an altered stored hash is one break, not also the next entry's",
+      tamper: [`update lims.audit_entry set hash = sha256('forged') where ${entry(3)}`],
+      breaks: [[3, 'Changed']],
+    },
+    {
+      name: "an altered stored link is one break, not also the next entry's",
+      tamper: [`update lims.audit_entry set prev_hash = sha256('forged') where ${entry(3)}`],
+      breaks: [[3, 'Changed']],
+    },
+    {
+      name: 'an altered entry whose hash is recomputed is a break at the entry after it',
+      tamper: [altered(3), recomputed(3)],
+      breaks: [[4, 'Changed']],
+    },
+    {
+      name: 'an altered stored hash on the last entry is one break, not also a moved head',
+      tamper: [`update lims.audit_entry set hash = sha256('forged') where ${entry(6)}`],
+      breaks: [[6, 'Changed']],
+    },
+    { name: 'a deleted first entry is missing', tamper: [deleted(1)], breaks: [[1, 'Missing']] },
+    {
+      name: 'two deleted entries in a row are one break at the first, through the second, and the entry after verifies',
+      tamper: [deleted(3), deleted(4)],
+      breaks: [[3, 'Missing', 4]],
+    },
+    {
+      name: 'two deleted entries apart are two breaks',
+      tamper: [deleted(2), deleted(4)],
+      breaks: [
+        [2, 'Missing'],
+        [4, 'Missing'],
+      ],
+    },
+    {
+      name: 'deleted last entries are one break through the last, even with the head moved back onto the entry before',
+      tamper: [
+        deleted(5),
+        deleted(6),
+        `update lims.audit_chain set head = (select hash from lims.audit_entry where ${entry(4)}) where chain = '$CHAIN'`,
+      ],
+      breaks: [[5, 'Missing', 6]],
+    },
+    { name: 'a moved head is a break after the last entry', tamper: [movedHead], breaks: [[7, 'HeadMoved']] },
+    {
+      name: 'an altered last entry and a moved head are two breaks',
+      tamper: [altered(6), movedHead],
+      breaks: [
+        [6, 'Changed'],
+        [7, 'HeadMoved'],
+      ],
+    },
+    {
+      name: 'an altered entry and a link moved behind it, with the entry after rehashed, are two breaks',
+      tamper: [
+        altered(5),
+        `update lims.audit_entry set prev_hash = sha256('moved') where ${entry(6)}`,
+        recomputed(6),
+        `update lims.audit_chain set head = (select hash from lims.audit_entry where ${entry(6)}) where chain = '$CHAIN'`,
+      ],
+      breaks: [
+        [5, 'Changed'],
+        [6, 'Changed'],
+      ],
+    },
+    {
+      name: 'an altered last entry whose hash is recomputed is a break at the head',
+      tamper: [altered(6), recomputed(6)],
+      breaks: [[7, 'HeadMoved']],
+    },
+    {
+      name: 'a head that counts fewer entries than the chain holds is a break after the last entry',
+      tamper: [`update lims.audit_chain set seq = 4 where chain = '$CHAIN'`],
+      breaks: [[7, 'HeadMoved']],
+    },
+    {
+      name: 'a deleted entry, an altered entry and a moved head are three breaks',
+      tamper: [deleted(2), altered(4), movedHead],
+      breaks: [
+        [2, 'Missing'],
+        [4, 'Changed'],
+        [7, 'HeadMoved'],
+      ],
+    },
+  ];
+  for (const [i, c] of cases.entries())
+    it(c.name, async () => {
+      const { labId: chain } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a Lab' }, (tx) =>
+        tx
+          .insertInto('lab')
+          .values({ code: `K${String.fromCodePoint(65 + i)}`, name: 'Broken Lab', timeZone: 'UTC' })
+          .returning('labId')
+          .executeTakeFirstOrThrow(),
+      );
+      for (const n of [2, 3, 4, 5, 6])
+        await audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
+          tx
+            .updateTable('lab')
+            .set({ name: `Broken Lab ${n}` })
+            .where('labId', '=', chain)
+            .execute(),
+        );
+      await owner(c.tamper.map((s) => s.replaceAll('$CHAIN', chain)));
+      const found = await sql<{ seq: number; kind: string; through: number }>`
+        select seq::int, kind, through::int from lims.chain_breaks(${chain})`
+        .execute(app)
+        .then((r) => r.rows.map((b) => (b.through === b.seq ? [b.seq, b.kind] : [b.seq, b.kind, b.through])));
+      assert.deepEqual(found, c.breaks);
+      const first = await sql<{ first: number | null }>`select lims.verify_chain(${chain})::int as first`.execute(app);
+      assert.equal(first.rows[0]?.first, c.breaks[0]?.[0] ?? null, 'verify_chain answers the first break');
+    });
 });
 
 const transactionIds = (customers: string[]) =>

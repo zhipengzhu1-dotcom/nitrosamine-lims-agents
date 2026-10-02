@@ -110,43 +110,46 @@ export async function openJobIncident(
 const ALARM = 'System Incident alarm';
 
 /**
- * Opens one System Incident for a break that chain verification found, naming the chain as the Audit Trail does and
- * the break's first failing entry, with the verifying QA as the requesting person, and raises the alarm for it once,
- * after it is written. A later verification of the same break answers that incident, in whatever state it is now, and
- * opens no other and raises no alarm. A failure to write it fails the verification, whose 500 opens a System Incident
- * of its own, so a break is never shown without a record.
+ * Opens, in one transaction, one System Incident for each break that chain verification found in a chain, naming the
+ * chain as the Audit Trail does and the break's first failing entry, with the verifying QA as the requesting person,
+ * and raises the alarm once for each incident it opened, after they are written. A break verified before answers its
+ * incident, in whatever state it is now, and opens no other and raises no alarm. A failure to write them fails the
+ * verification, whose 500 opens a System Incident of its own, so a break is never shown without a record.
  */
-export async function openChainIncident(
+export async function openChainIncidents<B extends { entry: string }>(
   db: Kysely<DB>,
   log: FastifyBaseLogger,
   requester: ActorContext,
   chain: string,
-  entry: string,
-): Promise<{ reference: string; state: IncidentState }> {
-  const { opened, ...incident } = await audited(db, INCIDENT_SERVICE, async (tx) => {
+  breaks: B[],
+): Promise<(B & { incident: string; incidentState: IncidentState })[]> {
+  if (breaks.length === 0) return [];
+  const entries = breaks.map((b) => b.entry);
+  const references = breaks.map(() => referenceOf(randomBytes(8)));
+  const { opened, found } = await audited(db, INCIDENT_SERVICE, async (tx) => {
     await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
-    const { numInsertedOrUpdatedRows } = await tx
-      .insertInto('systemIncident')
-      .values({
-        kind: 'ChainVerifyFailure',
-        reference: referenceOf(randomBytes(8)),
-        requestedBy: requester.person.id,
-        sessionLabId: requester.lab.id,
-        chain,
-        firstFailure: entry,
-      })
-      .onConflict((conflict) => conflict.columns(['chain', 'firstFailure']).doNothing())
-      .executeTakeFirstOrThrow();
+    const { rows: opened } = await sql<{ reference: string; entry: string }>`
+      insert into lims.system_incident (kind, reference, requested_by, session_lab_id, chain, first_failure)
+      select 'ChainVerifyFailure', t.reference, ${requester.person.id}, ${requester.lab.id}, ${chain}, t.entry
+      from unnest(${references}::text[], ${entries}::bigint[]) as t(reference, entry)
+      on conflict (chain, first_failure) do nothing
+      returning reference, first_failure::text as entry`.execute(tx);
     const found = await tx
       .selectFrom('systemIncident')
-      .select(['reference', 'state'])
+      .select(['firstFailure', 'reference', 'state'])
       .where('chain', '=', chain)
-      .where('firstFailure', '=', entry)
-      .executeTakeFirstOrThrow();
-    return { ...found, opened: numInsertedOrUpdatedRows === 1n };
+      .where(sql<boolean>`first_failure = any(${entries}::bigint[])`)
+      .execute();
+    return { opened, found };
   });
-  if (opened) log.error({ alarm: { reference: incident.reference, kind: 'ChainVerifyFailure', chain, entry } }, ALARM);
-  return incident;
+  for (const { reference, entry } of opened)
+    log.error({ alarm: { reference, kind: 'ChainVerifyFailure', chain, entry } }, ALARM);
+  const byEntry = new Map(found.map((f) => [f.firstFailure, f]));
+  return breaks.map((b) => {
+    const incident = byEntry.get(b.entry);
+    if (incident === undefined) throw new Error(`no System Incident records the break at entry ${b.entry}`);
+    return { ...b, incident: incident.reference, incidentState: incident.state };
+  });
 }
 
 function unwrittenOn(line: string): Static<typeof unwrittenLine> | 'unreadable' | null {
