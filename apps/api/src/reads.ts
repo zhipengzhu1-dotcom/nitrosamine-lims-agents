@@ -1,5 +1,5 @@
 import type { DB } from '@lims/db';
-import { nextStep, routes } from '@lims/domain';
+import { nextStep, recordKind, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
@@ -89,8 +89,9 @@ async function testView(scope: Scope, id: string) {
           .orderBy('signature.signedAt')
           .execute()
           .then((rows) =>
-            rows.map(({ version, canonicalForm, contentHash, ...signature }) => ({
+            rows.map(({ record, version, canonicalForm, contentHash, ...signature }) => ({
               ...signature,
+              record: recordKind(record),
               recordVersion: { version, canonicalForm, contentHash },
             })),
           )

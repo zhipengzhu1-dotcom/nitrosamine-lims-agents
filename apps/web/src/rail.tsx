@@ -1,5 +1,6 @@
 import {
   type ActorContext,
+  type ChainVerdict,
   decimalPattern,
   type Lab,
   type RecordVersionRef,
@@ -66,8 +67,25 @@ export interface SigningView {
 const stateOrder = Object.values(steps).map((s) => s.to);
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
-/** `fresh` marks a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them. */
-export function Status({ state, fresh = false }: { state: TestState; fresh?: boolean }) {
+const verdictLook = {
+  Intact: { tone: 'ok', glyph: 'M3 8.5l3.5 3.5L13 4.5' },
+  Broken: { tone: 'bad', glyph: 'M4 4l8 8M12 4l-8 8' },
+} as const;
+
+/** A Test state with its track, or a chain verdict with its glyph; `fresh` marks a state the server has just confirmed on this page: the word and glyph are final, and an accent plays around them. */
+export function Status(props: { state: TestState; fresh?: boolean } | { verdict: ChainVerdict }) {
+  if ('verdict' in props) {
+    const { tone, glyph } = verdictLook[props.verdict];
+    return (
+      <span className={`status status--${tone}`}>
+        {props.verdict}
+        <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
+          <path d={glyph} />
+        </svg>
+      </span>
+    );
+  }
+  const { state, fresh = false } = props;
   const at = stateOrder.indexOf(state);
   return (
     <span className={`status ${state === 'Reported' ? 'status--done' : ''} ${fresh ? 'status--fresh' : ''}`}>

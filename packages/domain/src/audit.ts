@@ -13,11 +13,13 @@ import type {
 
 type LabelOf = (table: AuditedTable, id: unknown) => string;
 
+type Shows = 'utf8' | 'hex' | 'recordKind' | 'instant';
+
 interface FieldSpec {
   label: string;
   ref?: AuditedTable;
   refTableIn?: string;
-  bytesAsUtf8?: true;
+  shows?: Shows;
   movedByStep?: true;
 }
 
@@ -29,6 +31,7 @@ interface RecordSpec {
 }
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : (JSON.stringify(value) ?? ''));
+const plain = (shown: string): ShownValue => ({ text: shown, ref: null, instant: null });
 
 /** The one place that says how each audited table reads: its glossary noun, its chain, its label and its fields' names. */
 export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
@@ -41,8 +44,9 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       username: { label: 'Username' },
       display_name: { label: 'Printed name' },
       customer_id: { label: 'Customer', ref: 'customer' },
+      identity_verification_id: { label: 'Identity Verification' },
       failed_logins: { label: 'Failed sign-ins', movedByStep: true },
-      locked_at: { label: 'Locked at', movedByStep: true },
+      locked_at: { label: 'Locked at', shows: 'instant', movedByStep: true },
     },
   },
   method: {
@@ -56,6 +60,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     chain: 'company',
     label: (row, labelOf) => `from ${labelOf('customer', row.customer_id)}`,
     fields: {
+      number: { label: 'Number' },
       customer_id: { label: 'Customer', ref: 'customer' },
       submitted_by: { label: 'Submitted by', ref: 'person' },
     },
@@ -67,7 +72,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     fields: {
       number: { label: 'Number' },
       description: { label: 'Description' },
-      received_at: { label: 'Received', movedByStep: true },
+      received_at: { label: 'Received', shows: 'instant', movedByStep: true },
       submission_id: { label: 'Submission', ref: 'submission' },
     },
   },
@@ -109,13 +114,13 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     chain: 'lab',
     label: (row) => text(row.version),
     fields: {
-      record_table: { label: 'Record kind' },
+      record_table: { label: 'Record kind', shows: 'recordKind' },
       record_id: { label: 'Record', refTableIn: 'record_table' },
       version: { label: 'Version' },
       canonical_form: { label: 'Canonical form' },
-      content: { label: 'Canonical content', bytesAsUtf8: true },
-      content_hash: { label: 'SHA-256 of the content' },
-      saved_at: { label: 'Saved at' },
+      content: { label: 'Canonical content', shows: 'utf8' },
+      content_hash: { label: 'SHA-256 of the content', shows: 'hex' },
+      saved_at: { label: 'Saved at', shows: 'instant' },
     },
   },
   signature: {
@@ -129,15 +134,15 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       username: { label: 'Username at signing' },
       role: { label: 'Role at signing' },
       record_version_id: { label: 'Record Version', ref: 'record_version' },
-      content_hash: { label: 'SHA-256 of the signed content' },
+      content_hash: { label: 'SHA-256 of the signed content', shows: 'hex' },
       canonical_form: { label: 'Canonical form' },
       statement_version: { label: 'Signature statement version' },
-      statement_hash: { label: 'Signature statement hash' },
+      statement_hash: { label: 'Signature statement hash', shows: 'hex' },
       authenticator: { label: 'Authenticator' },
       session_id: { label: 'Session' },
       app_release: { label: 'App release' },
       reauthentication_id: { label: 'Re-authentication', ref: 'reauthentication' },
-      signed_at: { label: 'Signed at' },
+      signed_at: { label: 'Signed at', shows: 'instant' },
     },
   },
   signing_role: {
@@ -152,9 +157,9 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     label: (row) => `version ${text(row.version)}`,
     fields: {
       version: { label: 'Version' },
-      statement: { label: 'Statement', bytesAsUtf8: true },
-      statement_hash: { label: 'SHA-256' },
-      approved_at: { label: 'Approved at' },
+      statement: { label: 'Statement', shows: 'utf8' },
+      statement_hash: { label: 'SHA-256', shows: 'hex' },
+      approved_at: { label: 'Approved at', shows: 'instant' },
     },
   },
   reauthentication: {
@@ -166,7 +171,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       meaning: { label: 'Meaning' },
       authenticator: { label: 'Authenticator' },
       session_id: { label: 'Session' },
-      at: { label: 'At' },
+      at: { label: 'At', shows: 'instant' },
     },
   },
 };
@@ -177,6 +182,9 @@ export const auditedTables = Object.keys(auditedRecords).filter((key): key is Au
 );
 /** True only for a table name `auditedRecords` reads. */
 export const isAuditedTable = (value: unknown): value is AuditedTable => auditedTables.some((t) => t === value);
+/** The glossary noun of an audited table's records, such as "Test Report" for `test_report`; any other name as it is. */
+export const recordKind = (table: unknown): string =>
+  isAuditedTable(table) ? auditedRecords[table].kind : text(table);
 /** The chain an entry sits on: the Lab's when its chain is that Lab's id, the company's otherwise. */
 export const chainKindOf = (chain: string, labId: string): ChainKind => (chain === labId ? 'lab' : 'company');
 
@@ -211,11 +219,33 @@ export function imagesOf(entries: readonly RawEntry[]): RowImage[] {
   });
 }
 
+const hexOf = (value: unknown): string | null =>
+  typeof value === 'string' && value.startsWith('\\x') ? value.slice(2) : null;
+
 function decodeUtf8Bytes(value: unknown): string {
-  const hex = typeof value === 'string' && value.startsWith('\\x') ? value.slice(2) : null;
+  const hex = hexOf(value);
   if (hex === null || hex.length % 2 !== 0) return text(value);
   const bytes = Uint8Array.from(hex.match(/../g) ?? [], (pair) => Number.parseInt(pair, 16));
   return new TextDecoder().decode(bytes);
+}
+
+/** An instant a row snapshot stores, as the database renders it in UTC and on the owning Lab's wall clock. */
+export interface StoredInstant {
+  at: Instant;
+  atLab: Instant;
+}
+
+/** Every instant the entries' row snapshots store, as stored, so that the API can have the database render each. */
+export function storedInstants(entries: readonly RawEntry[]): string[] {
+  const found = new Set<string>();
+  for (const e of entries) {
+    const spec = isAuditedTable(e.table) ? auditedRecords[e.table] : null;
+    for (const row of [e.oldRow, e.newRow])
+      for (const [column, field] of Object.entries(spec?.fields ?? {}))
+        if (field.shows === 'instant' && row?.[column] !== undefined && row[column] !== null)
+          found.add(text(row[column]));
+  }
+  return [...found];
 }
 
 const byAt = (a: RowImage, b: RowImage) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
@@ -283,6 +313,7 @@ export function describeTrail(
   entries: readonly TimedEntry[],
   images: readonly RowImage[],
   labId: string,
+  instants: ReadonlyMap<string, StoredInstant>,
 ): TrailEntry[] {
   const labelsAt = indexImages([...images, ...imagesOf(entries)]);
   return [...entries].sort(byTime).map(({ atLab, ...e }) => {
@@ -292,15 +323,33 @@ export function describeTrail(
     const record: RecordRef = {
       table: e.table,
       id: text(row.id),
-      kind: spec?.kind ?? e.table,
+      kind: recordKind(e.table),
       label: isAuditedTable(e.table) ? labelOf(e.table, row.id) : text(row.id),
     };
+    const chain = chainKindOf(e.chain, labId);
     const shown = (column: string, value: unknown): ShownValue | null => {
       if (value === null || value === undefined) return null;
       const field = spec?.fields[column];
       const refTable = field ? referenceOf(field, row) : null;
-      if (refTable) return { text: labelOf(refTable, value), ref: { table: refTable, id: text(value) } };
-      return { text: field?.bytesAsUtf8 ? decodeUtf8Bytes(value) : text(value), ref: null };
+      if (refTable) return { text: labelOf(refTable, value), ref: { table: refTable, id: text(value) }, instant: null };
+      switch (field?.shows) {
+        case 'utf8':
+          return plain(decodeUtf8Bytes(value));
+        case 'hex':
+          return plain(hexOf(value) ?? text(value));
+        case 'recordKind':
+          return plain(recordKind(value));
+        case 'instant': {
+          const stored = instants.get(text(value));
+          return {
+            text: text(value),
+            ref: null,
+            instant: stored ? { at: stored.at, atLab: chain === 'lab' ? stored.atLab : null } : null,
+          };
+        }
+        case undefined:
+          return plain(text(value));
+      }
     };
     const before: RowSnapshot = e.oldRow ?? {};
     const after: RowSnapshot = e.newRow ?? {};
@@ -318,7 +367,6 @@ export function describeTrail(
         old: shown(column, before[column]),
         new: shown(column, after[column]),
       }));
-    const chain = chainKindOf(e.chain, labId);
     return {
       chain,
       seq: e.seq,
@@ -338,10 +386,18 @@ export function describeTrail(
 /** How QA reads a recomputed chain: intact through its last entry, or through the entry before the first that fails. */
 export function chainVerification(chain: ChainKind, lastEntry: string, firstFailure: string | null): ChainVerification {
   if (firstFailure === null)
-    return { chain, lastEntry, intactThrough: lastEntry, firstFailure, report: `intact through entry ${lastEntry}` };
+    return {
+      chain,
+      verdict: 'Intact',
+      lastEntry,
+      intactThrough: lastEntry,
+      firstFailure,
+      report: `verified through entry ${lastEntry}`,
+    };
   if (bySeq(firstFailure, lastEntry) > 0)
     return {
       chain,
+      verdict: 'Broken',
       lastEntry,
       intactThrough: lastEntry,
       firstFailure,
@@ -350,6 +406,7 @@ export function chainVerification(chain: ChainKind, lastEntry: string, firstFail
   const intactThrough = String(Number(firstFailure) - 1);
   return {
     chain,
+    verdict: 'Broken',
     lastEntry,
     intactThrough,
     firstFailure,
