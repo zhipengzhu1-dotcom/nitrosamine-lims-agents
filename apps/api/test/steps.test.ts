@@ -616,6 +616,60 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
   refusedWith(await client.call(routes.me), 'noSession');
 });
 
+it('a Lockout committed after the signing password was checked refuses the Signature, records the refusal without counting it, and leaves the Test as it was', async () => {
+  const signer = await api.addPerson('lea.analyst', ['Analyst'], { trained: true });
+  const client = await api.login(signer);
+  const id = await submitTestTo('Assigned', signer);
+  const before = await view(id);
+  const signature = await signatureOf(client, id, signer);
+  const press = (password: string) =>
+    client.call(stepRoute('enterResult'), {
+      commitKey: randomUUID(),
+      testId: id,
+      input: result,
+      signature: { ...signature, password },
+    });
+  refusedWith(await press('wrong'), 'badCredentials');
+
+  const signing = await api.lockOutWhile(signer, () => press(signature.password));
+
+  assert.equal(refusedWith(signing, 'accountLocked'), 'this account is locked');
+  assert.deepEqual(await view(id), before, 'no Result, no Signature, and the Test still Assigned');
+  const failures = await api.superuser
+    .selectFrom('accessEvent')
+    .select(['kind', 'failureReason'])
+    .where('subjectId', '=', signer.id)
+    .where('kind', '<>', 'SignInSucceeded')
+    .orderBy('at')
+    .execute();
+  assert.deepEqual(
+    failures,
+    [
+      { kind: 'ReauthenticationFailed', failureReason: 'WrongPassword' },
+      { kind: 'ReauthenticationFailed', failureReason: 'AccountLocked' },
+    ],
+    'the refused signing is an Access Event, as a sign-in refused by a Lockout is',
+  );
+  const { failedLogins } = await api.superuser
+    .selectFrom('person')
+    .select('failedLogins')
+    .where('id', '=', signer.id)
+    .executeTakeFirstOrThrow();
+  assert.equal(failedLogins, 1, 'the refusal does not count toward the lockout again');
+  const reasons = await api.superuser
+    .selectFrom('auditEntry')
+    .select('reason')
+    .distinct()
+    .where('actor', '=', `person:${signer.username}`)
+    .where('tableName', '=', 'access_event')
+    .execute();
+  assert.deepEqual(
+    reasons,
+    [{ reason: 'Failed authentication' }],
+    'both refusals are recorded as failed authentication',
+  );
+});
+
 it("a Customer User cannot read another Customer's Test", async () => {
   const id = await submitTestTo('Requested');
   assert.ok(ok(await as.cora.call(routes.tests)).some((t) => t.id === id));

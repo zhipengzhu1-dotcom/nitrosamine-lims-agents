@@ -545,7 +545,7 @@ The QA-approved, versioned sentence a signer attests to on every Electronic Sign
 _Avoid_: Attestation text, legal text, disclaimer
 
 **Re-authentication**:
-The signer's proof of identity for one Electronic Signature: the typed user ID, password and second factor, checked again whatever the session already proved. A successful one is a single-use record for that person, session and Signature Meaning, written with the Signature it enables; a failed one is an Access Event that counts toward the lockout.
+The signer's proof of identity for one Electronic Signature: the typed user ID, password and second factor, checked again whatever the session already proved. A successful one is a single-use record for that person, session and Signature Meaning, written with the Signature it enables; a failed one is an Access Event that counts toward the lockout. A lockout that lands after the password was checked refuses the Signature, or the unlock, and that refusal is a failed Re-authentication, or a failed unlock, that does not count again.
 _Avoid_: Password prompt, confirmation, session reuse
 
 **Authorisation**:

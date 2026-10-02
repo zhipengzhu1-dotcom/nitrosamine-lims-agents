@@ -161,7 +161,7 @@ it('a step without a Commit Key is refused as malformed and writes nothing', asy
   assert.deepEqual(await totals(), before);
 });
 
-it("the same Commit Key from another session is refused and does not answer the first session's receipt", async () => {
+it("the same Commit Key from another session is refused as saved before the latest sign-in and does not answer the first session's receipt", async () => {
   const key = randomUUID();
   ok(await post(as.cora, 'submit', { commitKey: key, ...submission }));
   const otherSession = await api.login(cora);
@@ -169,7 +169,7 @@ it("the same Commit Key from another session is refused and does not answer the 
   const refused = await post(otherSession, 'submit', { commitKey: key, ...submission });
   assert.equal(
     refusedWith(refused, 'keyReused'),
-    'this press was already saved under another sign-in; reload to see what was saved',
+    'this press was already saved before the latest sign-in; reload to see what was saved',
   );
   assert.deepEqual(await totals(), before, 'no second Submission');
 });
