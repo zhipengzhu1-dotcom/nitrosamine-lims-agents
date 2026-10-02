@@ -84,6 +84,11 @@ export interface RailAction {
   run: (input: Record<string, string>, password: string | null) => Promise<string>;
 }
 
+async function sha256(text: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export function stepAction(
   name: StepName,
   testId: string | null,
@@ -98,10 +103,13 @@ export function stepAction(
     fields: ui.fields,
     signs: step.signs && { meaning: step.signs, what: ui.record ? [...what, ui.record] : what },
     async run(input, password) {
-      // Kept until the server answers, even across a reload, so pressing again after no answer resends this press.
+      // Kept until the server answers, even across a reload, so pressing again with the same entries after no answer
+      // resends this press. The entries are kept as a digest, as the server keeps them.
       const press = `commitKey:${name}:${testId ?? 'new'}`;
-      const commitKey = sessionStorage.getItem(press) ?? crypto.randomUUID();
-      sessionStorage.setItem(press, commitKey);
+      const entries = await sha256(JSON.stringify(input));
+      const [keptEntries, keptKey] = sessionStorage.getItem(press)?.split(' ') ?? [];
+      const commitKey = keptEntries === entries && keptKey ? keptKey : crypto.randomUUID();
+      sessionStorage.setItem(press, `${entries} ${commitKey}`);
       await api(stepRoute(name), {
         commitKey,
         ...(testId && { testId }),
