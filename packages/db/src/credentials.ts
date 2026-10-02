@@ -23,13 +23,23 @@ export async function hashPassword(password: string, pepper?: Buffer): Promise<s
   return `${pepper ? PEPPERED : 'scrypt'}$${salt.toString('base64')}$${key.toString('base64')}`;
 }
 
-/** Answers whether `password` is the one `stored` was hashed from; a peppered hash needs the same pepper. */
-export async function verifyPassword(password: string, stored: string, pepper?: Buffer): Promise<boolean> {
+/**
+ * Answers whether `password` is the one `stored` was hashed from; a peppered hash needs the same pepper. A hash made
+ * without the pepper proves nothing unless `acceptsUnpepperedHash`, which only the demo login does; it is still
+ * derived, so the refusal takes as long as a wrong password.
+ */
+export async function verifyPassword(
+  password: string,
+  stored: string,
+  pepper?: Buffer,
+  acceptsUnpepperedHash = true,
+): Promise<boolean> {
   const [scheme, salt, key] = stored.split('$');
   if (!salt || !key) return false;
   const withPepper = scheme === PEPPERED && pepper !== undefined;
   if (scheme !== 'scrypt' && !withPepper) return false;
   const expected = Buffer.from(key, 'base64');
   const input = withPepper ? peppered(password, pepper) : password;
-  return timingSafeEqual(await derive(input, Buffer.from(salt, 'base64'), expected.length), expected);
+  const matches = timingSafeEqual(await derive(input, Buffer.from(salt, 'base64'), expected.length), expected);
+  return matches && (withPepper || acceptsUnpepperedHash);
 }

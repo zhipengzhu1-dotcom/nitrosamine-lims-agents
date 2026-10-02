@@ -88,6 +88,27 @@ const failedLoginsOf = async (personId: string) =>
   (await api.superuser.selectFrom('person').select('failedLogins').where('id', '=', personId).executeTakeFirstOrThrow())
     .failedLogins;
 
+it('under the decided login, an account whose hash was made without the pepper can neither sign in nor enrol, each counted as a wrong password; under the demo login it still signs in', async () => {
+  const seeded = api.person('theo');
+  assert.equal(refusedWith(await signIn(seeded, seeded.password, '123456'), 'badCredentials'), NOT_VALID);
+  assert.equal(
+    refusedWith(
+      await new Client(decided.base).call(routes.enrolAuthenticator, {
+        username: seeded.username,
+        password: seeded.password,
+      }),
+      'badCredentials',
+    ),
+    NOT_VALID,
+  );
+  assert.deepEqual(await eventsOf(seeded.id), [
+    { kind: 'SignInFailed', failureReason: 'WrongPassword' },
+    { kind: 'SignInFailed', failureReason: 'WrongPassword' },
+  ]);
+  assert.equal(await failedLoginsOf(seeded.id), 2);
+  await api.login(seeded);
+});
+
 const eventsOf = (personId: string) =>
   api.superuser
     .selectFrom('accessEvent')

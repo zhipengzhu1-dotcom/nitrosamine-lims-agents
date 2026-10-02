@@ -28,8 +28,15 @@ const secondLab = { code: 'QC', name: 'QC Laboratory (fictional)', members: ['le
 
 const SEED = { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' };
 
-/** Seeds two Labs, two Rooms in the first, one Customer, one Method and the demo people, who all share one password, into an empty database. */
-export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('base64url')): Promise<SeededAccount[]> {
+/**
+ * Seeds two Labs, two Rooms in the first, one Customer, one Method and the demo people, who all share one password,
+ * into an empty database. The password is hashed under `pepper` when one is given, which the decided login requires.
+ */
+export async function seed(
+  db: Kysely<DB>,
+  password = randomBytes(6).toString('base64url'),
+  pepper?: Buffer,
+): Promise<SeededAccount[]> {
   if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
   const accounts = await audited(db, SEED, async (tx) => {
@@ -66,7 +73,7 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
         .values({
           username: p.username,
           displayName: p.name,
-          passwordHash: await hashPassword(password),
+          passwordHash: await hashPassword(password, pepper),
           customerId: p.role === 'Customer' ? customer.id : null,
         })
         .returning('id')
@@ -84,10 +91,14 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
 }
 
 if (import.meta.main) {
-  const { server, database, demoPassword } = dbConfig();
+  // LIMS_PASSWORD_PEPPER, the API's hex pepper, is given when the seeded accounts are to sign in under the decided login.
+  const { server, database, demoPassword } = dbConfig(['LIMS_PASSWORD_PEPPER']);
+  const pepper = process.env.LIMS_PASSWORD_PEPPER;
+  if (pepper !== undefined && !/^([0-9a-f]{2}){32,}$/i.test(pepper))
+    throw new Error('LIMS_PASSWORD_PEPPER must hold the password pepper: at least 64 hex digits');
   const db = createDb(databaseUrl(server, database, 'lims_app'));
   try {
-    const accounts = await seed(db, demoPassword);
+    const accounts = await seed(db, demoPassword, pepper === undefined ? undefined : Buffer.from(pepper, 'hex'));
     console.table(accounts.map((a) => ({ username: a.username, role: a.role })));
     const [first] = accounts;
     if (!first) throw new Error('the seed made no accounts');

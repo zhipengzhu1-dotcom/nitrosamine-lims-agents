@@ -15,8 +15,14 @@ it('a password hashed with the pepper verifies only with the same pepper', async
   assert.equal(await verifyPassword(PASSWORD, stored), false, 'without the pepper the hash proves nothing');
 });
 
-it("a demo account's hash, made without the pepper, still verifies", async () => {
+it("a demo account's hash, made without the pepper, still verifies where the login accepts one", async () => {
   const stored = await hashPassword(PASSWORD);
   assert.match(stored, /^scrypt\$/);
   assert.equal(await verifyPassword(PASSWORD, stored, randomBytes(32)), true);
+});
+
+it('a hash made without the pepper proves nothing where the login refuses one', async () => {
+  const pepper = randomBytes(32);
+  assert.equal(await verifyPassword(PASSWORD, await hashPassword(PASSWORD), pepper, false), false);
+  assert.equal(await verifyPassword(PASSWORD, await hashPassword(PASSWORD, pepper), pepper, false), true);
 });

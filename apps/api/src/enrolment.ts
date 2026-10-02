@@ -1,5 +1,4 @@
 import { audited, type DB, type SignInFailure } from '@lims/db';
-import { verifyPassword } from '@lims/db/credentials';
 import { routes } from '@lims/domain';
 import type { Kysely } from 'kysely';
 import type { App } from './app.ts';
@@ -7,6 +6,7 @@ import {
   asOwnAccount,
   browserSession,
   type Credentials,
+  proves,
   record,
   recordWrongCredential,
   refusalsUnder,
@@ -25,7 +25,7 @@ import { base32, newTotpSecret, otpauthUri, sealSecret } from './totp.ts';
  * nothing, and each refusal is a failed sign-in Access Event; only a wrong password counts toward the lockout.
  */
 export function enrolmentRoute(app: App, db: Kysely<DB>, accessEventKey: Buffer, credentials: Credentials): void {
-  const { policy: limits, pepper } = credentials;
+  const { policy: limits } = credentials;
   const REFUSAL = refusalsUnder(limits);
   app.route({
     ...routes.enrolAuthenticator,
@@ -44,7 +44,7 @@ export function enrolmentRoute(app: App, db: Kysely<DB>, accessEventKey: Buffer,
       // The guard answers for every user ID, known or not, so the signed-in browser learns nothing about which exist.
       if (signedIn && signedIn.personId !== person?.id)
         return failed(person ? 'OtherPersonSignedIn' : 'UnknownUserId', REFUSAL.OtherPersonSignedIn);
-      const proven = await verifyPassword(password, person?.passwordHash ?? TIMING_DECOY_HASH, pepper);
+      const proven = await proves(credentials, password, person?.passwordHash ?? TIMING_DECOY_HASH);
       if (!person) return failed('UnknownUserId');
       if (!person.passwordHash) return failed('NoCredential');
       const own = { subjectId: person.id, roles: [], sourceAddress };

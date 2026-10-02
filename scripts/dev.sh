@@ -32,7 +32,8 @@ if [ "${1:-}" = --scratch ]; then
 fi
 node packages/db/src/migrate.ts
 if [ "$(scripts/pg.sh psql -d "$LIMS_DB" -tAc 'select count(*) from lims.lab')" = 0 ]; then
-  node packages/db/src/seed.ts
+  # The decided login admits only a hash made under the pepper, so its seed takes the API's pepper.
+  if [ "$login" = decided ]; then LIMS_PASSWORD_PEPPER=$password_pepper node packages/db/src/seed.ts; else node packages/db/src/seed.ts; fi
 else
   echo "$LIMS_DB is already seeded; its accounts were printed when it was first seeded."
 fi

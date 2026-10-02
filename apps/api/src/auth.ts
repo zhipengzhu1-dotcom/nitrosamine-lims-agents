@@ -34,6 +34,11 @@ export interface LoginPolicy extends SessionLimits {
   lockoutAfter: number;
   /** Whether sign-in, signing, unlocking and a Lab switch also need a fresh code from the person's authenticator. */
   secondFactor: boolean;
+  /**
+   * Whether a password hash made without the pepper, as the demo seed makes them, still proves the person. The
+   * decided login refuses one as a wrong password, so every account it admits was hashed under the pepper (#13).
+   */
+  acceptsUnpepperedHash: boolean;
   password: PasswordRule;
 }
 /**
@@ -46,6 +51,7 @@ export const LOGIN = {
     absoluteMs: 12 * HOUR_MS,
     lockoutAfter: 5,
     secondFactor: true,
+    acceptsUnpepperedHash: false,
     password: DECIDED_PASSWORD,
   },
   demo: {
@@ -53,6 +59,7 @@ export const LOGIN = {
     absoluteMs: 12 * HOUR_MS,
     lockoutAfter: 20,
     secondFactor: false,
+    acceptsUnpepperedHash: true,
     password: DEMO_PASSWORD,
   },
 } as const satisfies Record<string, LoginPolicy>;
@@ -64,6 +71,10 @@ export interface Credentials {
   pepper: Buffer;
   totpKey: Buffer;
 }
+
+/** Verifies `password` against `stored` under the login: with the pepper, and a hash made without it only where the policy accepts one. */
+export const proves = (credentials: Credentials, password: string, stored: string): Promise<boolean> =>
+  verifyPassword(password, stored, credentials.pepper, credentials.policy.acceptsUnpepperedHash);
 
 /** The authenticator's two settings, as `checkCode` takes them. */
 const totpOf = (credentials: Credentials) => ({
@@ -416,10 +427,10 @@ export async function reauthenticate(
 ): Promise<Reauthenticated> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', actor.person.id).executeTakeFirstOrThrow();
   const theirs = typed.username === undefined || typed.username === person.username;
-  const proven = await verifyPassword(
+  const proven = await proves(
+    credentials,
     typed.password,
     theirs && person.passwordHash ? person.passwordHash : TIMING_DECOY_HASH,
-    credentials.pepper,
   );
   const checked =
     theirs && proven && person.passwordHash
@@ -649,7 +660,7 @@ export function loginRoutes(
       const labId = device?.labId ?? req.body.labId;
       const person = await db.selectFrom('person').selectAll().where('username', '=', username).executeTakeFirst();
       if (!person) {
-        await verifyPassword(password, TIMING_DECOY_HASH, pepper);
+        await proves(credentials, password, TIMING_DECOY_HASH);
         await audited(db, SIGN_IN_SERVICE, (tx) =>
           record(tx, {
             kind: 'SignInFailed',
@@ -663,7 +674,7 @@ export function loginRoutes(
         return notValid();
       }
 
-      const proven = await verifyPassword(password, person.passwordHash ?? TIMING_DECOY_HASH, pepper);
+      const proven = await proves(credentials, password, person.passwordHash ?? TIMING_DECOY_HASH);
       const checked =
         proven && person.passwordHash ? await checkCode(db, totpOf(credentials), person.id, code) : { step: null };
       const codeFailure = 'refused' in checked ? checked.refused : null;
@@ -899,11 +910,7 @@ export function labSwitchRoute(app: App, db: Kysely<DB>, credentials: Credential
       const as = asOwnAccount(person.username, 'Switch Lab');
       const sameUserId = username === person.username;
       const passwordProven =
-        (await verifyPassword(
-          password,
-          (sameUserId && person.passwordHash) || TIMING_DECOY_HASH,
-          credentials.pepper,
-        )) && sameUserId;
+        (await proves(credentials, password, (sameUserId && person.passwordHash) || TIMING_DECOY_HASH)) && sameUserId;
       const checked = passwordProven ? await checkCode(db, totpOf(credentials), person.id, code) : { step: null };
       const codeFailure = 'refused' in checked ? checked.refused : null;
       const proven = passwordProven && !('refused' in checked);
