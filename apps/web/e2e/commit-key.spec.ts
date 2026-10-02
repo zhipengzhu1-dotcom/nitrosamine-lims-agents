@@ -5,15 +5,15 @@ import { DEMO_PASSWORD } from '../playwright.config.ts';
 const sample = (which: string) =>
   `Metformin HCl tablets, ${which} (fictional, ${test.info().project.name} ${randomUUID()})`;
 
-async function openSubmit(page: Page, description: string, order: 'method first' | 'description first') {
+async function fillSubmitSheet(page: Page, description: string, order: 'method first' | 'description first') {
   await page.getByRole('button', { name: 'Submit' }).click();
   const method = () => page.getByLabel('Method').selectOption({ index: 1 });
-  const describe = () => page.getByLabel('Sample description').fill(description);
-  if (order === 'method first') await method().then(describe);
-  else await describe().then(method);
+  const fillDescription = () => page.getByLabel('Sample description').fill(description);
+  if (order === 'method first') await method().then(fillDescription);
+  else await fillDescription().then(method);
 }
 
-async function dropOneSubmitAndReload(page: Page, description: string) {
+async function signInDropOneSubmitAndReload(page: Page, description: string) {
   const commitKeys: string[] = [];
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/steps/submit'))
@@ -30,7 +30,7 @@ async function dropOneSubmitAndReload(page: Page, description: string) {
     await route.fetch();
     return route.abort('connectionreset');
   });
-  await openSubmit(page, description, 'description first');
+  await fillSubmitSheet(page, description, 'description first');
   await page.getByRole('button', { name: 'Submit' }).click();
   await expect(page.getByRole('status')).toContainText('The LIMS did not answer.');
   await page.unroute('**/api/steps/submit');
@@ -44,9 +44,9 @@ test('a Submission with other entries after a dropped Submit and a reload is rec
 }) => {
   const dropped = sample('dropped reply');
   const other = sample('other entries');
-  const commitKeys = await dropOneSubmitAndReload(page, dropped);
+  const commitKeys = await signInDropOneSubmitAndReload(page, dropped);
 
-  await openSubmit(page, other, 'method first');
+  await fillSubmitSheet(page, other, 'method first');
   await page.getByRole('button', { name: 'Submit' }).click();
   await expect(page.getByRole('status')).toContainText('now Requested');
   await expect(page.getByRole('row', { name: other })).toContainText('Requested');
@@ -59,9 +59,9 @@ test('the same entries typed in another order after a dropped Submit and a reloa
   page,
 }) => {
   const dropped = sample('dropped reply');
-  const commitKeys = await dropOneSubmitAndReload(page, dropped);
+  const commitKeys = await signInDropOneSubmitAndReload(page, dropped);
 
-  await openSubmit(page, dropped, 'method first');
+  await fillSubmitSheet(page, dropped, 'method first');
   await page.getByRole('button', { name: 'Submit' }).click();
   await expect(page.getByRole('status')).toContainText('now Requested');
   await expect(page.getByRole('row', { name: dropped }), 'the Submission is saved once').toHaveCount(1);

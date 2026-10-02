@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   pathOf,
+  pressText,
   readReply,
   type RefusalBody,
   type Route,
@@ -114,4 +115,25 @@ describe('a step body requires testId when the step starts from a state, and sig
     it(`${name} requires ${required[name].join(', ')}`, () => {
       assert.deepEqual(stepRoute(name).schema.body.required, required[name]);
     });
+});
+
+describe('pressText', () => {
+  const entries = { methodId: 'm1', description: 'Metformin HCl tablets (fictional)' };
+  const press = pressText('submit', null, entries);
+  const cases: [string, string, boolean][] = [
+    [
+      'the same entries typed in another order',
+      pressText('submit', null, { description: entries.description, methodId: 'm1' }),
+      true,
+    ],
+    [
+      'other entries',
+      pressText('submit', null, { ...entries, description: 'Metformin HCl, lot 2 (fictional)' }),
+      false,
+    ],
+    ['another step', pressText('assign', null, entries), false],
+    ['another record', pressText('submit', 't1', entries), false],
+  ];
+  for (const [what, other, same] of cases)
+    it(`names ${what} as ${same ? 'the same' : 'another'} press`, () => assert.equal(other === press, same));
 });

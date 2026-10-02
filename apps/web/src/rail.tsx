@@ -106,19 +106,19 @@ export function stepAction(
     async run(input, password) {
       // Kept until the server answers, even across a reload, so the same press after no answer resends its Commit Key.
       // The slot names the press by a digest, so no entries are kept in the browser.
-      const press = await commitKeySlot(pressText(name, testId, input));
-      const commitKey = sessionStorage.getItem(press) ?? crypto.randomUUID();
-      sessionStorage.setItem(press, commitKey);
+      const slot = await commitKeySlot(pressText(name, testId, input));
+      const commitKey = sessionStorage.getItem(slot) ?? crypto.randomUUID();
+      sessionStorage.setItem(slot, commitKey);
       await api(stepRoute(name), {
         commitKey,
         ...(testId && { testId }),
         input,
         ...(password !== null && { signature: { password } }),
       }).catch((e: unknown) => {
-        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(press);
+        if (e instanceof Refused && e.kind !== 'failure') sessionStorage.removeItem(slot);
         throw e;
       });
-      sessionStorage.removeItem(press);
+      sessionStorage.removeItem(slot);
       await onDone();
       return `${ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;
     },
