@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { SESSION_ENDED } from '@lims/domain';
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Page, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 const database = execFileSync(process.execPath, ['../../packages/db/src/checkout.ts', 'database', 'lims_e2e'], {

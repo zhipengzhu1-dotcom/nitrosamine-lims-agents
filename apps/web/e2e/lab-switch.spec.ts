@@ -1,4 +1,4 @@
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Page, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function credentials(page: Page, lab: RegExp, password = DEMO_PASSWORD) {
