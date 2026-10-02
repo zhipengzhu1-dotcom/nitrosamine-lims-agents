@@ -249,13 +249,17 @@ export function useApi<R extends Route>(
   return state.path === path ? { ...state, reload } : { reload };
 }
 
-/** The keys the latest server answer holds that the one before it on this page did not. A first answer holds nothing new. */
+/**
+ * The keys the latest server answer holds that the one before it on this page did not. A first answer holds nothing
+ * new, and neither does the first answer for another path, so a record opened next never replays the last one's motion.
+ */
 export function useFresh<T>(answer: T | undefined, keys: (answer: T) => string[]): ReadonlySet<string> {
   const [last, setLast] = useState(answer);
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
   if (answer !== last) {
     setLast(answer);
-    if (last !== undefined && answer !== undefined) {
+    if (answer === undefined) setFresh(new Set());
+    else if (last !== undefined) {
       const before = new Set(keys(last));
       setFresh(new Set(keys(answer).filter((k) => !before.has(k))));
     }
