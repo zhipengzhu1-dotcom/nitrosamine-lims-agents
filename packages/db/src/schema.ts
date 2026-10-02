@@ -23,7 +23,7 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type IncidentKind = "ChainVerifyFailure" | "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure" | "UnraisableLogLine";
 
-export type IncidentState = "Open";
+export type IncidentState = "Acknowledged" | "Closed" | "Open";
 
 export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
 

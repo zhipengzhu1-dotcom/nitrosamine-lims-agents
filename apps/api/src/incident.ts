@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { audited, type DB, postgresFault } from '@lims/db';
-import { type ActorContext, referencePattern, routes, stepNames, stepRoute } from '@lims/domain';
+import { type ActorContext, type IncidentState, referencePattern, routes, stepNames, stepRoute } from '@lims/domain';
 import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { type Insertable, type InsertObject, type Kysely, sql } from 'kysely';
 import { type Static, type TSchema, Type } from 'typebox';
@@ -107,21 +107,25 @@ export async function openJobIncident(
   await write(db, log, { ...factsOf(error), ...job });
 }
 
+const ALARM = 'System Incident alarm';
+
 /**
  * Opens one System Incident for a break that chain verification found, naming the chain as the Audit Trail does and
- * its first failing entry, with the verifying QA as the requesting person; a later verification of the same break
- * answers that incident's reference and opens no other. A failure to write it fails the verification, whose 500 opens
- * a System Incident of its own, so a break is never shown without a record.
+ * the break's first failing entry, with the verifying QA as the requesting person, and raises the alarm for it once,
+ * after it is written. A later verification of the same break answers that incident, in whatever state it is now, and
+ * opens no other and raises no alarm. A failure to write it fails the verification, whose 500 opens a System Incident
+ * of its own, so a break is never shown without a record.
  */
 export async function openChainIncident(
   db: Kysely<DB>,
+  log: FastifyBaseLogger,
   requester: ActorContext,
   chain: string,
-  firstFailure: string,
-): Promise<string> {
-  return audited(db, INCIDENT_SERVICE, async (tx) => {
+  entry: string,
+): Promise<{ reference: string; state: IncidentState }> {
+  const { opened, ...incident } = await audited(db, INCIDENT_SERVICE, async (tx) => {
     await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
-    await tx
+    const { numInsertedOrUpdatedRows } = await tx
       .insertInto('systemIncident')
       .values({
         kind: 'ChainVerifyFailure',
@@ -129,18 +133,20 @@ export async function openChainIncident(
         requestedBy: requester.person.id,
         sessionLabId: requester.lab.id,
         chain,
-        firstFailure,
+        firstFailure: entry,
       })
       .onConflict((conflict) => conflict.columns(['chain', 'firstFailure']).doNothing())
-      .execute();
-    const { reference } = await tx
-      .selectFrom('systemIncident')
-      .select('reference')
-      .where('chain', '=', chain)
-      .where('firstFailure', '=', firstFailure)
       .executeTakeFirstOrThrow();
-    return reference;
+    const found = await tx
+      .selectFrom('systemIncident')
+      .select(['reference', 'state'])
+      .where('chain', '=', chain)
+      .where('firstFailure', '=', entry)
+      .executeTakeFirstOrThrow();
+    return { ...found, opened: numInsertedOrUpdatedRows === 1n };
   });
+  if (opened) log.error({ alarm: { reference: incident.reference, kind: 'ChainVerifyFailure', chain, entry } }, ALARM);
+  return incident;
 }
 
 function unwrittenOn(line: string): Static<typeof unwrittenLine> | 'unreadable' | null {

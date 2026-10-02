@@ -71,26 +71,22 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     verifyAuditTrail: async () => {
       const lastEntry = (chain: string) =>
         sql<string>`coalesce((select seq from lims.audit_chain where chain = ${chain}), 0)::text`;
-      const firstFailure = (chain: string) => sql<string | null>`lims.verify_chain(${chain})::text`;
+      const breaks = (chain: string) =>
+        sql<string[]>`array(select b.seq::text from lims.chain_breaks(${chain}) as b(seq) order by b.seq)`;
       const found = await db
         .selectNoFrom([
           sql<Date>`now()`.as('at'),
           lastEntry(labId).as('labLast'),
-          firstFailure(labId).as('labFailure'),
+          breaks(labId).as('labBreaks'),
           lastEntry('company').as('companyLast'),
-          firstFailure('company').as('companyFailure'),
+          breaks('company').as('companyBreaks'),
         ])
         .executeTakeFirstOrThrow();
       return {
         at: found.at,
         chains: [
-          { chain: 'lab' as const, chainId: labId, lastEntry: found.labLast, firstFailure: found.labFailure },
-          {
-            chain: 'company' as const,
-            chainId: 'company',
-            lastEntry: found.companyLast,
-            firstFailure: found.companyFailure,
-          },
+          { chain: 'lab' as const, chainId: labId, lastEntry: found.labLast, breaks: found.labBreaks },
+          { chain: 'company' as const, chainId: 'company', lastEntry: found.companyLast, breaks: found.companyBreaks },
         ],
       };
     },

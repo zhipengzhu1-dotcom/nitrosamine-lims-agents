@@ -221,10 +221,10 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   );
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   assert.deepEqual(
-    verified.chains.map((c) => [c.chain, c.firstFailure]),
+    verified.chains.map((c) => [c.chain, c.breaks]),
     [
-      ['lab', null],
-      ['company', null],
+      ['lab', []],
+      ['company', []],
     ],
   );
   const { recent } = await api.db

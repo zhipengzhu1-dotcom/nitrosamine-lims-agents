@@ -278,14 +278,32 @@ const lookups = Type.Object({
 /** How a recomputed chain stands: Intact through its last entry, or Broken at its first failure. */
 export const chainVerdict = Type.Union([Type.Literal('Intact'), Type.Literal('Broken')]);
 export type ChainVerdict = Static<typeof chainVerdict>;
+/** Where a System Incident stands: Open until its actions are recorded and signed Acknowledged, then Closed. */
+const incidentState = Type.Enum({
+  Open: 'Open',
+  Acknowledged: 'Acknowledged',
+  Closed: 'Closed',
+} as const satisfies { [K in db.IncidentState]: K });
+export type IncidentState = Static<typeof incidentState>;
+/**
+ * One break chain verification found: its first entry that fails to verify (one past the last for a moved head), and
+ * the System Incident that records it in the state it is in now. The same break names the same incident on every
+ * verification, whatever its state; a break at another entry has its own.
+ */
+const chainBreak = Type.Object({
+  entry: seq,
+  failure: Type.String(),
+  incident: Type.String({ pattern: `^${referencePattern}$` }),
+  incidentState,
+});
+export type ChainBreak = Static<typeof chainBreak>;
 const chainVerification = Type.Object({
   chain: chainKind,
   verdict: chainVerdict,
   lastEntry: seq,
   intactThrough: seq,
-  firstFailure: nullable(seq),
-  /** The System Incident a break opened, the same on every verification that finds the same first failing entry. */
-  incident: nullable(Type.String({ pattern: `^${referencePattern}$` })),
+  /** Every break, in entry order; none when the chain is Intact. */
+  breaks: Type.Array(chainBreak),
   report: Type.String(),
 });
 export type ChainVerification = Static<typeof chainVerification>;
@@ -333,7 +351,7 @@ const systemIncident = Type.Object({
     RepeatedSignInOnLockedAccount: 'RepeatedSignInOnLockedAccount',
     ChainVerifyFailure: 'ChainVerifyFailure',
   } as const satisfies { [K in db.IncidentKind]: K }),
-  state: Type.Enum({ Open: 'Open' } as const satisfies { [K in db.IncidentState]: K }),
+  state: incidentState,
   /** The failing step and error class of a failure of the LIMS; null for a sign-in incident. */
   step: nullable(Type.String()),
   recordId: nullable(uuid),

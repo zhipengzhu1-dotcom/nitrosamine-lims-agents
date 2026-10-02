@@ -178,6 +178,15 @@ function VerifyChain() {
               {answer.found.chains.map((c) => (
                 <li key={c.chain}>
                   {chainWords[c.chain]} <Status mark={c.verdict} /> {c.report}
+                  {c.breaks.length > 0 && (
+                    <ul className="breaks">
+                      {c.breaks.map((b) => (
+                        <li key={b.entry}>
+                          {b.failure}, recorded as System Incident {b.incident} <Status mark={b.incidentState} />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               ))}
             </ul>

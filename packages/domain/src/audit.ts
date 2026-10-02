@@ -1,5 +1,6 @@
 import type {
   AuditedTable,
+  ChainBreak,
   ChainKind,
   ChainVerification,
   Instant,
@@ -399,37 +400,42 @@ export function describeTrail(
   });
 }
 
+/** A break as the database found it, before it is read for QA. */
+export type ChainBreakFound = Omit<ChainBreak, 'failure'>;
+
+/** A break as one line of text: where the chain fails and the System Incident that records it, in its state now. */
+export const breakReport = (b: ChainBreak) =>
+  `${b.failure}, recorded as System Incident ${b.incident} (${b.incidentState})`;
+
 /**
- * How QA reads a recomputed chain: intact through its last entry, or through the entry before the first that fails,
- * with the System Incident that records the break.
+ * How QA reads a recomputed chain: intact through its last entry, or through the entry before its first break, with
+ * every break and the System Incident that records each, which `breakReport` reads out.
  */
-export function chainVerification(
-  chain: ChainKind,
-  lastEntry: string,
-  broken: { firstFailure: string; incident: string } | null,
-): ChainVerification {
-  if (broken === null)
+export function chainVerification(chain: ChainKind, lastEntry: string, found: ChainBreakFound[]): ChainVerification {
+  const breaks = found.map((b) => ({
+    ...b,
+    failure:
+      bySeq(b.entry, lastEntry) > 0
+        ? `the chain head does not match entry ${lastEntry}`
+        : `entry ${b.entry} fails to verify`,
+  }));
+  const [first] = breaks;
+  if (first === undefined)
     return {
       chain,
       verdict: 'Intact',
       lastEntry,
       intactThrough: lastEntry,
-      firstFailure: null,
-      incident: null,
+      breaks,
       report: `verified through entry ${lastEntry}`,
     };
-  const { firstFailure, incident } = broken;
-  const [intactThrough, failure] =
-    bySeq(firstFailure, lastEntry) > 0
-      ? [lastEntry, `the chain head does not match entry ${lastEntry}`]
-      : [String(Number(firstFailure) - 1), `entry ${firstFailure} fails to verify`];
+  const intactThrough = bySeq(first.entry, lastEntry) > 0 ? lastEntry : String(Number(first.entry) - 1);
   return {
     chain,
     verdict: 'Broken',
     lastEntry,
     intactThrough,
-    firstFailure,
-    incident,
-    report: `${failure}; intact through entry ${intactThrough}; recorded as System Incident ${incident}`,
+    breaks,
+    report: `intact through entry ${intactThrough}`,
   };
 }

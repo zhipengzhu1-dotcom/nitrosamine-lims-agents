@@ -1,7 +1,9 @@
 import {
   type ActorContext,
+  type ChainVerdict,
   decimalPattern,
   mayTake,
+  type IncidentState,
   type Lab,
   type RecordVersionRef,
   type Role,
@@ -82,11 +84,30 @@ const markLook = {
   Broken: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
   Unsigned: unsignedLook,
   'Signatures unsigned': unsignedLook,
-} as const;
+  Open: unsignedLook,
+  Acknowledged: {
+    tone: 'done',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M8 5v3.5l2.5 1.5" />
+      </>
+    ),
+  },
+  Closed: {
+    tone: 'done',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M5.5 8.2l1.8 1.8 3.2-3.5" />
+      </>
+    ),
+  },
+} as const satisfies Record<ChainVerdict | IncidentState | 'Unsigned' | 'Signatures unsigned', unknown>;
 
 /**
- * A Test state with its track, or a mark with its glyph: a chain verdict, an unsigned Signature, or a record with an
- * unsigned Signature. `fresh` marks a state the server has just confirmed on this page: the word and glyph are final,
+ * A Test state with its track, or a mark with its glyph: a chain verdict, a System Incident's state, an unsigned
+ * Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page: the word and glyph are final,
  * and an accent plays around them.
  */
 export function Status(props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook }) {

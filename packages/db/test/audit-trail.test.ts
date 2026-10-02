@@ -152,6 +152,45 @@ it("the Lab's chain verifies; an entry the database owner alters is the first fa
   assert.equal(await verify(), '2', 'the earliest altered entry is the first failure; entry 1 verifies');
 });
 
+it('chain verification reports every break in a chain, each once, in entry order', async () => {
+  const lab = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a Lab to break' }, (tx) =>
+    tx
+      .insertInto('lab')
+      .values({ code: 'BK', name: 'Broken Lab', timeZone: 'UTC' })
+      .returning('labId')
+      .executeTakeFirstOrThrow(),
+  );
+  for (const name of ['Broken Lab 2', 'Broken Lab 3', 'Broken Lab 4', 'Broken Lab 5', 'Broken Lab 6'])
+    await audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
+      tx.updateTable('lab').set({ name }).where('labId', '=', lab.labId).execute(),
+    );
+  const breaks = async () =>
+    (await sql<{ seq: string }>`select seq::text from lims.chain_breaks(${lab.labId}) as seq`.execute(app)).rows.map(
+      (r) => r.seq,
+    );
+  const firstFailure = async () =>
+    (await sql<{ broken: string | null }>`select lims.verify_chain(${lab.labId}) as broken`.execute(app)).rows[0]
+      ?.broken;
+  assert.deepEqual(await breaks(), []);
+
+  const asOwner = async (statement: string, seq: number) => {
+    await superuser.query('begin');
+    await superuser.query('set local session_replication_role = replica');
+    await superuser.query(statement, [lab.labId, seq]);
+    await superuser.query('commit');
+  };
+  await asOwner(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = $2`, 2);
+  await asOwner(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = $2`, 4);
+  assert.deepEqual(await breaks(), ['2', '4'], 'both altered entries, and no entry after them');
+  assert.equal(await firstFailure(), '2', 'verify_chain still answers the first');
+
+  await asOwner('delete from lims.audit_entry where chain = $1 and seq = $2', 5);
+  assert.deepEqual(await breaks(), ['2', '4', '5'], 'a removed entry is one break at its place; entry 6 verifies');
+
+  await superuser.query(`update lims.audit_chain set head = sha256('moved') where chain = $1`, [lab.labId]);
+  assert.deepEqual(await breaks(), ['2', '4', '5', '7'], 'a moved head is a break after the last entry');
+});
+
 const transactionIds = (customers: string[]) =>
   app
     .selectFrom('auditEntry')

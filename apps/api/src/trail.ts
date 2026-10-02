@@ -30,6 +30,7 @@ import {
   type SqlBool,
   sql,
 } from 'kysely';
+import type { FastifyBaseLogger } from 'fastify';
 import { Value } from 'typebox/value';
 import type { App } from './app.ts';
 import { openChainIncident } from './incident.ts';
@@ -281,7 +282,7 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
     handler: async (req) => {
       if (!req.actor.roles.includes('QA')) refuse('role', 'verifying the Audit Trail is a QA action');
       const { at, chains } = await labScope(db, req.actor).verifyAuditTrail();
-      return { at, chains: await chainVerifications(db, req.actor, chains) };
+      return { at, chains: await chainVerifications(db, req.log, req.actor, chains) };
     },
   });
 }
@@ -290,21 +291,23 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
 export type RecomputedChain = Awaited<ReturnType<Scope['verifyAuditTrail']>>['chains'][number];
 
 /**
- * Reads each recomputed chain as QA sees it; a break opens its System Incident, or answers the one already open, so
- * no break is shown without a record.
+ * Reads each recomputed chain as QA sees it; each break opens its System Incident, or answers the one that records it
+ * already, so no break is shown without a record.
  */
 export async function chainVerifications(
   db: Kysely<DB>,
+  log: FastifyBaseLogger,
   requester: ActorContext,
   chains: RecomputedChain[],
 ): Promise<ChainVerification[]> {
   const verified = [];
-  for (const { chain, chainId, lastEntry, firstFailure } of chains) {
-    const broken =
-      firstFailure === null
-        ? null
-        : { firstFailure, incident: await openChainIncident(db, requester, chainId, firstFailure) };
-    verified.push(chainVerification(chain, lastEntry, broken));
+  for (const { chain, chainId, lastEntry, breaks } of chains) {
+    const found = [];
+    for (const entry of breaks) {
+      const { reference, state } = await openChainIncident(db, log, requester, chainId, entry);
+      found.push({ entry, incident: reference, incidentState: state });
+    }
+    verified.push(chainVerification(chain, lastEntry, found));
   }
   return verified;
 }
