@@ -28,21 +28,36 @@ const railSays = (page: Page, text: string | RegExp) => expect(page.getByRole('s
 
 /**
  * How a press on Save preferences looks once its feedback has settled: scaled under full motion, unmoved under reduced
- * motion. The pointer leaves the button before it is released, so nothing is saved.
+ * motion. The press is released on the button, as a person would, so it saves the unchanged setting, which writes nothing.
  */
 async function pressedTransform(page: Page): Promise<string> {
   const save = page.getByRole('button', { name: 'Save preferences' });
+  const look = () => save.evaluate((b) => `${getComputedStyle(b).transform}|${getComputedStyle(b).filter}`);
+  const steady = async () => {
+    let before = '';
+    await expect
+      .poll(
+        async () => {
+          const now = await look();
+          const same = now === before;
+          before = now;
+          return same;
+        },
+        { intervals: [100] },
+      )
+      .toBe(true);
+    return before;
+  };
+  await expect(save).toBeEnabled();
+  await steady();
   const box = await save.boundingBox();
   if (!box) throw new Error('Save preferences is not on screen');
-  const settled = () => save.evaluate((b) => Promise.all(b.getAnimations().map((a) => a.finished)));
-  await settled();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await expect.poll(() => save.evaluate((b) => getComputedStyle(b).filter), 'the press is held').not.toBe('none');
-  await settled();
-  const transform = await save.evaluate((b) => getComputedStyle(b).transform);
-  await page.mouse.move(1, 1);
+  const [transform = ''] = (await steady()).split('|');
   await page.mouse.up();
+  await expect(save, 'the save of the unchanged setting is answered').toBeEnabled();
   return transform;
 }
 
