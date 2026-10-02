@@ -19,15 +19,17 @@ type CompanyTable =
   | 'lab'
   | 'identityVerification'
   | 'credentialLink'
-  | 'signatureStatement';
+  | 'signatureStatement'
+  | 'accessEvent';
 type LabTable = Exclude<keyof DB, CompanyTable | 'auditEntry' | 'session' | 'systemIncident'>;
 
 function inLab(q: Kysely<DB>, labId: string) {
-  const ofLab = (table: LabTable) => sql<boolean>`${sql.ref(`${table}.labId`)} = ${labId}`;
+  const ofLab = (table: LabTable | 'session') => sql<boolean>`${sql.ref(`${table}.labId`)} = ${labId}`;
   // Typed without the Lab tables, so a Lab row can only be reached through the filtered builders below.
   const company: Kysely<Pick<DB, CompanyTable>> = q;
   return {
-    from: <T extends LabTable>(table: T) =>
+    /** Reads a Lab table, or this Lab's sessions, which only sign-in and the session routes write. */
+    from: <T extends LabTable | 'session'>(table: T) =>
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot type a select from a generic Lab table; ofLab filters it
       (q.selectFrom(table) as unknown as SelectQueryBuilder<DB, T, {}>).where(ofLab(table)),
     insert: <T extends LabTable>(table: T, values: Omit<Insertable<DB[T]>, 'labId'>) =>

@@ -3,7 +3,7 @@ import { type DB, postgresFault } from '@lims/db';
 import { type ActorContext, administrationApart, routes, staffRefusal } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
-import { hashToken } from './auth.ts';
+import { hashToken, sessionEnd, type SessionLimits } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type LabQueries, type Scope, type WriteQueries } from './scope.ts';
 
@@ -64,8 +64,73 @@ async function issueLink(q: WriteQueries, personId: string) {
   return { token, expiresAt };
 }
 
+const LISTED_ACCESS_EVENTS = 100;
+
+/**
+ * The person's newest Access Events that this Lab sees: those of its sessions, those of no session, and every Lockout,
+ * which lists the sessions here that it ended, at its instant, whether or not a request or the sweep has ended them yet.
+ */
+async function accessEventsOf(scope: Scope, personId: string, limits: SessionLimits) {
+  const labId = scope.ctx.lab.id;
+  const rows = await scope.company
+    .selectFrom('accessEvent')
+    .select([
+      'id',
+      'kind',
+      'at',
+      'workstationId',
+      sql<string | null>`host(source_address)`.as('sourceAddress'),
+      'failureReason',
+    ])
+    .where('subjectId', '=', personId)
+    .where((eb) => eb.or([eb('sessionLabId', '=', labId), eb('sessionLabId', 'is', null), eb('kind', '=', 'Lockout')]))
+    .orderBy('at', 'desc')
+    .orderBy('id')
+    .limit(LISTED_ACCESS_EVENTS + 1)
+    .execute();
+  const ended = await scope
+    .from('session')
+    .innerJoin('person', 'person.id', 'session.personId')
+    .innerJoin('accessEvent as lockout', (join) =>
+      join
+        .onRef('lockout.subjectId', '=', 'session.personId')
+        .on('lockout.kind', '=', 'Lockout')
+        .on(sql<boolean>`${sessionEnd(limits)} = lockout.at`),
+    )
+    .select(['lockout.id as lockoutId', 'session.id', 'session.createdAt as signedInAt', 'session.workstationId'])
+    .where('session.personId', '=', personId)
+    .orderBy('session.createdAt')
+    .execute();
+  const workstations = await scope.from('workstation').select(['id', 'name']).execute();
+  const workstation = (id: string | null) => workstations.find((w) => w.id === id)?.name ?? null;
+  const events = rows.slice(0, LISTED_ACCESS_EVENTS).map((e) => {
+    const listed = {
+      id: e.id,
+      at: e.at,
+      workstation: workstation(e.workstationId),
+      sourceAddress: e.sourceAddress,
+      failureReason: e.failureReason,
+    };
+    if (e.kind !== 'Lockout') return Object.assign(listed, { kind: e.kind });
+    const endedSessions = ended
+      .filter((s) => s.lockoutId === e.id)
+      .map((s) => ({ id: s.id, signedInAt: s.signedInAt, workstation: workstation(s.workstationId) }));
+    return Object.assign(listed, { kind: e.kind, endedSessions });
+  });
+  return { events, earlierNotListed: rows.length > LISTED_ACCESS_EVENTS };
+}
+
 /** The Admin's staff-account routes: each write is audited under the Admin with the step's name or the reason given. */
-export function staffRoutes(app: App, db: Kysely<DB>): void {
+export function staffRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): void {
+  app.route({
+    ...routes.accessEvents,
+    handler: async (req) => {
+      const scope = adminScope(db, req.actor);
+      const { id, printedName, username } = await onePerson(scope, req.actor.lab.id, req.params.id);
+      return { person: { id, printedName, username }, ...(await accessEventsOf(scope, id, limits)) };
+    },
+  });
+
   app.route({
     ...routes.staff,
     handler: async (req) => {

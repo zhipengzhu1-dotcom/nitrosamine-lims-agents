@@ -9,6 +9,7 @@ import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_access_events_test');
 const SYSTEM = { actor: 'svc:test', role: 'system', reason: 'Arrange an Access Event test' };
+const ada = await api.login(api.person('ada'));
 
 const signIn = (username: string, password: string) =>
   new Client(api.base).call(routes.login, { username, password, labId: api.labId });
@@ -285,4 +286,86 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong password writes one lockout Access Eve
     'Lockout',
     'WrongPasswordOnLockedAccount',
   ]);
+});
+
+const sessionsOf = (account: Account) =>
+  api.superuser
+    .selectFrom('session')
+    .select(['id', 'labId', 'endedAt'])
+    .where('personId', '=', account.id)
+    .orderBy('createdAt')
+    .execute();
+const lockOut = async (account: Account) => {
+  for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
+    refusedWith(await signIn(account.username, 'not-the-password'), 'badCredentials');
+};
+
+it("under a Lockout, the Admin sees each of the person's sessions in this Lab that it ended, whether or not a request has noticed yet", async () => {
+  const person = await api.addPerson('access.log-lockout', ['Analyst']);
+  await audited(api.superuser, SYSTEM, (tx) =>
+    tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
+  );
+  ok(await (await api.login(person)).call(routes.logout));
+  const noticed = await api.login(person);
+  await api.login(person);
+  await api.login(person, api.qcLabId);
+  await lockOut(person);
+  refusedWith(await noticed.call(routes.me), 'noSession');
+
+  const [signedOut, ended, notYetNoticed, inQc] = await sessionsOf(person);
+  assert.ok(signedOut?.endedAt && ended?.endedAt && notYetNoticed && inQc, 'four sessions');
+  assert.equal(notYetNoticed.endedAt, null, 'no request or sweep has ended the second live session yet');
+  const { person: listed, events, earlierNotListed } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  assert.deepEqual(listed, { id: person.id, printedName: person.username, username: person.username });
+  assert.equal(earlierNotListed, false);
+  const lockout = events.find((e) => e.kind === 'Lockout');
+  assert.ok(lockout?.kind === 'Lockout', 'the Lockout is listed');
+  assert.deepEqual(
+    lockout.endedSessions.map((s) => [s.id, s.workstation]),
+    [
+      [ended.id, null],
+      [notYetNoticed.id, null],
+    ],
+    'the sessions in this Lab live at the Lockout, not the one signed out before it, nor the one in the QC Lab',
+  );
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    [
+      'Lockout',
+      ...Array.from({ length: LOCKOUT_AFTER_FAILURES }, () => 'SignInFailed'),
+      'SignInSucceeded',
+      'SignInSucceeded',
+      'SignOut',
+      'SignInSucceeded',
+    ],
+    'newest first, with no event of the session in the QC Lab',
+  );
+});
+
+it("a person's Access Events are read only by this Lab's Admin, and only for this Lab's staff", async () => {
+  const person = await api.addPerson('access.log-who', ['Analyst']);
+  const quinn = await api.login(api.person('quinn'));
+  refusedWith(await quinn.call(routes.accessEvents, { id: person.id }), 'role');
+  refusedWith(await ada.call(routes.accessEvents, { id: api.person('cora').id }), 'notFound');
+});
+
+it("the Admin's list of a person's Access Events stops at the newest 100, and says that earlier ones exist", async () => {
+  const person = await api.addPerson('access.log-many', ['Analyst']);
+  await audited(api.superuser, SYSTEM, (tx) =>
+    tx
+      .insertInto('accessEvent')
+      .values(
+        Array.from({ length: 101 }, () => ({
+          kind: 'SignInFailed' as const,
+          failureReason: 'WrongPassword' as const,
+          subjectId: person.id,
+          sourceAddress: '192.0.2.1',
+          roles: ['Analyst' as const],
+        })),
+      )
+      .execute(),
+  );
+  const { events, earlierNotListed } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  assert.equal(events.length, 100);
+  assert.equal(earlierNotListed, true);
 });

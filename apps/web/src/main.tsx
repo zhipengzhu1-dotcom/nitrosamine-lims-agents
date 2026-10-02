@@ -19,7 +19,8 @@ type Route =
   | { page: 'welcome'; token: string }
   | { page: 'trail'; table: AuditedTable; id: string }
   | { page: 'auditExport' }
-  | { page: 'module'; module: Module };
+  /** A rail module; `of` names the person whose Access Events the Staff module shows, or null for the module itself. */
+  | { page: 'module'; module: Module; of: string | null };
 
 function parse(hash: string): Route {
   const [, a, id, b] = hash.split('/');
@@ -30,7 +31,8 @@ function parse(hash: string): Route {
   if (a === 'trails' && isAuditedTable(id) && b) return { page: 'trail', table: id, id: b };
   if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
-  return module ? { page: 'module', module } : { page: 'tests' };
+  if (!module) return { page: 'tests' };
+  return { page: 'module', module, of: module.key === 'staff' && id && b === 'access-events' ? id : null };
 }
 
 function useRoute(): Route {
@@ -97,7 +99,7 @@ function page(route: Route, me: ActorContext) {
     case 'welcome':
       return <WelcomePage token={route.token} />;
     case 'module':
-      return <Placeholder key={route.module.key} me={me} module={route.module} />;
+      return <Placeholder key={`${route.module.key}/${route.of}`} me={me} module={route.module} of={route.of} />;
   }
 }
 

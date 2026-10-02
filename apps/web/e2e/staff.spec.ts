@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { expect, test } from './walk.ts';
+import { expect, signInByApi, test } from './walk.ts';
 import { DEMO_PASSWORD, SHOTS } from '../playwright.config.ts';
 
 test('the Admin records an Identity Verification, creates the account and grants a Membership; the person sets their own password', async ({
@@ -89,4 +89,64 @@ test('the Admin records an Identity Verification, creates the account and grants
     'Refused: this link has been used, replaced or has expired; ask the Admin for a new one.',
   );
   await shot('08-link-used');
+});
+
+/** The wrong passwords in a row that lock an account, as the API counts them. */
+const LOCKOUT_AFTER_FAILURES = 20;
+
+test('the Admin opens a locked-out person’s Access Events and sees, under the Lockout, the session it ended', async ({
+  page,
+  playwright,
+  baseURL,
+}) => {
+  const project = test.info().project.name;
+  const suffix = randomBytes(3).toString('hex');
+  const printedName = `Lou Lockedout ${suffix}`;
+  const username = `lou.${project}-${suffix}`;
+  const shot = async (what: string) => {
+    if (SHOTS)
+      await page.screenshot({ path: `test-results/shots/access-events-${project}-${what}.png`, fullPage: true });
+  };
+  const posted = async (url: string, data: object) => {
+    const res = await page.request.post(url, { data });
+    expect(res.ok(), `${url}: ${await res.text()}`).toBe(true);
+    return res.json();
+  };
+
+  await signInByApi(page, 'ada.admin');
+  const labs: { id: string; code: string }[] = await (await page.request.get('/api/labs')).json();
+  const labId = labs.find((lab) => lab.code === 'RD')?.id;
+  const verification = await posted('/api/staff/identity-verifications', {
+    printedName,
+    evidence: 'Passport seen in person (fictional)',
+  });
+  const { person, link } = await posted('/api/staff/accounts', { identityVerificationId: verification.id, username });
+  await posted('/api/staff/memberships', { personId: person.id, role: 'Analyst', reason: 'New starter (fictional)' });
+
+  if (!baseURL) throw new Error('the walk has no baseURL');
+  const lou = await playwright.request.newContext({ baseURL });
+  const set = await lou.post('/api/credentials', { data: { token: link.token, password: 'lou-chose-this' } });
+  expect(set.ok(), 'Lou sets a password').toBe(true);
+  const signedIn = await lou.post('/api/login', { data: { username, password: 'lou-chose-this', labId } });
+  expect(signedIn.ok(), 'Lou signs in').toBe(true);
+  const stranger = await playwright.request.newContext({ baseURL });
+  for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
+    expect((await stranger.post('/api/login', { data: { username, password: 'not-it', labId } })).status()).toBe(401);
+
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Staff' }).click();
+  await expect(page.getByRole('heading', { name: 'Staff accounts' })).toBeVisible();
+  const open = page.getByRole('link', { name: `Access Events of ${printedName}` });
+  expect((await open.boundingBox())?.height, 'a gloved finger can press it').toBeGreaterThanOrEqual(44);
+  await open.click();
+  await expect(page.getByRole('heading', { name: `Access Events of ${printedName}` })).toBeVisible();
+  const lockout = page.getByRole('row').filter({ hasText: 'Lockout' });
+  await expect(lockout).toHaveCount(1);
+  await expect(lockout).toContainText('Ended this session at the Lockout:');
+  await expect(lockout.getByRole('listitem')).toHaveText([/^Signed in \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC$/]);
+  await expect(page.getByRole('row').filter({ hasText: 'Sign In Succeeded' })).toHaveCount(1);
+  await expect(page.getByRole('row').filter({ hasText: 'Wrong Password' })).toHaveCount(LOCKOUT_AFTER_FAILURES);
+  await shot('01-lockout');
+  await lou.dispose();
+  await stranger.dispose();
 });
