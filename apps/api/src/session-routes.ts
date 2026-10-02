@@ -1,7 +1,7 @@
 import type { DB } from '@lims/db';
 import type { Kysely } from 'kysely';
 import type { App } from './app.ts';
-import { actorFor, labSwitchRoute, lockScreenRoutes, SESSION_COOKIE, type SessionLimits } from './auth.ts';
+import { actorFor, labSwitchRoute, lockScreenRoutes, SESSION_COOKIE, type Credentials } from './auth.ts';
 import { preferenceRoutes } from './preferences.ts';
 import { readRoutes } from './reads.ts';
 import { staffRoutes } from './staff.ts';
@@ -9,7 +9,8 @@ import { stepRoutes } from './steps.ts';
 import { workstationRoutes } from './workstations.ts';
 
 /** Every route that needs a session. A locked session reaches only lock, unlock and sign-out; every other route answers sessionLocked. */
-export function sessionRoutes(app: App, db: Kysely<DB>, limits: SessionLimits, release: string): void {
+export function sessionRoutes(app: App, db: Kysely<DB>, credentials: Credentials, release: string): void {
+  const limits = credentials.policy;
   const withSession = (whileLocked: boolean, routes: (scope: App) => void) =>
     app.register(async (scope) => {
       scope.decorateRequest('actor');
@@ -25,13 +26,13 @@ export function sessionRoutes(app: App, db: Kysely<DB>, limits: SessionLimits, r
       });
       routes(scope);
     });
-  withSession(true, (lockScreen) => lockScreenRoutes(lockScreen, db, limits));
+  withSession(true, (lockScreen) => lockScreenRoutes(lockScreen, db, credentials));
   withSession(false, (signedIn) => {
-    labSwitchRoute(signedIn, db, limits);
+    labSwitchRoute(signedIn, db, credentials);
     preferenceRoutes(signedIn, db);
     readRoutes(signedIn, db);
     staffRoutes(signedIn, db, limits);
-    stepRoutes(signedIn, db, release);
+    stepRoutes(signedIn, db, credentials, release);
     workstationRoutes(signedIn, db);
   });
 }

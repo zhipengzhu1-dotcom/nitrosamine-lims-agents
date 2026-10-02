@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { audited } from '@lims/db';
 import { type Route, type RouteInput, routes, SESSION_ENDED, stepNames, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { endLapsedSessions, SESSION_LIMITS } from '../src/auth.ts';
+import { endLapsedSessions, LOGIN } from '../src/auth.ts';
 import { type Account, type Answer, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_workstations_test');
@@ -305,6 +305,7 @@ describe('Lock and Switch user', () => {
       routes.unlock,
       routes.logout,
       routes.setPasswordThroughLink,
+      routes.enrolAuthenticator,
     ]);
     const everyOther = [...Object.values(routes), ...stepNames.map((name) => stepRoute(name))].filter(
       (route) => !servedWhileLocked.has(route),
@@ -421,9 +422,9 @@ describe('Lock and Switch user', () => {
     const { workstation, browser } = await enrolledBrowser();
     const ana = await api.addPerson(`ana.expired-on-bench-${randomUUID()}`, ['Analyst']);
     await signInOn(browser, ana);
-    await api.advanceClock(ana, SESSION_LIMITS.decided.idleMs + 60_000);
+    await api.advanceClock(ana, LOGIN.decided.idleMs + 60_000);
 
-    await endLapsedSessions(api.db, SESSION_LIMITS.decided);
+    await endLapsedSessions(api.db, LOGIN.decided);
 
     const events = await eventsOf(ana.id);
     assert.deepEqual(
@@ -454,7 +455,7 @@ describe('Lock and Switch user', () => {
     const browser = await api.login(ana);
     ok(await browser.call(routes.lock));
     refusedWith(await browser.call(routes.unlock, { password: 'not-the-password' }), 'badCredentials');
-    await api.advanceClock(ana, SESSION_LIMITS.decided.idleMs + 60_000);
+    await api.advanceClock(ana, LOGIN.decided.idleMs + 60_000);
     refusedWith(await browser.call(routes.unlock, { password: ana.password }), 'noSession');
     assert.deepEqual(
       (await eventsOf(ana.id)).map((e) => e.kind).sort(),

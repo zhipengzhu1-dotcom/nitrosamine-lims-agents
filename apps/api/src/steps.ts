@@ -21,7 +21,7 @@ import {
 } from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
-import { type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
+import { type Credentials, type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
 
@@ -225,7 +225,13 @@ function receiptOf(kept: KeptCommit, sessionId: string, requestHash: Buffer): St
   return { testId: kept.testId, state: kept.state };
 }
 
-function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, release: string): void {
+function registerStep<K extends StepName>(
+  app: App,
+  db: Kysely<DB>,
+  credentials: Credentials,
+  name: K,
+  release: string,
+): void {
   const step: Step = steps[name];
   const effect: Effect<StepInput<K>> = effects[name];
   const route = stepRoute(name);
@@ -266,8 +272,9 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
       const seen = await seenVersion(scope, testId, signature);
       const reauthenticated = await reauthenticate(
         db,
+        credentials,
         { actor, session: req.sessionKey },
-        { username: signature.username, password: signature.password },
+        { username: signature.username, password: signature.password, code: signature.code },
         step.role,
         sourceAddressOf(req),
         'ReauthenticationFailed',
@@ -321,6 +328,6 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
 }
 
 /** `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema. */
-export function stepRoutes(app: App, db: Kysely<DB>, release: string): void {
-  for (const name of stepNames) registerStep(app, db, name, release);
+export function stepRoutes(app: App, db: Kysely<DB>, credentials: Credentials, release: string): void {
+  for (const name of stepNames) registerStep(app, db, credentials, name, release);
 }

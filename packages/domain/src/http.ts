@@ -489,15 +489,21 @@ export const refusalBody = Type.Object({ kind: Type.Enum(refusalKinds), message:
 export type RefusalBody = Static<typeof refusalBody>;
 
 /** A sign-in names its Lab; the schema lets it out so that the API can answer `labNotChosen` after the password. */
-const signIn = Type.Object({ username: text, password: text, labId: Type.Optional(uuid) }, closed);
-const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, closed);
+/** The six-digit code from the person's authenticator, which the decided login asks for; any other text is a wrong code. */
+const code = Type.Optional(text);
+const signIn = Type.Object({ username: text, password: text, code, labId: Type.Optional(uuid) }, closed);
+const labSwitch = Type.Object({ username: text, password: text, code, labId: uuid }, closed);
+const authenticatorEnrolment = Type.Object({ username: text, password: text }, closed);
+/** An enrolled authenticator's secret, shown once: as text, and as the otpauth URI its QR code carries. */
+const enrolled = Type.Object({ secret: Type.String(), otpauth: Type.String() });
+export type Enrolled = Static<typeof enrolled>;
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
 /** The Record Version the signer saw, as the screen showed it: the signing is refused if the record has moved on. */
 const seenVersion = Type.Object({ version: recordVersionRef.properties.version, contentHash: sha256Hex }, closed);
-const typedCredentials = Type.Object({ username: text, password: text }, closed);
-/** What a signer types on the signature sheet: their user ID and their password. */
+const typedCredentials = Type.Object({ username: text, password: text, code }, closed);
+/** What a signer types on the signature sheet: their user ID, their password and, under the decided login, a fresh code. */
 export type TypedCredentials = Static<typeof typedCredentials>;
 /** What a signing sends: the typed credentials, the Record Version the sheet showed and the signature statement version it showed. */
 const signingBody = Type.Object(
@@ -505,7 +511,7 @@ const signingBody = Type.Object(
   closed,
 );
 export type SigningBody = Static<typeof signingBody>;
-const reauthentication = Type.Object({ password: text }, closed);
+const reauthentication = Type.Object({ password: text, code }, closed);
 const room = Type.Object({ id: uuid, name: Type.String() });
 const workstation = Type.Object({
   id: uuid,
@@ -644,6 +650,7 @@ export const routes = {
     { body: Type.Object({ personId: uuid, printedName: text, reason: reasonText }, closed) },
     staffPerson,
   ),
+  enrolAuthenticator: route('POST', '/api/authenticator', { body: authenticatorEnrolment }, enrolled),
   setPasswordThroughLink: route(
     'POST',
     '/api/credentials',

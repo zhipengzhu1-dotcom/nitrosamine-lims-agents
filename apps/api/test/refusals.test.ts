@@ -51,6 +51,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   [K in StepName]: { route: Route; body: StepBody<K> };
 } = {
   login: entry(routes.login, { username: cora.username, password: 'not-the-password' }),
+  enrolAuthenticator: entry(routes.enrolAuthenticator, { username: cora.username, password: 'not-the-password' }),
   switchLab: entry(routes.switchLab, { username: cora.username, password: 'not-the-password', labId: api.labId }),
   verifyAuditTrail: entry(routes.verifyAuditTrail, {}),
   setPreferences: entry(routes.setPreferences, { reducedMotion: true }),
