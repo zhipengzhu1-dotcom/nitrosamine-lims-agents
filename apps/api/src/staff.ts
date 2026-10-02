@@ -44,7 +44,7 @@ async function staffOf(q: LabQueries, labId: string, only?: string) {
 
 async function onePerson(q: LabQueries, labId: string, personId: string) {
   const [person] = await staffOf(q, labId, personId);
-  return person ?? refuse('notFound', 'no such person among this Lab’s staff');
+  return person ?? refuse('notFound', 'This Lab’s staff has no such person.');
 }
 
 /** The database refuses Admin beside a business role across every Lab, which this Lab's scope cannot see. */
@@ -178,15 +178,15 @@ export function staffRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): vo
             .where('iv.id', '=', identityVerificationId)
             .where('iv.checkedInLabId', '=', labId)
             .executeTakeFirst()) ??
-          refuse('guard', 'record an Identity Verification in this Lab before creating the account');
-        if (verification.accountId) refuse('state', 'this Identity Verification already has an account');
+          refuse('guard', 'Record an Identity Verification in this Lab before creating the account.');
+        if (verification.accountId) refuse('state', 'This Identity Verification already has an account.');
         const created =
           (await q.company
             .insertInto('person')
             .values({ username, displayName: verification.printedName, identityVerificationId })
             .onConflict((oc) => oc.column('username').doNothing())
             .returning('id')
-            .executeTakeFirst()) ?? refuse('state', `the username ${username} is taken`);
+            .executeTakeFirst()) ?? refuse('state', `The username ${username} is taken.`);
         const link = await issueLink(q, created.id);
         return { person: await onePerson(q, labId, created.id), link };
       });
@@ -200,7 +200,7 @@ export function staffRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): vo
       const labId = req.actor.lab.id;
       return adminScope(db, req.actor).write('Issue a new one-time link', 'Admin', async (q) => {
         const person = await onePerson(q, labId, personId);
-        if (person.credentialSet) refuse('state', `${person.printedName} has already set a password`);
+        if (person.credentialSet) refuse('state', `The person ${person.printedName} has already set a password.`);
         return { person, link: await issueLink(q, personId) };
       });
     },
@@ -213,9 +213,10 @@ export function staffRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): vo
       const labId = req.actor.lab.id;
       return adminScope(db, req.actor).write(reason, 'Admin', async (q) => {
         const person = await onePerson(q, labId, personId);
-        if (person.roles.includes(role)) refuse('state', `${person.printedName} already holds ${role} in this Lab`);
+        if (person.roles.includes(role))
+          refuse('state', `The person ${person.printedName} already holds ${role} in this Lab.`);
         if (!person.identityVerifiedAt)
-          refuse('guard', 'a staff role goes only to a staff account with an Identity Verification');
+          refuse('guard', 'A staff role goes only to a staff account with an Identity Verification.');
         await q.insert('membership', { personId, role }).execute().catch(heldApart);
         return onePerson(q, labId, personId);
       });

@@ -67,7 +67,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   }).withTypeProvider<WireTypes>();
   app.setErrorHandler(answerThrown(db));
   app.decorateRequest('requester', null);
-  app.setNotFoundHandler(() => refuse('notFound', 'no such route'));
+  app.setNotFoundHandler(() => refuse('notFound', 'The LIMS has no such route.'));
   if (options.logVolume) checkLogVolume(app, db, options.logVolume);
   loginRoutes(app, db, options.accessEventKey, options.secureCookie, limits);
   sessionRoutes(app, db, limits, options.release);

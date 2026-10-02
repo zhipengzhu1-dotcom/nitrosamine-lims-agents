@@ -76,10 +76,10 @@ async function setReducedMotion(page: Page, on: boolean) {
   await expect(box, 'the saved setting stays shown after the save').toBeChecked({ checked: on });
 }
 
-test('on a shared iPad the reduced-motion preference follows each person through Switch user, without a reload', async ({
+test('on a shared bench workstation the reduced-motion preference follows each person through Switch user, without a reload', async ({
   page,
 }) => {
-  test.skip(test.info().project.name !== 'ipad', 'the shared bench tablet');
+  test.skip(test.info().project.name !== 'desktop', 'the shared bench workstation');
   // The stored preference is shared server state: only Theo, whom no other walk signs in as, ever turns it on.
   await page.goto('/');
   await signIn(page, 'theo.untrained');

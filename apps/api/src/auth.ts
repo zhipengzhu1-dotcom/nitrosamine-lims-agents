@@ -3,7 +3,7 @@ import { isIP } from 'node:net';
 import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
 import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from '@lims/db/credentials';
-import { type ActorContext, routes, SESSION_ENDED, type SignedInView } from '@lims/domain';
+import { type ActorContext, routes, type Sentence, SESSION_ENDED, type SignedInView } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
 import { openJobIncident } from './incident.ts';
@@ -78,9 +78,9 @@ export async function deviceOf(
     .where('deviceTokenHash', '=', hashToken(token))
     .executeTakeFirst();
 }
-const notValid = () => refuse('badCredentials', 'the user ID or password is not valid');
+const notValid = () => refuse('badCredentials', 'The user ID or password is not valid.');
 const linkNotValid = () =>
-  refuse('badCredentials', 'this link has been used, replaced or has expired; ask the Admin for a new one');
+  refuse('badCredentials', 'This link has been used, replaced or has expired. Ask the Admin for a new one.');
 
 const REFUSAL: { readonly [F in SignInFailure]: (labName?: string) => never } = {
   UnknownUserId: notValid,
@@ -88,14 +88,14 @@ const REFUSAL: { readonly [F in SignInFailure]: (labName?: string) => never } = 
   WrongPasswordOnLockedAccount: notValid,
   OtherUserId: notValid,
   NoCredential: notValid,
-  AccountLocked: () => refuse('accountLocked', 'this account is locked'),
-  NoLab: () => refuse('role', 'this account belongs to no Lab'),
+  AccountLocked: () => refuse('accountLocked', 'This account is locked.'),
+  NoLab: () => refuse('role', 'This account belongs to no Lab.'),
   WrongUserId: notValid,
-  NoLabChosen: () => refuse('labNotChosen', 'choose the Lab to work in'),
+  NoLabChosen: () => refuse('labNotChosen', 'Choose the Lab to work in.'),
   NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
-  NotInWorkstationLab: () => refuse('role', "this account belongs to no role in this Workstation's Lab"),
+  NotInWorkstationLab: () => refuse('role', "You hold no Membership in this Workstation's Lab."),
   SessionEnded: () =>
-    refuse('stale', 'this session has already moved to another Lab or ended; reload to see where you work'),
+    refuse('stale', 'This session has already moved to another Lab or ended. Reload to see where you work.'),
 };
 
 const record = (tx: Transaction<DB>, event: AccessEvent) => tx.insertInto('accessEvent').values(event).execute();
@@ -257,7 +257,7 @@ export async function auditedAfterReauthentication<R>(
   );
   if (done) return done.written;
   await audited(db, { ...ctx, reason: 'Failed authentication' }, (tx) => record(tx, reauthenticated.refusedByLockout));
-  return refuse('accountLocked', 'this account is locked');
+  return refuse('accountLocked', 'This account is locked.');
 }
 
 /**
@@ -300,7 +300,7 @@ export async function reauthenticate(
     await record(tx, failed(failureReason));
     if (locksOut) await lockOut(tx, event);
   });
-  if (typed.username === undefined) refuse('badCredentials', 'the password is not valid');
+  if (typed.username === undefined) refuse('badCredentials', 'The password is not valid.');
   return notValid();
 }
 
@@ -314,8 +314,8 @@ export const sessionEnd = (limits: SessionLimits) =>
   sql<Date>`coalesce(session.ended_at, lims.session_lapse(session.last_seen_at, session.created_at, person.locked_at,
     ${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}))`;
 
-const lockedMessage = (displayName: string) =>
-  `this screen is locked; ${displayName} unlocks it with their password, or another person signs in with Switch user`;
+const lockedMessage = (displayName: string): Sentence =>
+  `This screen is locked. ${displayName} unlocks it with their password, or another person signs in with Switch user.`;
 
 /**
  * Builds the ActorContext from the session cookie, and counts the request as activity. A lapsed session (past its end,
@@ -368,7 +368,7 @@ export async function actorFor(
       ])
       .where('tokenHash', '=', hashToken(token))
       .executeTakeFirst());
-  if (!session) return refuse('noSession', 'sign in first');
+  if (!session) return refuse('noSession', 'Sign in first.');
   if (session.endedAt) return refuse('noSession', SESSION_ENDED);
   const key = { labId: session.labId, id: session.id, workstationId: session.workstationId };
   const lapsed = async () => {
@@ -583,7 +583,7 @@ export function loginRoutes(
     handler: async (req) => {
       const { token, password } = req.body;
       if (password.length < MIN_PASSWORD_LENGTH)
-        refuse('malformed', `a password needs at least ${MIN_PASSWORD_LENGTH} characters`);
+        refuse('malformed', `A password needs at least ${MIN_PASSWORD_LENGTH} characters.`);
       const live = await db
         .selectFrom('credentialLink')
         .select('id')
@@ -616,7 +616,7 @@ export function loginRoutes(
     ...routes.session,
     handler: async (req) => {
       const token = req.cookies[SESSION_COOKIE];
-      if (!token) return refuse('noSession', 'sign in first');
+      if (!token) return refuse('noSession', 'Sign in first.');
       const idle = interval(limits.idleMs);
       const absolute = interval(limits.absoluteMs);
       const session = await db
@@ -734,11 +734,11 @@ export function labSwitchRoute(app: App, db: Kysely<DB>, limits: SessionLimits):
     handler: async (req, reply) => {
       const { actor, sessionKey: session } = req;
       const { username, password, labId } = req.body;
-      if (labId === session.labId) refuse('state', `you already work in ${actor.lab.name}`);
+      if (labId === session.labId) refuse('state', `You already work in ${actor.lab.name}.`);
       if (session.workstationId)
         refuse(
           'state',
-          `this Workstation belongs to ${actor.lab.name}; switch Lab on a desk PC or another Workstation`,
+          `This Workstation belongs to ${actor.lab.name}. Switch Lab on a desk PC or another Workstation.`,
         );
       const person = await db
         .selectFrom('person')

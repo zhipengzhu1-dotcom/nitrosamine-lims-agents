@@ -1,6 +1,17 @@
 import { type FormEvent, useId, useState } from 'react';
 import { type ActorContext, type Lab, type RouteInput, routes } from '@lims/domain';
-import { api, type LockMode, setPreferences, signIn, signOut, switchLab, unlock, useApi } from './api.ts';
+import {
+  api,
+  failureText,
+  type LockMode,
+  Refused,
+  setPreferences,
+  signIn,
+  signOut,
+  switchLab,
+  unlock,
+  useApi,
+} from './api.ts';
 import { Shell, TopBar } from './rail.tsx';
 import { field, useCommit } from './form.tsx';
 
@@ -38,7 +49,7 @@ function CredentialsForm({
     };
     setBusy(true);
     onSubmit({ username: field('username'), password: field('password'), labId: field('labId') })
-      .catch((err: Error) => setError(err.message))
+      .catch((err: unknown) => setError(failureText(err)))
       .finally(() => setBusy(false));
   }
   return (
@@ -192,8 +203,8 @@ export function LockScreen({
     setError('');
     unlock(typeof password === 'string' ? password : '')
       .then(onIn)
-      .catch((err: Error) => {
-        setError(err.message);
+      .catch((err: unknown) => {
+        setError(failureText(err));
         setBusy(false);
       });
   }
@@ -220,7 +231,7 @@ export function LockScreen({
           <>
             <CredentialsForm
               title="Switch user"
-              intro={`${message}.`}
+              intro={message}
               labs={labs}
               commit="Sign in on this screen"
               onSubmit={(c) => signIn(c).then(onIn)}
@@ -231,7 +242,7 @@ export function LockScreen({
           <form className="signin card" onSubmit={submit} aria-labelledby="lock-title">
             <fieldset className="lock__set" disabled={busy}>
               <h1 id="lock-title">Locked</h1>
-              <p className="muted">{message}.</p>
+              <p className="muted">{message}</p>
               <label>
                 Password
                 <input name="password" type="password" required autoComplete="current-password" />
@@ -277,7 +288,7 @@ export function WelcomePage({ token }: { token: string }) {
             onSubmit={(e) =>
               commit(e, async (form) => {
                 const password = field(form, 'password');
-                if (password !== field(form, 'confirm')) throw new Error('the two passwords differ');
+                if (password !== field(form, 'confirm')) throw new Refused('malformed', 'The two passwords differ.');
                 const set = await api(routes.setPasswordThroughLink, { token, password });
                 setUsername(set.username);
                 history.replaceState(null, '', location.pathname);

@@ -28,7 +28,7 @@ const listed = (scope: Scope) =>
 export function workstationRoutes(app: App, db: Kysely<DB>): void {
   const asAdmin = (actor: ActorContext) => {
     if (!actor.roles.includes('Admin'))
-      refuse('role', 'registering Rooms and Workstations and enrolling browsers is an Admin action');
+      refuse('role', 'Registering Rooms and Workstations and enrolling browsers is an Admin action.');
     return labScope(db, actor);
   };
   const one = (scope: Scope, id: string) => listed(scope).where('workstation.id', '=', id).executeTakeFirstOrThrow();
@@ -54,7 +54,7 @@ export function workstationRoutes(app: App, db: Kysely<DB>): void {
       const scope = asAdmin(req.actor);
       const { name, reason } = req.body;
       if (await scope.from('room').select('id').where('name', '=', name).executeTakeFirst())
-        refuse('guard', `a Room named ${name} is already registered in this Lab`);
+        refuse('guard', `A Room named ${name} is already registered in this Lab.`);
       return scope.write(reason, 'Admin', (q) =>
         q.insert('room', { name }).returning(['id', 'name']).executeTakeFirstOrThrow(),
       );
@@ -67,9 +67,9 @@ export function workstationRoutes(app: App, db: Kysely<DB>): void {
       const scope = asAdmin(req.actor);
       const { name, roomId, browserPolicy, reason } = req.body;
       if (!(await scope.from('room').select('id').where('id', '=', roomId).executeTakeFirst()))
-        refuse('notFound', 'no such Room in this Lab');
+        refuse('notFound', 'This Lab has no such Room.');
       if (await scope.from('workstation').select('id').where('name', '=', name).executeTakeFirst())
-        refuse('guard', `a Workstation named ${name} is already registered in this Lab`);
+        refuse('guard', `A Workstation named ${name} is already registered in this Lab.`);
       const { id } = await scope.write(reason, 'Admin', (q) =>
         q.insert('workstation', { name, roomId, browserPolicy }).returning('id').executeTakeFirstOrThrow(),
       );
@@ -89,7 +89,7 @@ export function workstationRoutes(app: App, db: Kysely<DB>): void {
           .set({ deviceTokenHash: hashToken(token) })
           .where('id', '=', workstationId)
           .executeTakeFirst();
-        if (!enrolled.numUpdatedRows) refuse('notFound', 'no such Workstation in this Lab');
+        if (!enrolled.numUpdatedRows) refuse('notFound', 'This Lab has no such Workstation.');
       });
       reply.setCookie(DEVICE_COOKIE, token, { maxAge: DEVICE_COOKIE_MAX_AGE_S });
       return one(scope, workstationId);

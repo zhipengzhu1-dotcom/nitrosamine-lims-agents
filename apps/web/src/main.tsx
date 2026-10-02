@@ -111,7 +111,7 @@ function page(route: Route, me: ActorContext) {
 }
 
 const root = document.getElementById('root');
-if (!root) throw new Error('index.html has no #root element');
+if (!root) throw new Error('The page has no #root element.');
 createRoot(root).render(
   <StrictMode>
     <App />

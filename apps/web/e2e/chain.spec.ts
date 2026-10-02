@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, test } from './walk.ts';
+import { expect, type Locator, type Page, test, utcThenLabClock } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {
@@ -256,7 +256,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await passwordField.fill(DEMO_PASSWORD);
   await shot(page, 'test-signature-sheet');
   await sign(page, 'Performed', 'not-the-password');
-  await railSays(page, 'Refused: the user ID or password is not valid. Nothing has been signed.');
+  await railSays(page, 'Refused: The user ID or password is not valid. Nothing has been signed.');
   await expect(signing.locator('.refusal')).toBeVisible();
   const heldPerformed = Promise.withResolvers<void>();
   await page.route('**/api/steps/enterResult', async (route) => {
@@ -295,8 +295,8 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await wholeOnScreenAtBothSizes(page, whatYouAreSigning, signButton);
   const height = (await box(sheet)).height;
   await sign(page, 'Reviewed', 'not-the-password');
-  await railSays(page, 'Refused: the user ID or password is not valid. Nothing has been signed.');
-  await shownOnce(page, 'Refused: the user ID or password is not valid. Nothing has been signed.');
+  await railSays(page, 'Refused: The user ID or password is not valid. Nothing has been signed.');
+  await shownOnce(page, 'Refused: The user ID or password is not valid. Nothing has been signed.');
   const refusal = sheet.locator('.refusal');
   await expect(refusal).toBeInViewport({ ratio: 1 });
   const [inSheet, inRefusal] = [await box(sheet), await box(refusal)];
@@ -315,7 +315,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   });
   await sign(page, 'Reviewed');
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveText('sign in first');
+  await expect(page.getByRole('alert')).toHaveText('Sign in first.');
   expect(whoAmI, 'the web returned to sign-in by the kind, with no second request to decide it').toHaveLength(0);
   await page.getByRole('radio', { name: RD }).check();
   await page.getByLabel('Username').fill('rui.reviewer');
@@ -401,6 +401,15 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     /^1 · [0-9a-f]{64}$/,
   );
   await expect(signatureRow(page, 'Released').locator('td[data-label="Record Version"]')).toHaveText('1');
+  const reportTimes = page.locator('td[data-label="Time"]');
+  await expect(reportTimes, 'each Signature time in UTC, then on the Lab wall clock').toHaveText([
+    utcThenLabClock,
+    utcThenLabClock,
+    utcThenLabClock,
+  ]);
+  await expect(page.locator('dl.facts dt:text-is("Received") + dd')).toHaveText(utcThenLabClock);
+  const timesOnReport = await reportTimes.allTextContents();
+  const receivedOnReport = await page.locator('dl.facts dt:text-is("Received") + dd').textContent();
   await shot(page, 'test-report');
 
   const testId = new URL(page.url()).hash.split('/')[2] ?? '';
@@ -418,6 +427,12 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     'Reported',
     'Signatures unsigned',
   ]);
+  await expect(page.locator('td[data-label="Time"]'), 'the Test page shows the times the Test Report shows').toHaveText(
+    timesOnReport,
+  );
+  await expect(page.locator('dl.facts').first().locator('dt:text-is("Received") + dd')).toHaveText(
+    receivedOnReport ?? '',
+  );
   await expect(page.locator('dl.facts').first().locator('dt:text-is("Record Version") + dd')).toContainText('4 ·');
   await unsignedBesideMeanings(page);
   for (const [meaning, record] of [
@@ -445,7 +460,7 @@ test('a wrong password and an unknown user ID show the same failure message', as
   };
   const wrongPassword = await attempt('rui.reviewer', 'not-the-password');
   const unknownUserId = await attempt(`nobody-${randomUUID()}`, DEMO_PASSWORD);
-  expect(wrongPassword).toBe('the user ID or password is not valid');
+  expect(wrongPassword).toBe('The user ID or password is not valid.');
   expect(unknownUserId).toBe(wrongPassword);
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
 });

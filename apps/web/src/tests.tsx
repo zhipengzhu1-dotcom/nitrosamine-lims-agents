@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
 import { Shell, Status, stepAction, words } from './rail.tsx';
 import { type Column, StackTable } from './stack.tsx';
-import { time } from './time.ts';
+import { When } from './time.tsx';
 import { TestTrail } from './trail.tsx';
 const testLine = (t: TestRow) => `Test of ${t.methodCode} v${t.methodVersion} on Sample ${t.sampleNumber}`;
 
@@ -15,7 +15,7 @@ const worklistColumns: Column<TestRow>[] = [
   { head: 'Method', cell: (t) => `${t.methodCode} v${t.methodVersion}` },
   { head: 'State', cell: (t) => <Status state={t.state} /> },
   { head: 'Analyst', cell: (t) => t.assignee },
-  { head: 'Received', cell: (t) => time(t.receivedAt) },
+  { head: 'Received', cell: (t) => t.receivedAt && <When at={t.receivedAt} atLab={t.receivedAtLab} /> },
 ];
 
 export function Worklist({ me }: { me: ActorContext }) {
@@ -77,7 +77,7 @@ export function TestPage({ me, id }: { me: ActorContext; id: string }) {
         <dt>Customer</dt>
         <dd>{test.customer}</dd>
         <dt>Received</dt>
-        <dd>{time(test.receivedAt) || 'not yet'}</dd>
+        <dd>{test.receivedAt ? <When at={test.receivedAt} atLab={test.receivedAtLab} /> : 'not yet'}</dd>
         <dt>Method</dt>
         <dd>
           {test.methodCode} v{test.methodVersion}, {test.methodTitle}
@@ -150,7 +150,7 @@ const signatureColumns: Column<Signature>[] = [
     ),
   },
   { head: 'Signed by', cell: (s) => `${s.signer} (${s.username}, ${words(s.role)})` },
-  { head: 'Time', cell: (s) => time(s.signedAt) },
+  { head: 'Time', cell: (s) => <When at={s.signedAt} atLab={s.signedAtLab} /> },
   { head: 'Record', cell: (s) => s.record },
   { head: 'Record Version', cell: (s) => s.recordVersion.version },
   {

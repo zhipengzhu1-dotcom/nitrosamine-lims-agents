@@ -7,11 +7,11 @@ import {
   type StaffPerson,
 } from '@lims/domain';
 import { useMemo, useState } from 'react';
-import { api, useApi, useFresh } from './api.ts';
+import { api, Refused, useApi, useFresh } from './api.ts';
 import { field, useCommit } from './form.tsx';
 import { Shell, words } from './rail.tsx';
 import { type Column, StackTable } from './stack.tsx';
-import { time } from './time.ts';
+import { time } from './time.tsx';
 
 function RecordVerification({ onDone }: { onDone: () => Promise<void> }) {
   const { busy, commit, shown } = useCommit();
@@ -130,7 +130,7 @@ function GrantMembership({
       onSubmit={(e) =>
         commit(e, async (form) => {
           const role = field(form, 'role');
-          if (!isGrantable(role)) throw new Error('choose a role');
+          if (!isGrantable(role)) throw new Refused('malformed', 'Choose a role.');
           const person = await api(routes.grantMembership, {
             personId: field(form, 'personId'),
             role,

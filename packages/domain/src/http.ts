@@ -46,8 +46,9 @@ const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
  * A point in time: on the wire, and so in the web and the tests, an ISO 8601 string the database clock produced, in
- * UTC unless the field says otherwise (`atLab` carries the Lab's offset). The API hands Fastify the Date that Kysely
- * returns, and Fastify writes it with toISOString.
+ * UTC unless its name ends in `Lab` (`atLab`, `receivedAtLab`, `signedAtLab`): that one carries the owning Lab's offset,
+ * and the database renders it as text. For a UTC field the API hands Fastify the Date that Kysely returns, and Fastify
+ * writes it with toISOString.
  */
 export type Instant = string & { readonly [instantBrand]: true };
 export const instant = Type.Unsafe<Instant>(Type.String({ format: 'date-time' }));
@@ -89,6 +90,8 @@ const testRow = Type.Object({
   sampleNumber: Type.String(),
   description: Type.String(),
   receivedAt: nullable(instant),
+  /** `receivedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
+  receivedAtLab: nullable(instant),
   customer: Type.String(),
   methodCode: Type.String(),
   methodVersion: Type.String(),
@@ -118,6 +121,8 @@ const signature = Type.Object({
   username: Type.String(),
   role: role,
   signedAt: instant,
+  /** `signedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
+  signedAtLab: instant,
   /** The signed record's glossary noun, such as "Test Report". */
   record: Type.String(),
   recordVersion: recordVersionRef,

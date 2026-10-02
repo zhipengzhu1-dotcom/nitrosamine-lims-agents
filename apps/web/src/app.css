@@ -94,6 +94,10 @@ p {
 .muted {
   color: var(--ink-3);
 }
+/* A date, or a clock with its zone, never breaks inside itself. */
+.when {
+  white-space: nowrap;
+}
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;

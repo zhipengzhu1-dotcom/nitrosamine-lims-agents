@@ -59,7 +59,7 @@ it('creating a staff account with no Identity Verification on record is refused 
     await as.ada.call(routes.createAccount, { identityVerificationId: randomUUID(), username: 'no.check' }),
     'guard',
   );
-  assert.equal(message, 'record an Identity Verification in this Lab before creating the account');
+  assert.equal(message, 'Record an Identity Verification in this Lab before creating the account.');
   const after = await api.superuser
     .selectFrom('person')
     .select(({ fn }) => fn.countAll<string>().as('n'))
@@ -132,7 +132,7 @@ it('a one-time link works once: a second use is refused and leaves the password 
   ok(await as.ada.call(routes.grantMembership, { personId: person.id, role: 'Reviewer', reason: 'New starter' }));
   ok(await setPassword(link.token, 'first-choice'));
   const message = refusedWith(await setPassword(link.token, 'second-choice'), 'badCredentials');
-  assert.equal(message, 'this link has been used, replaced or has expired; ask the Admin for a new one');
+  assert.equal(message, 'This link has been used, replaced or has expired. Ask the Admin for a new one.');
   refusedWith(await signIn(person.username, 'second-choice'), 'badCredentials');
   ok(await signIn(person.username, 'first-choice'));
   refusedWith(await setPassword('not-a-link-the-lims-issued', 'third-choice'), 'badCredentials');
@@ -242,7 +242,7 @@ it('every staff-account route refuses a person who is not an Admin', async () =>
 });
 
 it('a business role for an Admin, or Admin for a holder of a business role, is refused with a kind', async () => {
-  const apart = 'a person who holds Admin or Platform Operator holds no business role, in any Lab';
+  const apart = 'A person who holds Admin or Platform Operator holds no business role, in any Lab.';
   const { person: admin } = await newStarter();
   const { person: analyst } = await newStarter();
   ok(await as.ada.call(routes.grantMembership, { personId: admin.id, role: 'Admin', reason: 'Second Admin' }));
@@ -263,7 +263,7 @@ it('a staff role goes only to an account with an Identity Verification, so not t
       await as.ada.call(routes.grantMembership, { personId: api.person('ana').id, role: 'Reviewer', reason: 'Cover' }),
       'guard',
     ),
-    'a staff role goes only to a staff account with an Identity Verification',
+    'A staff role goes only to a staff account with an Identity Verification.',
   );
 });
 
@@ -279,7 +279,7 @@ it('an Identity Verification gives one account, and a username is given once', a
       await as.ada.call(routes.createAccount, { identityVerificationId: other.id, username: person.username }),
       'state',
     ),
-    `the username ${person.username} is taken`,
+    `The username ${person.username} is taken.`,
   );
 });
 
@@ -374,7 +374,7 @@ it('a grant to a person who is not among this Lab’s staff, or of a role alread
       await as.ada.call(routes.grantMembership, { personId: person.id, role: 'QA', reason: 'Again' }),
       'state',
     ),
-    `${person.printedName} already holds QA in this Lab`,
+    `The person ${person.printedName} already holds QA in this Lab.`,
   );
   assert.deepEqual(await api.superuser.selectFrom('systemIncident').select('id').execute(), before);
 });

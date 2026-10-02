@@ -6,6 +6,9 @@ import { API_LOG, DEMO_PASSWORD } from '../playwright.config.ts';
 
 export { expect, type Locator, type Page } from '@playwright/test';
 
+/** A Lab record's time as every screen shows it: UTC, then the Lab's wall clock with its offset. */
+export const utcThenLabClock = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/;
+
 /** Playwright's `test`, which attaches the API log lines written during a walk that fails, so a 500 can be traced. */
 export const test = playwright.extend<{ apiLog: void }>({
   apiLog: [
