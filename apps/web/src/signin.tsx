@@ -206,7 +206,7 @@ export function LockScreen({
           <>
             <CredentialsForm
               title="Switch user"
-              intro={`${message}.`}
+              intro={message}
               labs={labs}
               commit="Sign in on this screen"
               onSubmit={(c) => signIn(c).then(onIn)}
@@ -217,7 +217,7 @@ export function LockScreen({
           <form className="signin card" onSubmit={submit} aria-labelledby="lock-title">
             <fieldset className="lock__set" disabled={busy}>
               <h1 id="lock-title">Locked</h1>
-              <p className="muted">{message}.</p>
+              <p className="muted">{message}</p>
               <label>
                 Password
                 <input name="password" type="password" required autoComplete="current-password" />

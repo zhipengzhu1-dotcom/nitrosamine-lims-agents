@@ -170,6 +170,9 @@ function unsentenced(sources: Sources): { findings: string[]; used: Set<string> 
   return { findings, used };
 }
 
+/** A message shown in JSX or a template and then followed by a full stop of the web's own. */
+const FULL_STOP_AFTER = /(\$\{|\{)[\w.]*(message|error)\}\./gi;
+
 function trackedSources(): Sources {
   const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0');
   return new Map(tracked.filter((path) => shown(path)).map((path) => [path, readFileSync(`${root}${path}`, 'utf8')]));
@@ -180,6 +183,17 @@ describe('every refusal and failure message is a sentence for the person at the 
 
   it('every message passed to refuse, Refused or refusedBy, every message: literal and every Error the web throws starts with a capital letter and ends with a full stop', () => {
     assert.deepEqual(findings, [], 'write the message as a sentence in glossary terms');
+  });
+
+  it('the web adds no full stop after a message it shows, which already ends with one', () => {
+    assert.deepEqual(
+      [...trackedSources()].flatMap(([path, text]) =>
+        path.startsWith('apps/web/src/')
+          ? [...text.matchAll(FULL_STOP_AFTER)].map((m) => `${path}:${text.slice(0, m.index).split('\n').length}`)
+          : [],
+      ),
+      [],
+    );
   });
 
   it('every message the check cannot read is listed in elsewhere, and every entry there is still used', () => {
@@ -216,7 +230,7 @@ describe('every refusal and failure message is a sentence for the person at the 
     ['a file the web does not show', { 'apps/api/test/x.ts': "refuse('role', 'only QA');" }, 0],
   ];
   for (const [name, files, count] of cases)
-    it(`${count ? 'refuses' : 'allows'} ${name}`, () => {
+    it(`the check ${count ? 'flags' : 'passes'} ${name}`, () => {
       assert.equal(unsentenced(new Map(Object.entries(files))).findings.length, count);
     });
 });

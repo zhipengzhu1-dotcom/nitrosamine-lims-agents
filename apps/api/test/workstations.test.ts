@@ -221,7 +221,7 @@ describe('the device token', () => {
       await tx.insertInto('membership').values({ labId: otherLabId, personId: outsider.id, role: 'Analyst' }).execute();
     });
     const refused = await browser.call(routes.login, { username: outsider.username, password: outsider.password });
-    assert.equal(refusedWith(refused, 'role'), "This account holds no role in this Workstation's Lab.");
+    assert.equal(refusedWith(refused, 'role'), "You hold no Membership in this Workstation's Lab.");
     const [event] = await api.superuser
       .selectFrom('accessEvent')
       .select(['kind', 'failureReason', 'workstationId', sql<string[]>`roles::text[]`.as('roles')])

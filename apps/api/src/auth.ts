@@ -93,7 +93,7 @@ const REFUSAL: { readonly [F in SignInFailure]: (labName?: string) => never } = 
   WrongUserId: notValid,
   NoLabChosen: () => refuse('labNotChosen', 'Choose the Lab to work in.'),
   NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
-  NotInWorkstationLab: () => refuse('role', "This account holds no role in this Workstation's Lab."),
+  NotInWorkstationLab: () => refuse('role', "You hold no Membership in this Workstation's Lab."),
   SessionEnded: () =>
     refuse('stale', 'This session has already moved to another Lab or ended. Reload to see where you work.'),
 };
