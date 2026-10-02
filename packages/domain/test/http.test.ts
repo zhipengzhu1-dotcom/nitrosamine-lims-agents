@@ -127,6 +127,11 @@ describe('pressText', () => {
       true,
     ],
     [
+      'an entry typed and then cleared, which is an absent entry,',
+      pressText('submit', null, { ...entries, notebookRef: '' }),
+      true,
+    ],
+    [
       'other entries',
       pressText('submit', null, { ...entries, description: 'Metformin HCl, lot 2 (fictional)' }),
       false,

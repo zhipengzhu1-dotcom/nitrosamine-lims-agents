@@ -116,9 +116,25 @@ async function startSession(request: () => Promise<SignedInView>): Promise<Signe
 
 addEventListener('visibilitychange', tick);
 
-/** Signs in and starts the session's countdown. */
-export const signIn = (credentials: RouteInput<typeof routes.login>[0]) =>
-  startSession(() => api(routes.login, credentials));
+const commitKeyPrefix = 'commitKey:';
+
+/** The tab's slot that keeps a press's Commit Key until the server answers. It names the press by a digest, so no entries are kept in the browser. */
+export async function commitKeySlot(press: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(press));
+  return commitKeyPrefix + Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+// The API binds a Commit Key to the session that sent it, so a key kept from an earlier session could only be refused.
+function dropKeptCommitKeys() {
+  for (const slot of Object.keys(sessionStorage)) if (slot.startsWith(commitKeyPrefix)) sessionStorage.removeItem(slot);
+}
+
+/** Signs in, starts the session's countdown, and drops every Commit Key kept from an earlier session in this tab. */
+export async function signIn(credentials: RouteInput<typeof routes.login>[0]): Promise<SignedInView> {
+  const view = await startSession(() => api(routes.login, credentials));
+  dropKeptCommitKeys();
+  return view;
+}
 
 /** Reads who is signed in, if anyone, and starts the session's countdown. */
 export const resume = () => startSession(() => api(routes.me));
@@ -183,9 +199,10 @@ export const onActorChanged = (fn: (me: ActorContext) => void) => {
   actorChanged = fn;
 };
 
-/** Moves the session to another Lab, then shows the worklist of the Lab the server answered with. */
+/** Moves the session to another Lab, drops the Commit Keys kept from the old session, then shows the worklist of the Lab the server answered with. */
 export async function switchLab(body: RouteInput<typeof routes.switchLab>[0]): Promise<void> {
   const me = await startSession(() => api(routes.switchLab, body));
+  dropKeptCommitKeys();
   location.hash = '';
   actorChanged(me);
 }
