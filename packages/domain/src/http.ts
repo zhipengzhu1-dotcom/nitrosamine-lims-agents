@@ -253,6 +253,8 @@ const accessEventKindButLockout = Type.Enum({
   LabSwitchFailed: 'LabSwitchFailed',
   ReauthenticationFailed: 'ReauthenticationFailed',
   PasswordSet: 'PasswordSet',
+  PasswordChanged: 'PasswordChanged',
+  AuthenticatorEnrolled: 'AuthenticatorEnrolled',
 } as const satisfies { [K in Exclude<db.AccessEventKind, 'Lockout'>]: K });
 const signInFailure = Type.Enum({
   UnknownUserId: 'UnknownUserId',
@@ -267,6 +269,8 @@ const signInFailure = Type.Enum({
   OtherUserId: 'OtherUserId',
   SessionEnded: 'SessionEnded',
   WrongUserId: 'WrongUserId',
+  WrongCode: 'WrongCode',
+  NoAuthenticator: 'NoAuthenticator',
 } as const satisfies { [K in db.SignInFailure]: K });
 /** A session a Lockout ended, at the Lockout's instant: when it was signed in, and on which Workstation. */
 const endedSession = Type.Object({ id: uuid, signedInAt: instant, workstation: nullable(Type.String()) });

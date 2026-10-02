@@ -11,6 +11,8 @@ export interface ApiConfig {
   logFile: string | null;
   secureCookie: boolean;
   accessEventKey: Buffer;
+  passwordPepper: Buffer;
+  totpKey: Buffer;
   trustedProxies: string[];
   login: Login;
   release: string;
@@ -20,6 +22,8 @@ const API_SETTINGS = [
   'LIMS_LOG',
   'LIMS_LOG_FILE',
   'LIMS_ACCESS_EVENT_KEY',
+  'LIMS_PASSWORD_PEPPER',
+  'LIMS_TOTP_KEY',
   'LIMS_TRUSTED_PROXIES',
   'LIMS_LOGIN',
   'LIMS_RELEASE',
@@ -33,12 +37,17 @@ function port(value: string | undefined): number {
   return n;
 }
 
-function accessEventKey(value: string | undefined): Buffer {
+/** A secret of 32 bytes or more, given as hex, that the API needs and has no default for. */
+function secret(name: string, value: string | undefined, what: string): Buffer {
   if (value === undefined || !/^([0-9a-f]{2}){32,}$/i.test(value))
-    throw new Error(
-      'LIMS_ACCESS_EVENT_KEY must hold the Access Event HMAC key: at least 64 hex digits, such as `openssl rand -hex 32` prints',
-    );
+    throw new Error(`${name} must hold ${what}: at least 64 hex digits, such as \`openssl rand -hex 32\` prints`);
   return Buffer.from(value, 'hex');
+}
+
+function totpKey(value: string | undefined): Buffer {
+  const key = secret('LIMS_TOTP_KEY', value, 'the key that encrypts TOTP secrets');
+  if (key.length !== 32) throw new Error('LIMS_TOTP_KEY must be exactly 64 hex digits: an AES-256 key');
+  return key;
 }
 
 function login(value: string | undefined): Login {
@@ -69,12 +78,14 @@ export function apiConfig(): ApiConfig {
     log,
     logFile,
     secureCookie,
-    accessEventKey: accessEventKey(env.LIMS_ACCESS_EVENT_KEY),
+    accessEventKey: secret('LIMS_ACCESS_EVENT_KEY', env.LIMS_ACCESS_EVENT_KEY, 'the Access Event HMAC key'),
     trustedProxies: (env.LIMS_TRUSTED_PROXIES ?? '')
       .split(',')
       .map((proxy) => proxy.trim())
       .filter(Boolean),
     login: login(env.LIMS_LOGIN),
     release: release(env.LIMS_RELEASE),
+    passwordPepper: secret('LIMS_PASSWORD_PEPPER', env.LIMS_PASSWORD_PEPPER, 'the password pepper'),
+    totpKey: totpKey(env.LIMS_TOTP_KEY),
   };
 }

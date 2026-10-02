@@ -91,6 +91,8 @@ const REFUSAL: { readonly [F in SignInFailure]: (labName?: string) => never } = 
   AccountLocked: () => refuse('accountLocked', 'This account is locked.'),
   NoLab: () => refuse('role', 'This account belongs to no Lab.'),
   WrongUserId: notValid,
+  WrongCode: notValid,
+  NoAuthenticator: notValid,
   NoLabChosen: () => refuse('labNotChosen', 'Choose the Lab to work in.'),
   NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
   NotInWorkstationLab: () => refuse('role', "You hold no Membership in this Workstation's Lab."),
