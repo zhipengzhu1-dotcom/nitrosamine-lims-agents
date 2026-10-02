@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Page, test } from './walk.ts';
+import { expect, type Page, signOutFromRail, test } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE } from '../playwright.config.ts';
 
 const sample = (which: string) =>
@@ -99,7 +99,7 @@ test('the same entries after a dropped Submit, a sign-out and a sign-in are refu
   const dropped = sample('dropped reply');
   const commitKeys = await signInAndDropOneSubmit(page, dropped);
   await page.getByRole('button', { name: 'Cancel' }).click();
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOutFromRail(page);
   await signInAsCora(page);
   await expect(page.getByRole('row', { name: dropped }), 'the sign-in shows the saved Submission').toHaveCount(1);
 

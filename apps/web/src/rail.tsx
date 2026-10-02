@@ -331,6 +331,7 @@ function Rail({
   const [refusal, setRefusal] = useState<Note | null>(null);
   const [instant, setInstant] = useState(false);
   const [locking, setLocking] = useState(false);
+  const [sessionOpen, setSessionOpen] = useState(false);
   const inFlight = useRef(false);
   const count = useRef(0);
   const returnFocus = useRef(false);
@@ -583,8 +584,23 @@ function Rail({
           </fieldset>
         </form>
       )}
-      <footer className="rail">
-        <div className="who">
+      <footer className="rail" data-session-open={sessionOpen || undefined}>
+        <button
+          type="button"
+          className="rail__toggle"
+          aria-label={`${me.person.displayName}, your session`}
+          aria-describedby="rail-clock"
+          aria-expanded={sessionOpen}
+          aria-controls={me.workstation ? 'rail-who rail-sign-out' : 'rail-who rail-switch-lab rail-sign-out'}
+          onClick={() => setSessionOpen((open) => !open)}
+        >
+          <span className="rail__name">
+            <b>{me.person.displayName}</b>
+            <span className="rail__chevron" />
+          </span>
+          <SessionCountdown id="rail-clock" />
+        </button>
+        <div id="rail-who" className="who">
           <b>
             <a href="#/preferences" aria-label={`${me.person.displayName}, your preferences`}>
               {me.person.displayName}
@@ -614,11 +630,12 @@ function Rail({
             {action.label}
           </button>
         )}
-        <fieldset className="rail__session" disabled={busy || locking}>
+        <fieldset id="rail-session" className="rail__session" disabled={busy || locking}>
           {!me.workstation && (
             <button
               type="button"
-              className="rbtn rbtn--quiet rail__out"
+              id="rail-switch-lab"
+              className="rbtn rbtn--quiet rail__out rail__folded"
               onClick={() => {
                 location.hash = '#/switch-lab';
               }}
@@ -632,7 +649,12 @@ function Rail({
           <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void lockAs('unlock')}>
             Lock
           </button>
-          <button type="button" className="rbtn rbtn--quiet rail__out" onClick={() => void signOut()}>
+          <button
+            type="button"
+            id="rail-sign-out"
+            className="rbtn rbtn--quiet rail__out rail__folded"
+            onClick={() => void signOut()}
+          >
             Sign out
           </button>
         </fieldset>
@@ -643,12 +665,12 @@ function Rail({
 
 const twoDigits = (n: number) => String(n).padStart(2, '0');
 
-function SessionCountdown() {
+function SessionCountdown({ id }: { id?: string }) {
   const left = useSecondsLeft();
   if (left === null) return null;
   const [h, m, s] = [Math.floor(left / 3600), Math.floor(left / 60) % 60, left % 60];
   return (
-    <span className="who__clock">
+    <span id={id} className="who__clock">
       Session ends in <time>{h > 0 ? `${h}:${twoDigits(m)}:${twoDigits(s)}` : `${m}:${twoDigits(s)}`}</time>
     </span>
   );

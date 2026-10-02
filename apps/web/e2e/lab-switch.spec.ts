@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { type RouteReply, routes } from '@lims/domain';
-import { DESKTOP, expect, PHONE, type Page, signInByApi, test } from './walk.ts';
+import { DESKTOP, expect, openSessionBlock, PHONE, type Page, signInByApi, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function credentials(page: Page, lab: RegExp, password = DEMO_PASSWORD) {
@@ -27,6 +27,7 @@ test('the sign-in screen offers each Lab with none selected, and the rail switch
   const rail = page.getByRole('contentinfo');
   await expect(rail).toContainText('RD · Lab Manager');
 
+  await openSessionBlock(page);
   await rail.getByRole('button', { name: 'Switch Lab' }).click();
   const form = page.locator('form.signin');
   await expect(form.getByRole('heading', { name: 'Switch Lab' })).toBeVisible();
