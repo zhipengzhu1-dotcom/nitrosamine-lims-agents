@@ -16,3 +16,18 @@ create table lims.authenticator (
 );
 
 grant select, insert (person_id, secret_ciphertext), update (last_used_step) on lims.authenticator to lims_app;
+
+-- A TOTP code is accepted once: the API accepts a code by moving last_used_step to the code's step, so a step at or
+-- before the last accepted one is a code already used, or an older one, and the database refuses it.
+create function lims.step_moves_forward() returns trigger
+language plpgsql as $$
+begin
+  if new.last_used_step is null or new.last_used_step <= old.last_used_step then
+    raise exception 'a TOTP code is accepted once; step % is not after step %', new.last_used_step, old.last_used_step
+      using errcode = 'LA014';
+  end if;
+  return new;
+end $$;
+
+create trigger step_moves_forward before update of last_used_step on lims.authenticator
+  for each row execute function lims.step_moves_forward();

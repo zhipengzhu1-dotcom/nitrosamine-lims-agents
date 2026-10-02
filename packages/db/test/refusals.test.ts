@@ -2327,7 +2327,7 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
   });
 });
 
-it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys, the counters and the Audit Trail itself', async () => {
+it('every lims table is captured in the Audit Trail except the sessions, the authenticators, the Commit Keys, the counters and the Audit Trail itself', async () => {
   const { rows } = await client.query<{ name: string }>(
     `select 'lims.' || c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'lims' and c.relkind = 'r'
@@ -2336,7 +2336,7 @@ it('every lims table is captured in the Audit Trail except the sessions, the Com
   );
   assert.deepEqual(
     rows.map((row) => row.name),
-    ['lims.audit_chain', 'lims.audit_entry', 'lims.commit_key', 'lims.counter', 'lims.session'],
+    ['lims.audit_chain', 'lims.audit_entry', 'lims.authenticator', 'lims.commit_key', 'lims.counter', 'lims.session'],
   );
 });
 
@@ -2767,6 +2767,12 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
 
 it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
+    ['lims.authenticator.authenticator_pkey', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_person_id_fkey', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_person_id_not_null', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_secret_ciphertext_not_null', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_enrolled_at_not_null', 'authenticator.test.ts'],
+    ['lims.authenticator.step_moves_forward', 'authenticator.test.ts'],
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
     ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
     ['lims.access_event.stamp_lockout', 'session-expiry.test.ts'],
