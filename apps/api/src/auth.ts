@@ -244,6 +244,7 @@ export type { Reauthenticated };
 /**
  * Runs `write` in one audited transaction that holds the re-authenticated person's row first, so a Lockout lands wholly
  * before the write, which it then refuses as accountLocked and records as a failed authentication, or wholly after it.
+ * The transaction is stamped with the person re-authenticated, which lims.unlock_session requires.
  */
 export async function auditedAfterReauthentication<R>(
   db: Kysely<DB>,
@@ -252,9 +253,11 @@ export async function auditedAfterReauthentication<R>(
   write: (tx: Transaction<DB>) => Promise<R>,
 ): Promise<R> {
   if (!reauthenticated) return audited(db, ctx, write);
-  const done = await audited(db, ctx, async (tx) =>
-    (await resetFailuresUnlessLocked(tx, reauthenticated.personId)) ? null : { written: await write(tx) },
-  );
+  const done = await audited(db, ctx, async (tx) => {
+    if (await resetFailuresUnlessLocked(tx, reauthenticated.personId)) return null;
+    await sql`select lims.set_this_transaction('lims.reauthenticated', ${reauthenticated.personId})`.execute(tx);
+    return { written: await write(tx) };
+  });
   if (done) return done.written;
   await audited(db, { ...ctx, reason: 'Failed authentication' }, (tx) => record(tx, reauthenticated.refusedByLockout));
   return refuse('accountLocked', 'This account is locked.');
@@ -644,33 +647,6 @@ export function loginRoutes(
 }
 
 /**
- * Writes the person's own Access Event on their session when `change` applied, under no role of the Lab; a change a
- * re-authentication enables holds that person's row before anything else.
- */
-function onOwnSession(
-  db: Kysely<DB>,
-  req: { actor: ActorContext; sessionKey: SessionKey } & Parameters<typeof sourceAddressOf>[0],
-  kind: 'SignOut' | 'Lock' | 'Unlock',
-  change: (tx: Transaction<DB>) => Promise<boolean>,
-  reauthenticated?: Reauthenticated,
-) {
-  const { actor, sessionKey: session } = req;
-  const reason = kind === 'SignOut' ? 'Sign out' : kind;
-  return auditedAfterReauthentication(db, asOwnAccount(actor.person.username, reason), reauthenticated, async (tx) => {
-    if (!(await change(tx))) return;
-    await record(tx, {
-      kind,
-      subjectId: actor.person.id,
-      roles: actor.roles,
-      sourceAddress: sourceAddressOf(req),
-      sessionLabId: session.labId,
-      sessionId: session.id,
-      workstationId: session.workstationId,
-    });
-  });
-}
-
-/**
  * The routes a locked session still reaches: sign-out, lock and unlock. Lock hides the session behind sessionLocked;
  * only the same person's password unlocks it, and a wrong one is an UnlockFailed Access Event that counts toward
  * lockout. Each change is an Access Event under the person whose session it is.
@@ -679,35 +655,48 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
   app.route({
     ...routes.logout,
     handler: async (req, reply) => {
-      await onOwnSession(db, req, 'SignOut', (tx) => endSession(tx, req.sessionKey, limits));
+      const { actor, sessionKey: session } = req;
+      await audited(db, asOwnAccount(actor.person.username, 'Sign out'), async (tx) => {
+        if (!(await endSession(tx, session, limits))) return;
+        await record(tx, {
+          kind: 'SignOut',
+          subjectId: actor.person.id,
+          roles: actor.roles,
+          sourceAddress: sourceAddressOf(req),
+          sessionLabId: session.labId,
+          sessionId: session.id,
+          workstationId: session.workstationId,
+        });
+      });
       reply.clearCookie(SESSION_COOKIE);
       return { ended: true } as const;
     },
   });
 
-  // Postgres 18's old.locked_at tells whether this very update changed the lock, so a repeat writes no second event.
-  // The company chain, which the Access Event below needs, is taken before the session row, the order end_session takes,
-  // so a Lock and a sign-out on one session cannot each hold what the other waits for.
-  const setLocked = async (tx: Transaction<DB>, session: SessionKey, locked: boolean) => {
-    await sql`select lims.lock_chains('company')`.execute(tx);
-    const row = await tx
-      .updateTable('session')
-      .set({ lockedAt: locked ? sql`coalesce(locked_at, now())` : null })
-      .where('labId', '=', session.labId)
-      .where('id', '=', session.id)
-      .where('endedAt', 'is', null)
-      .where(
-        sql<boolean>`lims.session_end(last_seen_at, created_at, ${interval(limits.idleMs)}, ${interval(limits.absoluteMs)}) > now()`,
-      )
-      .returning(sql<boolean>`(old.locked_at is null) <> (new.locked_at is null)`.as('changed'))
-      .executeTakeFirst();
-    return row ? row.changed : refuse('noSession', SESSION_ENDED);
+  /**
+   * Locks or unlocks the session through the database function that alone may, which writes the Lock or Unlock Access
+   * Event when the call changed the lock; a session it finds not live, or ended by a Lockout, is refused and nothing
+   * is kept, since the sweep or the next request ends it at the same lapse.
+   */
+  const setLocked = async (
+    tx: Transaction<DB>,
+    req: { sessionKey: SessionKey } & Parameters<typeof sourceAddressOf>[0],
+    locked: boolean,
+  ) => {
+    const { labId, id } = req.sessionKey;
+    const change = locked ? sql`lims.lock_session` : sql`lims.unlock_session`;
+    const { rows } = await sql<{
+      changed: boolean | null;
+    }>`select ${change}(${labId}, ${id}, ${interval(limits.idleMs)},
+      ${interval(limits.absoluteMs)}, ${sourceAddressOf(req)}) as changed`.execute(tx);
+    if (typeof rows[0]?.changed !== 'boolean') refuse('noSession', SESSION_ENDED);
   };
 
   app.route({
     ...routes.lock,
     handler: async (req) => {
-      await onOwnSession(db, req, 'Lock', (tx) => setLocked(tx, req.sessionKey, true));
+      const ctx = asOwnAccount(req.actor.person.username, 'Lock');
+      await audited(db, ctx, (tx) => setLocked(tx, req, true));
       return { locked: true, message: lockedMessage(req.actor.person.displayName) } as const;
     },
   });
@@ -724,7 +713,8 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
         sourceAddressOf(req),
         'UnlockFailed',
       );
-      await onOwnSession(db, req, 'Unlock', (tx) => setLocked(tx, req.sessionKey, false), reauthenticated);
+      const ctx = asOwnAccount(req.actor.person.username, 'Unlock');
+      await auditedAfterReauthentication(db, ctx, reauthenticated, (tx) => setLocked(tx, req, false));
       return (await actorFor(db, req.cookies[SESSION_COOKIE], limits)).view;
     },
   });
