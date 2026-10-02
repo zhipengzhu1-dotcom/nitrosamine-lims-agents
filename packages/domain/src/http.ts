@@ -80,12 +80,20 @@ const result = Type.Object({
   performedOn: calendarDate,
 });
 export type Result = Static<typeof result>;
+/** One Record Version of a record: its number, the canonical form that rendered it and the hex SHA-256 of its content. */
+const recordVersionRef = Type.Object({
+  version: Type.Integer({ minimum: 1 }),
+  canonicalForm: Type.Integer({ minimum: 0 }),
+  contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+});
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
   signedAt: instant,
   record: Type.String(),
-  contentHash: Type.String(),
+  recordVersion: recordVersionRef,
+  /** True once the record has a Record Version later than the one this Signature was given on. */
+  unsigned: Type.Boolean(),
 });
 export type Signature = Static<typeof signature>;
 /** An Audit Trail row snapshot, keyed by its stored column names. */
@@ -100,6 +108,7 @@ export const auditedTable = Type.Enum({
   test: 'test',
   result: 'result',
   test_report: 'test_report',
+  record_version: 'record_version',
   signature: 'signature',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;
@@ -162,9 +171,11 @@ const trailEntry = Type.Object({
 export type TrailEntry = Static<typeof trailEntry>;
 const trail = Type.Object({ record: recordRef, labZone: Type.String(), entries: Type.Array(trailEntry) });
 export type Trail = Static<typeof trail>;
-const reportRef = Type.Object({ number: Type.String() });
+const reportRef = Type.Object({ id: uuid, number: Type.String() });
+/** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
 const testView = Type.Object({
   test: testRow,
+  recordVersion: nullable(recordVersionRef),
   report: nullable(reportRef),
   result: nullable(result),
   signatures: Type.Array(signature),

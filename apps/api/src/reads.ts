@@ -4,7 +4,7 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { factsFor } from './steps.ts';
+import { factsFor, latestVersion, signedVersions } from './steps.ts';
 import { trailRoutes } from './trail.ts';
 
 function visibleTests(scope: Scope) {
@@ -42,9 +42,15 @@ async function testView(scope: Scope, id: string) {
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
   const visibleToActor = !isCustomer || test.state === 'Reported';
+  const latest = visibleToActor ? await latestVersion(scope, 'test', id) : null;
   return {
     test,
-    report: report ? { number: report.number } : null,
+    recordVersion: latest && {
+      version: latest.version,
+      canonicalForm: latest.canonicalForm,
+      contentHash: latest.contentHash,
+    },
+    report: report ? { id: report.id, number: report.number } : null,
     result: visibleToActor
       ? ((await scope
           .from('result')
@@ -60,19 +66,31 @@ async function testView(scope: Scope, id: string) {
           .executeTakeFirst()) ?? null)
       : null,
     signatures: visibleToActor
-      ? await scope
-          .from('signature')
+      ? await signedVersions(scope)
           .innerJoin('person', 'person.id', 'signature.personId')
           .select([
             'signature.meaning',
             'person.displayName as signer',
             'signature.signedAt',
-            'signature.recordTable as record',
-            sql<string>`encode(signature.content_hash, 'hex')`.as('contentHash'),
+            'recordVersion.recordTable as record',
+            'recordVersion.version',
+            'recordVersion.canonicalForm',
+            sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
+            sql<boolean>`exists (select from lims.record_version later
+              where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
+                and later.record_id = record_version.record_id and later.version > record_version.version)`.as(
+              'unsigned',
+            ),
           ])
-          .where('signature.recordId', 'in', ids)
+          .where('recordVersion.recordId', 'in', ids)
           .orderBy('signature.signedAt')
           .execute()
+          .then((rows) =>
+            rows.map(({ version, canonicalForm, contentHash, ...signature }) => ({
+              ...signature,
+              recordVersion: { version, canonicalForm, contentHash },
+            })),
+          )
       : [],
     next: nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test)),
   };

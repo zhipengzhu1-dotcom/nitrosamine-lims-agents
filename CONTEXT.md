@@ -489,7 +489,7 @@ _Avoid_: Scan (alone), certified copy, electronic copy
 ### Records and signatures
 
 **Record Version**:
-One saved state of a record that can be signed. Changing a signable record makes a new Record Version; earlier versions are kept.
+One saved state of a record that can be signed: the record's canonical content, the SHA-256 of that content and the canonical form that rendered it. A change to the record, to a child of it, or to a record it names (for a Test: its Result, Sample, Method or Customer) makes a new Record Version of it and of every record built on it, such as the Test Report on a Test; a save that leaves the content as it was, such as a step forward, makes none. Earlier versions are kept, and a Signature given on one shows as unsigned once a later version exists, even if the content comes back.
 _Avoid_: Revision, edit
 
 **Audit Trail**:
