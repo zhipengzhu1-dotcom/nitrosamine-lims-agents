@@ -337,7 +337,7 @@ describe('Lock and Switch user', () => {
     );
   });
 
-  it('a sign-in over a session already past its idle limit ends it without a takeover Access Event', async () => {
+  it('a sign-in over a session already past its idle limit leaves it to the expiry sweep, with no takeover Access Event', async () => {
     const ana = await api.addPerson(`ana.expired-${randomUUID()}`, ['Analyst']);
     const rui = await api.addPerson(`rui.next-morning-${randomUUID()}`, ['Reviewer']);
     const browser = await api.login(ana);
@@ -349,8 +349,10 @@ describe('Lock and Switch user', () => {
     await signInOn(browser, rui);
     assert.deepEqual(
       (await sessionsOf(ana.id)).map((s) => s.ended),
-      [true],
+      [false],
+      'not ended here, so the sweep writes its expiry Access Event',
     );
+    assert.notEqual(ok(await browser.call(routes.me)).person.id, ana.id, 'the browser now holds the new session');
     assert.deepEqual(
       (await eventsOf(ana.id)).map((e) => e.kind),
       ['SignInSucceeded'],

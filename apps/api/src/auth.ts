@@ -283,7 +283,8 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
         }
         if (person.failedLogins > 0)
           await tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', person.id).execute();
-        if (earlier && (await endSession(tx, earlier)) && !earlier.expired)
+        // A session already past its limit is left for the expiry sweep, which records when it really ended.
+        if (earlier && !earlier.expired && (await endSession(tx, earlier)))
           await record(tx, {
             kind: 'Takeover',
             subjectId: earlier.personId,
