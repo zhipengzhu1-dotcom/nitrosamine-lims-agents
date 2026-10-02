@@ -2,7 +2,7 @@ import { type ActorContext, type EndedSession, type ListedAccessEvent, routes } 
 import { useApi } from './api.ts';
 import { Shell, words } from './rail.tsx';
 import { type Column, StackTable } from './stack.tsx';
-import { time } from './time.ts';
+import { time } from './time.tsx';
 
 function EndedSessions({ sessions }: { sessions: readonly EndedSession[] }) {
   if (sessions.length === 0) return <span>Ended no session in this Lab.</span>;
