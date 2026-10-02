@@ -195,6 +195,11 @@ export type IdentityVerification = Static<typeof identityVerification>;
 const staff = Type.Object({ people: Type.Array(staffPerson), awaitingAccount: Type.Array(identityVerification) });
 /** The roles an Admin grants. Platform Operator is held outside the LIMS, and Customer Users get portal accounts. */
 export const grantableRoles = ['SampleCustodian', 'Analyst', 'Reviewer', 'QA', 'LabManager', 'Admin'] as const;
+/** The one-time link's token goes to the person, who sets their own password with it; the LIMS keeps only its hash. */
+const accountCreated = Type.Object({
+  person: staffPerson,
+  link: Type.Object({ token: Type.String(), expiresAt: instant }),
+});
 const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
 /** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
 const username = Type.String({ pattern: '^[a-z][a-z0-9.-]{2,39}$' });
@@ -343,8 +348,7 @@ export const routes = {
     'POST',
     '/api/staff/accounts',
     { body: Type.Object({ identityVerificationId: uuid, username }, closed) },
-    /** The link's token goes to the person, who sets their own password with it; the LIMS keeps only its hash. */
-    Type.Object({ person: staffPerson, link: Type.Object({ token: Type.String(), expiresAt: instant }) }),
+    accountCreated,
   ),
   grantMembership: route(
     'POST',

@@ -4,6 +4,7 @@ import {
   routes,
   type StepInput,
   type StepName,
+  staffRefusal,
   stepRoute,
   steps,
   type TestState,
@@ -163,7 +164,7 @@ export function Shell({
   children,
 }: {
   me: ActorContext;
-  active: ModuleKey;
+  active: ModuleKey | 'staff';
   action: RailAction | null;
   notice?: string | undefined;
   children: ReactNode;
@@ -177,11 +178,26 @@ export function Shell({
               {m.name}
             </a>
           ))}
+          {staffRefusal(me.roles) === null && (
+            <a href="#/staff" className={active === 'staff' ? 'active' : ''}>
+              Staff
+            </a>
+          )}
         </nav>
       </TopBar>
       <main className="plane">{children}</main>
       <Rail me={me} action={action} notice={notice} />
     </div>
+  );
+}
+
+export function Placeholder({ me, module }: { me: ActorContext; module: Module }) {
+  return (
+    <Shell me={me} active={module.key} action={null}>
+      <h1>{module.name}</h1>
+      <p>{module.holds}</p>
+      <p className="muted">Not built in the thin slice.</p>
+    </Shell>
   );
 }
 

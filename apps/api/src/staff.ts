@@ -13,7 +13,7 @@ function adminScope(db: Kysely<DB>, actor: ActorContext): Scope {
   return labScope(db, actor);
 }
 
-/** The people this Lab's Admin sees: those with a Membership here, and those whose identity was checked here. */
+/** The staff this Lab's Admin sees: those with a Membership here, and those whose identity was checked here; Customer Users have portal accounts instead. */
 async function staffOf(q: LabQueries, labId: string, only?: string) {
   const memberships = await q.from('membership').select(['personId', 'role']).orderBy('role').execute();
   const members = [...new Set(memberships.map((m) => m.personId))];
@@ -30,6 +30,7 @@ async function staffOf(q: LabQueries, labId: string, only?: string) {
     .where((eb) =>
       eb.or([...(members.length > 0 ? [eb('person.id', 'in', members)] : []), eb('iv.checkedInLabId', '=', labId)]),
     )
+    .where('person.customerId', 'is', null)
     .orderBy('person.displayName');
   if (only) people = people.where('person.id', '=', only);
   const rows = await people.execute();
