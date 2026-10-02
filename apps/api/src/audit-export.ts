@@ -52,7 +52,7 @@ async function recordsByCustomer(scope: Scope) {
     scope
       .from('sample')
       .innerJoin('submission', 'submission.id', 'sample.submissionId')
-      .select(['sample.id', 'sample.number', 'sample.submissionId', 'submission.customerId'])
+      .select(['sample.id', 'sample.number', 'sample.description', 'sample.submissionId', 'submission.customerId'])
       .execute(),
     scope.from('test').select(['id', 'sampleId', 'methodId']).execute(),
     scope.from('result').select(['id', 'testId']).execute(),
@@ -82,7 +82,7 @@ async function recordsByCustomer(scope: Scope) {
     customer.identifiers.push(id, ...identifiers);
   };
   for (const s of samples) {
-    own(s.id, s.customerId, s.number);
+    own(s.id, s.customerId, s.number, s.description);
     of.get(s.customerId)?.submissionIds.add(s.submissionId);
   }
   for (const t of tests) {
@@ -207,6 +207,7 @@ function pdfOf(data: AuditExportData, dataFile: { name: string; sha256: string }
     `Data file: ${dataFile.name}`,
     `SHA-256 of the data file: ${dataFile.sha256}`,
     'The data file holds every entry with its raw values. Another Customer\'s identifiers read "[redacted]".',
+    'A character this PDF cannot print shows as its code point, such as <U+4E2D>; the data file holds it as written.',
     '',
     ...data.entries.flatMap((e) => entryLines(e)),
   ];

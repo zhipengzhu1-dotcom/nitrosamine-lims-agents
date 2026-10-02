@@ -152,25 +152,27 @@ it("an entry on a shared record that names another Customer's Sample shows it re
     return added;
   });
   const mine = await submitted(as.cora, { methodId: method.id });
-  const theirs = await submitted(as.carl, { methodId: method.id });
-  const title = `Transfer checked on ${mine.sampleNumber} and ${theirs.sampleNumber}`;
+  const theirDescription = 'Contoso capsules, lot CX-9 (fictional)';
+  const theirs = await submitted(as.carl, { methodId: method.id, description: theirDescription });
+  const title = `Transfer checked on ${mine.sampleNumber} and ${theirs.sampleNumber} (${theirDescription})`;
   await write('Record the transfer Samples', (tx) =>
     tx.updateTable('method').set({ title }).where('id', '=', method.id).execute(),
   );
 
-  for (const [customerId, own, other] of [
-    [northwindId, mine.sampleNumber, theirs.sampleNumber],
-    [contoso.id, theirs.sampleNumber, mine.sampleNumber],
+  for (const [customerId, own, others] of [
+    [northwindId, [mine.sampleNumber], [theirs.sampleNumber, theirDescription]],
+    [contoso.id, [theirs.sampleNumber, theirDescription], [mine.sampleNumber]],
   ] as const) {
     const data = dataOf(await generate(customerId));
     const update = data.entries.find((e) => e.record.id === method.id && e.op === 'UPDATE');
     assert.ok(update, 'the shared Method update is in the export');
-    const shown = title.replace(other, REDACTED);
-    assert.ok(shown.includes(own));
+    const shown = others.reduce((t: string, other) => t.replace(other, REDACTED), title);
+    for (const kept of own) assert.ok(shown.includes(kept));
     assert.deepEqual(update.changes.find((c) => c.field === 'title')?.new, { text: shown, ref: null });
     assert.equal(update.raw.newRow?.title, shown);
     assert.equal(update.redacted, true);
-    assert.ok(!JSON.stringify(data).includes(other), "the other Customer's Sample number appears nowhere");
+    for (const other of others)
+      assert.ok(!JSON.stringify(data).includes(other), `the other Customer's ${other} appears nowhere`);
   }
 });
 
@@ -340,10 +342,10 @@ it('QA picks from the Customers with a Sample in this Lab, and a Customer with n
   refusedWith(await as.quinn.call(routes.auditExport, { customerId: empty.id, format: 'JSON' }), 'notFound');
 });
 
-it("the PDF prints Windows-1252's curly quotes and dashes, and a character outside it as ?", async () => {
+it("the PDF prints Windows-1252's curly quotes and dashes, and a character outside it as its code point", async () => {
   await submitted(as.cora, { description: 'Customer’s tablets – lot 7 二' });
   const pdf = Buffer.from((await generate(northwindId)).files[1].base64, 'base64').toString('latin1');
-  assert.ok(pdf.includes('Customer\\222s tablets \\226 lot 7 ?'), 'printed as WinAnsi bytes');
+  assert.ok(pdf.includes('Customer\\222s tablets \\226 lot 7 <U+4E8C>'), 'printed as WinAnsi bytes');
 });
 
 it('a CSV cell a spreadsheet would run as a formula starts with an apostrophe', async () => {

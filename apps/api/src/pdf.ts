@@ -14,7 +14,7 @@ const CP1252_HIGH = new Map(
 );
 const octal = (byte: number) => `\\${byte.toString(8).padStart(3, '0')}`;
 
-/** A character Courier's WinAnsi encoding cannot print becomes `?`; the data file beside the PDF keeps it as written. */
+/** A character Courier's WinAnsi encoding cannot print shows as its code point, such as `<U+4E2D>`, so the PDF never prints a wrong character. */
 function winAnsi(line: string): string {
   return Array.from(line)
     .map((ch) => {
@@ -23,7 +23,7 @@ function winAnsi(line: string): string {
       if (code >= 0x20 && code <= 0x7e) return ch;
       if (code >= 0xa0 && code <= 0xff) return octal(code);
       const high = CP1252_HIGH.get(ch);
-      return high === undefined ? '?' : octal(high);
+      return high === undefined ? `<U+${code.toString(16).toUpperCase().padStart(4, '0')}>` : octal(high);
     })
     .join('');
 }
