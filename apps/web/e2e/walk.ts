@@ -4,7 +4,7 @@ import { expect, type Page, test as playwright } from '@playwright/test';
 import { type RouteReply, routes, stepRoute } from '@lims/domain';
 import { API_LOG, DEMO_PASSWORD } from '../playwright.config.ts';
 
-export { expect, type Locator, type Page } from '@playwright/test';
+export { expect, type Locator, type Page, type ViewportSize } from '@playwright/test';
 
 /** A Lab record's time as every screen shows it: UTC, then the Lab's wall clock with its offset. */
 export const utcThenLabClock = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d\d:\d\d$/;
@@ -27,6 +27,7 @@ export const test = playwright.extend<{ apiLog: void }>({
 
 export const PHONE = { width: 390, height: 844 };
 export const DESKTOP = { width: 1360, height: 900 };
+export const TABLET = { width: 820, height: 1180 };
 
 /** Ends any session of the page's browser and signs `username` in to the R&D Lab through the API. */
 export async function signInByApi(page: Page, username: string) {
