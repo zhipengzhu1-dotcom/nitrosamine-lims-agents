@@ -1,4 +1,5 @@
 import {
+  type ActorContext,
   isRefusalKind,
   pathOf,
   type RefusalKind,
@@ -49,6 +50,18 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
   const refused = refusedBy(json, `the LIMS did not answer (${res.status})`);
   if (refused.kind === 'noSession') signedOut(refused.message);
   throw refused;
+}
+
+let actorChanged = (_me: ActorContext) => {};
+export const onActorChanged = (fn: (me: ActorContext) => void) => {
+  actorChanged = fn;
+};
+
+/** Moves the session to another Lab, then shows the worklist of the Lab the server answered with. */
+export async function switchLab(body: RouteInput<typeof routes.switchLab>[0]): Promise<void> {
+  const me = await api(routes.switchLab, body);
+  location.hash = '';
+  actorChanged(me);
 }
 
 export async function signOut(): Promise<void> {

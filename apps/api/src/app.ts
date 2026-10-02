@@ -11,7 +11,7 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import { actorFor, loginRoutes, logoutRoute, SESSION_COOKIE, type SessionKey } from './auth.ts';
+import { actorFor, loginRoutes, SESSION_COOKIE, type SessionKey, sessionRoutes } from './auth.ts';
 import { readRoutes } from './reads.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
 import { stepRoutes } from './steps.ts';
@@ -86,7 +86,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
     signedIn.addHook('onRequest', async (req) => {
       ({ actor: req.actor, session: req.sessionKey } = await actorFor(db, req.cookies[SESSION_COOKIE]));
     });
-    logoutRoute(signedIn, db);
+    sessionRoutes(signedIn, db);
     readRoutes(signedIn, db);
     stepRoutes(signedIn, db);
   });

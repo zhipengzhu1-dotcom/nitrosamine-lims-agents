@@ -7,7 +7,10 @@ const shot = async (page: Page, name: string) => {
     await page.screenshot({ path: `../../docs/design/thin-slice-shots/${name}.png` });
 };
 
+const RD = /R&D Laboratory/;
+
 async function signIn(page: Page, username: string) {
+  await page.getByRole('radio', { name: RD }).check();
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -143,6 +146,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveText('sign in first');
   expect(whoAmI, 'the web returned to sign-in by the kind, with no second request to decide it').toHaveLength(0);
+  await page.getByRole('radio', { name: RD }).check();
   await page.getByLabel('Username').fill('rui.reviewer');
   await page.getByLabel('Password').fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -218,6 +222,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
 test('a wrong password and an unknown user ID show the same failure message', async ({ page }) => {
   const attempt = async (username: string, password: string) => {
     await page.goto('/');
+    await page.getByRole('radio', { name: RD }).check();
     await page.getByLabel('Username').fill(username);
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: 'Sign in' }).click();

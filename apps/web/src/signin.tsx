@@ -1,45 +1,111 @@
 import { type FormEvent, useState } from 'react';
-import { type ActorContext, routes } from '@lims/domain';
-import { api } from './api.ts';
-import { TopBar } from './rail.tsx';
+import { type ActorContext, type Lab, routes } from '@lims/domain';
+import { api, switchLab, useApi } from './api.ts';
+import { Shell, TopBar } from './rail.tsx';
 
-export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorContext) => void }) {
+interface Credentials {
+  username: string;
+  password: string;
+  labId: string;
+}
+
+/** User ID, password and a Lab picked from `labs`, none of them filled in or selected. */
+function CredentialsForm({
+  title,
+  intro,
+  labs,
+  commit,
+  notice = '',
+  onSubmit,
+}: {
+  title: string;
+  intro?: string;
+  labs: Lab[] | undefined;
+  commit: string;
+  notice?: string;
+  onSubmit: (credentials: Credentials) => Promise<unknown>;
+}) {
   const [error, setError] = useState(notice);
+  const [busy, setBusy] = useState(false);
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (busy) return;
     const form = new FormData(e.currentTarget);
     const field = (name: string) => {
       const value = form.get(name);
       return typeof value === 'string' ? value : '';
     };
-    api(routes.login, { username: field('username'), password: field('password') }).then(onIn, (err: Error) =>
-      setError(err.message),
-    );
+    setBusy(true);
+    onSubmit({ username: field('username'), password: field('password'), labId: field('labId') })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setBusy(false));
   }
+  return (
+    <form className="signin card" onSubmit={submit}>
+      <fieldset disabled={busy}>
+        <h1>{title}</h1>
+        {intro && <p className="muted">{intro}</p>}
+        <fieldset className="labs">
+          <legend>Lab</legend>
+          {labs?.map((lab) => (
+            <label key={lab.id} className="labs__option">
+              <input type="radio" name="labId" value={lab.id} required />
+              <span>
+                <b>{lab.code}</b> {lab.name}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <label>
+          Username
+          <input name="username" required autoComplete="username" />
+        </label>
+        <label>
+          Password
+          <input name="password" type="password" required autoComplete="current-password" />
+        </label>
+        {error && (
+          <p className="note--bad" role="alert">
+            {error}
+          </p>
+        )}
+        <button type="submit" className="rbtn" aria-busy={busy}>
+          {commit}
+        </button>
+      </fieldset>
+    </form>
+  );
+}
+
+export function SignIn({ notice, onIn }: { notice: string; onIn: (me: ActorContext) => void }) {
+  const labs = useApi(routes.labs);
   return (
     <div className="frame frame--bare">
       <TopBar />
       <main className="plane">
-        <form className="signin card" onSubmit={submit}>
-          <h1>Sign in</h1>
-          <label>
-            Username
-            <input name="username" required autoComplete="username" />
-          </label>
-          <label>
-            Password
-            <input name="password" type="password" required autoComplete="current-password" />
-          </label>
-          {error && (
-            <p className="note--bad" role="alert">
-              {error}
-            </p>
-          )}
-          <button type="submit" className="rbtn">
-            Sign in
-          </button>
-        </form>
+        <CredentialsForm
+          title="Sign in"
+          labs={labs.data}
+          commit="Sign in"
+          notice={notice}
+          onSubmit={(c) => api(routes.login, c).then(onIn)}
+        />
       </main>
     </div>
+  );
+}
+
+export function LabSwitchPage({ me }: { me: ActorContext }) {
+  const labs = useApi(routes.labs);
+  return (
+    <Shell me={me} active={null} action={null}>
+      <CredentialsForm
+        title="Switch Lab"
+        intro={`You work in ${me.lab.name}. Sign in again with your username and password to work in another Lab.`}
+        labs={labs.data?.filter((lab) => lab.id !== me.lab.id)}
+        commit="Switch Lab"
+        onSubmit={switchLab}
+      />
+    </Shell>
   );
 }

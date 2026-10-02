@@ -25,7 +25,7 @@ const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', re
 
 const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
 
-const SIGN_OUT_NEEDS_NO_ROLE = 'none';
+const NEEDS_NO_ROLE = 'none';
 
 const hashToken = (token: string) => createHash('sha256').update(token).digest();
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
@@ -34,8 +34,11 @@ const REFUSAL: { readonly [F in SignInFailure]: () => never } = {
   UnknownUserId: notValid,
   WrongPassword: notValid,
   WrongPasswordOnLockedAccount: notValid,
+  OtherUserId: notValid,
   AccountLocked: () => refuse('accountLocked', 'this account is locked'),
   NoLab: () => refuse('role', 'this account belongs to no Lab'),
+  NoLabChosen: () => refuse('labNotChosen', 'choose the Lab to work in'),
+  NoMembership: () => refuse('role', 'you hold no Membership in that Lab'),
 };
 
 const record = (tx: Transaction<DB>, event: AccessEvent) => tx.insertInto('accessEvent').values(event).execute();
@@ -50,14 +53,33 @@ async function rolesIn(db: Kysely<DB>, personId: string, labId: string): Promise
   return rows.map((r) => r.role);
 }
 
-async function lowestIdMembershipLab(db: Kysely<DB>, personId: string): Promise<string | undefined> {
-  const membership = await db
+type LabChoice =
+  | { labId: string; roles: Role[] }
+  | { refused: Extract<SignInFailure, 'NoLab' | 'NoLabChosen' | 'NoMembership'>; roles: Role[] };
+
+/**
+ * The Lab a sign-in or a Lab switch opens: the one named, if the person holds a Membership there, and never a default.
+ * A refused choice keeps the roles its Access Event records: those of the default Lab (the spec's earliest Membership;
+ * a Membership has no date yet, so the lowest Lab ID stands in), or Customer for a person with no Membership.
+ */
+async function chooseLab(
+  db: Kysely<DB>,
+  person: { id: string; customerId: string | null },
+  labId: string | undefined,
+): Promise<LabChoice> {
+  const held = await db
     .selectFrom('membership')
-    .select('labId')
-    .where('personId', '=', personId)
+    .select(['labId', 'role'])
+    .where('personId', '=', person.id)
     .orderBy('labId')
-    .executeTakeFirst();
-  return membership?.labId;
+    .orderBy('role')
+    .execute();
+  const rolesOf = (lab: string) => held.filter((m) => m.labId === lab).map((m) => m.role);
+  const chosen = labId === undefined ? [] : rolesOf(labId);
+  if (labId !== undefined && chosen.length > 0) return { labId, roles: chosen };
+  const [first] = held;
+  if (!first) return { refused: 'NoLab', roles: person.customerId ? ['Customer'] : [] };
+  return { refused: labId === undefined ? 'NoLabChosen' : 'NoMembership', roles: rolesOf(first.labId) };
 }
 
 async function countFailure(tx: Transaction<DB>, personId: string) {
@@ -73,6 +95,28 @@ async function countFailure(tx: Transaction<DB>, personId: string) {
       sql<boolean>`old.locked_at is null and new.locked_at is not null`.as('lockedNow'),
     ])
     .executeTakeFirstOrThrow();
+}
+
+/** Locks the person's row for the session about to open, and answers whether a lock landed since the password was checked. */
+async function lockedMeanwhile(tx: Transaction<DB>, personId: string): Promise<boolean> {
+  const { lockedAt, failedLogins } = await tx
+    .selectFrom('person')
+    .select(['lockedAt', 'failedLogins'])
+    .where('id', '=', personId)
+    .forUpdate()
+    .executeTakeFirstOrThrow();
+  if (lockedAt) return true;
+  if (failedLogins > 0) await tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', personId).execute();
+  return false;
+}
+
+async function openSession(tx: Transaction<DB>, personId: string, labId: string, token: string): Promise<SessionKey> {
+  const { id } = await tx
+    .insertInto('session')
+    .values({ labId, personId, tokenHash: hashToken(token) })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  return { labId, id };
 }
 
 /** Proves the signer before a Signature is written: a wrong password refuses as badCredentials, counts toward lockout, and a lockout it applies is an Access Event. */
@@ -158,12 +202,16 @@ function typedUserIdDigest(key: Buffer, typed: string) {
   return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: typed.length };
 }
 
-/** Signs a person in. Every attempt, refused or not, writes its Access Event in a transaction of its own that commits. */
+/** The routes before a session: the Labs to choose from, and sign-in. Every sign-in attempt, refused or not, writes its Access Event in a transaction of its own that commits. */
 export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): void {
+  app.route({
+    ...routes.labs,
+    handler: () => db.selectFrom('lab').select(['labId as id', 'code', 'name']).orderBy('code').execute(),
+  });
   app.route({
     ...routes.login,
     handler: async (req, reply) => {
-      const { username, password } = req.body;
+      const { username, password, labId } = req.body;
       const sourceAddress = req.ip;
       const person = await db.selectFrom('person').selectAll().where('username', '=', username).executeTakeFirst();
       if (!person) {
@@ -181,16 +229,15 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): v
       }
 
       const proven = await verifyPassword(password, person.passwordHash);
-      const labId = await lowestIdMembershipLab(db, person.id);
-      const roles: Role[] = labId ? await rolesIn(db, person.id, labId) : person.customerId ? ['Customer'] : [];
-      const subject = { subjectId: person.id, roles, sourceAddress };
+      const choice = await chooseLab(db, person, labId);
+      const subject = { subjectId: person.id, roles: choice.roles, sourceAddress };
 
-      if (!proven || person.lockedAt || !labId) {
+      const refusal = person.lockedAt ? 'AccountLocked' : 'refused' in choice ? choice.refused : null;
+      if (!proven || refusal || 'refused' in choice) {
         const failure = await audited(db, SIGN_IN_SERVICE, async (tx): Promise<SignInFailure> => {
-          if (proven) {
-            const reason = person.lockedAt ? 'AccountLocked' : 'NoLab';
-            await record(tx, { kind: 'SignInFailed', failureReason: reason, ...subject });
-            return reason;
+          if (proven && refusal) {
+            await record(tx, { kind: 'SignInFailed', failureReason: refusal, ...subject });
+            return refusal;
           }
           const { wasLocked, lockedNow } = await countFailure(tx, person.id);
           const reason = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
@@ -202,41 +249,29 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer): v
       }
 
       const token = randomBytes(32).toString('base64url');
-      const lockedMeanwhile = await audited(db, SIGN_IN_SERVICE, async (tx) => {
-        const { lockedAt } = await tx
-          .selectFrom('person')
-          .select('lockedAt')
-          .where('id', '=', person.id)
-          .forUpdate()
-          .executeTakeFirstOrThrow();
-        if (lockedAt) {
+      const locked = await audited(db, SIGN_IN_SERVICE, async (tx) => {
+        if (await lockedMeanwhile(tx, person.id)) {
           await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...subject });
           return true;
         }
-        if (person.failedLogins > 0)
-          await tx.updateTable('person').set({ failedLogins: 0 }).where('id', '=', person.id).execute();
-        const session = await tx
-          .insertInto('session')
-          .values({ labId, personId: person.id, tokenHash: hashToken(token) })
-          .returning('id')
-          .executeTakeFirstOrThrow();
-        await record(tx, { kind: 'SignInSucceeded', ...subject, sessionLabId: labId, sessionId: session.id });
+        const session = await openSession(tx, person.id, choice.labId, token);
+        await record(tx, { kind: 'SignInSucceeded', ...subject, sessionLabId: session.labId, sessionId: session.id });
         return false;
       });
-      if (lockedMeanwhile) return REFUSAL.AccountLocked();
+      if (locked) return REFUSAL.AccountLocked();
       reply.setCookie(SESSION_COOKIE, token);
       return (await actorFor(db, token)).actor;
     },
   });
 }
 
-/** Ends the request's session and writes its sign-out Access Event, under the person who signs out. */
-export function logoutRoute(app: App, db: Kysely<DB>): void {
+/** The routes that end or move the request's session, each written under the person whose session it is. */
+export function sessionRoutes(app: App, db: Kysely<DB>): void {
   app.route({
     ...routes.logout,
     handler: async (req, reply) => {
       const { actor, sessionKey: session } = req;
-      const as = { actor: `person:${actor.person.username}`, role: SIGN_OUT_NEEDS_NO_ROLE, reason: 'Sign out' };
+      const as = { actor: `person:${actor.person.username}`, role: NEEDS_NO_ROLE, reason: 'Sign out' };
       await audited(db, as, async (tx) => {
         const ended = await tx
           .updateTable('session')
@@ -257,6 +292,80 @@ export function logoutRoute(app: App, db: Kysely<DB>): void {
       });
       reply.clearCookie(SESSION_COOKIE);
       return { ended: true } as const;
+    },
+  });
+
+  app.route({
+    ...routes.switchLab,
+    handler: async (req, reply) => {
+      const { actor, sessionKey: session } = req;
+      const { username, password, labId } = req.body;
+      if (labId === session.labId) refuse('state', `you already work in ${actor.lab.name}`);
+      const person = await db
+        .selectFrom('person')
+        .selectAll()
+        .where('id', '=', actor.person.id)
+        .executeTakeFirstOrThrow();
+      const as = { actor: `person:${person.username}`, role: NEEDS_NO_ROLE, reason: 'Switch Lab' };
+      const sameUserId = username === person.username;
+      const proven =
+        (await verifyPassword(password, sameUserId ? person.passwordHash : TIMING_DECOY_HASH)) && sameUserId;
+      const choice = await chooseLab(db, person, labId);
+      const inSession = {
+        subjectId: person.id,
+        roles: actor.roles,
+        sourceAddress: req.ip,
+        sessionLabId: session.labId,
+        sessionId: session.id,
+      };
+
+      if (!proven || 'refused' in choice) {
+        const failure = await audited(db, as, async (tx): Promise<SignInFailure> => {
+          if (proven && 'refused' in choice) {
+            await record(tx, { kind: 'LabSwitchFailed', failureReason: choice.refused, ...inSession });
+            return choice.refused;
+          }
+          const { wasLocked, lockedNow } = await countFailure(tx, person.id);
+          const wrongPassword = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
+          const reason = sameUserId ? wrongPassword : 'OtherUserId';
+          await record(tx, { kind: 'LabSwitchFailed', failureReason: reason, ...inSession });
+          if (lockedNow) await record(tx, { kind: 'Lockout', ...inSession });
+          return reason;
+        });
+        return REFUSAL[failure]();
+      }
+
+      const token = randomBytes(32).toString('base64url');
+      const refused = await audited(db, as, async (tx): Promise<SignInFailure | 'SessionEnded' | null> => {
+        if (await lockedMeanwhile(tx, person.id)) {
+          await record(tx, { kind: 'LabSwitchFailed', failureReason: 'AccountLocked', ...inSession });
+          return 'AccountLocked';
+        }
+        const ended = await tx
+          .updateTable('session')
+          .set({ endedAt: sql`now()` })
+          .where('labId', '=', session.labId)
+          .where('id', '=', session.id)
+          .where('endedAt', 'is', null)
+          .executeTakeFirst();
+        if (!ended.numUpdatedRows) return 'SessionEnded';
+        const opened = await openSession(tx, person.id, choice.labId, token);
+        await record(tx, {
+          kind: 'LabSwitch',
+          subjectId: person.id,
+          roles: choice.roles,
+          sourceAddress: req.ip,
+          sessionLabId: opened.labId,
+          sessionId: opened.id,
+          previousSessionLabId: session.labId,
+          previousSessionId: session.id,
+        });
+        return null;
+      });
+      if (refused === 'SessionEnded') return refuse('noSession', 'the session has ended; sign in again');
+      if (refused) return REFUSAL[refused]();
+      reply.setCookie(SESSION_COOKIE, token);
+      return (await actorFor(db, token)).actor;
     },
   });
 }

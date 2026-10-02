@@ -25,6 +25,7 @@ const STATUS_OF: { readonly [K in RefusalKind]: number } = {
   unknownField: 400,
   malformed: 400,
   badCredentials: 401,
+  labNotChosen: 400,
   noSession: 401,
   role: 403,
   guard: 403,
@@ -119,7 +120,10 @@ export async function startApi(name: string) {
     await db.destroy();
     await superuser.destroy();
   });
-  const { labId } = await db.selectFrom('lab').select('labId').executeTakeFirstOrThrow();
+  const labOf = async (code: string) =>
+    (await db.selectFrom('lab').select('labId').where('code', '=', code).executeTakeFirstOrThrow()).labId;
+  const labId = await labOf('RD');
+  const qcLabId = await labOf('QC');
   const { id: methodId } = await db.selectFrom('method').select('id').executeTakeFirstOrThrow();
 
   return {
@@ -132,13 +136,14 @@ export async function startApi(name: string) {
     logLines,
     startAnotherApi: (options: { secureCookie?: boolean } = {}) => listen(db, options),
     labId,
+    qcLabId,
     methodId,
     person(name: SeededName): Account {
       return seeded.find((a) => a.username.startsWith(`${name}.`)) ?? assert.fail(`no seeded person ${name}`);
     },
-    async login(account: Account): Promise<Client> {
+    async login(account: Account, lab = labId): Promise<Client> {
       const client = new Client(base);
-      ok(await client.call(routes.login, { username: account.username, password: account.password }));
+      ok(await client.call(routes.login, { username: account.username, password: account.password, labId: lab }));
       return client;
     },
     async addPerson(

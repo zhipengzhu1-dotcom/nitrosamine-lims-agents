@@ -500,6 +500,10 @@ _Avoid_: Log, history, change log
 The Audit Trail record of one sign-in (succeeded or failed), sign-out, lock, unlock, lockout, takeover, Lab switch, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
 _Avoid_: Login log, session log, access log
 
+**Lab switch**:
+Moving a signed-in person's work from one Lab to another in which they hold a Membership. It needs the full re-authentication of a sign-in, nothing is chosen for them, and from then on they see only the new Lab's records. It is an Access Event, and a failed one counts toward the lockout.
+_Avoid_: Change Lab, Lab login, context switch
+
 **Workstation**:
 A bench PC the Admin has registered with its name, Lab and Room, which every session and Access Event from it carries. A device that is not registered shows as an unregistered device; the portal and desk PCs may be used that way.
 _Avoid_: Terminal, client, kiosk

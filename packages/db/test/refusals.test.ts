@@ -26,6 +26,7 @@ const id = {
   testReport: randomUUID(),
   signature: randomUUID(),
   session: randomUUID(),
+  otherSession: randomUUID(),
   commitKey: randomUUID(),
   transaction: randomUUID(),
   accessEvent: randomUUID(),
@@ -91,6 +92,7 @@ const fixture: [string, Row][] = [
     },
   ],
   ['lims.session', { lab_id: id.lab, id: id.session, person_id: id.person, token_hash: token }],
+  ['lims.session', { lab_id: id.otherLab, id: id.otherSession, person_id: id.person, token_hash: Buffer.alloc(32, 4) }],
   [
     'lims.commit_key',
     {
@@ -115,6 +117,15 @@ const fixture: [string, Row][] = [
     },
   ],
 ];
+/** A Lab switch into the fixture session from a session in another Lab; each case breaks one part of it. */
+const labSwitch: Row = {
+  kind: 'LabSwitch',
+  failure_reason: null,
+  session_lab_id: id.lab,
+  session_id: id.session,
+  previous_session_lab_id: id.otherLab,
+  previous_session_id: id.otherSession,
+};
 const unknownUserIdAttempt: Row = {
   kind: 'SignInFailed',
   failure_reason: 'UnknownUserId',
@@ -646,6 +657,12 @@ describe('the database refuses a reference to a row that does not exist', () => 
       },
       constraint: 'access_event_session_lab_id_session_id_subject_id_fkey',
     },
+    {
+      name: 'a Lab switch Access Event from a session that does not exist is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, previous_session_id: missing },
+      constraint: 'access_event_previous_session_lab_id_previous_session_id_s_fkey',
+    },
   ]);
 
   const testOfKey = 'commit_key_test_after_claim_fkey';
@@ -753,6 +770,48 @@ describe('the database refuses a value outside its allowed set', () => {
       table: 'lims.access_event',
       change: { failure_reason: null },
       constraint: 'access_event_failure_check',
+    },
+    {
+      name: 'a Lab switch Access Event without a session is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, session_lab_id: null, session_id: null },
+      constraint: 'access_event_session_kind_check',
+    },
+    {
+      name: 'a failed Lab switch Access Event without the session it stays in is refused',
+      table: 'lims.access_event',
+      change: { kind: 'LabSwitchFailed' },
+      constraint: 'access_event_session_kind_check',
+    },
+    {
+      name: 'a failed Lab switch Access Event without a failure reason is refused',
+      table: 'lims.access_event',
+      change: { kind: 'LabSwitchFailed', failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_check',
+    },
+    {
+      name: 'a Lab switch Access Event that names no previous session is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, previous_session_lab_id: null, previous_session_id: null },
+      constraint: 'access_event_previous_session_check',
+    },
+    {
+      name: 'an Access Event of another kind that names a previous session is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, kind: 'SignOut' },
+      constraint: 'access_event_previous_session_check',
+    },
+    {
+      name: 'a previous session ID without its Lab is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, previous_session_lab_id: null },
+      constraint: 'access_event_previous_session_check',
+    },
+    {
+      name: 'a Lab switch Access Event into the Lab it came from is refused',
+      table: 'lims.access_event',
+      change: { ...labSwitch, previous_session_lab_id: id.lab, previous_session_id: id.session },
+      constraint: 'access_event_lab_switch_check',
     },
     {
       name: 'a lockout Access Event with a failure reason is refused',

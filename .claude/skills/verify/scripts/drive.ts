@@ -92,6 +92,7 @@ export async function open(slug: string): Promise<Proof> {
     signIn: async (username, pw = password) => {
       note(`sign in as ${username}`);
       await page.goto('/');
+      await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
       await page.getByLabel('Username').fill(username);
       await page.getByLabel('Password').fill(pw);
       await page.getByRole('button', { name: 'Sign in' }).click();
