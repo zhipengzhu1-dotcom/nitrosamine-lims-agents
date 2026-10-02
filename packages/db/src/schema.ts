@@ -157,6 +157,7 @@ export interface Person {
   identityVerificationId: string | null;
   lockedAt: Timestamp | null;
   passwordHash: string | null;
+  reducedMotion: Generated<boolean>;
   username: string;
 }
 

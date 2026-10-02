@@ -77,7 +77,10 @@ const sessionClock = Type.Object({
 export type SessionClock = Static<typeof sessionClock>;
 /** What a person is told when the API refuses a session that has ended; the web shows it as the API sends it. */
 export const SESSION_ENDED = 'Your session has ended. Sign in again.';
-const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock });
+/** The person's own settings for the web. `reducedMotion` only ever reduces motion: the device's own setting still applies when it is off. */
+const preferences = Type.Object({ reducedMotion: Type.Boolean() }, closed);
+export type Preferences = Static<typeof preferences>;
+const signedIn = Type.Object({ ...actorContext.properties, session: sessionClock, preferences });
 export type SignedInView = Static<typeof signedIn>;
 const testRow = Type.Object({
   id: uuid,
@@ -493,6 +496,7 @@ export const routes = {
   registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
   enrolWorkstation: route('POST', '/api/workstations/enrol', { body: enrolment }, workstation),
   me: route('GET', '/api/me', {}, signedIn),
+  setPreferences: route('POST', '/api/me/preferences', { body: preferences }, preferences),
   /** Reads how long the session has left without counting as activity, for the web's countdown. */
   session: route('GET', '/api/session', {}, sessionClock),
   lookups: route('GET', '/api/lookups', {}, lookups),

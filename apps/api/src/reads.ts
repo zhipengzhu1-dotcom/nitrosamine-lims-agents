@@ -108,7 +108,7 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
   trailRoutes(app, db);
   auditExportRoutes(app, db);
   staffRoutes(app, db);
-  app.route({ ...routes.me, handler: async (req) => ({ ...req.actor, session: req.sessionClock }) });
+  app.route({ ...routes.me, handler: async (req) => req.signedInView });
 
   app.route({
     ...routes.lookups,

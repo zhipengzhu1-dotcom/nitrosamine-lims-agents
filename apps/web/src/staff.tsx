@@ -6,10 +6,11 @@ import {
   routes,
   type StaffPerson,
 } from '@lims/domain';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api, useApi, useFresh } from './api.ts';
 import { field, useCommit } from './form.tsx';
 import { Shell, words } from './rail.tsx';
+import { type Column, StackTable } from './stack.tsx';
 import { time } from './time.ts';
 
 function RecordVerification({ onDone }: { onDone: () => Promise<void> }) {
@@ -203,6 +204,8 @@ function ChangePrintedName({ people, onDone }: { people: readonly StaffPerson[];
 }
 
 /** For an account whose person has not set a password yet: a fresh one-time link, which replaces the earlier one. */
+const noPeople: StaffPerson[] = [];
+
 function NewLink({ person, onIssued }: { person: StaffPerson; onIssued: (link: Link) => void }) {
   const { busy, commit, shown } = useCommit();
   return (
@@ -224,10 +227,27 @@ function NewLink({ person, onIssued }: { person: StaffPerson; onIssued: (link: L
   );
 }
 
+function staffColumns(onIssued: (link: Link) => void): Column<StaffPerson>[] {
+  return [
+    { head: 'Printed name', cell: (p) => p.printedName },
+    { head: 'Username', cell: (p) => <code>{p.username}</code> },
+    { head: 'Roles', cell: (p) => p.roles.map(words).join(', ') || 'No Membership yet' },
+    { head: 'Password', cell: (p) => (p.credentialSet ? 'Set' : <NewLink person={p} onIssued={onIssued} />) },
+    {
+      head: 'Identity verified',
+      cell: (p) =>
+        p.identityVerifiedAt
+          ? `${time(p.identityVerifiedAt)} by ${p.identityVerifiedBy}: ${p.identityEvidence}`
+          : 'Not recorded (seeded demo account)',
+    },
+  ];
+}
+
 export function StaffPage({ me }: { me: ActorContext }) {
   const { data, error, reload } = useApi(routes.staff);
   const fresh = useFresh(data, (d) => d.people.map((p) => `${p.id}:${p.roles.join()}:${p.printedName}`));
   const [link, setLink] = useState<Link | null>(null);
+  const columns = useMemo(() => staffColumns(setLink), []);
   const linkUrl = link && `${location.origin}${location.pathname}#/welcome/${link.token}`;
   return (
     <Shell me={me} active="staff" action={null}>
@@ -268,37 +288,12 @@ export function StaffPage({ me }: { me: ActorContext }) {
         )}
         <h2>Staff in {me.lab.name}</h2>
         <div className="wide">
-          <table className="stack">
-            <thead>
-              <tr>
-                <th>Printed name</th>
-                <th>Username</th>
-                <th>Roles</th>
-                <th>Password</th>
-                <th>Identity verified</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.people.map((p) => (
-                <tr
-                  key={p.id}
-                  className={fresh.has(`${p.id}:${p.roles.join()}:${p.printedName}`) ? 'row--fresh' : undefined}
-                >
-                  <td data-label="Printed name">{p.printedName}</td>
-                  <td data-label="Username">
-                    <code>{p.username}</code>
-                  </td>
-                  <td data-label="Roles">{p.roles.map(words).join(', ') || 'No Membership yet'}</td>
-                  <td data-label="Password">{p.credentialSet ? 'Set' : <NewLink person={p} onIssued={setLink} />}</td>
-                  <td data-label="Identity verified">
-                    {p.identityVerifiedAt
-                      ? `${time(p.identityVerifiedAt)} by ${p.identityVerifiedBy}: ${p.identityEvidence}`
-                      : 'Not recorded (seeded demo account)'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <StackTable
+            columns={columns}
+            rows={data?.people ?? noPeople}
+            rowKey={(p) => p.id}
+            rowClass={(p) => (fresh.has(`${p.id}:${p.roles.join()}:${p.printedName}`) ? 'row--fresh' : undefined)}
+          />
         </div>
         {data && <GrantMembership me={me} people={data.people} onDone={reload} />}
         {data && <ChangePrintedName people={data.people} onDone={reload} />}
