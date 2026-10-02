@@ -11,7 +11,7 @@ import { api, useApi, useFresh } from './api.ts';
 import { field, useCommit } from './form.tsx';
 import { Shell, words } from './rail.tsx';
 import { type Column, StackTable } from './stack.tsx';
-import { time } from './time.ts';
+import { time } from './time.tsx';
 
 function RecordVerification({ onDone }: { onDone: () => Promise<void> }) {
   const { busy, commit, shown } = useCommit();

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, test } from './walk.ts';
+import { expect, type Locator, type Page, test, utcThenLabClock } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {
@@ -401,6 +401,15 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     /^1 · [0-9a-f]{64}$/,
   );
   await expect(signatureRow(page, 'Released').locator('td[data-label="Record Version"]')).toHaveText('1');
+  const reportTimes = page.locator('td[data-label="Time"]');
+  await expect(reportTimes, 'each Signature time in UTC, then on the Lab wall clock').toHaveText([
+    utcThenLabClock,
+    utcThenLabClock,
+    utcThenLabClock,
+  ]);
+  await expect(page.locator('dl.facts dt:text-is("Received") + dd')).toHaveText(utcThenLabClock);
+  const timesOnReport = await reportTimes.allTextContents();
+  const receivedOnReport = await page.locator('dl.facts dt:text-is("Received") + dd').textContent();
   await shot(page, 'test-report');
 
   const testId = new URL(page.url()).hash.split('/')[2] ?? '';
@@ -418,6 +427,12 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     'Reported',
     'Signatures unsigned',
   ]);
+  await expect(page.locator('td[data-label="Time"]'), 'the Test page shows the times the Test Report shows').toHaveText(
+    timesOnReport,
+  );
+  await expect(page.locator('dl.facts').first().locator('dt:text-is("Received") + dd')).toHaveText(
+    receivedOnReport ?? '',
+  );
   await expect(page.locator('dl.facts').first().locator('dt:text-is("Record Version") + dd')).toContainText('4 ·');
   await unsignedBesideMeanings(page);
   for (const [meaning, record] of [
