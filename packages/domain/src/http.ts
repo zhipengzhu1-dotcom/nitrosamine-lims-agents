@@ -8,6 +8,7 @@ const role = Type.Enum({
   Analyst: 'Analyst',
   Customer: 'Customer',
   LabManager: 'LabManager',
+  PlatformOperator: 'PlatformOperator',
   QA: 'QA',
   Reviewer: 'Reviewer',
   SampleCustodian: 'SampleCustodian',
@@ -171,6 +172,32 @@ const trailEntry = Type.Object({
 export type TrailEntry = Static<typeof trailEntry>;
 const trail = Type.Object({ record: recordRef, labZone: Type.String(), entries: Type.Array(trailEntry) });
 export type Trail = Static<typeof trail>;
+/** A person as the Admin of the session's Lab sees them: the roles are those held in that Lab. */
+const staffPerson = Type.Object({
+  id: uuid,
+  username: Type.String(),
+  printedName: Type.String(),
+  roles: Type.Array(role),
+  /** True once the person has set a password through their one-time link. */
+  credentialSet: Type.Boolean(),
+  identityVerifiedAt: nullable(instant),
+});
+export type StaffPerson = Static<typeof staffPerson>;
+const identityVerification = Type.Object({
+  id: uuid,
+  printedName: Type.String(),
+  evidence: Type.String(),
+  checkedBy: Type.String(),
+  checkedAt: instant,
+});
+export type IdentityVerification = Static<typeof identityVerification>;
+/** The Lab's staff, and the Identity Verifications its Admins recorded that no account names yet. */
+const staff = Type.Object({ people: Type.Array(staffPerson), awaitingAccount: Type.Array(identityVerification) });
+/** The roles an Admin grants. Platform Operator is held outside the LIMS, and Customer Users get portal accounts. */
+export const grantableRoles = ['SampleCustodian', 'Analyst', 'Reviewer', 'QA', 'LabManager', 'Admin'] as const;
+const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
+/** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
+const username = Type.String({ pattern: '^[a-z][a-z0-9.-]{2,39}$' });
 const reportRef = Type.Object({ id: uuid, number: Type.String() });
 /** `recordVersion` is the Test's latest; null for a Customer before release, since a hash of unreleased content would let a guessed value be confirmed. */
 const testView = Type.Object({
@@ -305,6 +332,38 @@ export const routes = {
     trail,
   ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
+  staff: route('GET', '/api/staff', {}, staff),
+  recordIdentityVerification: route(
+    'POST',
+    '/api/staff/identity-verifications',
+    { body: Type.Object({ printedName: text, evidence: text }, closed) },
+    identityVerification,
+  ),
+  createAccount: route(
+    'POST',
+    '/api/staff/accounts',
+    { body: Type.Object({ identityVerificationId: uuid, username }, closed) },
+    /** The link's token goes to the person, who sets their own password with it; the LIMS keeps only its hash. */
+    Type.Object({ person: staffPerson, link: Type.Object({ token: Type.String(), expiresAt: instant }) }),
+  ),
+  grantMembership: route(
+    'POST',
+    '/api/staff/memberships',
+    { body: Type.Object({ personId: uuid, role: Type.Enum(grantableRoles), reason: reasonText }, closed) },
+    staffPerson,
+  ),
+  changePrintedName: route(
+    'POST',
+    '/api/staff/printed-names',
+    { body: Type.Object({ personId: uuid, printedName: text, reason: reasonText }, closed) },
+    staffPerson,
+  ),
+  setPasswordThroughLink: route(
+    'POST',
+    '/api/credentials',
+    { body: Type.Object({ token: Type.String({ minLength: 1, maxLength: 100 }), password: text }, closed) },
+    Type.Object({ username: Type.String() }),
+  ),
 } satisfies Record<string, Route>;
 
 /** The route of one step, whose body requires a Commit Key, a testId when the step starts from a state, and a signature when it signs. */

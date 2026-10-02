@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
-import { hashPassword, verifyPassword } from '@lims/db/credentials';
+import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from '@lims/db/credentials';
 import { type ActorContext, routes } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
@@ -28,13 +28,14 @@ const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url
 
 const SIGN_OUT_NEEDS_NO_ROLE = 'none';
 
-const hashToken = (token: string) => createHash('sha256').update(token).digest();
+export const hashToken = (token: string) => createHash('sha256').update(token).digest();
 const notValid = () => refuse('badCredentials', 'the credentials are not valid');
 
 const REFUSAL: { readonly [F in SignInFailure]: () => never } = {
   UnknownUserId: notValid,
   WrongPassword: notValid,
   WrongPasswordOnLockedAccount: notValid,
+  NoCredential: notValid,
   AccountLocked: () => refuse('accountLocked', 'this account is locked'),
   NoLab: () => refuse('role', 'this account belongs to no Lab'),
 };
@@ -87,7 +88,7 @@ export async function reauthenticate(
 ): Promise<void> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', actor.person.id).executeTakeFirstOrThrow();
   const as = (reason: string) => ({ actor: `person:${person.username}`, role, reason });
-  if (await verifyPassword(password, person.passwordHash)) {
+  if (person.passwordHash && (await verifyPassword(password, person.passwordHash))) {
     if (person.lockedAt) refuse('accountLocked', 'this account is locked');
     if (person.failedLogins > 0)
       await audited(db, as(`Re-authenticate to sign ${step}`), (tx) =>
@@ -182,13 +183,17 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
         return notValid();
       }
 
-      const proven = await verifyPassword(password, person.passwordHash);
+      const proven = await verifyPassword(password, person.passwordHash ?? TIMING_DECOY_HASH);
       const labId = await lowestIdMembershipLab(db, person.id);
       const roles: Role[] = labId ? await rolesIn(db, person.id, labId) : person.customerId ? ['Customer'] : [];
       const subject = { subjectId: person.id, roles, sourceAddress };
 
-      if (!proven || person.lockedAt || !labId) {
+      if (!proven || !person.passwordHash || person.lockedAt || !labId) {
         const failure = await audited(db, SIGN_IN_SERVICE, async (tx): Promise<SignInFailure> => {
+          if (!person.passwordHash) {
+            await record(tx, { kind: 'SignInFailed', failureReason: 'NoCredential', ...subject });
+            return 'NoCredential';
+          }
           if (proven) {
             const reason = person.lockedAt ? 'AccountLocked' : 'NoLab';
             await record(tx, { kind: 'SignInFailed', failureReason: reason, ...subject });
@@ -228,6 +233,27 @@ export function loginRoutes(app: App, db: Kysely<DB>, accessEventKey: Buffer, se
       if (lockedMeanwhile) return REFUSAL.AccountLocked();
       reply.setCookie(SESSION_COOKIE, token);
       return (await actorFor(db, token)).actor;
+    },
+  });
+  app.route({
+    ...routes.setPasswordThroughLink,
+    handler: async (req) => {
+      const { token, password } = req.body;
+      if (password.length < MIN_PASSWORD_LENGTH)
+        refuse('malformed', `a password needs at least ${MIN_PASSWORD_LENGTH} characters`);
+      const passwordHash = await hashPassword(password);
+      const as = { ...SIGN_IN_SERVICE, reason: 'Set a password through a one-time link' };
+      const set = await audited(db, as, async (tx) => {
+        const { rows } = await sql<{ person: string | null }>`
+          select lims.set_password_through_link(${hashToken(token)}, ${passwordHash}) as person`.execute(tx);
+        const personId = rows[0]?.person;
+        if (!personId) return null;
+        const labId = await lowestIdMembershipLab(tx, personId);
+        const roles = labId ? await rolesIn(tx, personId, labId) : [];
+        await record(tx, { kind: 'PasswordSet', subjectId: personId, roles, sourceAddress: req.ip });
+        return tx.selectFrom('person').select('username').where('id', '=', personId).executeTakeFirstOrThrow();
+      });
+      return set ?? refuse('badCredentials', 'this link has been used or has expired; ask the Admin for a new one');
     },
   });
 }

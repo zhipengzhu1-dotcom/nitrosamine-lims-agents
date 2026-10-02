@@ -32,6 +32,11 @@ const id = {
   transaction: randomUUID(),
   accessEvent: randomUUID(),
   otherPerson: randomUUID(),
+  admin: randomUUID(),
+  operator: randomUUID(),
+  verified: randomUUID(),
+  identityVerification: randomUUID(),
+  credentialLink: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -47,6 +52,8 @@ const fixture: [string, Row][] = [
     'lims.person',
     { id: id.otherPerson, username: 'refusal.other', display_name: 'Other Person', password_hash: 'not-a-real-hash' },
   ],
+  ['lims.person', { id: id.admin, username: 'refusal.admin', display_name: 'Refusal Admin' }],
+  ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
   ['lims.method', { id: id.method, code: 'RF-MTH-0001', version: '1', title: 'NDMA by LC-MS/MS (fictional)' }],
   [
     'lims.submission',
@@ -57,6 +64,28 @@ const fixture: [string, Row][] = [
   ['lims.counter', { lab_id: null, kind: 'Submission' }],
   ['lims.counter', { lab_id: id.lab, kind: 'Sample' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.person, role: 'Analyst' }],
+  ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
+  ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
+  [
+    'lims.identity_verification',
+    {
+      id: id.identityVerification,
+      printed_name: 'Vera Checked',
+      evidence: 'Passport seen in person (fictional)',
+      checked_by: id.admin,
+      checked_in_lab_id: id.otherLab,
+    },
+  ],
+  [
+    'lims.person',
+    {
+      id: id.verified,
+      username: 'refusal.verified',
+      display_name: 'Vera Checked',
+      identity_verification_id: id.identityVerification,
+    },
+  ],
+  ['lims.credential_link', { id: id.credentialLink, person_id: id.verified, token_hash: Buffer.alloc(32, 5) }],
   ['lims.training_record', { lab_id: id.lab, person_id: id.person, method_id: id.method }],
   [
     'lims.sample',
@@ -160,7 +189,22 @@ const tables = {
   'lims.person': {
     noun: 'person',
     row: { username: 'refusal.second', display_name: 'Second Person', password_hash: 'not-a-real-hash' },
-    notNull: ['id', 'username', 'display_name', 'password_hash', 'failed_logins'],
+    notNull: ['id', 'username', 'display_name', 'failed_logins'],
+  },
+  'lims.identity_verification': {
+    noun: 'Identity Verification',
+    row: {
+      printed_name: 'Second Checked',
+      evidence: 'Driving licence seen in person (fictional)',
+      checked_by: id.admin,
+      checked_in_lab_id: id.otherLab,
+    },
+    notNull: ['id', 'printed_name', 'evidence', 'checked_by', 'checked_in_lab_id', 'checked_at'],
+  },
+  'lims.credential_link': {
+    noun: 'one-time link',
+    row: { person_id: id.verified, token_hash: Buffer.alloc(32, 6) },
+    notNull: ['id', 'person_id', 'token_hash', 'issued_at', 'expires_at'],
   },
   'lims.method': {
     noun: 'Method',
@@ -340,6 +384,8 @@ const auditedTables: Table[] = [
   'lims.signature',
   'lims.system_incident',
   'lims.access_event',
+  'lims.identity_verification',
+  'lims.credential_link',
 ];
 
 const bare = (table: string) => table.slice(table.indexOf('.') + 1);
@@ -351,7 +397,8 @@ function insert(table: string, row: Row): [string, unknown[]] {
   return [`insert into ${table} (${names}) values (${params})`, Object.values(row)];
 }
 
-const AUDIT_CONTEXT = `select set_config('lims.actor', 'svc:test', true), set_config('lims.role', 'system', true),
+// The Admin acts, so that an Identity Verification's checker is the actor of its write.
+const AUDIT_CONTEXT = `select set_config('lims.actor', 'person:refusal.admin', true), set_config('lims.role', 'system', true),
                               set_config('lims.reason', 'Probe a refusal', true),
                               lims.set_this_transaction('lims.numbering', 'on')`;
 
@@ -427,6 +474,8 @@ describe('the database refuses a second row with the key of an existing one', ()
   const keys: Record<Exclude<Table, 'lims.counter'>, Row> = {
     'lims.customer': { id: id.customer },
     'lims.person': { id: id.person },
+    'lims.identity_verification': { id: id.identityVerification },
+    'lims.credential_link': { id: id.credentialLink },
     'lims.method': { id: id.method },
     'lims.submission': { id: id.submission },
     'lims.lab': { lab_id: id.lab },
@@ -483,6 +532,18 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.person',
       change: { username: 'refusal.person' },
       constraint: 'person_username_key',
+    },
+    {
+      name: 'a second account on one Identity Verification is refused',
+      table: 'lims.person',
+      change: { identity_verification_id: id.identityVerification },
+      constraint: 'person_identity_verification_id_key',
+    },
+    {
+      name: 'a second one-time link with the same token is refused',
+      table: 'lims.credential_link',
+      change: { token_hash: Buffer.alloc(32, 5) },
+      constraint: 'credential_link_token_hash_key',
     },
     {
       name: 'a second Method with the same code and version is refused',
@@ -586,6 +647,30 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'person_customer_id_fkey',
     },
     {
+      name: 'a person on an Identity Verification that does not exist is refused',
+      table: 'lims.person',
+      change: { identity_verification_id: missing },
+      constraint: 'person_identity_verification_id_fkey',
+    },
+    {
+      name: 'an Identity Verification by a checker who does not exist is refused',
+      table: 'lims.identity_verification',
+      change: { checked_by: missing },
+      constraint: 'identity_verification_checked_by_fkey',
+    },
+    {
+      name: 'an Identity Verification checked in a Lab that does not exist is refused',
+      table: 'lims.identity_verification',
+      change: { checked_in_lab_id: missing },
+      constraint: 'identity_verification_checked_in_lab_id_fkey',
+    },
+    {
+      name: 'a one-time link for a person who does not exist is refused',
+      table: 'lims.credential_link',
+      change: { person_id: missing },
+      constraint: 'credential_link_person_id_fkey',
+    },
+    {
       name: 'a Submission for a Customer that does not exist is refused',
       table: 'lims.submission',
       change: { customer_id: missing },
@@ -665,12 +750,6 @@ describe('the database refuses a reference to a row that does not exist', () => 
     },
     noLab('lims.record_version', 'Record Version'),
     noLab('lims.signature', 'Signature'),
-    {
-      name: 'a Signature by a person who does not exist is refused',
-      table: 'lims.signature',
-      change: { person_id: missing },
-      constraint: 'signature_person_id_fkey',
-    },
     {
       name: 'a Signature on a Record Version that does not exist is refused',
       table: 'lims.signature',
@@ -912,6 +991,39 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { ...unknownUserIdAttempt, roles: '{Analyst}' },
       constraint: 'access_event_roles_check',
     },
+    ...each(
+      'an Identity Verification without a printed name is refused',
+      'lims.identity_verification',
+      'printed_name',
+      ['', '   '],
+      'identity_verification_printed_name_check',
+    ),
+    ...each(
+      'an Identity Verification that does not say what was checked is refused',
+      'lims.identity_verification',
+      'evidence',
+      ['', '   '],
+      'identity_verification_evidence_check',
+    ),
+    ...each(
+      'a one-time link whose token hash is not 32 bytes is refused',
+      'lims.credential_link',
+      'token_hash',
+      [Buffer.alloc(31, 7), Buffer.alloc(33, 7)],
+      'credential_link_token_hash_check',
+    ),
+    {
+      name: 'a one-time link that expires before it is issued is refused',
+      table: 'lims.credential_link',
+      change: { expires_at: '2000-01-01T00:00:00Z' },
+      constraint: 'credential_link_expiry_check',
+    },
+    {
+      name: 'a one-time link used outside its life is refused',
+      table: 'lims.credential_link',
+      change: { used_at: '2000-01-01T00:00:00Z' },
+      constraint: 'credential_link_use_check',
+    },
   ]);
 });
 
@@ -1114,6 +1226,30 @@ describe('a Signature, a Record Version, an Access Event, an Audit Trail entry, 
       trigger: 'refuse_truncate',
       statement: 'truncate lims.system_incident',
     },
+    {
+      name: 'updating an Identity Verification is refused',
+      table: 'lims.identity_verification',
+      trigger: 'refuse_change',
+      statement: `update lims.identity_verification set evidence = 'Nothing'`,
+    },
+    {
+      name: 'deleting an Identity Verification is refused',
+      table: 'lims.identity_verification',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.identity_verification',
+    },
+    {
+      name: 'truncating the Identity Verifications is refused',
+      table: 'lims.identity_verification',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.identity_verification cascade',
+    },
+    {
+      name: 'truncating the one-time links is refused',
+      table: 'lims.credential_link',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.credential_link',
+    },
   ];
   for (const c of cases) {
     covered.add(`${c.table}.${c.trigger}`);
@@ -1151,6 +1287,165 @@ describe('a Signature, a Record Version, an Access Event, an Audit Trail entry, 
   });
 });
 
+describe('staff accounts keep their identity, and Admin stays apart from the work', () => {
+  const refusedAs = async (statement: string, values: unknown[], code: string, message: string) => {
+    const error = await refusalOf(statement, values);
+    assert.deepEqual([error.code, error.message], [code, message]);
+  };
+  const apart = 'a person who holds Admin or Platform Operator holds no business role, in any Lab';
+  const grant = 'insert into lims.membership (lab_id, person_id, role) values ($1, $2, $3)';
+
+  covered.add('lims.membership.keep_administration_apart');
+  it('a business role for a holder of Admin, even in another Lab, is refused', async () => {
+    for (const role of ['Customer', 'SampleCustodian', 'Analyst', 'Reviewer', 'QA', 'LabManager'])
+      await refusedAs(grant, [id.lab, id.admin, role], 'LA008', apart);
+  });
+  it('a business role for a holder of Platform Operator is refused', async () => {
+    await refusedAs(grant, [id.otherLab, id.operator, 'QA'], 'LA008', apart);
+  });
+  it('Admin or Platform Operator for a holder of a business role, even in another Lab, is refused', async () => {
+    for (const role of ['Admin', 'PlatformOperator'])
+      await refusedAs(grant, [id.otherLab, id.person, role], 'LA008', apart);
+  });
+  it('turning an Admin membership into a business role is refused', async () => {
+    await refusedAs(`update lims.membership set role = 'QA' where person_id = $1`, [id.admin], 'LA008', apart);
+  });
+  it('Admin and Platform Operator may be held together, as the owner does under the demo exception', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(grant, [id.otherLab, id.operator, 'Admin']);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it('two Labs granting Admin and a business role to one person at once: the second waits and is refused', async () => {
+    const other = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    await other.connect();
+    const fresh = randomUUID();
+    try {
+      await client.query('begin');
+      await client.query(AUDIT_CONTEXT);
+      await client.query(
+        `insert into lims.person (id, username, display_name) values ($1, 'refusal.race', 'Race Person')`,
+        [fresh],
+      );
+      await client.query('commit');
+      await client.query('begin');
+      await client.query(AUDIT_CONTEXT);
+      await client.query(grant, [id.lab, fresh, 'Admin']);
+      await other.query('begin');
+      await other.query(AUDIT_CONTEXT);
+      const second = other.query(grant, [id.otherLab, fresh, 'Analyst']).then(
+        () => assert.fail('the database granted a business role to a person being made Admin'),
+        (e: unknown) => (e instanceof pg.DatabaseError ? e : assert.fail(String(e))),
+      );
+      await client.query('commit');
+      const error = await second;
+      assert.deepEqual([error.code, error.message], ['LA008', apart]);
+    } finally {
+      await other.query('rollback');
+      await other.end();
+    }
+  });
+
+  covered.add('lims.person.keep_identity');
+  it('changing a username is refused, even by the superuser', async () => {
+    await refusedAs(
+      `update lims.person set username = 'refusal.renamed' where id = $1`,
+      [id.person],
+      'LA002',
+      'a username is never changed',
+    );
+  });
+  it("changing a person's Identity Verification is refused", async () => {
+    await refusedAs(
+      'update lims.person set identity_verification_id = null where id = $1',
+      [id.verified],
+      'LA002',
+      "a person's Identity Verification is never changed",
+    );
+  });
+
+  covered.add('lims.identity_verification.checked_by_the_acting_admin');
+  it('an Identity Verification recorded in the name of someone other than the acting Admin of its Lab is refused', async () => {
+    const checkedBy = (person: string, lab: string) =>
+      refusedAs(
+        `insert into lims.identity_verification (printed_name, evidence, checked_by, checked_in_lab_id)
+         values ('Forged Check', 'Nothing seen', $1, $2)`,
+        [person, lab],
+        'LA007',
+        'an Identity Verification is recorded by the Admin who checked',
+      );
+    await checkedBy(id.person, id.lab);
+    await checkedBy(id.operator, id.lab);
+    await checkedBy(id.admin, id.lab);
+  });
+
+  covered.add('lims.credential_link.link_needs_identity_verification');
+  it('a one-time link for an account with no Identity Verification is refused', async () => {
+    await refusedAs(
+      'insert into lims.credential_link (person_id, token_hash) values ($1, $2)',
+      [id.person, Buffer.alloc(32, 8)],
+      'LA007',
+      'a one-time link goes only to an account with an Identity Verification',
+    );
+  });
+
+  covered.add('lims.credential_link.use_link_once');
+  it('a one-time link is only ever marked used, once, even by the superuser', async () => {
+    const once = 'a one-time link is only ever marked used, once';
+    await refusedAs('update lims.credential_link set token_hash = $1', [Buffer.alloc(32, 9)], 'LA002', once);
+    await refusedAs('delete from lims.credential_link', [], 'LA002', once);
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('update lims.credential_link set used_at = clock_timestamp() where id = $1', [
+        id.credentialLink,
+      ]);
+      await client.query('savepoint used');
+      await assert.rejects(
+        client.query('update lims.credential_link set used_at = clock_timestamp() where id = $1', [id.credentialLink]),
+        { code: 'LA002', message: once },
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.signature.sign_as_the_person');
+  covered.add('lims.signature.signature_printed_name_not_null');
+  it('a Signature takes the printed name and username its signer has, whatever the insert says', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      const { rows } = await client.query<Row>(
+        `insert into lims.signature (lab_id, person_id, meaning, record_version_id, printed_name, username)
+         values ($1, $2, 'Reviewed', $3, 'Forged Name', 'forged.user') returning printed_name, username`,
+        [id.lab, id.person, id.laterRecordVersion],
+      );
+      assert.deepEqual(rows, [{ printed_name: 'Refusal Person', username: 'refusal.person' }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it('a Signature by a person who does not exist is refused', async () => {
+    const error = await refusalOfRow('lims.signature', { person_id: missing });
+    assert.deepEqual([error.code, error.table, error.column], ['23502', 'signature', 'printed_name'], error.message);
+  });
+  covered.add('lims.signature.signature_person_id_fkey');
+  it('removing a person who has signed is refused', async () => {
+    const signer = randomUUID();
+    const error = await refusalOf(
+      `insert into lims.person (id, username, display_name) values ('${signer}', 'refusal.signer', 'Signer');
+       insert into lims.signature (lab_id, person_id, meaning, record_version_id)
+         values ('${id.lab}', '${signer}', 'Reviewed', '${id.laterRecordVersion}');
+       delete from lims.person where id = '${signer}'`,
+    );
+    assertConstraint(error, '23503', 'lims.signature', 'signature_person_id_fkey');
+  });
+});
+
 it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys, the counters and the Audit Trail itself', async () => {
   const { rows } = await client.query<{ name: string }>(
     `select 'lims.' || c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
@@ -1176,6 +1471,10 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
       'unreachable: generated from content, which is not null',
     ],
     ['lims.session.session_lab_id_id_person_id_key', 'unreachable: (lab_id, id) is already the key'],
+    [
+      'lims.signature.signature_username_not_null',
+      'unreachable: sign_as_the_person sets it with printed_name, whose not null refuses first',
+    ],
     ['lims.test.version_record', 'record-version.test.ts'],
     ['lims.result.version_record', 'record-version.test.ts'],
     ['lims.test_report.version_record', 'record-version.test.ts'],

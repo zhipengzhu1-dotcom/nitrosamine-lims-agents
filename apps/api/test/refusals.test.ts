@@ -56,6 +56,18 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   enterResult: step('enterResult', { commitKey: randomUUID(), testId, input: result, signature }),
   review: step('review', { commitKey: randomUUID(), testId, input: {}, signature }),
   release: step('release', { commitKey: randomUUID(), testId, input: {}, signature }),
+  recordIdentityVerification: entry(routes.recordIdentityVerification, {
+    printedName: 'Nell Newcomer',
+    evidence: 'Passport seen in person (fictional)',
+  }),
+  createAccount: entry(routes.createAccount, { identityVerificationId: randomUUID(), username: 'nell.newcomer' }),
+  grantMembership: entry(routes.grantMembership, { personId: randomUUID(), role: 'Analyst', reason: 'New starter' }),
+  changePrintedName: entry(routes.changePrintedName, {
+    personId: randomUUID(),
+    printedName: 'Nell Newcomer-Smith',
+    reason: 'Marriage',
+  }),
+  setPasswordThroughLink: entry(routes.setPasswordThroughLink, { token: 'not-a-link', password: 'unused' }),
   logout: entry(routes.logout, {}),
 };
 
