@@ -193,7 +193,7 @@ test('QA verifying a broken chain sees Broken beside that chain, in its own glyp
   await page.getByRole('button', { name: 'Verify chain' }).click();
   const chains = page.locator('.chains li');
   await expect(chains).toHaveText([
-    /^Lab chain Broken entry 1 fails to verify; intact through entry 0$/,
+    /^Lab chain Broken entry 1 fails to verify; intact through entry 0; recorded as System Incident \w{8}$/,
     /^Company chain Intact verified through entry \d+$/,
   ]);
   const [broken, intact] = [chains.first().locator('.status'), chains.last().locator('.status')];
