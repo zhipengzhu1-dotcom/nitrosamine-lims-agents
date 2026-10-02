@@ -1547,9 +1547,9 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint: 'access_event_lab_switch_check',
     },
     {
-      name: 'a lockout Access Event with a failure reason is refused',
+      name: 'a sign-out Access Event with a failure reason is refused',
       table: 'lims.access_event',
-      change: { kind: 'Lockout' },
+      change: { kind: 'SignOut' },
       constraint: 'access_event_failure_check',
     },
     {
@@ -2448,6 +2448,8 @@ it('every constraint and trigger of a freshly migrated database has a refusing t
   const elsewhere = new Map([
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
     ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
+    ['lims.access_event.stamp_lockout', 'session-expiry.test.ts'],
+    ['lims.person.lock_once', 'session-expiry.test.ts'],
     ['public.schema_migration.refuse_change', 'migrate.test.ts'],
     ['public.schema_migration.refuse_truncate', 'migrate.test.ts'],
     ['public.schema_migration.schema_migration_sha256_not_null', 'migrate.test.ts'],
