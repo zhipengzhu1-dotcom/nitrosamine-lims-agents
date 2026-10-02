@@ -178,6 +178,10 @@ _Avoid_: MU budget, uncertainty (alone, for the record)
 One Method requested on one Sample; the unit of work assigned to an Analyst in one Lab.
 _Avoid_: Analysis, assay, job
 
+**Worklist**:
+The list of a Lab's Tests a person may see, with each Test's state; a Customer User sees only their Customer's Tests. A person filters it by Test state and searches it, and opens a Test from it.
+_Avoid_: Job list, dashboard
+
 **GxP Class**:
 Whether a Test is GMP or non-GMP. Every Test is GMP unless marked non-GMP at acceptance with a signed reason. Once results exist it can be raised to GMP, never lowered. Non-GMP covers only method development, feasibility, and Customer-labelled research or screening samples. Validation, verification, transfer and Phase 1 material are always GMP. Non-GMP work is still audit-trailed, signed and second-checked where data is typed or corrected, and still needs a Reviewed signing before its Test Report issues, but skips QA release, and its Test Reports carry no accreditation mark.
 _Avoid_: GMP flag, regulated/unregulated
