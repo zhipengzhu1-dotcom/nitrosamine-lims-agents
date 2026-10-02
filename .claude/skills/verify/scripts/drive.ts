@@ -119,6 +119,9 @@ export async function open(slug: string, screen: Screen = 'desktop'): Promise<Pr
     },
     signOut: async () => {
       note('sign out');
+      const session = page.locator('.rail__toggle');
+      if ((await session.isVisible()) && (await session.getAttribute('aria-expanded')) !== 'true')
+        await session.click();
       await page.getByRole('button', { name: 'Sign out' }).click();
       await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
     },

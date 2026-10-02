@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, type Page, test } from './walk.ts';
+import { expect, openSessionBlock, type Page, signOutFromRail, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string) {
@@ -35,7 +35,7 @@ test('on an enrolled bench browser, Lock hides the records until the same person
   await sheet.getByLabel('Sample description').fill(description);
   await sheet.getByRole('button', { name: 'Submit' }).click();
   await railSays(page, 'now Requested');
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOutFromRail(page);
 
   await signIn(page, 'ada.admin');
   await expect(page.locator('.rail')).toContainText('Unregistered device');
@@ -57,10 +57,11 @@ test('on an enrolled bench browser, Lock hides the records until the same person
   await railSays(page, `This browser is enrolled as ${bench}`);
   await expect(row).toContainText('Enrolled');
   await expect(page.getByText(`This browser is enrolled as Workstation ${bench}`)).toBeVisible();
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  await signOutFromRail(page);
 
   await signIn(page, 'ana.analyst');
   await expect(page.locator('.rail')).toContainText(`${bench} · LC-MS/MS Room (fictional)`);
+  await openSessionBlock(page);
   for (const name of ['Switch user', 'Lock', 'Sign out']) await atLeast44(page, name);
   await expect(record, 'the Test is on screen before the lock').toBeVisible();
 
