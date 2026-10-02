@@ -27,7 +27,8 @@ case "${1:-}" in
     if pgrep -f 'ci-runner.sh slot' >/dev/null; then echo "The slots are already running. Run stop first." >&2; exit 1; fi
     mkdir -p "$HOME/Library/Logs/lims-runner"
     for n in "${SLOTS[@]}"; do
-      nohup "$0" slot "$n" >>"$HOME/Library/Logs/lims-runner/$n.log" 2>&1 &
+      # caffeinate holds off idle sleep while the slot runs. A sleeping Mac freezes the runner, and GitHub fails its job.
+      nohup caffeinate -i "$0" slot "$n" >>"$HOME/Library/Logs/lims-runner/$n.log" 2>&1 &
     done
     ;;
   stop)
@@ -36,6 +37,9 @@ case "${1:-}" in
     gh api --paginate "repos/$REPO/actions/runners" --jq '.runners[] | select(.name | startswith("lims-runner-")) | .id' |
       while read -r id; do gh api -X DELETE "repos/$REPO/actions/runners/$id" || echo "runner $id not deleted" >&2; done
     ;;
-  status) gh api --paginate "repos/$REPO/actions/runners" --jq '.runners[] | [.name, .status, .busy] | @tsv' ;;
+  status)
+    gh api --paginate "repos/$REPO/actions/runners" --jq '.runners[] | [.name, .status, .busy] | @tsv'
+    if pgrep -f '^caffeinate -i .*ci-runner\.sh slot' >/dev/null; then echo "The slots keep the Mac awake."
+    else echo "No slot keeps the Mac awake. Run stop, then start." >&2; exit 1; fi ;;
   *) echo "usage: scripts/ci-runner.sh build|start|status|stop|slot check|e2e" >&2; exit 2 ;;
 esac

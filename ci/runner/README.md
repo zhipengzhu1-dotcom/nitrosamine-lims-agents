@@ -42,13 +42,15 @@ scripts/ci-runner.sh start
 
 Each slot registers its runner and starts its container. The slots keep running after you close the terminal. They stop when the Mac restarts, so run `start` again after a restart. `start` refuses while the slots are still running, because a second loop would remove the first loop's container mid-job. While Docker Desktop is stopped, each slot waits and registers no runner.
 
+Each slot runs under `caffeinate -i`, which holds off idle sleep while the slots run, on battery as well as on power. A sleeping Mac freezes the Docker VM and the runner inside it, and GitHub fails the job 10 minutes after the runner's last heartbeat. On 2026-10-02 the Mac, set to sleep after one minute idle, slept 8 seconds into the walk of `main`'s e2e job. The rerun started during a dark wake, a short wake that macOS takes while asleep, and the Mac slept again 13 seconds in, although a `caffeinate -i` hold was in place. So once the Mac sleeps for any reason, a dark wake can hand a slot a job that it then loses. After a wake the VM's clock lags until Docker resyncs it, and until then the slot registers a runner every few seconds that GitHub refuses for an expired token. A closed lid, Sleep in the Apple menu and a flat battery still sleep the Mac, so run `stop` before any of them. `stop` also releases the hold.
+
 ## Check the runners
 
 ```sh
 scripts/ci-runner.sh status
 ```
 
-It prints one line for each registered runner, with its name, `online` or `offline`, and whether it is running a job. Each slot's log is in `~/Library/Logs/lims-runner/<slot>.log`, and `docker ps --filter name=lims-runner-` shows the containers.
+It prints one line for each registered runner, with its name, `online` or `offline`, and whether it is running a job, then whether the slots keep the Mac awake. It exits 1 when no slot runs under `caffeinate`: when the slots are stopped, or when slots started by an older version of the script are still running. Each slot's log is in `~/Library/Logs/lims-runner/<slot>.log`, and `docker ps --filter name=lims-runner-` shows the containers.
 
 ## Stop the runners
 
