@@ -501,7 +501,7 @@ The Audit Trail record of one sign-in (succeeded or failed), sign-out, lock, unl
 _Avoid_: Login log, session log, access log
 
 **Workstation**:
-A bench PC the Admin has registered with its name, Lab and Room, which every session and Access Event from it carries. A device that is not registered shows as an unregistered device; the portal and desk PCs may be used that way.
+A bench PC the Admin has registered with its name, Lab, Room and browser policy (the managed browser settings it runs, as the Admin describes them), and whose browser the Admin has enrolled with a device token. Every session and Access Event from that browser carries it, and a session on it opens in its Lab. A device that is not registered shows as an unregistered device; the portal and desk PCs may be used that way.
 _Avoid_: Terminal, client, kiosk
 
 **Commit Key**:

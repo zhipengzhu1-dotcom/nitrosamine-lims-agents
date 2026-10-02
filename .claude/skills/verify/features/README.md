@@ -5,7 +5,7 @@ This directory is the maintained source for verifying what the LIMS does for the
 ## Baseline preconditions
 
 - Start an instance with `.claude/skills/verify/scripts/up.sh`, and require every line of `doctor.sh` to be `ok:`.
-- The database is seeded fresh: one Lab (`RD`), one Customer, the Method `RD-MTH-0001 v1`, the 8 demo accounts and no Tests.
+- The database is seeded fresh: one Lab (`RD`) with two Rooms, one Customer, the Method `RD-MTH-0001 v1`, the 8 demo accounts and no Tests.
 - Every account signs in with `verify-demo-password`.
 - Never drive an instance that this run did not start, such as `pnpm e2e`'s, which takes this checkout's own ports in 10000-19999 (from `node packages/db/src/checkout.ts e2e-ports`) and owns `lims_e2e_<suffix>`, or the owner's `scripts/dev.sh` on 5173.
 
@@ -35,5 +35,6 @@ Each feature file starts with an H1 and one paragraph on the behaviour a user se
 - [Take a Test through its steps](./test-steps.md) covers Receive, Assign, Enter Result, Review and Release, with their Signatures and refusals.
 - [Test Report](./test-report.md) covers the released report, its three Signatures and Verify Audit Trail.
 - [Test Audit Trail](./test-audit-trail.md) covers the Audit Trail table on a Test page and the rows behind it.
+- [Workstations, Lock and Switch user](./workstations.md) covers registering and enrolling a Workstation, and the rail's Lock and Switch user.
 
 Not mapped yet: the nav modules (Equipment, Inventory, Deviations, Documents, Training, Stability, Notebooks, Dashboards). Each is a placeholder page at `#/<module>` that says what it will hold. Add a feature file when one of them gets behaviour.

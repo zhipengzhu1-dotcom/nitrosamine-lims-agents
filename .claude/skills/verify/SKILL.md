@@ -68,7 +68,7 @@ Stable handles, all from the shipped UI (`apps/web/src`):
 - Sign in: the fields `Username` and `Password`, and the button `Sign in`. A refusal shows in `role=alert`.
 - The worklist has the heading `Tests`. Each Test is a link named by its Sample number, which matches `/^RD-S-\d{4}-\d{6}$/`.
 - On a Test page, the `h1` holds the Sample number and the state in words, such as `Submitted For Review`.
-- The rail is `role=contentinfo`. Its status line is `role=status`. It offers only the step the signed-in person may take next, as one button: `Submit`, `Receive`, `Assign`, `Enter Result`, `Review` or `Release`. `Sign out` is always there.
+- The rail is `role=contentinfo`. Its status line is `role=status`. It offers only the step the signed-in person may take next, as one button: `Submit`, `Receive`, `Assign`, `Enter Result`, `Review` or `Release`. `Switch user`, `Lock` and `Sign out` are always there, and the rail names the Workstation or `Unregistered device`.
 - The step form fields are `Method`, `Sample description`, `Analyst`, `Analyte`, `Result as written`, `Unit`, `Injection sequence`, `Notebook reference` and `Performed on`. Use `{ exact: true }` for these labels.
 - The signature sheet has a field matching the label `/Password/` and the button `Sign as Performed|Reviewed|Released`.
 - When the server accepts a step, the status line reads `... The Test is now <State in words>.` When it refuses, the line reads `Refused: <message>.` and adds ` Nothing has been signed.` for a signing step.

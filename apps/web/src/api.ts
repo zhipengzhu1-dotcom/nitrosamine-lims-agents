@@ -29,8 +29,14 @@ let signedOut = (_message: string) => {};
 export const onSignedOut = (fn: (message: string) => void) => {
   signedOut = fn;
 };
+export type LockMode = 'unlock' | 'switch';
+let locked = (_message: string, _mode: LockMode) => {};
+let nextLockMode: LockMode = 'unlock';
+export const onLocked = (fn: (message: string, mode: LockMode) => void) => {
+  locked = fn;
+};
 
-/** Calls a route and gives its reply. A `noSession` refusal returns to sign-in before it is thrown. */
+/** Calls a route and gives its reply. A `noSession` refusal returns to sign-in, and a `sessionLocked` one shows the lock screen, before it is thrown. */
 export function api<R extends Route>(route: R, ...request: RouteInput<R>): Promise<RouteReply<R>> {
   const [input] = request;
   return call(route, pathOf(route, input), input);
@@ -48,7 +54,18 @@ async function call<R extends Route>(route: R, path: string, body?: unknown): Pr
   if (res.ok) return json as RouteReply<R>;
   const refused = refusedBy(json, `the LIMS did not answer (${res.status})`);
   if (refused.kind === 'noSession') signedOut(refused.message);
+  if (refused.kind === 'sessionLocked') {
+    locked(refused.message, nextLockMode);
+    nextLockMode = 'unlock';
+  }
   throw refused;
+}
+
+/** Locks the session, then shows the lock screen with the server's words once a read is refused as locked; Switch user opens it on the sign-in form. */
+export async function lock(mode: LockMode): Promise<void> {
+  await api(routes.lock);
+  nextLockMode = mode;
+  await api(routes.me).catch(() => {});
 }
 
 export async function signOut(): Promise<void> {
