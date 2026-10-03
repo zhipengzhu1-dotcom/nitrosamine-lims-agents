@@ -39,7 +39,7 @@ const signInOn = async (browser: Client, account: Account, labId = api.labId) =>
 const eventsOf = (subjectId: string) =>
   api.superuser
     .selectFrom('accessEvent')
-    .select(['kind', 'subjectId', 'takenById', 'workstationId', 'sessionId'])
+    .select(['kind', 'subjectId', 'takenById', 'workstationId', 'sessionId', 'failureReason'])
     .where('subjectId', '=', subjectId)
     .orderBy('at')
     .execute();
@@ -345,13 +345,13 @@ describe('Lock and Switch user', () => {
 
     const [session] = await sessionsOf(ana.id);
     assert.deepEqual(
-      (await eventsOf(ana.id)).map((e) => [e.kind, e.workstationId, e.sessionId]),
+      (await eventsOf(ana.id)).map((e) => [e.kind, e.workstationId, e.sessionId, e.failureReason]),
       [
-        ['SignInSucceeded', workstation.id, session?.id],
-        ['Lock', workstation.id, session?.id],
-        ['UnlockFailed', workstation.id, session?.id],
-        ['UnlockFailed', workstation.id, session?.id],
-        ['Unlock', workstation.id, session?.id],
+        ['SignInSucceeded', workstation.id, session?.id, null],
+        ['Lock', workstation.id, session?.id, null],
+        ['UnlockFailed', workstation.id, session?.id, 'WrongPassword'],
+        ['UnlockFailed', workstation.id, session?.id, 'WrongPassword'],
+        ['Unlock', workstation.id, session?.id, null],
       ],
     );
   });
@@ -372,9 +372,14 @@ describe('Lock and Switch user', () => {
       .executeTakeFirstOrThrow();
     assert.equal(person.failedLogins, 1, 'a locked account keeps the failures that led to it');
     assert.deepEqual(
-      (await eventsOf(ana.id)).map((e) => e.kind),
-      ['SignInSucceeded', 'Lock', 'UnlockFailed', 'UnlockFailed'],
-      'the refused unlock is an Access Event, as a sign-in refused by a Lockout is',
+      (await eventsOf(ana.id)).map((e) => [e.kind, e.failureReason]),
+      [
+        ['SignInSucceeded', null],
+        ['Lock', null],
+        ['UnlockFailed', 'WrongPassword'],
+        ['UnlockFailed', 'AccountLocked'],
+      ],
+      'the refused unlock is an Access Event with its reason, as a sign-in refused by a Lockout is',
     );
     const reasons = await api.superuser
       .selectFrom('auditEntry')
