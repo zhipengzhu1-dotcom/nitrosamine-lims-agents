@@ -19,7 +19,7 @@ type Route =
   | { page: 'welcome'; token: string }
   | { page: 'trail'; table: AuditedTable; id: string }
   | { page: 'auditExport' }
-  /** A rail module; `open` names the record open beside it: the person whose Access Events the Staff module shows, or the System Incident's reference. */
+  /** A rail module; `open` names the record open beside it: the person whose Access Events the Staff module shows, the System Incident's reference, or the Equipment's id. */
   | { page: 'module'; module: Module; open: string | null };
 
 function parse(hash: string): Route {
@@ -33,7 +33,7 @@ function parse(hash: string): Route {
   if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
   if (!module) return { page: 'tests', open: null };
-  if (module.key === 'incidents') return { page: 'module', module, open: id || null };
+  if (module.key === 'incidents' || module.key === 'equipment') return { page: 'module', module, open: id || null };
   return { page: 'module', module, open: module.key === 'staff' && id && b === 'access-events' ? id : null };
 }
 

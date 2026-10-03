@@ -343,6 +343,9 @@ th {
   font-size: 13px;
   cursor: pointer;
 }
+.record-steps {
+  margin-bottom: 12px;
+}
 .pipe input {
   flex: none;
   width: 18px;

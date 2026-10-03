@@ -37,7 +37,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 4 | Authorisations | |
 | 4 | Appointments | |
 | 4 | Competence Assessments | |
-| 7 | Equipment | |
+| 7 | Equipment | Partly: [#129](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/129) built registration (Quarantined until QA signs Approved), the Fitness Status, marking suspect, Equipment Events signed Performed, moves between Rooms, retirement and the Logbook. Unbuilt: Expired from a Calibration due date ([#130](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/130)), and a storage location refusing placements while it is unfit |
 | 7 | Rooms | |
 | 7 | Check Plans | |
 | 7 | Checks | |
