@@ -57,6 +57,8 @@ export interface AppOptions {
   release: string;
   /** How often to run the expiry sweep, or null for an API whose caller runs it. */
   sweepEveryMs: number | null;
+  /** How long one chain's recompute may run before Verify chain refuses; the scope's defaults when absent. */
+  verifyReadLimitSeconds?: number | undefined;
 }
 
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {

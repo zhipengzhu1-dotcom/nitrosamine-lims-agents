@@ -6,7 +6,7 @@ import {
   type AuditExport,
   type AuditExportFormat,
   auditExportData,
-  type ChainVerification,
+  type ChainReading,
   REDACTED,
   routes,
   type StepInput,
@@ -479,7 +479,7 @@ it('an export that finds a chain break names, in its data file and its PDF, the 
     'the PDF names the break and its System Incident, in its state',
   );
 
-  const incidentOf = (chains: ChainVerification[]) => chains[0]?.breaks[0]?.incident;
+  const incidentOf = (chains: ChainReading[]) => chains[0]?.breaks[0]?.incident;
   assert.equal(incidentOf(dataOf(await generate(northwindId)).chains), incident, 'a second export');
   assert.equal(incidentOf(ok(await as.quinn.call(routes.verifyAuditTrail)).chains), incident, 'Verify chain');
   const opened = await api.db

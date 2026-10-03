@@ -36,7 +36,7 @@ We build a Vite + React 19 single-page app on a Fastify 5 API (Node 24), with Ky
   - The 7-day lock covers the whole bucket, since every prefix is kept at least that long.
   - Each backup run is recorded on the company audit chain with its prefixes and scheduled expiry dates. The Worker's daily check compares the backups expected with those present and reports expiries and anything missing, which the server writes to the company chain.
   - The `age` private key exists in two offline copies in separate places.
-- **Recovery.** The written objectives are 24 hours to restore (RTO) and 24 hours of data loss (RPO). A restore drill runs each quarter, decrypting with one of the two key copies. It passes when chain-verify succeeds against the S3 anchors (the in-database chain alone while anchoring is deferred) and every report-store hash matches.
+- **Recovery.** The written objectives are 24 hours to restore (RTO) and 24 hours of data loss (RPO). A restore drill runs each quarter, decrypting with one of the two key copies. It passes when Recompute every entry succeeds against the S3 anchors (the in-database chain alone while anchoring is deferred), never a Verify chain resumed from the restored copy's own Chain Verifications, and every report-store hash matches.
 - **System Incidents.**
   - **What counts:** an unexpected failure answered with a reference (every 500), chain-verify failure, a missed backup or anchor, a failed drill, a clock step, a lockout, or repeated failed signing.
   - **An unexpected failure:** the person is shown a reference, and the System Incident records it with the step, the record ID, the requesting person, the error class, the SQLSTATE and constraint name, and the Lab. It never holds the error message. Its actor is a service identity. When the database cannot write it, the API log line records an unwritten System Incident with its reference and instant, and the 500 still shows the reference.
@@ -47,7 +47,7 @@ We build a Vite + React 19 single-page app on a Fastify 5 API (Node 24), with Ky
 
 ## Change control and security
 
-- **Release Log.** Every release, configuration change and host move gets a Release Log entry: image digests, CI and ZAP baseline results, and the owner's *Approved* signature. After the move, the VPS serves nothing until chain-verify passes against the S3 anchors.
+- **Release Log.** Every release, configuration change and host move gets a Release Log entry: image digests, CI and ZAP baseline results, and the owner's *Approved* signature. After the move, the VPS serves nothing until Recompute every entry passes against the S3 anchors, since the moved copy brings its own Chain Verifications and a resumed Verify chain would trust them.
 - **Patching.** Image digests are bumped monthly, and critical fixes go in within 7 days, including macOS and Colima now, and the VPS operating system, kernel and sshd after the move.
 - **Security testing.** An OWASP ZAP baseline scan runs in CI. It is passive, so a real penetration test is required before any real data or any second user.
 - **Hardening.** Two build rules: a Content Security Policy and the standard security headers are set at the edge, and production images carry no development dependencies.
