@@ -116,11 +116,8 @@ export type RecordedBreak = {
   covered: CoveredBreak[];
 };
 
-/**
- * A chain verification System Incident's break range, the fingerprint it recorded for the breaks inside it, and those
- * breaks as JSON text, which an incident opened before the LIMS stored them does not have.
- */
-export type BreakRange = { chain: string; first: string; last: string; fingerprint: Buffer; stored: string | null };
+/** A chain verification System Incident, its break range and the fingerprint it recorded for the breaks inside it. */
+export type BreakRange = { id: string; chain: string; first: string; last: string; fingerprint: Buffer };
 
 /** One break as JSON, as a verification records it among the breaks an incident covers. */
 const coveredBreak = (b: string) =>
@@ -177,9 +174,10 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     },
     /**
      * Recomputes the breaks covering `range` on this Lab's or the company chain, each beside the breaks the incident
-     * stored, and whether they are the breaks it recorded; null for another Lab's chain.
+     * stored, whether they are the breaks it recorded, and the other System Incidents that record them as they read
+     * now, which is a lookup of what is already recorded and opens none; null for another Lab's chain.
      */
-    breaksWithin: async ({ chain, first, last, fingerprint, stored }: BreakRange) => {
+    breaksWithin: async ({ id, chain, first, last, fingerprint }: BreakRange) => {
       if (chain !== labId && chain !== 'company') return null;
       const sameBreak = (a: string, b: string) =>
         sql`${sql.ref(`${a}.seq`)} = ${sql.ref(`${b}.seq`)} and ${sql.ref(`${a}.through`)} = ${sql.ref(`${b}.through`)}
@@ -189,14 +187,13 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
         asRecorded: boolean;
         breaks: ListedBreak[];
         recorded: ListedBreak[] | null;
+        incidents: string[];
       }>`
         with found as (
           select b.seq, b.kind, b.through, b.fingerprint from lims.chain_breaks(${chain}) as b
           where b.through >= ${first}::bigint and b.seq <= ${last}::bigint
         ), kept as (
-          select (k ->> 'entry')::bigint as seq, k ->> 'kind' as kind, (k ->> 'through')::bigint as through,
-            decode(k ->> 'fingerprint', 'hex') as fingerprint
-          from jsonb_array_elements(coalesce(${stored}::jsonb, '[]')) as k
+          select k.seq, k.kind, k.through, k.fingerprint from lims.incident_break as k where k.incident_id = ${id}
         )
         select now() as recomputed_at,
           coalesce((select ${fingerprint} = ${digestOfBreaks} or (count(*) = 1 and bool_or(
@@ -205,11 +202,16 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
           coalesce((select json_agg(json_build_object('entry', f.seq::text, 'kind', f.kind, 'through', f.through::text,
               'matches', exists (select from kept as k where ${sameBreak('k', 'f')})) order by f.seq)
             from found as f), '[]') as breaks,
-          case when ${stored}::jsonb is not null then
-            coalesce((select json_agg(json_build_object('entry', k.seq::text, 'kind', k.kind, 'through', k.through::text,
+          case when exists (select from kept) then
+            (select json_agg(json_build_object('entry', k.seq::text, 'kind', k.kind, 'through', k.through::text,
                 'matches', exists (select from found as f where ${sameBreak('f', 'k')})) order by k.seq)
-              from kept as k), '[]')
-          end as recorded`.execute(db);
+              from kept as k)
+          end as recorded,
+          coalesce((select json_agg(i.reference order by i.reference) from lims.system_incident as i
+            where i.chain = ${chain} and i.id <> ${id} and exists (select from found as f
+              where (f.seq = i.first_failure and f.through = i.last_failure and f.fingerprint = i.fingerprint)
+                 or exists (select from lims.incident_break as b where b.incident_id = i.id and ${sameBreak('b', 'f')}))),
+            '[]') as incidents`.execute(db);
       const [recomputed] = rows;
       if (!recomputed) throw new Error('the break range read returned no row');
       return recomputed;

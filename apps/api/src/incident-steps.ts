@@ -295,16 +295,10 @@ export function incidentRoutes(app: App, db: Kysely<DB>, release: string): void 
       const incident =
         (await db
           .selectFrom('systemIncident')
-          .select([
-            'chain',
-            'firstFailure',
-            'lastFailure',
-            'fingerprint',
-            sql<string | null>`breaks::text`.as('stored'),
-          ])
+          .select(['id', 'chain', 'firstFailure', 'lastFailure', 'fingerprint'])
           .where('reference', '=', reference)
           .executeTakeFirst()) ?? refuse('notFound', `No System Incident has the reference ${reference}.`);
-      const { chain, firstFailure, lastFailure, fingerprint, stored } = incident;
+      const { id, chain, firstFailure, lastFailure, fingerprint } = incident;
       if (chain === null || firstFailure === null)
         refuse('state', `System Incident ${reference} records no break in an Audit Trail chain.`);
       if (lastFailure === null || fingerprint === null)
@@ -314,12 +308,13 @@ export function incidentRoutes(app: App, db: Kysely<DB>, release: string): void 
         );
       const scope = labScope(db, req.actor);
       const listed =
-        (await scope.breaksWithin({ chain, first: firstFailure, last: lastFailure, fingerprint, stored })) ??
+        (await scope.breaksWithin({ id, chain, first: firstFailure, last: lastFailure, fingerprint })) ??
         refuse(
           'role',
           `System Incident ${reference} records breaks in another Lab's chain. Switch to that Lab to list them.`,
         );
-      if (listed.asRecorded) return { ...listed, incidents: [] };
+      // Recording a change is a verification, which is QA's: any other reader is told what is recorded already.
+      if (listed.asRecorded || !req.actor.roles.includes('QA')) return { ...listed, opened: [] };
       const verified = (await scope.verifyAuditTrail()).chains.find((c) => c.chainId === chain);
       const found = verified ? await openChainIncidents(db, req.log, req.actor, chain, verified.breaks) : [];
       const inRange = found.filter(
@@ -328,7 +323,11 @@ export function incidentRoutes(app: App, db: Kysely<DB>, release: string): void 
           BigInt(b.through) >= BigInt(firstFailure) &&
           BigInt(b.entry) <= BigInt(lastFailure),
       );
-      return { ...listed, incidents: [...new Set(inRange.map((b) => b.incident))] };
+      return {
+        ...listed,
+        incidents: [...new Set(inRange.map((b) => b.incident))],
+        opened: found.filter((b) => b.opened).map((b) => b.incident),
+      };
     },
   });
   for (const name of incidentStepNames) registerIncidentStep(app, db, name, release);

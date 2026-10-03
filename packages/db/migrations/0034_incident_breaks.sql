@@ -3,34 +3,65 @@ set local role lims_owner;
 -- A chain verification System Incident keeps every break it records, as the verification read them: entry, kind,
 -- last entry and fingerprint, in entry order (#250). A More incident's fingerprint is only a digest of its breaks, so
 -- without them a later change inside its range, a further tamper or an entry put back, would leave the incident
--- unable to say which entries were broken when it opened. The breaks are one of its recorded facts, which
--- keep_incident_facts already keeps from changing, and the Acknowledged Signature binds them through the fingerprint
--- they must give. An incident opened before this migration has none, and keeps that shape.
-alter table lims.system_incident
-  add column breaks jsonb,
-  add constraint system_incident_breaks_check check (chain is not null or breaks is null);
+-- unable to say which entries were broken when it opened. The breaks are its own rows, not a column of the audited
+-- incident: lims.capture copies the whole row into every Audit Trail entry on it, and a chain with thousands of breaks
+-- would then be copied into each of the incident's entries, inside the time the verification has to write them. The
+-- rows are written once, in the transaction that opens the incident, and never change; the incident's fingerprint
+-- and its content hash (below) bind them, which is why the Audit Trail does not capture them. An incident opened
+-- before this migration has none.
+create table lims.incident_break (
+  incident_id uuid   not null references lims.system_incident,
+  seq         bigint not null,
+  kind        text   not null check (kind in ('Changed', 'Missing', 'HeadMoved')),
+  through     bigint not null constraint incident_break_through_check check (through >= seq),
+  fingerprint bytea  not null,
+  primary key (incident_id, seq)
+);
 
--- Checked after the row's own checks, so a row they refuse is refused by them. The breaks give the incident's count,
--- its first and last entry, and its fingerprint: the digest Verify chain records for a More incident
--- (sha256 over each break's entry and the sha256 of its fingerprint, in entry order), or the one break's own.
-create function lims.require_breaks() returns trigger
+create trigger refuse_change before update or delete on lims.incident_break
+  for each row execute function lims.refuse_change();
+create trigger refuse_truncate before truncate on lims.incident_break
+  for each statement execute function lims.refuse_change();
+
+-- A break belongs to a chain-verify System Incident and is written in the transaction that opens it, so that no break
+-- is added to an incident after it opened. After the row's own checks and its foreign key, so that they refuse first.
+-- Definer's rights, as lims.sign has, because written_here is the owner's.
+create function lims.written_with_incident() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  incident_chain text;
+  incident_xmin  xid;
+begin
+  select chain, xmin into incident_chain, incident_xmin from system_incident where id = new.incident_id;
+  if incident_chain is null then
+    raise exception 'a break is recorded only on a chain-verify System Incident' using errcode = '23514';
+  end if;
+  if not coalesce(written_here(incident_xmin), false) then
+    raise exception 'a break is recorded in the transaction that opens its System Incident' using errcode = '23514';
+  end if;
+  return null;
+end $$;
+
+create trigger written_with_incident after insert on lims.incident_break
+  for each row execute function lims.written_with_incident();
+
+-- Checked when the opening transaction commits, because the foreign key makes the incident come before its breaks: a
+-- chain-verify System Incident's breaks give its count, its first and last entry, and its fingerprint (the digest
+-- Verify chain records for a More incident: sha256 over each break's entry and the sha256 of its fingerprint, in
+-- entry order, or the one break's own).
+create function lims.check_incident_breaks() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 begin
   if new.chain is null or new.fingerprint is null then
     return null;
   end if;
-  if new.breaks is null or jsonb_typeof(new.breaks) <> 'array' or jsonb_array_length(new.breaks) <> new.break_count
-     or not exists (
+  if not exists (
        select
-       from (
-         select (b ->> 'entry')::bigint as seq, b ->> 'kind' as kind, (b ->> 'through')::bigint as through,
-           decode(b ->> 'fingerprint', 'hex') as fingerprint
-         from jsonb_array_elements(new.breaks) as b
-       ) as listed
-       having min(seq) = new.first_failure and max(through) = new.last_failure
-         and bool_and(kind in ('Changed', 'Missing', 'HeadMoved') and through >= seq)
-         and (sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq)) = new.fingerprint
-           or (count(*) = 1 and bool_and(fingerprint = new.fingerprint)))
+       from incident_break b
+       where b.incident_id = new.id
+       having count(*) = new.break_count and min(b.seq) = new.first_failure and max(b.through) = new.last_failure
+         and (sha256(string_agg(int8send(b.seq) || sha256(b.fingerprint), ''::bytea order by b.seq)) = new.fingerprint
+           or (count(*) = 1 and bool_and(b.fingerprint = new.fingerprint)))
      ) then
     raise exception 'a chain-verify System Incident records every break it covers, which give its count, range and fingerprint'
       using errcode = '23514';
@@ -38,7 +69,49 @@ begin
   return null;
 end $$;
 
-create trigger require_breaks after insert on lims.system_incident
-  for each row execute function lims.require_breaks();
+create constraint trigger check_incident_breaks after insert on lims.system_incident
+  deferrable initially deferred for each row execute function lims.check_incident_breaks();
 
-grant insert (breaks) on lims.system_incident to lims_app;
+-- Canonical form 1 of a System Incident now binds its breaks: a digest over each break's entry, last entry, kind and
+-- fingerprint, in entry order, so that a bypassed change to a break unsigns the Acknowledged Signature. An incident
+-- with no break rows renders as before, so the content signed before this migration keeps its hash.
+create or replace function lims.incident_content(i lims.system_incident) returns jsonb
+language sql stable as $$
+  select jsonb_build_object(
+    'id', i.id,
+    'reference', i.reference,
+    'kind', i.kind,
+    'openedAt', to_char(i.opened_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+    'requestedBy', i.requested_by,
+    'sessionLabId', i.session_lab_id,
+    'step', i.step,
+    'recordId', i.record_id,
+    'errorClass', i.error_class,
+    'sqlstate', i.sqlstate,
+    'constraintName', i.constraint_name,
+    'subjectId', i.subject_id,
+    'sourceAddress', host(i.source_address),
+    'typedUserIdHmac', encode(i.typed_user_id_hmac, 'hex'),
+    'chain', i.chain,
+    'firstFailure', i.first_failure,
+    'lastFailure', i.last_failure,
+    'breakCount', i.break_count,
+    'fingerprint', encode(i.fingerprint, 'hex'),
+    'loggedAt', to_char(i.logged_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+    'impactAnswer', i.impact_answer,
+    'impactAnsweredBy', i.impact_answered_by,
+    'impactAnsweredAt', to_char(i.impact_answered_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+    'immediateAction', i.immediate_action,
+    'immediateActionBy', i.immediate_action_by,
+    'immediateActionAt', to_char(i.immediate_action_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+    'correctiveAction', i.corrective_action,
+    'correctiveActionBy', i.corrective_action_by,
+    'correctiveActionAt', to_char(i.corrective_action_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+  || jsonb_strip_nulls(jsonb_build_object('breaksDigest', (
+       select encode(sha256(string_agg(
+                sha256(int8send(b.seq) || int8send(b.through) || sha256(convert_to(b.kind, 'UTF8')) || sha256(b.fingerprint)),
+                ''::bytea order by b.seq)), 'hex')
+       from lims.incident_break b where b.incident_id = i.id)))
+$$;
+
+grant select, insert on lims.incident_break to lims_app;

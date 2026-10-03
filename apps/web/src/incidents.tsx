@@ -134,28 +134,44 @@ const markedColumns = (head: string): Column<ListedBreak>[] => [
   { head, cell: (b) => <Status mark={b.matches ? 'As recorded' : 'Changed since opened'} /> },
 ];
 
-/** What the recomputed breaks say against the ones the incident recorded, and which incidents record a change. */
+/** `references` as links, in a sentence. */
+function IncidentLinks({ references }: { references: string[] }) {
+  return references.map((reference, i) => (
+    <span key={reference}>
+      {i > 0 && ', '}
+      <a href={`#/incidents/${reference}`}>System Incident {reference}</a>
+    </span>
+  ));
+}
+
+/**
+ * What the recomputed breaks say against the ones the incident recorded, which incidents record the breaks as they
+ * read now, and which of them this read opened. A read that opens none and finds none recorded was not QA's, whose
+ * read would have recorded the change, so it says that Verify chain does.
+ */
 function BreaksVerdict({ data }: { data: Breaks }) {
   const at = `Recomputed ${time(data.recomputedAt)}.`;
   if (data.asRecorded) return <>{at} These are the breaks this System Incident recorded.</>;
   if (data.breaks.length === 0)
     return <>{at} No break remains in this range: the breaks this System Incident recorded no longer read as broken.</>;
+  const recordedBefore = data.incidents.filter((reference) => !data.opened.includes(reference));
   return (
     <>
       {at} The chain has changed inside this range since this System Incident was opened.
-      {data.incidents.length > 0 && (
+      {recordedBefore.length > 0 && (
         <>
           {' '}
-          This read recorded the change as{' '}
-          {data.incidents.map((reference, i) => (
-            <span key={reference}>
-              {i > 0 && ', '}
-              <a href={`#/incidents/${reference}`}>System Incident {reference}</a>
-            </span>
-          ))}
-          .
+          <IncidentLinks references={recordedBefore} /> {recordedBefore.length === 1 ? 'records' : 'record'} the breaks
+          as they read now.
         </>
       )}
+      {data.opened.length > 0 && (
+        <>
+          {' '}
+          This read opened <IncidentLinks references={data.opened} />.
+        </>
+      )}
+      {recordedBefore.length === 0 && data.opened.length === 0 && <> Verify chain, by QA, records the change.</>}
     </>
   );
 }

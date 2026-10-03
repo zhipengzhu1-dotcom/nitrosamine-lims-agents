@@ -123,12 +123,13 @@ const ALARM = 'System Incident alarm';
 
 /**
  * Opens, in one transaction, one System Incident for each recorded break that chain verification found in a chain,
- * naming the chain as the Audit Trail does, the break's first and last entries, how many breaks it is, their
- * fingerprint and every break it covers, with the person whose verification found them as the requesting person, and
- * raises the alarm once for each incident it opened, after they are written. A break verified before, unchanged,
- * answers its incident, in whatever state it is now, and opens no other and raises no alarm; a break tampered with
- * again has a new fingerprint and opens its own. A failure to write them fails the verification, whose 500 opens a
- * System Incident of its own, so a break is never shown without a record.
+ * naming the chain as the Audit Trail does, the break's first and last entries, how many breaks it is and their
+ * fingerprint, with every break it covers stored beside it as its own rows, with the person whose verification found
+ * them as the requesting person, and raises the alarm once for each incident it opened, after they are written. A
+ * break verified before, unchanged, answers its incident, in whatever state it is now, and opens no other and raises
+ * no alarm; a break tampered with again has a new fingerprint and opens its own. Each break says whether this call
+ * opened its incident. A failure to write them fails the verification, whose 500 opens a System Incident of its own,
+ * so a break is never shown without a record.
  */
 export async function openChainIncidents(
   db: Kysely<DB>,
@@ -136,23 +137,30 @@ export async function openChainIncidents(
   requester: ActorContext,
   chain: string,
   breaks: RecordedBreak[],
-): Promise<ChainBreakFound[]> {
+): Promise<(ChainBreakFound & { opened: boolean })[]> {
   if (breaks.length === 0) return [];
   const column = <K extends keyof RecordedBreak>(key: K) => breaks.map((b) => b[key]);
   const references = breaks.map(() => referenceOf(randomBytes(8)));
+  const covered = breaks.flatMap((b) => b.covered.map((c) => ({ ...c, of: b.entry })));
+  const coveredColumn = <K extends keyof (typeof covered)[number]>(key: K) => covered.map((c) => c[key]);
   const { opened, found } = await audited(db, INCIDENT_SERVICE, async (tx) => {
     await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
-    const { rows: opened } = await sql<{ reference: string; entry: string }>`
+    const { rows: opened } = await sql<{ id: string; reference: string; entry: string }>`
       insert into lims.system_incident
-        (kind, reference, requested_by, session_lab_id, chain, first_failure, last_failure, break_count, fingerprint,
-         breaks)
+        (kind, reference, requested_by, session_lab_id, chain, first_failure, last_failure, break_count, fingerprint)
       select 'ChainVerifyFailure', t.reference, ${requester.person.id}, ${requester.lab.id}, ${chain}, t.entry,
-        t.through, t.breaks, decode(t.fingerprint, 'hex'), t.covered::jsonb
+        t.through, t.breaks, decode(t.fingerprint, 'hex')
       from unnest(${references}::text[], ${column('entry')}::bigint[], ${column('through')}::bigint[],
-        ${column('breaks')}::int[], ${column('fingerprint')}::text[], ${breaks.map((b) => JSON.stringify(b.covered))}::text[])
-        as t(reference, entry, through, breaks, fingerprint, covered)
+        ${column('breaks')}::int[], ${column('fingerprint')}::text[]) as t(reference, entry, through, breaks, fingerprint)
       on conflict (chain, first_failure, fingerprint) do nothing
-      returning reference, first_failure::text as entry`.execute(tx);
+      returning id, reference, first_failure::text as entry`.execute(tx);
+    await sql`
+      insert into lims.incident_break (incident_id, seq, kind, through, fingerprint)
+      select o.id, c.seq, c.kind, c.through, decode(c.fingerprint, 'hex')
+      from unnest(${opened.map((o) => o.id)}::uuid[], ${opened.map((o) => o.entry)}::bigint[]) as o(id, entry)
+      join unnest(${coveredColumn('of')}::bigint[], ${coveredColumn('entry')}::bigint[], ${coveredColumn('kind')}::text[],
+        ${coveredColumn('through')}::bigint[], ${coveredColumn('fingerprint')}::text[]) as c(of, seq, kind, through, fingerprint)
+        on c.of = o.entry`.execute(tx);
     const { rows: found } = await sql<{ key: string; reference: string; state: IncidentState }>`
       select i.first_failure::text || ':' || encode(i.fingerprint, 'hex') as key, i.reference, i.state
       from lims.system_incident i
@@ -164,10 +172,19 @@ export async function openChainIncidents(
   for (const { reference, entry } of opened)
     log.error({ alarm: { reference, kind: 'ChainVerifyFailure', chain, entry } }, ALARM);
   const byBreak = new Map(found.map((f) => [f.key, f]));
+  const openedNow = new Set(opened.map((o) => o.reference));
   return breaks.map(({ entry, kind, through, breaks: count, fingerprint }) => {
     const incident = byBreak.get(`${entry}:${fingerprint}`);
     if (incident === undefined) throw new Error(`no System Incident records the break at entry ${entry}`);
-    return { entry, kind, through, breaks: count, incident: incident.reference, incidentState: incident.state };
+    return {
+      entry,
+      kind,
+      through,
+      breaks: count,
+      incident: incident.reference,
+      incidentState: incident.state,
+      opened: openedNow.has(incident.reference),
+    };
   });
 }
 

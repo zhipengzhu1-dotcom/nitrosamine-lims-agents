@@ -131,6 +131,14 @@ export interface IdentityVerification {
   printedName: string;
 }
 
+export interface IncidentBreak {
+  fingerprint: Buffer;
+  incidentId: string;
+  kind: string;
+  seq: Int8;
+  through: Int8;
+}
+
 export interface Lab {
   code: string;
   labId: Generated<string>;
@@ -268,7 +276,6 @@ export interface Submission {
 
 export interface SystemIncident {
   breakCount: number | null;
-  breaks: Json | null;
   chain: string | null;
   constraintName: string | null;
   correctiveAction: string | null;
@@ -340,6 +347,7 @@ export interface DB {
   credentialLink: CredentialLink;
   customer: Customer;
   identityVerification: IdentityVerification;
+  incidentBreak: IncidentBreak;
   lab: Lab;
   membership: Membership;
   method: Method;

@@ -29,6 +29,8 @@ const id = {
   session: randomUUID(),
   otherSession: randomUUID(),
   systemIncident: randomUUID(),
+  chainIncident: randomUUID(),
+  openingIncident: randomUUID(),
   commitKey: randomUUID(),
   transaction: randomUUID(),
   accessEvent: randomUUID(),
@@ -59,9 +61,14 @@ const oneBreak = (entry: number) => ({
   last_failure: entry,
   break_count: 1,
   fingerprint: Buffer.alloc(32, 7),
-  breaks: JSON.stringify([
-    { entry: String(entry), kind: 'Changed', through: String(entry), fingerprint: '07'.repeat(32) },
-  ]),
+});
+/** The break at `entry` as its System Incident stores it: the one row the incident's fingerprint is. */
+const breakRow = (entry: number) => ({
+  incident_id: id.chainIncident,
+  seq: entry,
+  kind: 'Changed',
+  through: entry,
+  fingerprint: Buffer.alloc(32, 7),
 });
 const zeros = Buffer.alloc(32);
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest();
@@ -69,7 +76,10 @@ const fixtureContent = Buffer.from('{"id":"fixture"}');
 /** Signature statement 1's hash, read from the migrated database before the fixtures are written. */
 let statementHash: Buffer = zeros;
 
-const fixture: [string, Row][] = [
+type Fixture = [string, Row];
+/** Rows written in one transaction, because a break is recorded only in the transaction that opens its incident. */
+const isGroup = (f: Fixture | Fixture[]): f is Fixture[] => Array.isArray(f[0]);
+const fixture: (Fixture | Fixture[])[] = [
   ['lims.customer', { id: id.customer, name: 'Refusal Customer (fictional)' }],
   [
     'lims.person',
@@ -239,15 +249,19 @@ const fixture: [string, Row][] = [
     },
   ],
   [
-    'lims.system_incident',
-    {
-      kind: 'ChainVerifyFailure',
-      reference: 'RF000003',
-      requested_by: id.person,
-      session_lab_id: id.lab,
-      chain: id.lab,
-      ...oneBreak(7),
-    },
+    [
+      'lims.system_incident',
+      {
+        id: id.chainIncident,
+        kind: 'ChainVerifyFailure',
+        reference: 'RF000003',
+        requested_by: id.person,
+        session_lab_id: id.lab,
+        chain: id.lab,
+        ...oneBreak(7),
+      },
+    ],
+    ['lims.incident_break', breakRow(7)],
   ],
   [
     'lims.commit_key',
@@ -487,6 +501,11 @@ const tables = {
     row: { lab_id: id.lab, person_id: id.person, token_hash: Buffer.alloc(32, 2) },
     notNull: ['lab_id', 'id', 'person_id', 'token_hash', 'created_at', 'last_seen_at'],
   },
+  'lims.incident_break': {
+    noun: 'recorded break',
+    row: { ...breakRow(8), incident_id: id.openingIncident },
+    notNull: ['incident_id', 'seq', 'kind', 'through', 'fingerprint'],
+  },
   'lims.system_incident': {
     noun: 'System Incident',
     row: {
@@ -642,11 +661,28 @@ const asRole = (role: string) => `select set_config('lims.role', '${role}', true
 const actingAs = (role: 'QA' | 'Admin') =>
   `select set_config('lims.actor', 'person:${role === 'QA' ? 'refusal.other' : 'refusal.admin'}', true), set_config('lims.role', '${role}', true)`;
 
-/** The stamp lims.sign leaves, so a probe row reaches the constraints behind the sign_only trigger. */
-const signingStamp = (row: Row) =>
-  typeof row.reauthentication_id === 'string'
-    ? client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', row.reauthentication_id])
-    : Promise.resolve();
+/**
+ * What a probe row needs in its transaction before it is written: the stamp lims.sign leaves, so that a Signature
+ * reaches the constraints behind the sign_only trigger, or the chain-verify System Incident a break is opened with,
+ * so that a break reaches the constraints behind the written_with_incident trigger.
+ */
+const staged = (row: Row) => {
+  if (typeof row.reauthentication_id === 'string')
+    return client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', row.reauthentication_id]);
+  if (row.incident_id === id.openingIncident)
+    return client.query(
+      ...insert('lims.system_incident', {
+        id: id.openingIncident,
+        kind: 'ChainVerifyFailure',
+        reference: 'RF00000W',
+        requested_by: id.person,
+        session_lab_id: id.lab,
+        chain: id.lab,
+        ...oneBreak(8),
+      }),
+    );
+  return Promise.resolve();
+};
 
 async function refusalOf(
   statement: string,
@@ -657,7 +693,7 @@ async function refusalOf(
   await client.query('begin');
   try {
     if (context) await client.query(AUDIT_CONTEXT);
-    await signingStamp(row);
+    await staged(row);
     await client.query(statement, values);
   } catch (error) {
     if (error instanceof pg.DatabaseError) return error;
@@ -695,11 +731,13 @@ before(async () => {
         'select statement_hash as "statementHash" from lims.signature_statement where version = 1',
       )
     ).rows[0] ?? assert.fail('the migration seeds signature statement 1'));
-  for (const [table, row] of fixture) {
+  for (const group of fixture) {
     await client.query('begin');
     await client.query(AUDIT_CONTEXT);
-    await signingStamp(row);
-    await client.query(...insert(table, row));
+    for (const [table, row] of isGroup(group) ? group : [group]) {
+      await staged(row);
+      await client.query(...insert(table, row));
+    }
     await client.query('commit');
   }
   await client.query('begin');
@@ -723,7 +761,7 @@ it('the base row of every table is accepted, so each refusal below comes from th
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      await signingStamp(tables[table].row);
+      await staged(tables[table].row);
       await client.query(...insert(table, tables[table].row));
     } finally {
       await client.query('rollback');
@@ -766,6 +804,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.reauthentication': { id: id.reauthentication },
     'lims.session': { id: id.session },
     'lims.system_incident': { id: id.systemIncident },
+    'lims.incident_break': { incident_id: id.chainIncident, seq: 7 },
     'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
     'lims.audit_export': { id: id.auditExport },
@@ -1244,6 +1283,12 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'system_incident_corrective_action_by_fkey',
     },
     {
+      name: 'a recorded break of a System Incident that does not exist is refused',
+      table: 'lims.incident_break',
+      change: { incident_id: missing },
+      constraint: 'incident_break_incident_id_fkey',
+    },
+    {
       name: 'an Access Event about a person who does not exist is refused',
       table: 'lims.access_event',
       change: { subject_id: missing },
@@ -1588,10 +1633,16 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint: 'system_incident_break_check',
     },
     {
-      name: 'an unexpected-failure System Incident with recorded breaks is refused',
-      table: 'lims.system_incident',
-      change: { breaks: oneBreak(7).breaks },
-      constraint: 'system_incident_breaks_check',
+      name: 'a recorded break of a kind the chain does not find is refused',
+      table: 'lims.incident_break',
+      change: { kind: 'More' },
+      constraint: 'incident_break_kind_check',
+    },
+    {
+      name: 'a recorded break whose last entry is before its first is refused',
+      table: 'lims.incident_break',
+      change: { through: 7 },
+      constraint: 'incident_break_through_check',
     },
     {
       name: 'a chain-verify System Incident that records no breaks is refused',
@@ -2117,7 +2168,25 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       name: 'truncating the System Incidents is refused',
       table: 'lims.system_incident',
       trigger: 'refuse_truncate',
-      statement: 'truncate lims.system_incident',
+      statement: 'truncate lims.system_incident cascade',
+    },
+    {
+      name: 'updating a recorded break is refused',
+      table: 'lims.incident_break',
+      trigger: 'refuse_change',
+      statement: `update lims.incident_break set kind = 'Missing'`,
+    },
+    {
+      name: 'deleting a recorded break is refused',
+      table: 'lims.incident_break',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.incident_break',
+    },
+    {
+      name: 'truncating the recorded breaks is refused',
+      table: 'lims.incident_break',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.incident_break',
     },
     {
       name: 'updating an Identity Verification is refused',
@@ -2170,7 +2239,6 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       typed_user_id_hmac: Buffer.alloc(32, 9),
       chain: 'company',
       first_failure: 1,
-      breaks: '[]',
     };
     for (const [column, value] of Object.entries(changes)) {
       const error = await refusalOf(
@@ -2196,27 +2264,98 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
     );
   });
 
-  covered.add('lims.system_incident.require_breaks');
-  const withBreaks = (breaks: unknown) =>
-    refusalOf(
-      `insert into lims.system_incident
-         (kind, reference, requested_by, chain, first_failure, last_failure, break_count, fingerprint, breaks)
-       values ('ChainVerifyFailure', 'RF00000N', $1, $2, 4, 5, 2, $3, $4)`,
-      [id.person, id.lab, Buffer.alloc(32, 7), breaks === null ? null : JSON.stringify(breaks)],
+  covered.add('lims.incident_break.written_with_incident');
+  it('a break recorded on a System Incident after the transaction that opened it is refused', async () => {
+    const error = await refusalOf(...insert('lims.incident_break', breakRow(9)));
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', 'a break is recorded in the transaction that opens its System Incident'],
     );
-  const covering = (entry: number, fingerprint: string) => ({
-    entry: String(entry),
-    kind: 'Changed',
-    through: String(entry),
-    fingerprint,
   });
-  for (const [what, breaks] of [
-    ['without the breaks it covers', null],
-    ['whose breaks do not give its fingerprint', [covering(4, '07'.repeat(32)), covering(5, '07'.repeat(32))]],
-    ['whose breaks do not give its count', [covering(4, '07'.repeat(32))]],
+  it('a break recorded on a System Incident that records no chain break is refused', async () => {
+    const error = await refusalOf(...insert('lims.incident_break', { ...breakRow(4), incident_id: id.systemIncident }));
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', 'a break is recorded only on a chain-verify System Incident'],
+    );
+  });
+
+  const int8 = (n: number) => {
+    const bytes = Buffer.alloc(8);
+    bytes.writeBigInt64BE(BigInt(n));
+    return bytes;
+  };
+  /** The fingerprint a More incident records: the digest of its breaks' entries and fingerprints, in entry order. */
+  const digestOf = (breaks: { seq: number; fingerprint: Buffer }[]) =>
+    sha256(Buffer.concat(breaks.flatMap((b) => [int8(b.seq), sha256(b.fingerprint)])));
+  const fp7 = Buffer.alloc(32, 7);
+  /** The statements that open `reference` as a More incident and store `stored` as its breaks, for one transaction. */
+  const moreIncident = (
+    reference: string,
+    { first, last, count, fingerprint }: { first: number; last: number; count: number; fingerprint: Buffer },
+    stored: readonly { seq: number; through?: number }[],
+  ): [string, unknown[]][] => {
+    const incident = randomUUID();
+    return [
+      [
+        `insert into lims.system_incident
+           (id, kind, reference, requested_by, chain, first_failure, last_failure, break_count, fingerprint)
+         values ($1, 'ChainVerifyFailure', $2, $3, $4, $5, $6, $7, $8)`,
+        [incident, reference, id.person, id.lab, first, last, count, fingerprint],
+      ],
+      ...stored.map(({ seq, through = seq }): [string, unknown[]] =>
+        insert('lims.incident_break', { incident_id: incident, seq, kind: 'Changed', through, fingerprint: fp7 }),
+      ),
+    ];
+  };
+  /** The refusal that committing `statements`, run in one transaction, raises. */
+  async function refusalAtCommit(statements: [string, unknown[]][]): Promise<pg.DatabaseError> {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      for (const [statement, values] of statements) await client.query(statement, values);
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      if (error instanceof pg.DatabaseError) return error;
+      throw error;
+    }
+    return assert.fail('the database committed the System Incident');
+  }
+  covered.add('lims.system_incident.check_incident_breaks');
+  const twoBreaks = {
+    first: 4,
+    last: 5,
+    count: 2,
+    fingerprint: digestOf([
+      { seq: 4, fingerprint: fp7 },
+      { seq: 5, fingerprint: fp7 },
+    ]),
+  };
+  for (const [what, reference, incident, stored] of [
+    ['without the breaks it covers', 'RF00000P', twoBreaks, []],
+    ['whose breaks do not give its count', 'RF00000Q', twoBreaks, [{ seq: 4 }]],
+    [
+      'whose breaks do not give its range',
+      'RF00000R',
+      {
+        ...twoBreaks,
+        fingerprint: digestOf([
+          { seq: 4, fingerprint: fp7 },
+          { seq: 6, fingerprint: fp7 },
+        ]),
+      },
+      [{ seq: 4 }, { seq: 6 }],
+    ],
+    [
+      'whose breaks do not give its fingerprint',
+      'RF00000S',
+      { ...twoBreaks, fingerprint: Buffer.alloc(32, 9) },
+      [{ seq: 4 }, { seq: 5 }],
+    ],
   ] as const)
-    it(`a new chain-verify System Incident ${what} is refused`, async () => {
-      const error = await withBreaks(breaks);
+    it(`a chain-verify System Incident committed ${what} is refused`, async () => {
+      const error = await refusalAtCommit(moreIncident(reference, incident, stored));
       assert.deepEqual(
         [error.code, error.message],
         [
@@ -2225,6 +2364,48 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
         ],
       );
     });
+  it('a chain-verify System Incident whose breaks give its count, range and fingerprint commits with them', async () => {
+    await client.query('begin');
+    await client.query(AUDIT_CONTEXT);
+    for (const [statement, values] of moreIncident('RF00000T', twoBreaks, [{ seq: 4 }, { seq: 5 }]))
+      await client.query(statement, values);
+    await client.query('commit');
+    const { rows } = await client.query<{ seq: string }>(
+      `select b.seq::text as seq from lims.incident_break b join lims.system_incident i on i.id = b.incident_id
+        where i.reference = 'RF00000T' order by b.seq`,
+    );
+    assert.deepEqual(rows, [{ seq: '4' }, { seq: '5' }]);
+  });
+
+  const contentHash = async (incident: string) =>
+    (
+      await client.query<{ hash: string }>(`select encode(lims.incident_content_hash($1::uuid), 'hex') as hash`, [
+        incident,
+      ])
+    ).rows[0]?.hash;
+  it("a bypassed change to a recorded break changes its System Incident's content hash, which the Acknowledged Signature binds", async () => {
+    await client.query('begin');
+    try {
+      const before = await contentHash(id.chainIncident);
+      await client.query('set local session_replication_role = replica');
+      await client.query(`update lims.incident_break set kind = 'Missing' where incident_id = $1`, [id.chainIncident]);
+      assert.notEqual(await contentHash(id.chainIncident), before);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it("a System Incident's content binds its recorded breaks through one digest, and a System Incident with none renders as before they were stored", async () => {
+    const { rows } = await client.query<{ digest: string | null; present: boolean }>(
+      `select lims.incident_content(i.id) ->> 'breaksDigest' as digest, lims.incident_content(i.id) ? 'breaksDigest' as present
+         from lims.system_incident i where i.id in ($1, $2) order by i.id = $1 desc`,
+      [id.chainIncident, id.systemIncident],
+    );
+    const breakDigest = sha256(Buffer.concat([int8(7), int8(7), sha256(Buffer.from('Changed')), sha256(fp7)]));
+    assert.deepEqual(rows, [
+      { digest: sha256(breakDigest).toString('hex'), present: true },
+      { digest: null, present: false },
+    ]);
+  });
 
   it("a chain-verify System Incident opened before breaks carried a fingerprint still takes QA's answer", async () => {
     await client.query('begin');
@@ -2658,7 +2839,7 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      await signingStamp(forged);
+      await staged(forged);
       const [statement, values] = insert('lims.signature', forged);
       const { rows } = await client.query<Row>(`${statement} returning printed_name, username`, values);
       assert.deepEqual(rows, [{ printed_name: 'Refusal Person', username: 'refusal.person' }]);
@@ -2698,7 +2879,7 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
          values ($1, $2, $3, $4, 'Reviewed', 'Password')`,
         [id.lab, proof, session, signer],
       );
-      await signingStamp(signed);
+      await staged(signed);
       await client.query(...insert('lims.signature', signed));
       await assert.rejects(client.query('delete from lims.person where id = $1', [signer]), (error: unknown) => {
         assert.ok(error instanceof pg.DatabaseError);
@@ -2711,7 +2892,9 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
   });
 });
 
-it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys, the counters and the Audit Trail itself', async () => {
+// A System Incident's recorded breaks are bound by its fingerprint and its content hash, and copying them into each of
+// its Audit Trail entries is what their own table avoids (#250).
+it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys, the counters, the recorded breaks and the Audit Trail itself', async () => {
   const { rows } = await client.query<{ name: string }>(
     `select 'lims.' || c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'lims' and c.relkind = 'r'
@@ -2720,7 +2903,7 @@ it('every lims table is captured in the Audit Trail except the sessions, the Com
   );
   assert.deepEqual(
     rows.map((row) => row.name),
-    ['lims.audit_chain', 'lims.audit_entry', 'lims.commit_key', 'lims.counter', 'lims.session'],
+    ['lims.audit_chain', 'lims.audit_entry', 'lims.commit_key', 'lims.counter', 'lims.incident_break', 'lims.session'],
   );
 });
 
@@ -3312,7 +3495,7 @@ describe("a Lab's time zone changes only through a migration, and a Signature an
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      await signingStamp(forged);
+      await staged(forged);
       const [statement, values] = insert('lims.signature', forged);
       const { rows } = await client.query<Row>(`${statement} returning signed_time_zone`, values);
       assert.deepEqual(rows, [{ signed_time_zone: 'America/New_York' }]);
@@ -3442,7 +3625,7 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
   const { rows } = await client.query<{ rule: string }>(
     `select n.nspname || '.' || c.relname || '.' || k.conname as rule
        from pg_constraint k join pg_class c on c.oid = k.conrelid join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname in ('lims', 'public')
+      where n.nspname in ('lims', 'public') and k.contype <> 't'
      union all
      select n.nspname || '.' || c.relname || '.' || i.relname
        from pg_index x join pg_class i on i.oid = x.indexrelid join pg_class c on c.oid = x.indrelid
