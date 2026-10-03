@@ -139,7 +139,8 @@ async function accessEventsOf(
     const theirs = await listed.where('id', '=', before).executeTakeFirst();
     if (!theirs) refuse('notFound', 'This person has no such Access Event in this Lab.');
     listed = listed.where((eb) => {
-      const at = eb.selectFrom('accessEvent').select('at').where('id', '=', before);
+      // The database compares the cursor's instant, which a JavaScript Date would cut to milliseconds.
+      const at = scope.accessEvents().select('at').where('id', '=', before);
       return eb.or([eb('at', '<', at), eb.and([eb('at', '=', at), eb('id', '>', before)])]);
     });
   }
