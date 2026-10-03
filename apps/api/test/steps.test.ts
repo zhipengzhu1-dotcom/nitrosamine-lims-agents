@@ -30,7 +30,7 @@ const customerId =
   (await api.db.selectFrom('person').select('customerId').where('id', '=', cora.id).executeTakeFirstOrThrow())
     .customerId ?? assert.fail('Cora is a Customer User');
 const otherCustomer = await audited(
-  api.db,
+  api.superuser,
   { actor: 'svc:test', role: 'system', reason: 'Add a second Customer' },
   (tx) =>
     tx.insertInto('customer').values({ name: 'Second Customer (fictional)' }).returning('id').executeTakeFirstOrThrow(),
@@ -109,7 +109,12 @@ const changeResult = (testId: string, value: string) =>
   audited(
     api.superuser,
     { actor: 'svc:test', role: 'system', reason: 'Change a signed Result from outside the chain' },
-    (tx) => tx.updateTable('result').set({ value }).where('testId', '=', testId).execute(),
+    async (tx) => {
+      // A superuser can switch off the Critical Data Change guard; the Signatures must still catch the change.
+      await sql`alter table lims.result disable trigger value_through_change`.execute(tx);
+      await tx.updateTable('result').set({ value }).where('testId', '=', testId).execute();
+      await sql`alter table lims.result enable trigger value_through_change`.execute(tx);
+    },
   );
 
 it('the chain walks a submitted Test to Reported with three Signatures and an audit entry for every step', async () => {
@@ -144,7 +149,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   const testInsert = auditTrail.find((e) => e.table === 'test' && e.op === 'INSERT')?.newRow;
   assert.deepEqual(
     Object.keys(testInsert ?? {}).sort(),
-    ['assignee_id', 'gxp_class', 'id', 'lab_id', 'method_id', 'sample_id', 'state'],
+    ['assignee_id', 'data_class', 'gxp_class', 'id', 'lab_id', 'method_id', 'sample_id', 'state'],
     'the Audit Trail shows each row snapshot under its stored column names',
   );
   assert.deepEqual(
@@ -164,9 +169,10 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     review: rui,
     release: quinn,
   } satisfies {
-    [K in StepName]: Account;
+    // Performed is signed again only after an approved Critical Data Change, which this walk makes none of.
+    [K in Exclude<StepName, 'signPerformedAgain'>]: Account;
   };
-  for (const name of stepNames) {
+  for (const name of stepNames.filter((n) => n !== 'signPerformedAgain')) {
     const entries = auditTrail.filter((e) => e.reason === name);
     assert.ok(entries.length > 0, `an audit entry for ${name}`);
     for (const e of entries)
@@ -705,7 +711,7 @@ it("a query without the context's Lab fails, and another Lab's Test is out of re
   assert.throws(() => labScope(api.db, { ...ctx, lab: { id: '', code: '', name: '' } }), /needs the Lab/);
 
   const otherTest = await audited(
-    api.db,
+    api.superuser,
     { actor: 'svc:test', role: 'system', reason: 'Add a second Lab' },
     async (tx) => {
       // The Submission comes before the Lab: a transaction locks the company chain before any Lab's.

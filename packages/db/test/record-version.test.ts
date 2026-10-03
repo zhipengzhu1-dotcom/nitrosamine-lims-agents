@@ -44,7 +44,7 @@ async function dropDatabase(database: string): Promise<void> {
 before(async () => {
   await dropDatabase(DATABASE);
   await migrate(server, DATABASE);
-  await audited(app, { ...svc, reason: 'Set up the Lab' }, async (tx) => {
+  await audited(superuser, { ...svc, reason: 'Set up the Lab' }, async (tx) => {
     ({ id: fixture.customerId } = await tx
       .insertInto('customer')
       .values({ name: 'Versions Customer (fictional)' })
@@ -80,7 +80,7 @@ after(async () => {
 
 async function submitTest(): Promise<{ sampleId: string; testId: string; number: string }> {
   const number = `RV-S${String(++sampleCount).padStart(5, '0')}`;
-  return audited(app, { ...svc, reason: 'submit' }, async (tx) => {
+  return audited(superuser, { ...svc, reason: 'submit' }, async (tx) => {
     const { id: sampleId } = await tx
       .insertInto('sample')
       .values({ labId: fixture.labId, submissionId: fixture.submissionId, number, description: 'Tablets' })
@@ -161,7 +161,7 @@ describe('the database writes a Record Version whenever a signable record change
       'canonical form 1 is these bytes, so a change to the rendering is a new form, not a silent change of every hash',
     );
 
-    await audited(app, { ...svc, reason: 'receive' }, (tx) =>
+    await audited(superuser, { ...svc, reason: 'receive' }, (tx) =>
       tx.updateTable('sample').set({ receivedAt: '2026-09-30T08:15:00.123456Z' }).where('id', '=', sampleId).execute(),
     );
     const after = await versions(app, 'test', testId);
@@ -178,7 +178,7 @@ describe('the database writes a Record Version whenever a signable record change
 
   it('a change that leaves the canonical content as it was, such as a state move, writes no Record Version', async () => {
     const { testId } = await submitTest();
-    await audited(app, { ...svc, reason: 'receive' }, (tx) =>
+    await audited(superuser, { ...svc, reason: 'receive' }, (tx) =>
       tx.updateTable('test').set({ state: 'Ready' }).where('id', '=', testId).execute(),
     );
     assert.deepEqual(
@@ -189,7 +189,7 @@ describe('the database writes a Record Version whenever a signable record change
 
   it('a Result removed from a Test, and a Test Report issued on it, each write the versions that changed', async () => {
     const { testId } = await submitTest();
-    const { id: reportId } = await audited(app, { ...svc, reason: 'enterResult and release' }, async (tx) => {
+    const { id: reportId } = await audited(superuser, { ...svc, reason: 'enterResult and release' }, async (tx) => {
       await tx
         .insertInto('result')
         .values({ labId: fixture.labId, testId, enteredBy: fixture.personId, ...result })
@@ -215,9 +215,12 @@ describe('the database writes a Record Version whenever a signable record change
       test: testAfterResult[1]?.content,
     });
 
-    await audited(superuser, { ...svc, reason: 'Remove the Result' }, (tx) =>
-      tx.deleteFrom('result').where('testId', '=', testId).execute(),
-    );
+    await audited(superuser, { ...svc, reason: 'Remove the Result' }, async (tx) => {
+      // The database refuses to remove a Result, so its trigger is off to show what a removal would version.
+      await sql`alter table lims.result disable trigger refuse_removal`.execute(tx);
+      await tx.deleteFrom('result').where('testId', '=', testId).execute();
+      await sql`alter table lims.result enable trigger refuse_removal`.execute(tx);
+    });
     assert.deepEqual(
       (await versions(app, 'test', testId)).map((v) => [v.version, v.content.value]),
       [
@@ -252,7 +255,7 @@ describe('the database writes a Record Version whenever a signable record change
         .where('id', '=', fixture.customerId)
         .execute(),
     );
-    await audited(app, { ...svc, reason: 'Move the Submission to another Customer' }, async (tx) => {
+    await audited(superuser, { ...svc, reason: 'Move the Submission to another Customer' }, async (tx) => {
       const other = await tx
         .insertInto('customer')
         .values({ name: 'Other Customer (fictional)' })
@@ -273,28 +276,28 @@ describe('the database writes a Record Version whenever a signable record change
 
   it('two transactions that change one Test at the same time take turns, so the versions are numbered in order', async () => {
     const { sampleId, testId } = await submitTest();
-    await audited(app, { ...svc, reason: 'enterResult' }, (tx) =>
+    await audited(superuser, { ...svc, reason: 'enterResult' }, (tx) =>
       tx
         .insertInto('result')
         .values({ labId: fixture.labId, testId, enteredBy: fixture.personId, ...result })
         .execute(),
     );
     const slow = audited(superuser, { ...svc, reason: 'Change the Result slowly' }, async (tx) => {
-      await tx.updateTable('result').set({ value: '0.0310' }).where('testId', '=', testId).execute();
+      await tx.updateTable('result').set({ notebookRef: 'NB-RV-0001-002' }).where('testId', '=', testId).execute();
       await sql`select pg_sleep(0.4)`.execute(tx);
     });
     await sql`select pg_sleep(0.1)`.execute(app);
-    const quick = audited(app, { ...svc, reason: 'Describe the Sample' }, (tx) =>
+    const quick = audited(superuser, { ...svc, reason: 'Describe the Sample' }, (tx) =>
       tx.updateTable('sample').set({ description: 'Coated tablets' }).where('id', '=', sampleId).execute(),
     );
     await Promise.all([slow, quick]);
     assert.deepEqual(
-      (await versions(app, 'test', testId)).map((v) => [v.version, v.content.value, v.content.description]),
+      (await versions(app, 'test', testId)).map((v) => [v.version, v.content.notebookRef, v.content.description]),
       [
         [1, null, 'Tablets'],
-        [2, '0.0300', 'Tablets'],
-        [3, '0.0310', 'Tablets'],
-        [4, '0.0310', 'Coated tablets'],
+        [2, 'NB-RV-0001-001', 'Tablets'],
+        [3, 'NB-RV-0001-002', 'Tablets'],
+        [4, 'NB-RV-0001-002', 'Coated tablets'],
       ],
       'the second writer waited on the Lab chain lock the first one held, then saw its version',
     );

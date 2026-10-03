@@ -224,7 +224,7 @@ it("the sweep ends a locked-out person's session at the Lockout's instant, befor
 it('a Lockout Access Event is stamped at the lock instant, and one for a person who is not locked is refused', async () => {
   const person = await api.addPerson('expiry.lockout-stamp', ['Analyst']);
   await assert.rejects(
-    audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Record a Lockout' }, (tx) =>
+    audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Record a Lockout' }, (tx) =>
       tx
         .insertInto('accessEvent')
         .values({ kind: 'Lockout', subjectId: person.id, roles: [], sourceAddress: '192.0.2.1' })
@@ -245,8 +245,9 @@ it('a Lockout Access Event is stamped at the lock instant, and one for a person 
 it("the API's database role cannot choose, move or clear a person's lock, so it cannot choose when their sessions end", async () => {
   const person = await api.addPerson('expiry.lock-backdate', ['Analyst']);
   const client = await api.login(person);
+  // On the API's own connection, as the service identity the seeded Release Log entry declares to update a person.
   const setLock = (lockedAt: ReturnType<typeof sql<Date | null>>) =>
-    audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Set a lock' }, (tx) =>
+    audited(api.db, { actor: 'svc:sign-in', role: 'system', reason: 'Set a lock' }, (tx) =>
       tx.updateTable('person').set({ lockedAt }).where('id', '=', person.id).execute(),
     );
   const before = await dbNow();

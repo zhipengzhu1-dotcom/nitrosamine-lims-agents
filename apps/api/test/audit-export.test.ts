@@ -28,7 +28,7 @@ import {
 
 const api = await startApi('lims_api_audit_export_test');
 const write = <T>(reason: string, fn: Parameters<typeof audited<T>>[2]) =>
-  audited(api.db, { actor: 'svc:test', role: 'system', reason }, fn);
+  audited(api.superuser, { actor: 'svc:test', role: 'system', reason }, fn);
 const newCustomer = (name: string) =>
   write('Add a test Customer', (tx) =>
     tx.insertInto('customer').values({ name }).returning(['id', 'name']).executeTakeFirstOrThrow(),

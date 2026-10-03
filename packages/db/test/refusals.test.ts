@@ -9,6 +9,8 @@ const server = dbServer();
 
 const DATABASE = checkoutDatabase('lims_refusals_test');
 const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+/** The app role, for the one refusal the superuser is exempt from: a service identity outside its scope. */
+const app = new pg.Client({ connectionString: databaseUrl(server, DATABASE, 'lims_app') });
 
 type Row = Record<string, unknown>;
 type Literal = { literal: string };
@@ -62,9 +64,25 @@ const id = {
   checklistVersion: randomUUID(),
   draftChecklistVersion: randomUUID(),
   testReview: randomUUID(),
+  document: randomUUID(),
+  emptyDocument: randomUUID(),
+  documentVersion: randomUUID(),
+  reviewer: randomUUID(),
   equipment: randomUUID(),
   equipmentEvent: randomUUID(),
   manager: randomUUID(),
+  entry: randomUUID(),
+  probeEntry: randomUUID(),
+  operatorSession: randomUUID(),
+};
+/** A Release entry's validation evidence, fictional: each probe of it spoils one field. */
+const RELEASE_EVIDENCE: Row = {
+  kind: 'Release',
+  release: '2026.10.3',
+  image_digests: `{lims-api@sha256:${'0'.repeat(64)}}`,
+  ci_run: 'https://ci.example.invalid/runs/1',
+  ci_result: 'Passed',
+  zap_baseline_result: 'Passed',
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -104,7 +122,16 @@ const fixture: (Fixture | Fixture[])[] = [
     { id: id.otherPerson, username: 'refusal.other', display_name: 'Other Person', password_hash: 'not-a-real-hash' },
   ],
   ['lims.person', { id: id.admin, username: 'refusal.admin', display_name: 'Refusal Admin' }],
-  ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
+  [
+    'lims.person',
+    {
+      id: id.operator,
+      username: 'refusal.operator',
+      display_name: 'Refusal Operator',
+      password_hash: 'not-a-real-hash',
+    },
+  ],
+  ['lims.person', { id: id.reviewer, username: 'refusal.reviewer', display_name: 'Refusal Reviewer' }],
   // A second Admin, who created no account and issued no one-time link, so an enrolment grant can come from them.
   ['lims.person', { id: id.secondAdmin, username: 'refusal.second', display_name: 'Second Admin' }],
   ['lims.person', { id: id.manager, username: 'refusal.manager', display_name: 'Refusal Manager' }],
@@ -131,6 +158,7 @@ const fixture: (Fixture | Fixture[])[] = [
   ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.otherLab, person_id: id.secondAdmin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
+  ['lims.membership', { lab_id: id.lab, person_id: id.reviewer, role: 'Reviewer' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.manager, role: 'LabManager' }],
   [
     'lims.identity_verification',
@@ -211,6 +239,7 @@ const fixture: (Fixture | Fixture[])[] = [
     { lab_id: id.lab, id: id.otherPersonSession, person_id: id.otherPerson, token_hash: Buffer.alloc(32, 5) },
   ],
   ['lims.session', { lab_id: id.lab, id: id.secondSession, person_id: id.person, token_hash: Buffer.alloc(32, 6) }],
+  ['lims.session', { lab_id: id.lab, id: id.operatorSession, person_id: id.operator, token_hash: Buffer.alloc(32, 8) }],
   [
     'lims.reauthentication',
     {
@@ -346,6 +375,21 @@ const fixture: (Fixture | Fixture[])[] = [
       roles: '{Analyst}',
     },
   ],
+  ['lims.document', { id: id.document, lab_id: id.lab, document_type: 'SOP' }],
+  ['lims.document', { id: id.emptyDocument, lab_id: id.lab, document_type: 'Form' }],
+  [
+    'lims.document_version',
+    {
+      lab_id: id.lab,
+      id: id.documentVersion,
+      document_id: id.document,
+      version: 1,
+      title: 'Receiving samples (fictional)',
+      body: 'Check the seal.',
+      author_id: id.person,
+      effective_date: '2099-01-01',
+    },
+  ],
   [
     ['lims.review_checklist_version', { id: id.checklistVersion, kind: 'Test', version: 90 }],
     [
@@ -407,6 +451,14 @@ const takeover: Row = {
   session_id: id.session,
   taken_by_id: id.otherPerson,
 };
+
+interface TableSpec {
+  noun: string;
+  row: Row;
+  notNull: string[];
+  /** Statements the row needs in its own transaction before it is written. */
+  prelude?: string[];
+}
 
 const tables = {
   'lims.customer': {
@@ -515,7 +567,7 @@ const tables = {
       canonical_form: 1,
       content: Buffer.from('{"id":"third"}'),
     },
-    notNull: ['lab_id', 'id', 'record_table', 'record_id', 'version', 'canonical_form', 'content', 'saved_at'],
+    notNull: ['id', 'record_table', 'record_id', 'version', 'canonical_form', 'content', 'saved_at'],
   },
   'lims.signature': {
     noun: 'Signature',
@@ -680,6 +732,35 @@ const tables = {
     },
     notNull: ['id', 'kind', 'roles', 'at'],
   },
+  'lims.document': {
+    noun: 'Document',
+    row: { lab_id: id.lab, document_type: 'Policy' },
+    notNull: ['id', 'lab_id', 'document_type', 'created_at'],
+  },
+  'lims.document_version': {
+    noun: 'Document version',
+    row: {
+      lab_id: id.lab,
+      document_id: id.emptyDocument,
+      version: 1,
+      title: 'Sample label (fictional)',
+      body: 'Write the Sample number.',
+      author_id: id.person,
+      effective_date: '2099-01-01',
+    },
+    notNull: [
+      'lab_id',
+      'id',
+      'document_id',
+      'version',
+      'status',
+      'title',
+      'body',
+      'author_id',
+      'effective_date',
+      'saved_at',
+    ],
+  },
   'lims.chain_verification': {
     noun: 'Chain Verification',
     row: {
@@ -715,6 +796,21 @@ const tables = {
       'generated_at',
     ],
   },
+  'lims.release_log_entry': {
+    noun: 'Release Log entry',
+    row: { kind: 'ConfigurationChange', title: 'Probe entry', summary: 'An entry a refusal probe writes' },
+    notNull: ['id', 'kind', 'title', 'summary', 'records_exceptions', 'lapses_exceptions', 'recorded_at'],
+  },
+  'lims.service_identity': {
+    noun: 'service identity',
+    row: { name: 'svc:probe', scope: ['customer:INSERT'], created_by_entry_id: id.probeEntry },
+    notNull: ['name', 'scope'],
+    // The identity's entry must be written in the same transaction, so each probe writes one first.
+    prelude: [
+      `insert into lims.release_log_entry (id, kind, title, summary)
+       values ('${id.probeEntry}', 'ConfigurationChange', 'Probe entry', 'Declares a probe identity')`,
+    ],
+  },
   'lims.audit_chain': {
     noun: 'Audit Trail chain head',
     row: { chain: 'refusal-probe' },
@@ -742,8 +838,9 @@ const tables = {
     row: { name: '9999_probe.sql', sha256: zeros },
     notNull: ['name', 'applied_at', 'hashed_at'],
   },
-} satisfies Record<string, { noun: string; row: Row; notNull: string[] }>;
+} satisfies Record<string, TableSpec>;
 type Table = keyof typeof tables;
+const spec = (table: Table): TableSpec => tables[table];
 const tableNames = Object.keys(tables).filter((key): key is Table => Object.hasOwn(tables, key));
 
 const auditedTables: Table[] = [
@@ -767,6 +864,8 @@ const auditedTables: Table[] = [
   'lims.access_event',
   'lims.audit_export',
   'lims.chain_verification',
+  'lims.document',
+  'lims.document_version',
   'lims.identity_verification',
   'lims.credential_link',
   'lims.enrolment_grant',
@@ -774,6 +873,8 @@ const auditedTables: Table[] = [
   'lims.workstation',
   'lims.evidence_source',
   'lims.review_checklist_item',
+  'lims.release_log_entry',
+  'lims.service_identity',
   'lims.equipment',
   'lims.equipment_event',
 ];
@@ -829,6 +930,8 @@ async function draftChecklistVersion() {
     rows[0]?.held,
   ]);
 }
+/** Refusal Person, the Analyst, acts: a Document version is written by its author, who holds a business role. */
+const AS_ANALYST = `select set_config('lims.actor', 'person:refusal.person', true), set_config('lims.role', 'Analyst', true)`;
 
 /**
  * What a probe row needs in its transaction before it is written: the stamp lims.sign leaves, so that a Signature
@@ -861,11 +964,13 @@ const asLabManager = `select set_config('lims.actor', 'person:refusal.manager', 
 
 /**
  * Who a table's triggers demand of a probe row, set after the audit context: the Lab's Lab Manager registers
- * Equipment, and a member of the Lab's staff (Refusal Person, its Analyst) records an Equipment Event.
+ * Equipment, a member of the Lab's staff (Refusal Person, its Analyst) records an Equipment Event, and the author
+ * writes a Document version.
  */
 const actingFor: Partial<Record<Table, string>> = {
   'lims.equipment': asLabManager,
   'lims.equipment_event': `select set_config('lims.actor', 'person:refusal.person', true)`,
+  'lims.document_version': AS_ANALYST,
 };
 
 async function refusalOf(
@@ -874,12 +979,14 @@ async function refusalOf(
   context = true,
   row: Row = {},
   acting?: string,
+  prelude: string[] = [],
 ): Promise<pg.DatabaseError> {
   await client.query('begin');
   try {
     if (context) await client.query(AUDIT_CONTEXT);
     if (acting) await client.query(acting);
     await staged(row);
+    for (const first of prelude) await client.query(first);
     await client.query(statement, values);
   } catch (error) {
     if (error instanceof pg.DatabaseError) return error;
@@ -907,10 +1014,10 @@ async function refusalWithTriggersOff(statement: string, values: unknown[]): Pro
 
 function refusalOfRow(table: Table, change: Row = {}, context = true) {
   const row = { ...tables[table].row, ...change };
-  return refusalOf(...insert(table, row), context, row, actingFor[table]);
+  return refusalOf(...insert(table, row), context, row, actingFor[table], spec(table).prelude);
 }
 
-function assertConstraint(error: pg.DatabaseError, code: string, table: Table, constraint: string): void {
+function assertConstraint(error: pg.DatabaseError, code: string, table: string, constraint: string): void {
   assert.deepEqual([error.code, error.table, error.constraint], [code, bare(table), constraint], error.message);
 }
 
@@ -955,9 +1062,45 @@ before(async () => {
     }),
   );
   await client.query('commit');
+  // A service identity is declared by the entry written with it, so the two go in one transaction.
+  await client.query('begin');
+  await client.query(AUDIT_CONTEXT);
+  await client.query(
+    ...insert('lims.release_log_entry', {
+      id: id.entry,
+      kind: 'ConfigurationChange',
+      title: 'Refusal entry',
+      summary: 'Declares the refusal service identity',
+    }),
+  );
+  await client.query(
+    ...insert('lims.service_identity', {
+      name: 'svc:refusal',
+      scope: ['customer:INSERT'],
+      created_by_entry_id: id.entry,
+    }),
+  );
+  await client.query('commit');
+  await app.connect();
 });
 
-after(() => client.end());
+after(async () => {
+  await client.end();
+  await app.end();
+});
+
+async function attempt(...statements: string[]): Promise<pg.DatabaseError | null> {
+  await client.query('begin');
+  try {
+    for (const statement of statements) await client.query(statement);
+    return null;
+  } catch (error) {
+    if (error instanceof pg.DatabaseError) return error;
+    throw error;
+  } finally {
+    await client.query('rollback');
+  }
+}
 
 it('the base row of every table is accepted, so each refusal below comes from the one change it makes', async () => {
   for (const table of tableNames) {
@@ -967,6 +1110,7 @@ it('the base row of every table is accepted, so each refusal below comes from th
       const acting = table === 'lims.chain_verification' ? actingAs('QA') : actingFor[table];
       if (acting) await client.query(acting);
       await staged(tables[table].row);
+      for (const first of spec(table).prelude ?? []) await client.query(first);
       await client.query(...insert(table, tables[table].row));
     } finally {
       await client.query('rollback');
@@ -976,7 +1120,9 @@ it('the base row of every table is accepted, so each refusal below comes from th
 
 describe('the database refuses an empty required field', () => {
   for (const table of tableNames) {
-    const { noun, notNull } = tables[table];
+    const { noun } = tables[table];
+    // Every captured table holds the data class its record was created under.
+    const notNull = auditedTables.includes(table) ? [...tables[table].notNull, 'data_class'] : tables[table].notNull;
     for (const column of notNull) covered.add(`${table}.${bare(table)}_${column}_not_null`);
     it(`every required field of ${/^[AEIOU]/.test(noun) ? 'an' : 'a'} ${noun} refuses a null`, async () => {
       for (const column of notNull) {
@@ -1018,9 +1164,13 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
     'lims.audit_export': { id: id.auditExport },
+    'lims.document': { id: id.document },
+    'lims.document_version': { id: id.documentVersion },
     'lims.chain_verification': { id: id.chainVerification },
     'lims.room': { id: id.room },
     'lims.workstation': { id: id.workstation },
+    'lims.release_log_entry': { id: id.entry },
+    'lims.service_identity': { name: 'svc:refusal' },
     'lims.equipment': { id: id.equipment },
     'lims.equipment_event': { id: id.equipmentEvent },
     'lims.audit_chain': { chain: 'company' },
@@ -1224,6 +1374,109 @@ describe('the database refuses a duplicate of a unique value', () => {
   ]);
 });
 
+describe('a Document version is one open and one Effective version of its Document at a time', () => {
+  refusesEach('23505', [
+    {
+      name: 'a second open version of a Document is refused',
+      table: 'lims.document_version',
+      change: { document_id: id.document, version: 2 },
+      constraint: 'document_version_one_open',
+    },
+  ]);
+  covered.add('lims.document_version.document_version_one_effective');
+  it('a second Effective version of a Document is refused, even past the triggers', async () => {
+    const error = await refusalWithTriggersOff(
+      `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id, effective_date)
+       values ($1, $2, 1, 'Effective', 'One', 'One.', $3, '2026-01-01'), ($1, $2, 2, 'Effective', 'Two', 'Two.', $3, '2026-01-02')`,
+      [id.lab, id.emptyDocument, id.person],
+    );
+    assert.deepEqual([error.code, error.constraint], ['23505', 'document_version_one_effective']);
+  });
+  const pastTriggers: { name: string; statement: string; values: unknown[]; code: string; constraint: string }[] = [
+    {
+      name: 'a second Document with the number of an existing one is refused',
+      statement: `insert into lims.document (lab_id, document_type, number) values ($1, 'SOP', 'RF-SOP-0001')`,
+      values: [id.lab],
+      code: '23505',
+      constraint: 'document_number_key',
+    },
+    {
+      name: 'a Document with no number is refused',
+      statement: `insert into lims.document (lab_id, document_type) values ($1, 'SOP')`,
+      values: [id.lab],
+      code: '23502',
+      constraint: 'document_number_not_null',
+    },
+    {
+      name: 'a second version 1 of a Document is refused',
+      statement: `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id,
+                  abandon_reason, effective_date) values ($1, $2, 1, 'Abandoned', 'Again', 'Again.', $3, 'Again.',
+                  '2099-01-01')`,
+      values: [id.lab, id.document, id.person],
+      code: '23505',
+      constraint: 'document_version_document_id_version_key',
+    },
+    {
+      name: 'a Document version numbered below 1 is refused',
+      statement: `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date)
+                  values ($1, $2, 0, 'Zero', 'Zero.', $3, '2099-01-01')`,
+      values: [id.lab, id.emptyDocument, id.person],
+      code: '23514',
+      constraint: 'document_version_version_check',
+    },
+  ];
+  for (const c of pastTriggers) {
+    covered.add(
+      `lims.${c.constraint.startsWith('document_version') ? 'document_version' : 'document'}.${c.constraint}`,
+    );
+    it(c.name, async () => {
+      const error = await refusalWithTriggersOff(c.statement, c.values);
+      const constraint = error.constraint ?? `${error.table}_${error.column}_not_null`;
+      assert.deepEqual([error.code, constraint], [c.code, c.constraint], error.message);
+    });
+  }
+  refusesEach('23514', [
+    {
+      name: 'a Document version with a blank title is refused',
+      table: 'lims.document_version',
+      change: { title: '  ' },
+      constraint: 'document_version_title_check',
+    },
+    {
+      name: 'a Document version with an abandon reason but not Abandoned is refused',
+      table: 'lims.document_version',
+      change: { abandon_reason: 'Not needed.' },
+      constraint: 'document_version_abandon_reason_check',
+    },
+  ]);
+  refusesEach('23503', [
+    {
+      name: 'a Document in a Lab that does not exist is refused',
+      table: 'lims.document',
+      change: { lab_id: missing },
+      constraint: 'document_lab_id_fkey',
+    },
+    {
+      name: 'a Document version of a Document that does not exist is refused',
+      table: 'lims.document_version',
+      change: { document_id: missing },
+      constraint: 'document_version_lab_id_document_id_fkey',
+    },
+    {
+      name: 'a Document version of a Document in another Lab is refused',
+      table: 'lims.document_version',
+      change: { lab_id: id.otherLab },
+      constraint: 'document_version_lab_id_document_id_fkey',
+    },
+    {
+      name: 'a Document version by an author who does not exist is refused',
+      table: 'lims.document_version',
+      change: { author_id: missing },
+      constraint: 'document_version_author_id_fkey',
+    },
+  ]);
+});
+
 describe('the database refuses a reference to a row that does not exist', () => {
   const noLab = (table: Table, noun: string): Case => ({
     name: `a ${noun} in a Lab that does not exist is refused`,
@@ -1382,12 +1635,6 @@ describe('the database refuses a reference to a row that does not exist', () => 
       name: 'a Signature on a Record Version that does not exist is refused',
       table: 'lims.signature',
       change: { record_version_id: missing },
-      constraint: 'signature_record_version_fkey',
-    },
-    {
-      name: 'a Signature on a Record Version in another Lab is refused',
-      table: 'lims.signature',
-      change: { lab_id: id.otherLab },
       constraint: 'signature_record_version_fkey',
     },
     {
@@ -2508,6 +2755,13 @@ describe('a Review Checklist version and a Test Review record who saved them, an
       const error = await refusalWithTriggersOff(...insert(table, { ...tables[table].row, saved_by: null }));
       assert.deepEqual([error.code, error.column], ['23502', 'saved_by'], error.message);
     });
+    covered.add(`${table}.${bare(table)}_data_class_not_null`);
+    it(`a ${noun} with no data class is refused even with its triggers bypassed`, async () => {
+      const error = await refusalWithTriggersOff(
+        ...insert(table, { ...tables[table].row, saved_by: 'person:refusal.admin', data_class: null }),
+      );
+      assert.deepEqual([error.code, error.column], ['23502', 'data_class'], error.message);
+    });
     covered.add(`${table}.capture`);
     it(`a new ${noun} by a named actor without a role and a reason is refused`, async () => {
       await client.query('begin');
@@ -2573,7 +2827,7 @@ describe('a Review Checklist version and a Test Review record who saved them, an
 });
 
 describe('a Signature, a Record Version, a signature statement, a re-authentication record, an Access Event, an Audit Trail entry, a Commit Key, a System Incident or an Audit Export is never changed or removed, even by the superuser', () => {
-  const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
+  const cases: { name: string; table: Table | 'lims.deployment'; trigger: string; statement: string }[] = [
     {
       name: 'updating a Chain Verification is refused',
       table: 'lims.chain_verification',
@@ -2626,7 +2880,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       name: 'truncating the signature statements is refused',
       table: 'lims.signature_statement',
       trigger: 'refuse_truncate',
-      statement: 'truncate lims.signature_statement, lims.signature',
+      statement: 'truncate lims.signature_statement, lims.signature, lims.critical_data_change_decision',
     },
     {
       name: 'updating a signing role is refused',
@@ -2662,7 +2916,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       name: 'truncating the re-authentication records is refused',
       table: 'lims.reauthentication',
       trigger: 'refuse_truncate',
-      statement: 'truncate lims.reauthentication, lims.signature',
+      statement: 'truncate lims.reauthentication, lims.signature, lims.critical_data_change_decision',
     },
     {
       name: 'updating a Record Version is refused',
@@ -2681,7 +2935,8 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       name: 'truncating the Record Versions is refused',
       table: 'lims.record_version',
       trigger: 'refuse_truncate',
-      statement: 'truncate lims.record_version, lims.signature',
+      statement:
+        'truncate lims.record_version, lims.signature, lims.critical_data_change, lims.critical_data_change_decision',
     },
     {
       name: 'updating a Signature is refused',
@@ -2699,7 +2954,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       name: 'truncating the Signatures is refused',
       table: 'lims.signature',
       trigger: 'refuse_truncate',
-      statement: 'truncate lims.signature',
+      statement: 'truncate lims.signature, lims.critical_data_change_decision',
     },
     {
       name: "changing a Commit Key's receipt is refused",
@@ -2796,6 +3051,42 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       table: 'lims.credential_link',
       trigger: 'refuse_truncate',
       statement: 'truncate lims.credential_link',
+    },
+    {
+      name: 'updating a Release Log entry is refused',
+      table: 'lims.release_log_entry',
+      trigger: 'refuse_change',
+      statement: `update lims.release_log_entry set title = 'changed'`,
+    },
+    {
+      name: 'deleting a Release Log entry is refused',
+      table: 'lims.release_log_entry',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.release_log_entry',
+    },
+    {
+      name: 'truncating the Release Log is refused',
+      table: 'lims.release_log_entry',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.release_log_entry cascade',
+    },
+    {
+      name: 'truncating the service identities is refused',
+      table: 'lims.service_identity',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.service_identity',
+    },
+    {
+      name: 'deleting the deployment is refused',
+      table: 'lims.deployment',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.deployment',
+    },
+    {
+      name: 'truncating the deployment is refused',
+      table: 'lims.deployment',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.deployment',
     },
     {
       name: 'truncating the enrolment grants is refused',
@@ -3699,18 +3990,6 @@ describe('a Signature is written only by the signing function, which refuses eve
     `select lims.sign('${reauthentication}', '${session}', '${table}', '${recordId}', ${seen}, ${hash},
                       ${statementVersion}, '${meaning}', '${release}')`;
 
-  async function attempt(...statements: string[]): Promise<pg.DatabaseError | null> {
-    await client.query('begin');
-    try {
-      for (const statement of statements) await client.query(statement);
-      return null;
-    } catch (error) {
-      if (error instanceof pg.DatabaseError) return error;
-      throw error;
-    } finally {
-      await client.query('rollback');
-    }
-  }
   async function refused(...statements: string[]): Promise<string> {
     const error = await attempt(...statements);
     assert.ok(error, `the database accepted ${statements.at(-1)}`);
@@ -4298,6 +4577,17 @@ describe('a Signature is written only by the signing function, which refuses eve
         statements: () => [...holdsQaAndReviewer, ...draftV2(asPerson('QA')), ...approve(v2)],
         message: () => 'a Review Checklist version is approved by a QA who did not draft it',
       },
+      {
+        name: 'a Reviewer signing Approved on a Review Checklist version is refused, though a Reviewer signs a Critical Data Change Approved',
+        statements: () => [
+          ...holdsQaAndReviewer,
+          asPerson('Reviewer'),
+          proof(approval, 'Approved'),
+          `select lims.version_review_checklist('${approval}', '${v1}')`,
+          signChecklist(v1, approval),
+        ],
+        message: () => 'a Review Checklist version is signed Approved only by QA, not Reviewer',
+      },
     ];
     for (const c of reviewCases)
       it(c.name, async () => assert.equal(await refused(...c.statements()), await c.message()));
@@ -4477,6 +4767,425 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
   });
 });
 
+describe('a Release Log entry takes effect only once it is signed Approved, and the data class and the service identities change only through one', () => {
+  const latestVersion = (column: 'id' | 'content_hash', table = 'release_log_entry', record: string = id.entry) =>
+    `(select ${column} from lims.record_version where record_table = '${table}' and record_id = '${record}'
+       order by version desc limit 1)`;
+  const asSigner = (username: string, role: string) =>
+    `select set_config('lims.actor', 'person:${username}', true), set_config('lims.role', '${role}', true),
+            set_config('lims.reason', 'Approve a Release Log entry', true)`;
+  const signs = (person: string, session: string, meaning: string, table: string, record: string) => `do $$
+    declare proof uuid;
+    begin
+      insert into lims.reauthentication (lab_id, session_id, person_id, meaning, authenticator)
+      values ('${id.lab}', '${session}', '${person}', '${meaning}', 'Password') returning id into proof;
+      perform lims.sign(proof, '${session}', '${table}', '${record}',
+                        ${latestVersion('id', table, record)}, ${latestVersion('content_hash', table, record)}, 1,
+                        '${meaning}', 'test');
+    end $$`;
+  const approve = (person: string, session: string, entry = id.entry) =>
+    signs(person, session, 'Approved', 'release_log_entry', entry);
+  const stamp = (entry: string) => `select lims.set_this_transaction('lims.release_log', '${entry}')`;
+  /** Declares a change of the data class and takes the company chain, as an approval setting the class does first. */
+  const declared = ['select lims.declare_data_class_change()', `select lims.lock_chains('company')`];
+  const probeEntry = `insert into lims.release_log_entry (id, kind, title, summary)
+                      values ('${id.probeEntry}', 'ConfigurationChange', 'Probe entry', 'Retires an identity')`;
+
+  async function refusedWith(code: string, ...statements: string[]): Promise<string> {
+    const error = await attempt(...statements);
+    assert.ok(error, `the database accepted ${statements.at(-1)}`);
+    assert.equal(error.code, code, error.message);
+    return error.message;
+  }
+
+  refusesEach('23514', [
+    {
+      name: 'a Release Log entry with an empty title is refused',
+      table: 'lims.release_log_entry',
+      change: { title: '' },
+      constraint: 'release_log_entry_title_check',
+    },
+    {
+      name: 'a Release Log entry with an empty summary is refused',
+      table: 'lims.release_log_entry',
+      change: { summary: '' },
+      constraint: 'release_log_entry_summary_check',
+    },
+    {
+      name: 'a Release Log entry naming an empty release is refused',
+      table: 'lims.release_log_entry',
+      change: { kind: 'Release', release: '' },
+      constraint: 'release_log_entry_release_check',
+    },
+    {
+      name: 'a Release Log entry for a release that names none is refused',
+      table: 'lims.release_log_entry',
+      change: { kind: 'Release' },
+      constraint: 'release_log_entry_kind_release_check',
+    },
+    {
+      name: 'a Release entry without its image digests, CI run and result and ZAP baseline result is refused',
+      table: 'lims.release_log_entry',
+      change: { kind: 'Release', release: '2026.10.3' },
+      constraint: 'release_log_entry_release_evidence_check',
+    },
+    {
+      name: 'a Release Log entry that is not a Release yet carries release evidence is refused',
+      table: 'lims.release_log_entry',
+      change: { ci_run: 'https://ci.example.invalid/runs/1', ci_result: 'Passed' },
+      constraint: 'release_log_entry_release_evidence_check',
+    },
+    {
+      name: 'a Release entry with no image digest is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, image_digests: '{}' },
+      constraint: 'release_log_entry_image_digests_check',
+    },
+    {
+      name: 'a Release entry with an image without its sha256 digest is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, image_digests: '{postgres:18-alpine}' },
+      constraint: 'release_log_entry_image_digests_check',
+    },
+    {
+      name: 'a Release entry with a NULL image digest element is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, image_digests: '{NULL}' },
+      constraint: 'release_log_entry_image_digests_check',
+    },
+    {
+      name: 'a Release entry with an empty CI run is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, ci_run: '' },
+      constraint: 'release_log_entry_ci_run_check',
+    },
+    {
+      name: 'a Release entry with a CI result that is neither Passed nor Failed is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, ci_result: 'Green' },
+      constraint: 'release_log_entry_ci_result_check',
+    },
+    {
+      name: 'a Release entry with a ZAP baseline result that is not Passed, Warned or Failed is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, zap_baseline_result: 'Clean' },
+      constraint: 'release_log_entry_zap_baseline_result_check',
+    },
+    {
+      name: 'a Release Log entry with a signature statement version below 1 is refused',
+      table: 'lims.release_log_entry',
+      change: { statement_version: 0, statement: Buffer.from('A statement') },
+      constraint: 'release_log_entry_statement_version_check',
+    },
+    {
+      name: 'a Release Log entry with a signature statement version but no statement is refused',
+      table: 'lims.release_log_entry',
+      change: { statement_version: 2 },
+      constraint: 'release_log_entry_statement_pair_check',
+    },
+    {
+      name: 'a Release Log entry that sets the data class without recording the FileVault personal key is refused',
+      table: 'lims.release_log_entry',
+      change: { sets_data_class: 'real' },
+      constraint: 'release_log_entry_file_vault_check',
+    },
+    {
+      name: 'a Release Log entry bringing a signature statement into force that also records a demo exception is refused',
+      table: 'lims.release_log_entry',
+      change: { statement_version: 2, statement: Buffer.from('A statement'), records_exceptions: '{TwoRole}' },
+      constraint: 'release_log_entry_statement_alone_check',
+    },
+    {
+      name: 'a Release Log entry bringing a signature statement into force that also sets the data class is refused',
+      table: 'lims.release_log_entry',
+      change: {
+        statement_version: 2,
+        statement: Buffer.from('A statement'),
+        sets_data_class: 'real',
+        file_vault_personal_key: true,
+      },
+      constraint: 'release_log_entry_statement_alone_check',
+    },
+    {
+      name: 'a Release Log entry that records and lapses the same demo exception is refused',
+      table: 'lims.release_log_entry',
+      change: { records_exceptions: '{TwoRole,Anchoring}', lapses_exceptions: '{Anchoring}' },
+      constraint: 'release_log_entry_exception_twice_check',
+    },
+    {
+      name: 'a service identity whose scope is not a table and INSERT, UPDATE or DELETE is refused',
+      table: 'lims.service_identity',
+      change: { scope: ['customer:INSERT', 'customer:insert'] },
+      constraint: 'service_identity_scope_pair_check',
+    },
+    {
+      name: 'a service identity whose scope holds a NULL element is refused',
+      table: 'lims.service_identity',
+      change: { scope: ['customer:INSERT', null] },
+      constraint: 'service_identity_scope_pair_check',
+    },
+    {
+      name: 'a service identity whose scope holds two pairs in one element is refused',
+      table: 'lims.service_identity',
+      change: { scope: ['customer:INSERT person:UPDATE'] },
+      constraint: 'service_identity_scope_pair_check',
+    },
+    {
+      name: 'a service identity whose name is not svc: and a name is refused',
+      table: 'lims.service_identity',
+      change: { name: 'svc:' },
+      constraint: 'service_identity_name_check',
+    },
+    {
+      name: 'a service identity with no scope is refused',
+      table: 'lims.service_identity',
+      change: { scope: [] },
+      constraint: 'service_identity_scope_check',
+    },
+    {
+      name: 'a Record Version of a Lab record without its Lab is refused',
+      table: 'lims.record_version',
+      change: { lab_id: null },
+      constraint: 'record_version_company_check',
+    },
+    {
+      name: 'a Record Version of a Release Log entry with a Lab is refused',
+      table: 'lims.record_version',
+      change: { record_table: 'release_log_entry', record_id: id.entry },
+      constraint: 'record_version_company_check',
+    },
+  ]);
+
+  covered.add('lims.deployment.deployment_pkey');
+  covered.add('lims.deployment.deployment_single_check');
+  covered.add('lims.deployment.deployment_single_not_null');
+  covered.add('lims.deployment.deployment_data_class_not_null');
+  it('there is one deployment row, and no statement adds a second', async () => {
+    const second = await refusalOf('insert into lims.deployment default values');
+    assertConstraint(second, '23505', 'lims.deployment', 'deployment_pkey');
+    const other = await refusalOf('insert into lims.deployment (single) values (false)');
+    assertConstraint(other, '23514', 'lims.deployment', 'deployment_single_check');
+    for (const column of ['single', 'data_class']) {
+      const error = await refusalOf(`insert into lims.deployment (${column}) values (null)`);
+      assert.deepEqual([error.code, error.column], ['23502', column], error.message);
+    }
+  });
+
+  covered.add('lims.deployment.data_class_through_release_log');
+  it('the data class changes only in the transaction that approves the entry setting it', async () => {
+    assert.equal(
+      await refusedWith('LA011', AUDIT_CONTEXT, `update lims.deployment set data_class = 'real'`),
+      'the data class changes only when a Release Log entry setting it is signed Approved',
+    );
+  });
+  it('the data class never becomes real while a fictional record is held, and the refusal names the tables', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        ...declared,
+        `insert into lims.release_log_entry (id, kind, title, summary, sets_data_class, file_vault_personal_key)
+         values ('${id.probeEntry}', 'ConfigurationChange', 'Real data', 'Takes real data', 'real', true)`,
+        stamp(id.probeEntry),
+        `update lims.deployment set data_class = 'real', set_by_entry_id = '${id.probeEntry}'`,
+      ),
+      'the database holds records created under fictional: audit_export, chain_verification, customer, document, document_version, enrolment_grant, equipment, equipment_event, method, result, room, sample, submission, system_incident, test, test_report, test_review, training_record, workstation',
+    );
+  });
+
+  covered.add('lims.deployment.deployment_set_by_entry_id_fkey');
+  it('the deployment cannot cite a Release Log entry that does not exist', async () => {
+    const error = await refusalOf(
+      `update lims.deployment set set_by_entry_id = '${missing}'`,
+      [],
+      true,
+      {},
+      undefined,
+      [...declared, stamp(missing)],
+    );
+    assertConstraint(error, '23503', 'lims.deployment', 'deployment_set_by_entry_id_fkey');
+  });
+
+  covered.add('lims.deployment.capture');
+  it('a change to the deployment without an actor, a role and a reason is refused', async () => {
+    const error = await refusalOf(
+      `update lims.deployment set set_by_entry_id = '${id.entry}'`,
+      [],
+      false,
+      {},
+      undefined,
+      [...declared, stamp(id.entry)],
+    );
+    assert.deepEqual([error.code, error.message], ['LA001', 'an audited write needs an actor, a role and a reason']);
+  });
+
+  covered.add('lims.service_identity.service_identity_through_release_log');
+  it('a service identity is declared only by a Release Log entry written in the same transaction', async () => {
+    const error = await refusalOf(
+      ...insert('lims.service_identity', {
+        name: 'svc:late',
+        scope: ['customer:INSERT'],
+        created_by_entry_id: id.entry,
+      }),
+    );
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA011', 'a service identity is created or retired only by the Release Log entry written with it'],
+    );
+  });
+  it('a service identity is retired only by a Release Log entry written in the same transaction, and once', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `update lims.service_identity set retired_by_entry_id = '${id.entry}' where name = 'svc:refusal'`,
+      ),
+      'a service identity is created or retired only by the Release Log entry written with it',
+    );
+    const retire = (entry: string) =>
+      `update lims.service_identity set retired_by_entry_id = '${entry}' where name = 'svc:refusal'`;
+    assert.equal(await attempt(AUDIT_CONTEXT, probeEntry, retire(id.probeEntry)), null);
+    const again = randomUUID();
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        probeEntry,
+        retire(id.probeEntry),
+        `insert into lims.release_log_entry (id, kind, title, summary)
+         values ('${again}', 'ConfigurationChange', 'Second retirement', 'Retires an identity again')`,
+        retire(again),
+      ),
+      'a service identity changes only by being retired, once, by a Release Log entry',
+    );
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        probeEntry,
+        `update lims.service_identity set scope = '{person:UPDATE}' where name = 'svc:refusal'`,
+      ),
+      'a service identity changes only by being retired, once, by a Release Log entry',
+    );
+  });
+
+  it('a service identity is not declared by an entry bringing a signature statement into force, which QA approves alone', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `insert into lims.release_log_entry (id, kind, title, summary, statement_version, statement)
+         values ('${id.probeEntry}', 'ConfigurationChange', 'Statement', 'A new statement', 2, 'A statement')`,
+        `insert into lims.service_identity (name, scope, created_by_entry_id)
+         values ('svc:smuggled', '{customer:INSERT}', '${id.probeEntry}')`,
+      ),
+      'an entry bringing a signature statement into force declares no service identity',
+    );
+  });
+
+  covered.add('lims.signature.take_effect_on_approval');
+  it('a Test is never signed Approved, and a Release Log entry takes no other Signature Meaning', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA010',
+        asSigner('refusal.other', 'QA'),
+        signs(id.otherPerson, id.otherPersonSession, 'Approved', 'test', id.test),
+      ),
+      'a Test and the Test Report built on it are never signed Approved',
+    );
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        asSigner('refusal.person', 'Analyst'),
+        signs(id.person, id.session, 'Performed', 'release_log_entry', id.entry),
+      ),
+      'a Release Log entry is signed Approved, not Performed',
+    );
+  });
+  it('an entry whose signature statement version does not follow the one in force is refused at its approval', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `insert into lims.release_log_entry (id, kind, title, summary, statement_version, statement)
+         values ('${id.probeEntry}', 'ConfigurationChange', 'Statement', 'A skipped version', 3, 'A statement')`,
+        asSigner('refusal.other', 'QA'),
+        approve(id.otherPerson, id.otherPersonSession, id.probeEntry),
+      ),
+      'the signature statement version 3 does not follow the version in force',
+    );
+  });
+  it('a Release Log entry of the system is approved by the Platform Operator, not QA, and is approved once', async () => {
+    assert.equal(
+      await refusedWith('LA011', asSigner('refusal.other', 'QA'), approve(id.otherPerson, id.otherPersonSession)),
+      'a Release Log entry of the system is approved by PlatformOperator, not QA',
+    );
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        asSigner('refusal.operator', 'PlatformOperator'),
+        approve(id.operator, id.operatorSession),
+        approve(id.operator, id.operatorSession),
+      ),
+      'the Release Log entry is already approved',
+    );
+  });
+
+  it('a record takes the data class of the deployment it is created under', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `insert into lims.customer (name, data_class) values ('Claims real', 'real')`,
+      ),
+      'a record takes the data class of the deployment it is created under',
+    );
+  });
+
+  it('a record keeps the data class it was created under', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `update lims.customer set data_class = 'real' where id = '${id.customer}'`,
+      ),
+      'a record keeps the data class it was created under',
+    );
+  });
+
+  it('a service identity writes only inside the scope its approved Release Log entry declares', async () => {
+    const asService = (name: string) =>
+      `select set_config('lims.actor', '${name}', true), set_config('lims.role', 'system', true),
+              set_config('lims.reason', 'Probe the scope', true)`;
+    const write = `insert into lims.customer (name) values ('Scoped Customer (fictional)')`;
+    const refusal = (name: string) => (error: unknown) =>
+      error instanceof pg.DatabaseError &&
+      error.code === 'LA011' &&
+      error.message ===
+        `the service identity ${name} is not declared to insert customer, or its Release Log entry is not approved`;
+    // The scope binds once an entry is approved; this transaction approves the one declaring svc:refusal.
+    await app.query('begin');
+    try {
+      await app.query(asSigner('refusal.operator', 'PlatformOperator'));
+      await app.query(`select lims.lock_chains('company', '${id.lab}')`);
+      await app.query(approve(id.operator, id.operatorSession));
+      await app.query('savepoint probe');
+      await app.query(asService('svc:nobody'));
+      await assert.rejects(app.query(write), refusal('svc:nobody'));
+      await app.query('rollback to savepoint probe');
+      await app.query(asService('svc:refusal'));
+      assert.equal((await app.query(write)).rowCount, 1, 'the approved entry opens the scope');
+      await assert.rejects(
+        app.query(`update lims.customer set name = 'Renamed (fictional)' where id = '${id.customer}'`),
+        (error: unknown) => error instanceof pg.DatabaseError && error.code === 'LA011',
+        'the scope holds the identity to the declared operation',
+      );
+    } finally {
+      await app.query('rollback');
+    }
+  });
+});
+
 describe("a Chain Verification names an entry of its chain and that entry's hash", () => {
   covered.add('lims.chain_verification.head_matches_entry');
   it('a Chain Verification whose hash is not the hash of the entry it verified through is refused', async () => {
@@ -4572,6 +5281,27 @@ describe("a Lab's time zone changes only through a migration, and a Signature an
     } finally {
       await client.query('rollback');
     }
+  });
+
+  covered.add('lims.signature.signature_in_record_lab');
+  it('a Signature on a Record Version in another Lab is refused', async () => {
+    const reauthentication = randomUUID();
+    const row = {
+      ...tables['lims.signature'].row,
+      lab_id: id.otherLab,
+      session_id: id.otherSession,
+      reauthentication_id: reauthentication,
+    };
+    const error = await refusalOf(...insert('lims.signature', row), true, row, actingFor['lims.signature'], [
+      ...(spec('lims.signature').prelude ?? []),
+      `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
+       values ('${id.otherLab}', '${reauthentication}', '${id.otherSession}', '${id.person}', '${row.meaning}', 'Password')`,
+    ]);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', "a Signature on a Lab's record is given in that Lab"],
+      error.message,
+    );
   });
 
   covered.add('lims.signature.signature_signed_time_zone_not_null');
@@ -4791,9 +5521,10 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
     meaning: string,
     past: boolean,
     content?: string,
+    role = 'QA',
+    reauthentication: string = randomUUID(),
   ) => {
     if (past) await client.query('set local session_replication_role = replica');
-    const reauthentication = randomUUID();
     await client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', reauthentication]);
     await client.query(
       `with version as (
@@ -4811,11 +5542,11 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
        insert into lims.signature (lab_id, person_id, printed_name, username, role, meaning, record_version_id,
                                    content_hash, canonical_form, statement_version, statement_hash, authenticator,
                                    session_id, app_release, reauthentication_id, signed_time_zone)
-       select $1, $4, 'Refusal Person', 'refusal.person', 'QA', $5, id, content_hash, canonical_form, 1,
+       select $1, $4, 'Refusal Person', 'refusal.person', $9, $5, id, content_hash, canonical_form, 1,
               (select statement_hash from lims.signature_statement where version = 1), 'Password', $6, 'test', $7,
               (select time_zone from lims.lab where lab_id = $1)
          from version`,
-      [id.lab, table, recordId, id.person, meaning, id.session, reauthentication, content ?? null],
+      [id.lab, table, recordId, id.person, meaning, id.session, reauthentication, content ?? null, role],
     );
     if (past) await client.query('set local session_replication_role = origin');
   };
@@ -5158,6 +5889,19 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
       'Equipment is signed only Approved',
     ],
     [
+      'Equipment signed Approved by a Platform Operator is refused; QA alone releases Equipment',
+      async () => {
+        const proof = randomUUID();
+        await client.query(
+          `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
+           values ($1, $2, $3, $4, 'Approved', 'Password')`,
+          [id.lab, proof, id.session, id.person],
+        );
+        await signOver('equipment', id.equipment, 'Approved', false, undefined, 'PlatformOperator', proof);
+      },
+      'Equipment is signed Approved only by QA, not PlatformOperator',
+    ],
+    [
       'Equipment signed Approved while In use is refused',
       async () => {
         const balance = await register('BAL-07');
@@ -5241,6 +5985,505 @@ describe('Equipment is never removed, and an Equipment Event is never changed or
   }
 });
 
+describe('a Document keeps its number, and its versions reach Effective only through three independent Signatures', () => {
+  interface Statement {
+    text: string;
+    values: unknown[];
+  }
+  const statement = (text: string, ...values: unknown[]): Statement => ({ text, values });
+  const triggersOff = statement('set local session_replication_role = replica');
+  const triggersOn = statement('set local session_replication_role = origin');
+  const asPerson = (username: string, role: string) =>
+    statement(
+      `select set_config('lims.actor', $1, true), set_config('lims.role', $2, true),
+              set_config('lims.reason', 'Probe the Document vault', true)`,
+      `person:${username}`,
+      role,
+    );
+  const asAuthor = asPerson('refusal.person', 'Analyst');
+  const version = randomUUID();
+  /** A Document version of the empty Document, written past the triggers as a past write left it. */
+  const versionIn = (status: string, effectiveDate = '2099-01-01'): Statement[] => [
+    triggersOff,
+    statement(
+      `insert into lims.document_version (lab_id, id, document_id, version, status, title, body, author_id, effective_date,
+                                          abandon_reason)
+       values ($1, $2, $3, 1, $4, 'Probe', 'Probe.', $5, $6, $7)`,
+      id.lab,
+      version,
+      id.emptyDocument,
+      status,
+      id.person,
+      effectiveDate,
+      status === 'Abandoned' ? 'Not needed.' : null,
+    ),
+    statement(
+      `insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
+       values ($1, 'document_version', $2, 1, 1, convert_to(lims.document_version_content($2)::text, 'UTF8'))`,
+      id.lab,
+      version,
+    ),
+    triggersOn,
+  ];
+  /** The role each Meaning is signed in, as lims.sign writes the role the signer acts in. */
+  const signingRoles: Record<string, string> = {
+    Authored: 'Analyst',
+    Reviewed: 'Reviewer',
+    Approved: 'QA',
+    Performed: 'Analyst',
+  };
+  /** A Signature on the version, written past the triggers as lims.sign left it. */
+  const signed = (meaning: string, person: string): Statement[] => [
+    triggersOff,
+    statement(
+      `insert into lims.signature (lab_id, person_id, printed_name, username, role, meaning, record_version_id,
+                                   content_hash, canonical_form, statement_version, statement_hash, authenticator,
+                                   session_id, app_release, reauthentication_id, signed_time_zone)
+       select $1, $2, 'Signer', 'signer', $3, $4, v.id, v.content_hash, 1, 1, $5, 'Password', $6, 'test',
+              gen_random_uuid(), 'UTC'
+         from lims.record_version v where v.record_table = 'document_version' and v.record_id = $7
+        order by v.version desc limit 1`,
+      id.lab,
+      person,
+      signingRoles[meaning],
+      meaning,
+      zeros,
+      id.session,
+      version,
+    ),
+    triggersOn,
+  ];
+  /** The insert lims.sign makes, which reaches document_signing before sign_only refuses it. */
+  const signing = (meaning: string, person: string, role = signingRoles[meaning]): Statement =>
+    statement(
+      `insert into lims.signature (lab_id, person_id, role, meaning, record_version_id)
+       values ($1, $2, $3, $4, (select id from lims.record_version where record_table = 'document_version'
+                                    and record_id = $5 order by version desc limit 1))`,
+      id.lab,
+      person,
+      role,
+      meaning,
+      version,
+    );
+  /** The insert lims.sign makes on a Test's Record Version. */
+  const signingTest = (meaning: string, role: string): Statement =>
+    statement(
+      'insert into lims.signature (lab_id, person_id, role, meaning, record_version_id) values ($1, $2, $3, $4, $5)',
+      id.lab,
+      id.person,
+      role,
+      meaning,
+      id.laterRecordVersion,
+    );
+  const setStatus = (status: string) =>
+    statement('update lims.document_version set status = $1 where id = $2', status, version);
+  const setTitle = (title: string) =>
+    statement('update lims.document_version set title = $1 where id = $2', title, version);
+  const setEffectiveDate = (date: string) =>
+    statement('update lims.document_version set effective_date = $1 where id = $2', date, version);
+  const setAbandonReason = (reason: string) =>
+    statement('update lims.document_version set abandon_reason = $1 where id = $2', reason, version);
+  /** Version 2 of the empty Document, written past the triggers in `status` with `effectiveDate`. */
+  const laterIn = (status: string, effectiveDate: string): Statement[] => [
+    triggersOff,
+    statement(
+      `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id, effective_date)
+       values ($1, $2, 2, $3, 'Later', 'Later.', $4, $5)`,
+      id.lab,
+      id.emptyDocument,
+      status,
+      id.person,
+      effectiveDate,
+    ),
+    triggersOn,
+  ];
+  const abandon = (reason: string) =>
+    statement(
+      `update lims.document_version set status = 'Abandoned', abandon_reason = $1 where id = $2`,
+      reason,
+      version,
+    );
+
+  async function refusal(...statements: Statement[]): Promise<pg.DatabaseError> {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      for (const { text, values } of statements) await client.query(text, values);
+    } catch (error) {
+      if (error instanceof pg.DatabaseError) return error;
+      throw error;
+    } finally {
+      await client.query('rollback');
+    }
+    return assert.fail(`the database accepted ${statements.at(-1)?.text}`);
+  }
+
+  async function accepted(...statements: Statement[]): Promise<void> {
+    for (const { text, values } of statements) await client.query(text, values);
+  }
+
+  covered.add('lims.document.number_document');
+  it('a Document takes the next number of its type in its Lab, {Lab}-{Type}-{NNNN}', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('select lims.lock_chains($1::text, $2::text)', [id.lab, id.otherLab]);
+      const { rows } = await client.query<{ number: string }>(
+        `insert into lims.document (lab_id, document_type) values ($1, 'SOP'), ($1, 'Policy'), ($2, 'SOP') returning number`,
+        [id.lab, id.otherLab],
+      );
+      assert.deepEqual(
+        rows.map((row) => row.number),
+        ['RF-SOP-0002', 'RF-POL-0001', 'OT-SOP-0001'],
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.document.refuse_change');
+  covered.add('lims.document.refuse_truncate');
+  covered.add('lims.document_version.refuse_change');
+  covered.add('lims.document_version.refuse_truncate');
+  it('a Document is never changed or removed, and a Document version is never removed, even by the superuser', async () => {
+    for (const s of [
+      statement(`update lims.document set number = 'RF-SOP-0009' where id = $1`, id.document),
+      statement(`update lims.document set document_type = 'Policy' where id = $1`, id.document),
+      statement('delete from lims.document where id = $1', id.emptyDocument),
+      statement('truncate lims.document cascade'),
+      statement('delete from lims.document_version where id = $1', id.documentVersion),
+      statement('truncate lims.document_version'),
+    ]) {
+      const error = await refusal(s);
+      assert.equal(error.code, 'LA002', `${s.text}: ${error.message}`);
+    }
+  });
+
+  covered.add('lims.document_version.version_record');
+  it('a Document version is versioned when written and when its Draft changes, and not when it moves on', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await accepted(
+        ...versionIn('Draft'),
+        setTitle('Probe again'),
+        setEffectiveDate('2099-02-01'),
+        ...signed('Authored', id.person),
+        setStatus('InReview'),
+      );
+      const { rows } = await client.query<{ version: number; title: string; effectiveDate: string }>(
+        `select version, convert_from(content, 'UTF8')::jsonb ->> 'title' as title,
+                convert_from(content, 'UTF8')::jsonb ->> 'effectiveDate' as "effectiveDate"
+           from lims.record_version where record_table = 'document_version' and record_id = $1 order by version`,
+        [version],
+      );
+      assert.deepEqual(rows, [
+        { version: 1, title: 'Probe', effectiveDate: '2099-01-01' },
+        { version: 2, title: 'Probe again', effectiveDate: '2099-01-01' },
+        { version: 3, title: 'Probe again', effectiveDate: '2099-02-01' },
+      ]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  /** Version 1 of the empty Document, a Draft by `author` dated `effectiveDate`. */
+  const draftBy = (author: string, effectiveDate = '2099-01-01') =>
+    statement(
+      `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date)
+       values ($1, $2, 1, 'Probe', 'Probe.', $3, $4)`,
+      id.lab,
+      id.emptyDocument,
+      author,
+      effectiveDate,
+    );
+  covered.add('lims.document_version.open_document_version');
+  it('a Document version opens only as the next Draft of its Document, by the person who writes it', async () => {
+    const cases: [Statement, string][] = [
+      [
+        statement(
+          `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date, status)
+           values ($1, $2, 1, 'Probe', 'Probe.', $3, '2099-01-01', 'Approved')`,
+          id.lab,
+          id.emptyDocument,
+          id.person,
+        ),
+        'a Document version opens as a Draft, not Approved',
+      ],
+      [
+        statement(
+          `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date)
+           values ($1, $2, 2, 'Probe', 'Probe.', $3, '2099-01-01')`,
+          id.lab,
+          id.emptyDocument,
+          id.person,
+        ),
+        'a Document version is the next version of its Document',
+      ],
+      [draftBy(id.reviewer), "a Document version's author is the person who writes it"],
+      [draftBy(id.person, '2000-01-01'), "a Document version's Effective Date is today or later in the Lab"],
+    ];
+    for (const [insert, message] of cases) {
+      const error = await refusal(asAuthor, insert);
+      assert.deepEqual([error.code, error.message], ['LA014', message]);
+    }
+  });
+  it('a Document version is authored only by a person who holds a business role in its Lab', async () => {
+    const outsiders: [Statement, string][] = [
+      [asPerson('refusal.admin', 'Admin'), id.admin],
+      [asPerson('refusal.operator', 'PlatformOperator'), id.operator],
+    ];
+    for (const [acting, author] of outsiders) {
+      const error = await refusal(acting, draftBy(author));
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA014', "a Document version's author holds the Lab Manager, Analyst, Reviewer or QA role in its Lab"],
+      );
+    }
+  });
+
+  covered.add('lims.document_version.move_document_version');
+  const moves: { name: string; statements: Statement[]; message: string }[] = [
+    {
+      name: "a change to a Document version's title once it left Draft is refused",
+      statements: [...versionIn('InReview'), setTitle('Changed')],
+      message: "a Document version's content changes only while it is a Draft",
+    },
+    {
+      name: "a change to a Document version's Effective Date once it left Draft is refused",
+      statements: [...versionIn('InReview'), setEffectiveDate('2099-02-01')],
+      message: "a Document version's content changes only while it is a Draft",
+    },
+    {
+      name: 'a Draft that goes straight to Effective is refused',
+      statements: [...versionIn('Draft'), setStatus('Effective')],
+      message: 'a Document version does not move from Draft to Effective',
+    },
+    {
+      name: 'a Draft that goes In Review with no Authored Signature is refused',
+      statements: [...versionIn('Draft'), setStatus('InReview')],
+      message: 'a Document version goes In Review only on an Authored Signature over its content as it is now',
+    },
+    {
+      name: 'a Draft whose content changed after its Authored Signature does not go In Review',
+      statements: [
+        ...versionIn('Draft'),
+        ...signed('Authored', id.person),
+        setTitle('Changed after signing'),
+        setStatus('InReview'),
+      ],
+      message: 'a Document version goes In Review only on an Authored Signature over its content as it is now',
+    },
+    {
+      name: 'a Document version Approved with no Approved Signature is refused',
+      statements: [...versionIn('InReview'), setStatus('Approved')],
+      message: 'a Document version is Approved only by Reviewed and Approved Signatures over its content as it is now',
+    },
+    {
+      name: 'a Document version Approved with no Reviewed Signature is refused',
+      statements: [...versionIn('InReview'), ...signed('Approved', id.otherPerson), setStatus('Approved')],
+      message: 'a Document version is Approved only by Reviewed and Approved Signatures over its content as it is now',
+    },
+    {
+      name: 'a Document version Approved after its Effective Date has passed is refused',
+      statements: [
+        ...versionIn('InReview', '2000-01-01'),
+        ...signed('Reviewed', id.reviewer),
+        ...signed('Approved', id.otherPerson),
+        setStatus('Approved'),
+      ],
+      message: 'a Document version is not Approved after its Effective Date, 2000-01-01, has passed',
+    },
+    {
+      name: 'an Effective Date before the Lab’s today is refused',
+      statements: [...versionIn('Draft'), setEffectiveDate('2000-01-01')],
+      message: "a Document version's Effective Date is today or later in the Lab",
+    },
+    {
+      name: 'a Document version that takes effect before its Effective Date is refused',
+      statements: [...versionIn('Approved', '2099-01-01'), setStatus('Effective')],
+      message: 'a Document version takes effect on its Effective Date, 2099-01-01, not before',
+    },
+    {
+      name: 'an Effective version Superseded with no later Approved version is refused',
+      statements: [...versionIn('Effective', '2026-01-01'), setStatus('Superseded')],
+      message: 'a Document version is Superseded only by a later version whose Effective Date has come',
+    },
+    {
+      name: 'an Effective version Superseded by a later version Approved for a later Effective Date is refused',
+      statements: [
+        ...versionIn('Effective', '2026-01-01'),
+        ...laterIn('Approved', '2099-01-01'),
+        setStatus('Superseded'),
+      ],
+      message: 'a Document version is Superseded only by a later version whose Effective Date has come',
+    },
+    {
+      name: "a change to an Abandoned version's abandon reason is refused",
+      statements: [...versionIn('Abandoned'), setAbandonReason('Rewritten.')],
+      message: "a Document version's abandon reason is written once, as it is Abandoned",
+    },
+    {
+      name: 'a Document version Abandoned by someone who claims QA but does not hold it is refused',
+      statements: [...versionIn('InReview'), asPerson('refusal.admin', 'QA'), abandon('Not needed.')],
+      message: 'a Document version is Abandoned by its author or QA',
+    },
+    {
+      name: 'a Document version Abandoned by someone who is neither its author nor QA is refused',
+      statements: [...versionIn('Draft'), asPerson('refusal.reviewer', 'Reviewer'), abandon('Not needed.')],
+      message: 'a Document version is Abandoned by its author or QA',
+    },
+    {
+      name: 'a Document version Approved for an Effective Date that has come, Abandoned by its author, is refused',
+      statements: [...versionIn('Approved', '2026-01-01'), asAuthor, abandon('Not needed.')],
+      message: 'a Document version Approved for an Effective Date that has come is not Abandoned',
+    },
+  ];
+  for (const move of moves) {
+    it(move.name, async () => {
+      const error = await refusal(...move.statements);
+      assert.deepEqual([error.code, error.message], ['LA014', move.message]);
+    });
+  }
+  it('the author Abandons a Draft with a reason, and the Draft keeps its number', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await accepted(...versionIn('Draft'), asAuthor, abandon('Not needed.'));
+      const { rows } = await client.query(
+        `select v.status, d.number from lims.document_version v join lims.document d on d.id = v.document_id
+          where v.id = $1`,
+        [version],
+      );
+      assert.deepEqual(rows, [{ status: 'Abandoned', number: 'RF-FRM-0001' }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it('QA, who did not author it, Abandons an In Review version with a reason', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await accepted(...versionIn('InReview'), asPerson('refusal.other', 'QA'), abandon('Withdrawn.'));
+      const { rows } = await client.query('select status, abandon_reason from lims.document_version where id = $1', [
+        version,
+      ]);
+      assert.deepEqual(rows, [{ status: 'Abandoned', abandon_reason: 'Withdrawn.' }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it('the author Abandons an Approved version before its Effective Date', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await accepted(...versionIn('Approved', '2099-01-01'), asAuthor, abandon('Not needed.'));
+      const { rows } = await client.query('select status from lims.document_version where id = $1', [version]);
+      assert.deepEqual(rows, [{ status: 'Abandoned' }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.signature.document_signing');
+  const signings: { name: string; statements: Statement[]; message: string }[] = [
+    {
+      name: 'signing a Test Authored is refused',
+      statements: [signingTest('Authored', 'Analyst')],
+      message: 'Authored is a Signature Meaning of a Document version only',
+    },
+    {
+      name: 'signing a Document version Authored in a role that is not a business role is refused',
+      statements: [...versionIn('Draft'), signing('Authored', id.person, 'Admin')],
+      message: 'a Document version is signed Authored in the Lab Manager, Analyst, Reviewer or QA role, not Admin',
+    },
+    {
+      name: 'signing a Document version Reviewed in a role other than Reviewer is refused',
+      statements: [...versionIn('InReview'), ...signed('Authored', id.person), signing('Reviewed', id.reviewer, 'QA')],
+      message: 'a Document version is signed Reviewed in the Reviewer role, not QA',
+    },
+    {
+      name: 'signing a Document version Approved in a role other than QA is refused',
+      statements: [
+        ...versionIn('InReview'),
+        ...signed('Authored', id.person),
+        ...signed('Reviewed', id.reviewer),
+        signing('Approved', id.otherPerson, 'Reviewer'),
+      ],
+      message: 'a Document version is signed Approved in the QA role, not Reviewer',
+    },
+    {
+      name: 'signing a Document version Performed is refused',
+      statements: [...versionIn('Draft'), signing('Performed', id.person)],
+      message: 'a Document version is signed Authored, Reviewed or Approved, not Performed',
+    },
+    {
+      name: 'signing a Document version Authored by someone other than its author is refused',
+      statements: [...versionIn('Draft'), signing('Authored', id.reviewer)],
+      message: 'a Document version is signed Authored only by its author',
+    },
+    {
+      name: 'signing a Document version Authored a second time is refused',
+      statements: [...versionIn('Draft'), ...signed('Authored', id.person), signing('Authored', id.person)],
+      message: 'a Document version is signed Authored once, while a Draft',
+    },
+    {
+      name: 'signing a Draft Reviewed is refused',
+      statements: [...versionIn('Draft'), signing('Reviewed', id.reviewer)],
+      message: 'a Document version is signed Reviewed while In Review, not Draft',
+    },
+    {
+      name: 'signing a Document version Reviewed by its Authored signer is refused',
+      statements: [...versionIn('InReview'), ...signed('Authored', id.person), signing('Reviewed', id.person)],
+      message: 'a Document version is signed Reviewed by someone who has not authored or reviewed it',
+    },
+    {
+      name: 'signing a Document version Approved with no Reviewed Signature is refused',
+      statements: [...versionIn('InReview'), ...signed('Authored', id.person), signing('Approved', id.otherPerson)],
+      message: 'a Document version is signed Approved once, while In Review, after a Reviewed Signature',
+    },
+    {
+      name: 'signing a Document version Approved by its Reviewed signer is refused',
+      statements: [
+        ...versionIn('InReview'),
+        ...signed('Authored', id.person),
+        ...signed('Reviewed', id.reviewer),
+        signing('Approved', id.reviewer),
+      ],
+      message: 'a Document version is signed Approved by someone who has not authored or reviewed it',
+    },
+    {
+      name: 'signing a Document version Approved by its Authored signer is refused',
+      statements: [
+        ...versionIn('InReview'),
+        ...signed('Authored', id.person),
+        ...signed('Reviewed', id.reviewer),
+        signing('Approved', id.person),
+      ],
+      message: 'a Document version is signed Approved by someone who has not authored or reviewed it',
+    },
+  ];
+  for (const s of signings) {
+    it(s.name, async () => {
+      const error = await refusal(...s.statements);
+      assert.deepEqual([error.code, error.message], ['LA010', s.message]);
+    });
+  }
+  it('an Approved signing by a third person, after Authored and Reviewed, passes the independence rules', async () => {
+    const error = await refusal(
+      ...versionIn('InReview'),
+      ...signed('Authored', id.person),
+      ...signed('Reviewed', id.reviewer),
+      signing('Approved', id.otherPerson),
+    );
+    assert.doesNotMatch(error.message, /Document version/);
+  });
+  it('a Test Approved in the role Reviewer passes the Document rules, for the record kinds that add it', async () => {
+    const error = await refusal(signingTest('Approved', 'Reviewer'));
+    assert.doesNotMatch(error.message, /Document version/);
+  });
+});
+
 it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.authenticator.authenticator_pkey', 'authenticator.test.ts'],
@@ -5262,9 +6505,22 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
       'unreachable: generated from content, which is not null',
     ],
     ['lims.session.session_lab_id_id_person_id_key', 'unreachable: (lab_id, id) is already the key'],
+    ['lims.document.document_lab_id_id_key', 'unreachable: id is already the key'],
+    ['lims.record_version.record_version_id_content_hash_canonical_form_key', 'unreachable: id is already the key'],
+    ['lims.release_log_entry.version_record', 'release-log.test.ts'],
+    ['lims.reauthentication.seed_authenticator_only_seeding', 'data-class.test.ts'],
+    ['lims.service_identity.version_record', 'release-log.test.ts'],
     [
-      'lims.record_version.record_version_lab_id_id_content_hash_canonical_form_key',
-      'unreachable: (lab_id, id) is already the key',
+      'lims.service_identity.service_identity_created_by_entry_id_not_null',
+      'unreachable: service_identity_through_release_log looks the entry up first',
+    ],
+    [
+      'lims.service_identity.service_identity_created_by_entry_id_fkey',
+      'unreachable: service_identity_through_release_log looks the entry up first',
+    ],
+    [
+      'lims.service_identity.service_identity_retired_by_entry_id_fkey',
+      'unreachable: service_identity_through_release_log looks the entry up first',
     ],
     [
       'lims.signature_statement.signature_statement_version_statement_hash_key',
@@ -5286,6 +6542,124 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
     [
       'lims.signature.signature_lab_id_fkey',
       'unreachable: sign_in_lab_time_zone leaves signed_time_zone null, whose not null refuses first',
+    ],
+    ['lims.critical_data_change.capture', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_field_check', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_field_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_id_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_lab_id_fkey', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_lab_id_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_proposed_on_version_fkey', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_data_class_not_null', 'critical-data-changes.test.ts'],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_data_class_not_null',
+      'critical-data-changes.test.ts',
+    ],
+    ['lims.picklist_reason.picklist_reason_data_class_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_lab_id_result_id_fkey', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_lab_id_test_id_fkey', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_new_value_check', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_new_value_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_old_value_check', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_old_value_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_pkey', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_proposed_at_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_proposed_by_fkey', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_proposed_by_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_proposed_on_version_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_reason_id_fkey', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_reason_id_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_reason_text_check', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_result_id_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_test_id_not_null', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.critical_data_change_values_differ_check', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.propose', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.refuse_change', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.refuse_truncate', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change.version_record', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change_decision.apply', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change_decision.capture', 'critical-data-changes.test.ts'],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_change_id_not_null',
+      'critical-data-changes.test.ts',
+    ],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_decided_at_not_null',
+      'critical-data-changes.test.ts',
+    ],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_decided_by_fkey',
+      'critical-data-changes.test.ts',
+    ],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_decided_by_not_null',
+      'critical-data-changes.test.ts',
+    ],
+    ['lims.critical_data_change_decision.critical_data_change_decision_id_not_null', 'critical-data-changes.test.ts'],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_lab_id_change_id_key',
+      'critical-data-changes.test.ts',
+    ],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_lab_id_change_id_test_id_fkey',
+      'critical-data-changes.test.ts',
+    ],
+    ['lims.critical_data_change_decision.critical_data_change_decision_lab_id_fkey', 'critical-data-changes.test.ts'],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_lab_id_not_null',
+      'critical-data-changes.test.ts',
+    ],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_lab_id_signature_id_fkey',
+      'critical-data-changes.test.ts',
+    ],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_outcome_not_null',
+      'critical-data-changes.test.ts',
+    ],
+    ['lims.critical_data_change_decision.critical_data_change_decision_pkey', 'critical-data-changes.test.ts'],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_reason_id_fkey',
+      'critical-data-changes.test.ts',
+    ],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_reason_text_check',
+      'critical-data-changes.test.ts',
+    ],
+    [
+      'lims.critical_data_change_decision.critical_data_change_decision_test_id_not_null',
+      'critical-data-changes.test.ts',
+    ],
+    ['lims.critical_data_change_decision.decide', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change_decision.decision_reason_unless_approved_check', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change_decision.decision_signed_only_if_approved_check', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change_decision.decision_text_unless_approved_check', 'critical-data-changes.test.ts'],
+    ['lims.signature.change_signing', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change_decision.refuse_change', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change_decision.refuse_truncate', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.capture', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_id_not_null', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_label_check', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_label_not_null', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_pkey', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_position_check', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_position_not_null', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_step_check', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_step_label_key', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_step_not_null', 'critical-data-changes.test.ts'],
+    ['lims.picklist_reason.picklist_reason_step_position_key', 'critical-data-changes.test.ts'],
+    ['lims.result.value_through_change', 'critical-data-changes.test.ts'],
+    ['lims.result.refuse_removal', 'critical-data-changes.test.ts'],
+    ['lims.result.refuse_truncate', 'critical-data-changes.test.ts'],
+    ['lims.signature.test_signing_waits_for_change', 'critical-data-changes.test.ts'],
+    ['lims.signature.test_signing_waits_for_performed', 'critical-data-changes.test.ts'],
+    [
+      'lims.critical_data_change.critical_data_change_lab_id_id_test_id_key',
+      'unreachable: (lab_id, id) is already the key',
+    ],
+    [
+      'lims.picklist_reason.picklist_reason_needs_text_not_null',
+      'unreachable: generated from label, which is not null',
     ],
     ['lims.test.version_record', 'record-version.test.ts'],
     ['lims.result.version_record', 'record-version.test.ts'],

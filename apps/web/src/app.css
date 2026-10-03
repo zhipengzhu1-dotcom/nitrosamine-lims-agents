@@ -521,6 +521,10 @@ th {
 .raw h2 {
   margin-top: 0;
 }
+.document-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .raw pre {
   font: 12px / 1.4 var(--mono);
   white-space: pre-wrap;
@@ -1141,6 +1145,11 @@ a.btn {
     order: 2;
     flex-basis: 100%;
   }
+  /* A secondary step shares the primary's row, so the rail grows by one row, not two. */
+  .rbtn--commit:has(+ .rbtn--commit),
+  .rbtn--commit + .rbtn--commit {
+    flex: 1 1 0;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1499,6 +1508,17 @@ a.btn {
   gap: 8px;
   align-items: center;
   margin: 0;
+}
+
+.changes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+.changes p {
+  margin: 4px 0 0;
 }
 
 /* The stored breaks follow the recomputed table, so the heading stands off it. */

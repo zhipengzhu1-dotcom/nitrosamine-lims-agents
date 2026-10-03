@@ -93,7 +93,7 @@ const lastEntryOf = async (chain: string) =>
   ).last;
 
 const rename = (table: 'person' | 'customer', id: string, change: Record<string, string>, reason: string) =>
-  audited(api.db, { actor: 'svc:test', role: 'system', reason }, (tx) =>
+  audited(api.superuser, { actor: 'svc:test', role: 'system', reason }, (tx) =>
     tx.updateTable(table).set(change).where('id', '=', id).execute(),
   );
 
@@ -292,7 +292,7 @@ it('every column a row snapshot stores has a glossary label in the registry, oth
   assert.deepEqual(
     rows.filter(
       ({ table, column }) =>
-        !['id', 'lab_id'].includes(column) &&
+        !['id', 'lab_id', 'data_class'].includes(column) &&
         !(isAuditedTable(table) && Object.hasOwn(auditedRecords[table].fields, column)),
     ),
     [],

@@ -8,9 +8,11 @@ import {
   type TestRow,
   type TestState,
   type Ticks,
+  unsignedMeanings,
 } from '@lims/domain';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
+import { Changes, useChangeActions } from './changes.tsx';
 import { ChecklistPanel, reviewAction } from './checklist.tsx';
 import { type RailAction, Shell, Status, stateOrder, stepAction, words } from './rail.tsx';
 import { Split } from './split.tsx';
@@ -139,25 +141,35 @@ export function TestPage({
   const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
   // The ticks are the Reviewer's own entries until the Review press saves them, not a copy of server data.
   const [ticks, setTicks] = useState<Ticks>({});
-  const action = view?.next ? actionFor(view.next) : null;
+  const refresh = async () => {
+    await Promise.all([reload(), reloadTrail(), afterStep?.()]);
+  };
+  const [changeAction, otherChangeAction] = useChangeActions(view, refresh);
+  // oxlint-disable-next-line react-perf/jsx-no-new-array-as-prop -- the rail is not memoized and each action is rebuilt per render, so a stable array would save nothing
+  const secondary = otherChangeAction ? [otherChangeAction] : [];
+  const action = view?.next ? actionFor(view.next) : changeAction;
   function actionFor(next: NonNullable<NonNullable<typeof view>['next']>): RailAction | null {
     if (!view) return null;
     const what = [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])];
-    const onDone = async () => {
-      await Promise.all([reload(), reloadTrail(), afterStep?.()]);
-    };
     const signing =
       view.recordVersion && view.statement ? { recordVersion: view.recordVersion, statement: view.statement } : null;
-    if (next !== 'review') return stepAction(next, id, what, onDone, signing);
+    if (next !== 'review') return stepAction(next, id, what, refresh, signing);
     if (!view.checklist)
       return {
-        ...stepAction(next, id, what, onDone, signing),
+        ...stepAction(next, id, what, refresh, signing),
         blocked: 'No Test Review Checklist version is approved yet.',
       };
-    return reviewAction(id, what, view.checklist, ticks, onDone, signing);
+    return reviewAction(id, what, view.checklist, ticks, refresh, signing);
   }
   const frame = (record: ReactNode) => (
-    <Shell me={me} active="tests" action={action} notice={view && unsignedNotice(view.signatures)} railKey={id}>
+    <Shell
+      me={me}
+      active="tests"
+      action={action}
+      secondary={secondary}
+      notice={view && unsignedNotice(view.signatures)}
+      railKey={id}
+    >
       {list ? <Split list={list} record={record} closeHref="#/tests" /> : record}
     </Shell>
   );
@@ -167,7 +179,7 @@ export function TestPage({
     <>
       <h1 className="record-head">
         {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
-        {view.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
+        {unsignedMeanings(view.signatures).length > 0 && <Status mark="Signatures unsigned" />}
       </h1>
       <dl className="facts">
         <dt>Sample</dt>
@@ -219,6 +231,12 @@ export function TestPage({
       {view.checklist && view.next === 'review' && (
         <ChecklistPanel checklist={view.checklist} ticks={ticks} onChange={setTicks} />
       )}
+      {!view.withheld && result && (
+        <>
+          <h2>Critical Data Changes</h2>
+          <Changes rows={view.changes} />
+        </>
+      )}
       <h2>Signatures</h2>
       {view.withheld ? (
         <p className="muted">The Signatures are not released yet. They show here with the Result.</p>
@@ -235,9 +253,9 @@ const resultLine = (r: Result) => `Result: ${r.analyte} ${r.value} ${r.unit}, pe
 /** A Signature's key among a record's Signatures: its Meaning and when it was given. */
 export const signatureKey = (s: Signature) => s.meaning + s.signedAt;
 
-/** The rail's line for a record with Signatures the server returns as unsigned, or nothing to say. */
+/** The rail's line for a record with a Signature Meaning no Signature gives on it as it reads now, or nothing to say. */
 export function unsignedNotice(rows: Signature[]): string | undefined {
-  const unsigned = rows.filter((s) => s.unsigned).map((s) => s.meaning);
+  const unsigned = unsignedMeanings(rows);
   return unsigned.length ? `Unsigned: ${unsigned.join(', ')}. The record changed after signing.` : undefined;
 }
 const rowClass = (s: Signature, fresh?: ReadonlySet<string>) =>

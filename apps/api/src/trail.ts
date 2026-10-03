@@ -28,14 +28,7 @@ import {
   type Trail,
   type ZonedInstant,
 } from '@lims/domain';
-import {
-  type ExpressionBuilder,
-  type ExpressionWrapper,
-  type Kysely,
-  type RawBuilder,
-  type SqlBool,
-  sql,
-} from 'kysely';
+import { type ExpressionBuilder, type ExpressionWrapper, type Kysely, type SqlBool, sql } from 'kysely';
 import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { Value } from 'typebox/value';
 import type { App } from './app.ts';
@@ -47,6 +40,7 @@ import {
   type Scope,
   VERIFY_READ_LIMIT_SECONDS,
   inUtc,
+  onWallClock,
   type VerifiedChains,
   type VerifyOptions,
 } from './scope.ts';
@@ -62,14 +56,6 @@ function opOf(op: string): TimedEntry['op'] {
   throw new Error(`an Audit Trail entry has the op ${op}`);
 }
 
-/** `at` on `zone`'s wall clock, ISO 8601 to the microsecond with the zone's offset, rendered by the database so that no host clock formats it; null when `at` may be null. */
-export const onWallClock = <At>(at: RawBuilder<At>, zone: RawBuilder<unknown>) => sql<
-  null extends At ? Instant | null : Instant
->`
-  to_char(${at} at time zone ${zone}, 'YYYY-MM-DD"T"HH24:MI:SS.US')
-    || case when (${at} at time zone ${zone}) < (${at} at time zone 'UTC') then '-' else '+' end
-    || to_char(greatest((${at} at time zone ${zone}) - (${at} at time zone 'UTC'),
-                        (${at} at time zone 'UTC') - (${at} at time zone ${zone})), 'HH24:MI')`;
 /**
  * What every read shows of a Signature and the Record Version it was given on, from `signature` joined to
  * `recordVersion`; `signedAtLab` is on the wall clock of the zone it was signed in, which no later change to its Lab's
@@ -249,6 +235,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'evidence_source':
     case 'review_checklist_version':
     case 'review_checklist_item':
+    case 'picklist_reason':
       return true;
     case 'chain_verification':
       return Boolean(
@@ -278,11 +265,15 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'test':
     case 'result':
     case 'test_report':
+    case 'document':
+    case 'document_version':
     case 'record_version':
     case 'signature':
     case 'audit_export':
     case 'reauthentication':
     case 'test_review':
+    case 'critical_data_change':
+    case 'critical_data_change_decision':
       return true;
   }
 }
@@ -302,7 +293,15 @@ export function trailRoutes(app: App, db: Kysely<DB>, readLimitSeconds?: number)
           .where('test.id', '=', id)
           .executeTakeFirst()) ?? refuse('notFound', 'This Lab has no such Test.');
       const reviews = await scope.from('testReview').select('id').where('testId', '=', id).execute();
-      const ids = [test.id, test.sampleId, ...(test.reportId ? [test.reportId] : []), ...reviews.map((r) => r.id)];
+      const changes = await scope.from('criticalDataChange').select('id').where('testId', '=', id).execute();
+      // A Test Review's and a Critical Data Change's Record Versions and Signatures name that record, not the Test.
+      const ids = [
+        test.id,
+        test.sampleId,
+        ...(test.reportId ? [test.reportId] : []),
+        ...reviews.map((r) => r.id),
+        ...changes.map((c) => c.id),
+      ];
       return trailOf(scope, { table: 'test', id }, (eb) =>
         eb.or([
           eb.and([

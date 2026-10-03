@@ -72,7 +72,9 @@ function changeResult(testId: string, value: string) {
     {
       input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
                      set_config('lims.reason', 'Change a signed Result from outside the chain (e2e)', true);
-              update lims.result set value = :'value' where test_id = :'test';`,
+              alter table lims.result disable trigger value_through_change;
+              update lims.result set value = :'value' where test_id = :'test';
+              alter table lims.result enable trigger value_through_change;`,
       stdio: ['pipe', 'ignore', 'inherit'],
     },
   );

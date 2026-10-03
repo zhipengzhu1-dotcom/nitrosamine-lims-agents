@@ -13,7 +13,9 @@ export type Signable =
   | 'equipment'
   | 'equipment_event'
   | 'test_review'
-  | 'review_checklist_version';
+  | 'review_checklist_version'
+  | 'critical_data_change'
+  | 'document_version';
 
 /** The Record Version the signer saw: its id and the hash the sheet showed. */
 export interface Seen {
@@ -57,13 +59,16 @@ export async function proveReauthentication(
   return proof.id;
 }
 
-/** Signs through lims.sign, the only path to a Signature, against the re-authentication record written here. */
-export async function signRecord(q: WriteQueries, signing: RecordSigning) {
+/** Signs through lims.sign, the only path to a Signature, against the re-authentication record written here; answers the Signature's id. */
+export async function signRecord(q: WriteQueries, signing: RecordSigning): Promise<string> {
   const { proof, sessionId, meaning, table, recordId, seen, statementVersion, release } = signing;
-  await sql`select lims.sign(${proof}, ${sessionId}, ${table}, ${recordId}, ${seen.id},
-                             decode(${seen.contentHash}, 'hex'), ${statementVersion}, ${meaning}, ${release})`
+  const { rows } = await sql<{ id: string }>`select lims.sign(${proof}, ${sessionId}, ${table}, ${recordId}, ${seen.id},
+                             decode(${seen.contentHash}, 'hex'), ${statementVersion}, ${meaning}, ${release}) as id`
     .execute(q.company)
     .catch(signingRefused);
+  const [signed] = rows;
+  if (!signed) throw new Error('lims.sign returned no Signature');
+  return signed.id;
 }
 
 /** lims.sign's own refusal (LA010) reaches the bench as a refusal; any other failure is thrown with its cause. */

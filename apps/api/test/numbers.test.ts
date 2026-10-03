@@ -63,7 +63,7 @@ it('two Labs number their Samples independently, each with its own Lab code', as
       .customerId ?? assert.fail('Cora is a Customer User');
   const password = 'quincy-password-for-tests';
   await audited(
-    api.db,
+    api.superuser,
     { actor: 'svc:test', role: 'system', reason: 'Add a Customer User of the second Lab' },
     async (tx) => {
       const { id: personId } = await tx

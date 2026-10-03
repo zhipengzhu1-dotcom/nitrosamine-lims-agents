@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { DB } from '@lims/db';
 import {
   type ActorContext,
+  type ChangeFacts,
   type Meaning,
   type PersonId,
   pressText,
@@ -22,7 +23,7 @@ import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
 import { type Credentials, type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
-import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
+import { type LabQueries, labScope, onWallClock, type WriteQueries } from './scope.ts';
 import { reviewToSign } from './checklists.ts';
 import {
   latestVersion,
@@ -90,6 +91,7 @@ const effects: { [K in StepName]: Effect<StepInput<K>> } = {
         })
         .execute(),
   },
+  signPerformedAgain: { write: async () => {} },
   review: {
     review: async (scope, ctx, testId, input) => {
       await reviewToSign(scope, ctx, testId, input.review);
@@ -114,15 +116,46 @@ export async function factsFor(
 ): Promise<StepFacts> {
   const signatures = test
     ? await signedVersions(q)
-        .select(['signature.meaning', 'signature.personId'])
+        .select([
+          'signature.meaning',
+          'signature.personId',
+          'recordVersion.recordTable',
+          // A Reviewed Signature binds a Test Review, whose content names the Test Record Version it was ticked against.
+          sql<number>`case when record_version.record_table = 'test_review'
+                           then (convert_from(record_version.content, 'UTF8')::jsonb #>> '{test,version}')::integer
+                           else record_version.version end`.as('testVersion'),
+        ])
         .where((eb) =>
           eb.or([
-            eb('recordVersion.recordId', '=', test.id),
-            eb('recordVersion.recordId', 'in', q.from('testReview').select('id').where('testId', '=', test.id)),
+            eb.and([eb('recordVersion.recordTable', '=', 'test'), eb('recordVersion.recordId', '=', test.id)]),
+            eb.and([
+              eb('recordVersion.recordTable', '=', 'test_review'),
+              eb('recordVersion.recordId', 'in', q.from('testReview').select('id').where('testId', '=', test.id)),
+            ]),
+            eb.and([
+              eb('recordVersion.recordTable', '=', 'critical_data_change'),
+              eb(
+                'recordVersion.recordId',
+                'in',
+                q
+                  .from('criticalDataChange')
+                  .select('criticalDataChange.id')
+                  .where('criticalDataChange.testId', '=', test.id),
+              ),
+            ]),
           ]),
         )
         .execute()
     : [];
+  const signers: StepFacts['signers'] = {};
+  for (const { meaning, personId } of signatures) signers[meaning] = [...(signers[meaning] ?? []), personId];
+  const correctedAfter = test ? await latestCorrection(q, test.id) : null;
+  const signedSinceCorrection =
+    correctedAfter === null
+      ? null
+      : signatures
+          .filter((s) => s.recordTable !== 'critical_data_change' && s.testVersion > correctedAfter)
+          .map((s) => s.meaning);
   const assignee = assigneeId ?? test?.assigneeId ?? null;
   const trained =
     assignee &&
@@ -143,8 +176,130 @@ export async function factsFor(
     actor: ctx.person.id,
     assignee,
     assigneeTrained: Boolean(trained),
-    signers: Object.fromEntries(signatures.map((s) => [s.meaning, s.personId])),
+    signers,
+    signedSinceCorrection,
+    pendingChange: Boolean(test && (await pendingChangeOn(q, test.id))),
   };
+}
+
+/**
+ * The Test Record Version the latest approved Critical Data Change on the Test was proposed on, or null when none was
+ * approved. An approval is refused once the Test has a later version, so the version after this one is the corrected
+ * Result's.
+ */
+async function latestCorrection(q: LabQueries, testId: string): Promise<number | null> {
+  const { version } = await q
+    .from('criticalDataChange')
+    .innerJoin('criticalDataChangeDecision as d', (j) =>
+      j.onRef('d.labId', '=', 'criticalDataChange.labId').onRef('d.changeId', '=', 'criticalDataChange.id'),
+    )
+    .innerJoin('recordVersion', (j) =>
+      j
+        .onRef('recordVersion.labId', '=', 'criticalDataChange.labId')
+        .onRef('recordVersion.id', '=', 'criticalDataChange.proposedOnVersion'),
+    )
+    .select((eb) => eb.fn.max('recordVersion.version').as('version'))
+    .where('criticalDataChange.testId', '=', testId)
+    .where('d.outcome', '=', 'Approved')
+    .executeTakeFirstOrThrow();
+  return version;
+}
+
+/** The Test's Critical Data Change that has no decision yet, if any; the database allows one at a time. */
+export function pendingChangeOn(q: LabQueries, testId: string) {
+  return q
+    .from('criticalDataChange')
+    .select(['criticalDataChange.id', 'criticalDataChange.proposedBy'])
+    .where('criticalDataChange.testId', '=', testId)
+    .where((eb) =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('criticalDataChangeDecision as d')
+            .select('d.id')
+            .whereRef('d.labId', '=', 'criticalDataChange.labId')
+            .whereRef('d.changeId', '=', 'criticalDataChange.id'),
+        ),
+      ),
+    )
+    .executeTakeFirst();
+}
+
+type ChangeTest = Pick<Selectable<DB['test']>, 'id' | 'state' | 'assigneeId'>;
+
+/** What the change registry decides on for this Test and person, and the pending change itself. */
+export async function changeFactsFor(q: LabQueries, ctx: ActorContext, test: ChangeTest) {
+  const performed = await signedVersions(q)
+    .select('signature.personId')
+    .where('recordVersion.recordTable', '=', 'test')
+    .where('recordVersion.recordId', '=', test.id)
+    .where('signature.meaning', '=', 'Performed')
+    .executeTakeFirst();
+  const pending = await pendingChangeOn(q, test.id);
+  const facts: ChangeFacts = {
+    actor: ctx.person.id,
+    state: test.state,
+    assignee: test.assigneeId,
+    performedBy: performed?.personId ?? null,
+    pendingBy: pending?.proposedBy ?? null,
+  };
+  return { facts, pending };
+}
+
+/** The Lab's time zone in force at the instant in `column`, so no later change of the zone moves its wall clock. */
+const labZoneAt = (column: string) => sql`lims.lab_time_zone_at(critical_data_change.lab_id, ${sql.ref(column)})`;
+
+/**
+ * The Test's Critical Data Changes, oldest first, each with its decision once made and its own Record Version. The
+ * proposed and decided times carry the Lab's wall clock beside UTC, as a Signature's time does, because a Rejected or
+ * Withdrawn decision has no Signature to carry it.
+ */
+export async function changesOf(q: LabQueries, testId: string) {
+  const rows = await q
+    .from('criticalDataChange')
+    .innerJoin('result', (j) =>
+      j.onRef('result.labId', '=', 'criticalDataChange.labId').onRef('result.id', '=', 'criticalDataChange.resultId'),
+    )
+    .innerJoin('picklistReason as reason', 'reason.id', 'criticalDataChange.reasonId')
+    .innerJoin('person as proposer', 'proposer.id', 'criticalDataChange.proposedBy')
+    .leftJoin('criticalDataChangeDecision as d', (j) =>
+      j.onRef('d.labId', '=', 'criticalDataChange.labId').onRef('d.changeId', '=', 'criticalDataChange.id'),
+    )
+    .leftJoin('person as decider', 'decider.id', 'd.decidedBy')
+    .leftJoin('picklistReason as decisionReason', 'decisionReason.id', 'd.reasonId')
+    .select([
+      'criticalDataChange.id',
+      'd.outcome',
+      'criticalDataChange.field',
+      'result.analyte',
+      'result.unit',
+      'criticalDataChange.oldValue',
+      'criticalDataChange.newValue',
+      'reason.label as reason',
+      'criticalDataChange.reasonText',
+      'proposer.displayName as proposedBy',
+      'criticalDataChange.proposedAt',
+      onWallClock(sql.ref<Date>('critical_data_change.proposed_at'), labZoneAt('critical_data_change.proposed_at')).as(
+        'proposedAtLab',
+      ),
+      'decider.displayName as decidedBy',
+      'd.decidedAt',
+      onWallClock(sql.ref<Date | null>('d.decided_at'), labZoneAt('d.decided_at')).as('decidedAtLab'),
+      'decisionReason.label as decisionReason',
+      'd.reasonText as decisionReasonText',
+    ])
+    .where('criticalDataChange.testId', '=', testId)
+    .orderBy('criticalDataChange.proposedAt')
+    .execute();
+  return Promise.all(
+    rows.map(async ({ outcome, ...row }) => {
+      const { version, canonicalForm, contentHash } = await latestVersion(q, 'critical_data_change', row.id);
+      return Object.assign(row, {
+        state: outcome ?? ('Pending' as const),
+        recordVersion: { version, canonicalForm, contentHash },
+      });
+    }),
+  );
 }
 
 /** Every Signature of the Lab joined to the Record Version it was given on. */
@@ -182,18 +337,20 @@ async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signi
   await signRecord(q, { proof, sessionId, meaning, table, recordId, seen, statementVersion, release });
 }
 
-async function seenVersion(
+/** The record's latest Record Version, refused unless it is the one the signer's sheet showed under the statement in force. */
+export async function seenVersion(
   scope: LabQueries,
-  [table, recordId]: ['test' | 'test_review', string],
+  table: 'test' | 'test_review' | 'critical_data_change',
+  recordId: string,
   signature: SigningBody,
 ): Promise<Seen> {
   const latest = await latestVersion(scope, table, recordId);
   if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
     refuse(
       'recordChanged',
-      table === 'test'
-        ? 'The Test changed since this screen loaded it. Read it again before signing.'
-        : 'The Test changed since its Test Review was saved. Tick the checklist again before signing.',
+      table === 'test_review'
+        ? 'The Test changed since its Test Review was saved. Tick the checklist again before signing.'
+        : `The ${table === 'test' ? 'Test' : 'Critical Data Change'} changed since this screen loaded it. Read it again before signing.`,
     );
   if ((await statementInForce(scope.company)).version !== signature.statementVersion)
     refuse(
@@ -258,7 +415,9 @@ function registerStep<K extends StepName>(
       const signature = body.signature ?? refuse('malformed', `The ${name} step needs the signer's credentials.`);
       const testId = test?.id ?? refuse('malformed', `The ${name} step signs a Test, and this request names none.`);
       const review = (await effect.review?.(scope, actor, testId, body.input)) ?? null;
-      const seen = await seenVersion(scope, review ? ['test_review', review] : ['test', testId], signature);
+      const seen = review
+        ? await seenVersion(scope, 'test_review', review, signature)
+        : await seenVersion(scope, 'test', testId, signature);
       const reauthenticated = await reauthenticate(
         db,
         credentials,

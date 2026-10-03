@@ -124,6 +124,32 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     label: (row) => text(row.number),
     fields: { number: { label: 'Number' }, test_id: { label: 'Test', ref: 'test' } },
   },
+  document: {
+    kind: 'Document',
+    chain: 'lab',
+    label: (row) => text(row.number),
+    fields: {
+      number: { label: 'Number' },
+      document_type: { label: 'Type' },
+      created_at: { label: 'Created at', shows: 'instant' },
+    },
+  },
+  document_version: {
+    kind: 'Document version',
+    chain: 'lab',
+    label: (row, labelOf) => `${labelOf('document', row.document_id)} version ${text(row.version)}`,
+    fields: {
+      document_id: { label: 'Document', ref: 'document' },
+      version: { label: 'Version' },
+      status: { label: 'Status', movedByStep: true },
+      title: { label: 'Title' },
+      body: { label: 'Body' },
+      author_id: { label: 'Author', ref: 'person' },
+      effective_date: { label: 'Effective Date' },
+      abandon_reason: { label: 'Abandon reason', movedByStep: true },
+      saved_at: { label: 'Saved at', shows: 'instant' },
+    },
+  },
   record_version: {
     kind: 'Record Version',
     chain: 'lab',
@@ -265,6 +291,49 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       at: { label: 'At', shows: 'instant' },
     },
   },
+  picklist_reason: {
+    kind: 'Picklist Reason',
+    chain: 'company',
+    label: (row) => text(row.label),
+    fields: {
+      step: { label: 'Step' },
+      position: { label: 'Position' },
+      label: { label: 'Reason' },
+      needs_text: { label: 'Needs text' },
+    },
+  },
+  critical_data_change: {
+    kind: 'Critical Data Change',
+    chain: 'lab',
+    label: (row) => `${text(row.field)} ${text(row.old_value)} to ${text(row.new_value)}`,
+    fields: {
+      test_id: { label: 'Test', ref: 'test' },
+      result_id: { label: 'Result', ref: 'result' },
+      field: { label: 'Field' },
+      old_value: { label: 'Old value' },
+      new_value: { label: 'New value' },
+      reason_id: { label: 'Reason', ref: 'picklist_reason' },
+      reason_text: { label: 'Reason text' },
+      proposed_by: { label: 'Proposed by', ref: 'person' },
+      proposed_at: { label: 'Proposed at', shows: 'instant' },
+      proposed_on_version: { label: 'Proposed on Record Version', ref: 'record_version' },
+    },
+  },
+  critical_data_change_decision: {
+    kind: 'Critical Data Change Decision',
+    chain: 'lab',
+    label: (row) => text(row.outcome),
+    fields: {
+      change_id: { label: 'Critical Data Change', ref: 'critical_data_change' },
+      test_id: { label: 'Test', ref: 'test' },
+      outcome: { label: 'Outcome' },
+      decided_by: { label: 'Decided by', ref: 'person' },
+      decided_at: { label: 'Decided at', shows: 'instant' },
+      reason_id: { label: 'Reason', ref: 'picklist_reason' },
+      reason_text: { label: 'Reason text' },
+      signature_id: { label: 'Signature', ref: 'signature' },
+    },
+  },
 };
 
 /** Every table `auditedRecords` reads, in registry order. */
@@ -292,7 +361,7 @@ function referenceOf(field: FieldSpec, row: RowSnapshot): AuditedTable | null {
 export const actorUsername = (actor: string): string | null =>
   actor.startsWith('person:') ? actor.slice('person:'.length) : null;
 
-const UNLISTED = new Set(['id', 'lab_id']);
+const UNLISTED = new Set(['id', 'lab_id', 'data_class']);
 
 /** One row of an audited record as it stood at one instant. */
 export interface RowImage {

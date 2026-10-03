@@ -1,23 +1,24 @@
-import { type ActorContext, routes } from '@lims/domain';
-import { useApi } from './api.ts';
+import { type ActorContext, routes, unsignedMeanings } from '@lims/domain';
+import { useApi, useFictional } from './api.ts';
 import { Shell, Status } from './rail.tsx';
 import { Signatures, signingNotes, unsignedNotice } from './tests.tsx';
 import { When } from './time.tsx';
 
 export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
   const { data, error } = useApi(routes.report, { id });
+  const fictional = useFictional();
   return (
     <Shell me={me} active="tests" action={null} notice={data && unsignedNotice(data.signatures)}>
       {error && <p className="note--bad">{error}</p>}
       {data && (
         <article className="report">
-          <p className="fict">Fictional data only. Not a real Test Report.</p>
+          {fictional && <p className="fict">Fictional data only. Not a real Test Report.</p>}
           <button type="button" className="btn print-hide" onClick={() => window.print()}>
             Print
           </button>
           <h1>
             Test Report <span className="record-number">{data.report.number}</span>
-            {data.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
+            {unsignedMeanings(data.signatures).length > 0 && <Status mark="Signatures unsigned" />}
           </h1>
           <p>{me.lab.name}</p>
           <dl className="facts">

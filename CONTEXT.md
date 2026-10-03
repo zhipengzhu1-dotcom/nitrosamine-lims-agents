@@ -469,11 +469,11 @@ A Lab's approved account of validating, verifying or transferring in one Method 
 _Avoid_: Validation report (alone), qualification report
 
 **Document Status**:
-Where one version of a Document stands: Draft, In Review, Approved, Effective, Superseded or Retired. A Draft, or an Approved version before its Effective Date, that goes no further is Abandoned. A Draft is signed Authored, then Reviewed by at least one authorised person who is not the author, then Approved by QA, who neither wrote nor reviewed it. Only one version of a Document is Effective at a time.
+Where one version of a Document stands: Draft, In Review, Approved, Effective, Superseded or Retired. A version that goes no further while it is a Draft, In Review, or Approved before its Effective Date is Abandoned, by its author or QA, with a reason. A Draft is signed Authored, then Reviewed by at least one authorised person who is not the author, then Approved by QA, who neither wrote nor reviewed it. Until Authorisations are recorded ([#116](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/116)), a person is authorised to sign Reviewed by holding the Reviewer role. Only one version of a Document is Effective at a time.
 _Avoid_: Stage, lifecycle state
 
 **Effective Date**:
-The date QA sets at approval on which a version replaces the previous one, which then becomes Superseded.
+The date, written by the author on the Draft, on which a version replaces the previous one, which then becomes Superseded. The Authored, Reviewed and Approved Signatures all cover it, so it changes only while the version is a Draft, and a version whose Effective Date has passed is not Approved.
 _Avoid_: Release date, issue date
 
 **Distribution**:
@@ -560,6 +560,18 @@ _Avoid_: E-sig, approval, sign-off
 What an Electronic Signature attests: Performed, Verified, Reviewed, Approved, Released, Authored or Acknowledged.
 _Avoid_: Signature type, status
 
+**Release Log**:
+The company record of every release, configuration change and host move of the LIMS: an entry names what changed and what it declares (Service Identities it creates or retires, a demo exception it records or lapses, a Signature Statement version it brings into force, the Data Class it sets), and takes effect only in the transaction where the Platform Operator, or QA for a Signature Statement, signs it Approved. A Release also carries its validation evidence, which the Approved Signature covers: the digest of each image it ships, the CI run that tested them with its result, and the ZAP baseline result. An entry is never changed or removed.
+_Avoid_: Changelog, release notes, deployment log
+
+**Service Identity**:
+A non-person actor the LIMS writes as, named `svc:` and a name, such as `svc:sign-in`. A Release Log entry declares it with the record types and operations it may write, and the database refuses any write of its outside that scope or before the entry is approved. Another entry retires it, once.
+_Avoid_: Service account, system user, bot
+
+**Data Class**:
+Whether the deployment holds `fictional` or `real` records. Every record is stamped with the class it was created under and keeps it. The class starts fictional and changes only when a Release Log entry setting it is signed Approved, and never to real while the real-data gate names an unmet condition, any record created under fictional remains other than the Lab and the approver's own account and Memberships, or anyone holds Admin together with another role.
+_Avoid_: Environment, mode, demo flag
+
 **Signature Statement**:
 The QA-approved, versioned sentence a signer attests to on every Electronic Signature, shown on the signature sheet before the credentials. Each Signature records the version it showed and its hash, and a later version comes into force only through a Release Log entry that QA signs Approved.
 _Avoid_: Attestation text, legal text, disclaimer
@@ -585,7 +597,7 @@ Sending a record back, with a reason, to the person who signed it Performed, ins
 _Avoid_: Reject (in review), send back
 
 **Critical Data Change**:
-A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, an Injection's match to a Preparation or standard or its exclusion, a typed Injection's ID or acquisition time, a Run Adjustment's values, a Room, storage or DI water reading, a Check's typed value such as a balance or pipette weighing, a Customer Lot's expiry or retest date, a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date, any value typed from a calibration certificate (its certified values, corrections, uncertainty and k, calibrated range, as-found and as-left values, or its Supplier's verdict and decision rule), a manually entered Run Check value, any structured field of a Method version, a Method Report's results, a validation impact decision, a Method Adoption's status, scope entries, LOQ, LOD, range, maximum dilution or cited Method Report, any field of an Uncertainty Evaluation or Accreditation Scope, or a Substance's kind. It stays a proposal until a second person approves it. Once a versioned record such as a Method or Specification is approved, a change is a new version instead.
+A change, after its first save, to a result value, weight, dilution volume, standard concentration, any field of a Specification, Specification Section or Specification Line (such as its maximum daily dose, Acceptable Intake, limit and its decimal places, reporting threshold, conformance claim or Decision Rule), a Customer-supplied water or LOD value, the instrument a Run used, an Injection's match to a Preparation or standard or its exclusion, a typed Injection's ID or acquisition time, a Run Adjustment's values, a Room, storage or DI water reading, a Check's typed value such as a balance or pipette weighing, a Customer Lot's expiry or retest date, a Material Lot's certified value, purity, salt form, uncertainty or expiry or retest date, any value typed from a calibration certificate (its certified values, corrections, uncertainty and k, calibrated range, as-found and as-left values, or its Supplier's verdict and decision rule), a manually entered Run Check value, any structured field of a Method version, a Method Report's results, a validation impact decision, a Method Adoption's status, scope entries, LOQ, LOD, range, maximum dilution or cited Method Report, any field of an Uncertainty Evaluation or Accreditation Scope, or a Substance's kind. It stays a proposal until a second person approves it. After an approved change to the Result of a Test, the assigned Analyst signs Performed again on the corrected value before anyone reviews it; a Test already signed Reviewed goes back for review, so a new Reviewed signature covers the corrected value, and the person who approved a change on a Test does not release that Test. Once a versioned record such as a Method or Specification is approved, a change is a new version instead.
 _Avoid_: Correction, amendment
 
 **Unconfirmed Value**:

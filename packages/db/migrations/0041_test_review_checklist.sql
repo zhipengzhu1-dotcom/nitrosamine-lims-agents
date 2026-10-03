@@ -5,7 +5,8 @@ set local role lims_owner;
 -- signs it Approved, and every version, draft or approved, is insert-only, so a correction is a new version.
 create table lims.evidence_source (
   source text not null primary key check (source ~ '^[a-z][A-Za-z]*$'),
-  kind   text not null check (kind in ('Run', 'Test', 'Released')),
+  kind       text            not null check (kind in ('Run', 'Test', 'Released')),
+  data_class lims.data_class not null default lims.current_data_class(),
   unique (source, kind)
 );
 
@@ -15,6 +16,7 @@ create table lims.review_checklist_version (
   version  integer     not null check (version > 0),
   saved_at timestamptz not null default now(),
   saved_by text        not null,
+  data_class lims.data_class not null default lims.current_data_class(),
   unique (kind, version),
   unique (id, kind)
 );
@@ -28,6 +30,7 @@ create table lims.review_checklist_item (
   ticked        boolean not null,
   needs_comment boolean not null default false,
   evidence      text,
+  data_class    lims.data_class not null default lims.current_data_class(),
   primary key (version_id, key),
   unique (version_id, position),
   foreign key (version_id, kind) references lims.review_checklist_version (id, kind),
@@ -48,6 +51,7 @@ create table lims.test_review (
   ticks                jsonb       not null check (jsonb_typeof(ticks) = 'object'),
   saved_at             timestamptz not null default now(),
   saved_by             text        not null,
+  data_class           lims.data_class not null default lims.current_data_class(),
   primary key (lab_id, id),
   foreign key (lab_id, test_id) references lims.test (lab_id, id),
   foreign key (checklist_version_id, checklist_kind) references lims.review_checklist_version (id, kind)
@@ -195,11 +199,13 @@ language sql stable security definer set search_path = lims, pg_temp as $$
    where r.lab_id = p_lab_id and r.id = p_review_id
 $$;
 
+-- 0040's Record Version rules, with a Test Review and a Review Checklist version among the records versioned.
 alter table lims.record_version
   drop constraint record_version_record_table_check,
-  add constraint record_version_record_table_check
-    check (record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'test_review',
-                            'review_checklist_version'));
+  add constraint record_version_record_table_check check (
+    record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'release_log_entry',
+                     'document_version', 'critical_data_change', 'test_review', 'review_checklist_version')
+  );
 
 create or replace function lims.save_record_version(p_lab_id uuid, p_table text, p_record_id uuid) returns void
 language plpgsql security definer set search_path = lims, pg_temp as $$
@@ -210,16 +216,19 @@ begin
   bytes := convert_to((case p_table
     when 'test' then test_content(p_lab_id, p_record_id)
     when 'test_report' then test_report_content(p_lab_id, p_record_id)
+    when 'release_log_entry' then release_log_entry_content(p_record_id)
     when 'system_incident' then incident_content(p_record_id)
     when 'equipment' then (select equipment_content(e) from equipment e where e.lab_id = p_lab_id and e.id = p_record_id)
     when 'equipment_event' then
       (select equipment_event_content(v) from equipment_event v where v.lab_id = p_lab_id and v.id = p_record_id)
+    when 'document_version' then document_version_content(p_record_id)
+    when 'critical_data_change' then critical_data_change_content(p_lab_id, p_record_id)
     when 'test_review' then test_review_content(p_lab_id, p_record_id)
     when 'review_checklist_version' then review_checklist_content(p_record_id)
   end)::text, 'UTF8');
   if bytes is null then return; end if;
   select * into latest from record_version
-    where lab_id = p_lab_id and record_table = p_table and record_id = p_record_id
+    where lab_id is not distinct from p_lab_id and record_table = p_table and record_id = p_record_id
     order by version desc limit 1;
   if latest.content_hash = sha256(bytes) then return; end if;
   insert into record_version (lab_id, record_table, record_id, version, canonical_form, content)
@@ -257,6 +266,10 @@ begin
       join sample s on s.lab_id = t.lab_id and s.id = t.sample_id
       join submission sub on sub.id = s.submission_id
       where sub.customer_id = r.id;
+    when 'release_log_entry' then perform save_record_version(null, 'release_log_entry', r.id);
+    when 'service_identity' then
+      perform save_record_version(null, 'release_log_entry',
+                                  case when tg_op = 'INSERT' then r.created_by_entry_id else r.retired_by_entry_id end);
   end case;
   return null;
 end $$;
@@ -289,8 +302,9 @@ begin
   return latest;
 end $$;
 
--- Reviewed binds a Test Review complete on the Test checklist in force and saved by the signer; Approved binds a
--- checklist version once, by a QA who did not draft it, and only one newer than the version in force.
+-- Reviewed binds a Test Review complete on the Test checklist in force and saved by the signer, or a Document version
+-- as 0039 holds; Approved binds a checklist version once, by a QA who did not draft it, and only one newer than the
+-- version in force. 0040 gives the Reviewer Approved for a Critical Data Change, so the QA role is held here.
 create function lims.check_review_signing() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 declare
@@ -304,12 +318,16 @@ begin
   if signed.id is null then
     return new; -- signature_record_version_fkey refuses it
   end if;
-  if (new.meaning = 'Reviewed') <> (signed.record_table = 'test_review') then
+  if new.meaning = 'Reviewed' and signed.record_table not in ('test_review', 'document_version')
+     or signed.record_table = 'test_review' and new.meaning <> 'Reviewed' then
     raise exception 'Reviewed is the Signature Meaning of a Test Review, and a Test Review is signed only Reviewed'
       using errcode = 'LA010';
   end if;
   if signed.record_table = 'review_checklist_version' and new.meaning <> 'Approved' then
     raise exception 'a Review Checklist version is signed only Approved' using errcode = 'LA010';
+  end if;
+  if signed.record_table = 'review_checklist_version' and new.role::text <> 'QA' then
+    raise exception 'a Review Checklist version is signed Approved only by QA, not %', new.role using errcode = 'LA010';
   end if;
   if signed.record_table = 'test_review' then
     select * into review from test_review where lab_id = signed.lab_id and id = signed.record_id;
@@ -346,6 +364,131 @@ end $$;
 
 create trigger review_signing before insert on lims.signature
   for each row execute function lims.check_review_signing();
+
+-- 0040's approval rule, with a Review Checklist version among the records signed Approved: its Approved is QA's, as
+-- check_review_signing holds. The Release Log, Equipment, Document version and Critical Data Change rules are 0040's.
+create or replace function lims.apply_release_log_entry() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  v        record_version;
+  e        release_log_entry;
+  approver text;
+begin
+  select * into v from record_version where id = new.record_version_id;
+  if v.record_table not in ('release_log_entry', 'equipment', 'document_version', 'critical_data_change',
+                            'review_checklist_version')
+     and new.meaning = 'Approved' then
+    raise exception 'only a Release Log entry, Equipment, a Document version, a Critical Data Change or a Review Checklist '
+                    'version is signed Approved'
+      using errcode = 'LA011';
+  end if;
+  if v.record_table = 'equipment' and new.meaning = 'Approved' and new.role::text <> 'QA' then
+    raise exception 'Equipment is signed Approved only by QA, not %', new.role using errcode = 'LA010';
+  end if;
+  if v.record_table <> 'release_log_entry' then return null; end if;
+  if new.meaning <> 'Approved' then
+    raise exception 'a Release Log entry is signed Approved, not %', new.meaning using errcode = 'LA011';
+  end if;
+  -- The row lock makes a second approval of the entry wait for the first, and then see it.
+  select * into e from release_log_entry where id = v.record_id for no key update;
+  approver := case when e.statement_version is not null then 'QA' else 'PlatformOperator' end;
+  if new.role::text <> approver then
+    raise exception 'a Release Log entry % is approved by %, not %',
+      case when e.statement_version is not null then 'bringing a signature statement into force' else 'of the system' end,
+      approver, new.role using errcode = 'LA011';
+  end if;
+  if exists (select from signature g join record_version x on x.id = g.record_version_id
+              where x.record_table = 'release_log_entry' and x.record_id = e.id and g.meaning = 'Approved'
+                and g.id <> new.id) then
+    raise exception 'the Release Log entry is already approved' using errcode = 'LA011';
+  end if;
+  if e.sets_data_class is not null then
+    perform set_this_transaction('lims.release_log', e.id::text);
+    update deployment set data_class = e.sets_data_class, set_by_entry_id = e.id;
+    perform set_this_transaction('lims.release_log', '');
+  end if;
+  if e.statement_version is not null then
+    if e.statement_version <> (select max(version) + 1 from signature_statement) then
+      raise exception 'the signature statement version % does not follow the version in force', e.statement_version
+        using errcode = 'LA011';
+    end if;
+    insert into signature_statement (version, statement) values (e.statement_version, e.statement);
+  end if;
+  return null;
+end $$;
+
+-- 0040's change-control rules, with a Test Review among the records a Test step signs: Reviewed binds the Test Review,
+-- so it waits for a pending Critical Data Change and for Performed on the corrected Result as a Test's Reviewed did.
+create or replace function lims.refuse_signing_while_change_pending() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  signed_test uuid;
+begin
+  select coalesce(r.test_id, w.test_id, v.record_id) into signed_test
+    from record_version v
+    left join test_report r on v.record_table = 'test_report' and r.lab_id = v.lab_id and r.id = v.record_id
+    left join test_review w on v.record_table = 'test_review' and w.lab_id = v.lab_id and w.id = v.record_id
+   where v.lab_id = new.lab_id and v.id = new.record_version_id
+     and v.record_table in ('test', 'test_report', 'test_review');
+  if signed_test is null then
+    return new;
+  end if;
+  perform lock_chains(new.lab_id::text);
+  if exists (select from critical_data_change c
+              where c.lab_id = new.lab_id and c.test_id = signed_test
+                and not exists (select from critical_data_change_decision d
+                                 where d.lab_id = c.lab_id and d.change_id = c.id)) then
+    raise exception 'a Test is not signed while a Critical Data Change on one of its Results is pending'
+      using errcode = 'LA010';
+  end if;
+  return new;
+end $$;
+
+create or replace function lims.refuse_signing_before_performed() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  signed_test    uuid;
+  corrected_from integer;
+begin
+  if new.meaning not in ('Reviewed', 'Released') then
+    return new;
+  end if;
+  select coalesce(r.test_id, w.test_id, v.record_id) into signed_test
+    from record_version v
+    left join test_report r on v.record_table = 'test_report' and r.lab_id = v.lab_id and r.id = v.record_id
+    left join test_review w on v.record_table = 'test_review' and w.lab_id = v.lab_id and w.id = v.record_id
+   where v.lab_id = new.lab_id and v.id = new.record_version_id
+     and v.record_table in ('test', 'test_report', 'test_review');
+  if signed_test is null then
+    return new;
+  end if;
+  select max(v.version) into corrected_from
+    from critical_data_change c
+    join critical_data_change_decision d on d.lab_id = c.lab_id and d.change_id = c.id and d.outcome = 'Approved'
+    join record_version v on v.lab_id = c.lab_id and v.id = c.proposed_on_version
+   where c.lab_id = new.lab_id and c.test_id = signed_test;
+  if corrected_from is null then
+    return new;
+  end if;
+  if not exists (select from signature s
+                   join record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
+                  where s.lab_id = new.lab_id and s.meaning = 'Performed' and v.record_table = 'test'
+                    and v.record_id = signed_test and v.version > corrected_from) then
+    raise exception 'a Test and the Test Report built on it are signed % only once Performed is signed on the corrected Result',
+      new.meaning using errcode = 'LA010';
+  end if;
+  return new;
+end $$;
+
+-- The evidence sources and version 1 of each Review Checklist are change-control configuration this migration writes,
+-- as the picklist reasons are, so the real-data gate does not read them. 0040's list, with the checklist tables.
+create or replace function lims.gate_exempt_tables() returns text[]
+language sql immutable as $$
+  select array['access_event', 'credential_link', 'deployment', 'evidence_source', 'identity_verification', 'lab',
+               'membership', 'person', 'picklist_reason', 'reauthentication', 'record_version', 'release_log_entry',
+               'review_checklist_item', 'review_checklist_version', 'service_identity', 'signature',
+               'signature_statement', 'signing_role']
+$$;
 
 revoke execute on function lims.stamp_saver(), lims.check_test_review_ticks(), lims.check_item_in_its_draft(),
   lims.review_checklist_content(uuid), lims.review_checklist_content_hash(uuid), lims.review_checklist_in_force(text),
