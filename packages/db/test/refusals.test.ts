@@ -5255,7 +5255,7 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     {
       name: 'signing a Test Approved in the role QA is refused',
       statements: [signingTest('Approved', 'QA')],
-      message: 'QA signs Approved only on a Document version',
+      message: 'QA signs Approved only on a Document version or Equipment',
     },
     {
       name: 'signing a Document version Authored in a role that is not a business role is refused',

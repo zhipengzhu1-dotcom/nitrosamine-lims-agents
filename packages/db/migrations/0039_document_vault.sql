@@ -267,13 +267,13 @@ insert into lims.signing_role (role, meaning) values
   ('LabManager', 'Authored'), ('Analyst', 'Authored'), ('Reviewer', 'Authored'), ('QA', 'Authored'), ('QA', 'Approved')
   on conflict do nothing;
 
--- Authored is a Signature Meaning of a Document version only, and QA signs Approved only on one; another record kind
--- may be signed Approved in another role. Equipment and its Events are left to check_equipment_signing (0037), which
--- gives each its one meaning, Equipment's being QA's Approved (#129). A Document version is signed Authored, Reviewed
--- or Approved, each by a different person: Authored once, by its author in a business role, on the Draft; Reviewed In Review, after
--- Authored, in the Reviewer role, by someone who did not author it; Approved once, In Review, after a Reviewed, in
--- the QA role, by someone who neither authored nor reviewed it. lims.sign checks the signer, the proof, the role they
--- hold and the version shown; this checks who may sign what.
+-- Authored is a Signature Meaning of a Document version only, and QA signs Approved only on one or on Equipment;
+-- another record kind may be signed Approved in another role. Equipment and its Events are left to
+-- check_equipment_signing (0037), which gives each its one meaning, Equipment's being QA's Approved (#129). A Document
+-- version is signed Authored, Reviewed or Approved, each by a different person: Authored once, by its author in a
+-- business role, on the Draft; Reviewed In Review, after Authored, in the Reviewer role, by someone who did not author
+-- it; Approved once, In Review, after a Reviewed, in the QA role, by someone who neither authored nor reviewed it.
+-- lims.sign checks the signer, the proof, the role they hold and the version shown; this checks who may sign what.
 create function lims.check_document_signing() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -294,7 +294,7 @@ begin
       raise exception 'Authored is a Signature Meaning of a Document version only' using errcode = 'LA010';
     end if;
     if new.meaning = 'Approved' and new.role = 'QA' then
-      raise exception 'QA signs Approved only on a Document version' using errcode = 'LA010';
+      raise exception 'QA signs Approved only on a Document version or Equipment' using errcode = 'LA010';
     end if;
     return new;
   end if;
