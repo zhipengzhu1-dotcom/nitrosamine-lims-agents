@@ -289,10 +289,21 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
       const unknown = unknownTick(inForce.items, body.ticks);
       if (unknown) refuse('unknownField', unknown);
       const saved = await scope.write('saveTestReview', 'Reviewer', async (q) => {
-        const { id } = await q
-          .insert('testReview', { testId: test.id, checklistVersionId: inForce.id, ticks: body.ticks })
-          .returning('id')
-          .executeTakeFirstOrThrow();
+        // The same ticks saved again return the review already saved, so a Reviewed press resent after a refusal or no
+        // answer names the same review and keeps its Commit Key.
+        const { id } =
+          (await q
+            .from('testReview')
+            .select('id')
+            .where('testId', '=', test.id)
+            .where('checklistVersionId', '=', inForce.id)
+            .where('savedBy', '=', `person:${actor.person.username}`)
+            .where(sql<boolean>`ticks = ${JSON.stringify(body.ticks)}::jsonb`)
+            .executeTakeFirst()) ??
+          (await q
+            .insert('testReview', { testId: test.id, checklistVersionId: inForce.id, ticks: body.ticks })
+            .returning('id')
+            .executeTakeFirstOrThrow());
         const { version, canonicalForm, contentHash } = await latestVersion(q, 'test_review', id);
         return { review: id, recordVersion: { version, canonicalForm, contentHash } };
       });

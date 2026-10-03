@@ -196,6 +196,18 @@ it('saving a Test Review that ticks an evidence item or a key the checklist lack
   );
 });
 
+it('saving the same ticks again returns the Test Review already saved, so a resent Reviewed press names the same review', async () => {
+  await api.approveChecklist();
+  const testId = await awaitingReview();
+  const first = await saved(testId);
+  assert.deepEqual(await saved(testId), first);
+  const recommented = await saved(testId, (ticks) => ({
+    ...ticks,
+    flagsAcknowledged: { comment: 'One flag, cleared.' },
+  }));
+  assert.notEqual(recommented.review, first.review, 'changed ticks save a new Test Review');
+});
+
 it('Reviewed on a Test Review that leaves a ticked item unticked is refused, naming the item, and signs nothing', async () => {
   await api.approveChecklist();
   const testId = await awaitingReview();
