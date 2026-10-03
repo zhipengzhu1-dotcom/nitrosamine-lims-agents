@@ -42,6 +42,7 @@ const allowed: StepFacts = {
   assignee: 'ana',
   assigneeTrained: true,
   signers: { Performed: 'pia', Reviewed: 'rui' },
+  pendingChange: false,
 };
 
 describe('a step from any state but its own is refused', () => {

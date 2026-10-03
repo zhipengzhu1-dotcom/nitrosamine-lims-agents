@@ -124,7 +124,27 @@ export async function factsFor(
     assignee,
     assigneeTrained: Boolean(trained),
     signers: Object.fromEntries(signatures.map((s) => [s.meaning, s.personId])),
+    pendingChange: Boolean(test && (await pendingChangeOn(q, test.id))),
   };
+}
+
+/** The Test's Critical Data Change that has no decision yet, if any; the database allows one at a time. */
+export function pendingChangeOn(q: LabQueries, testId: string) {
+  return q
+    .from('criticalDataChange')
+    .select(['criticalDataChange.id', 'criticalDataChange.proposedBy'])
+    .where('criticalDataChange.testId', '=', testId)
+    .where(({ not, exists, selectFrom }) =>
+      not(
+        exists(
+          selectFrom('criticalDataChangeDecision as d')
+            .select('d.id')
+            .whereRef('d.labId', '=', 'criticalDataChange.labId')
+            .whereRef('d.changeId', '=', 'criticalDataChange.id'),
+        ),
+      ),
+    )
+    .executeTakeFirst();
 }
 
 /** Every Signature of the Lab joined to the Record Version it was given on. */
@@ -174,10 +194,19 @@ async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signi
   await signRecord(q, { proof, sessionId, meaning, table, recordId, seen, statementVersion, release });
 }
 
-async function seenVersion(scope: LabQueries, testId: string, signature: SigningBody): Promise<Seen> {
-  const latest = await latestVersion(scope, 'test', testId);
+/** The record's latest Record Version, refused unless it is the one the signer's sheet showed under the statement in force. */
+export async function seenVersion(
+  scope: LabQueries,
+  table: 'test' | 'critical_data_change',
+  recordId: string,
+  signature: SigningBody,
+): Promise<Seen> {
+  const latest = await latestVersion(scope, table, recordId);
   if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
-    refuse('recordChanged', 'The Test changed since this screen loaded it. Read it again before signing.');
+    refuse(
+      'recordChanged',
+      `The ${table === 'test' ? 'Test' : 'Critical Data Change'} changed since this screen loaded it. Read it again before signing.`,
+    );
   if ((await statementInForce(scope.company)).version !== signature.statementVersion)
     refuse(
       'signingRefused',
@@ -240,7 +269,7 @@ function registerStep<K extends StepName>(
       }
       const signature = body.signature ?? refuse('malformed', `The ${name} step needs the signer's credentials.`);
       const testId = test?.id ?? refuse('malformed', `The ${name} step signs a Test, and this request names none.`);
-      const seen = await seenVersion(scope, testId, signature);
+      const seen = await seenVersion(scope, 'test', testId, signature);
       const reauthenticated = await reauthenticate(
         db,
         credentials,

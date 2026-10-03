@@ -217,6 +217,49 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       at: { label: 'At', shows: 'instant' },
     },
   },
+  picklist_reason: {
+    kind: 'Picklist Reason',
+    chain: 'company',
+    label: (row) => text(row.label),
+    fields: {
+      step: { label: 'Step' },
+      position: { label: 'Position' },
+      label: { label: 'Reason' },
+      needs_text: { label: 'Needs text' },
+    },
+  },
+  critical_data_change: {
+    kind: 'Critical Data Change',
+    chain: 'lab',
+    label: (row) => `${text(row.field)} ${text(row.old_value)} to ${text(row.new_value)}`,
+    fields: {
+      test_id: { label: 'Test', ref: 'test' },
+      result_id: { label: 'Result', ref: 'result' },
+      field: { label: 'Field' },
+      old_value: { label: 'Old value' },
+      new_value: { label: 'New value' },
+      reason_id: { label: 'Reason', ref: 'picklist_reason' },
+      reason_text: { label: 'Reason text' },
+      proposed_by: { label: 'Proposed by', ref: 'person' },
+      proposed_at: { label: 'Proposed at', shows: 'instant' },
+      proposed_on_version: { label: 'Proposed on Record Version', ref: 'record_version' },
+    },
+  },
+  critical_data_change_decision: {
+    kind: 'Critical Data Change Decision',
+    chain: 'lab',
+    label: (row) => text(row.outcome),
+    fields: {
+      change_id: { label: 'Critical Data Change', ref: 'critical_data_change' },
+      test_id: { label: 'Test', ref: 'test' },
+      outcome: { label: 'Outcome' },
+      decided_by: { label: 'Decided by', ref: 'person' },
+      decided_at: { label: 'Decided at', shows: 'instant' },
+      reason_id: { label: 'Reason', ref: 'picklist_reason' },
+      reason_text: { label: 'Reason text' },
+      signature_id: { label: 'Signature', ref: 'signature' },
+    },
+  },
 };
 
 /** Every table `auditedRecords` reads, in registry order. */

@@ -33,7 +33,8 @@ type CompanyTable =
   | 'enrolmentGrant'
   | 'signatureStatement'
   | 'systemIncident'
-  | 'chainVerification';
+  | 'chainVerification'
+  | 'picklistReason';
 type LabTable = Exclude<keyof DB, CompanyTable | 'accessEvent' | 'auditEntry' | 'session'>;
 
 function inLab(q: Kysely<DB>, labId: string) {

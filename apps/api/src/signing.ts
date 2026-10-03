@@ -6,7 +6,7 @@ import { refuse } from './refuse.ts';
 import type { WriteQueries } from './scope.ts';
 
 /** The records a Signature can be given on, each with its own canonical content in the database. */
-export type Signable = 'test' | 'test_report' | 'system_incident';
+export type Signable = 'test' | 'test_report' | 'system_incident' | 'critical_data_change';
 
 /** The Record Version the signer saw: its id and the hash the sheet showed. */
 export interface Seen {
@@ -50,13 +50,16 @@ export async function proveReauthentication(
   return proof.id;
 }
 
-/** Signs through lims.sign, the only path to a Signature, against the re-authentication record written here. */
-export async function signRecord(q: WriteQueries, signing: RecordSigning) {
+/** Signs through lims.sign, the only path to a Signature, against the re-authentication record written here; answers the Signature's id. */
+export async function signRecord(q: WriteQueries, signing: RecordSigning): Promise<string> {
   const { proof, sessionId, meaning, table, recordId, seen, statementVersion, release } = signing;
-  await sql`select lims.sign(${proof}, ${sessionId}, ${table}, ${recordId}, ${seen.id},
-                             decode(${seen.contentHash}, 'hex'), ${statementVersion}, ${meaning}, ${release})`
+  const { rows } = await sql<{ id: string }>`select lims.sign(${proof}, ${sessionId}, ${table}, ${recordId}, ${seen.id},
+                             decode(${seen.contentHash}, 'hex'), ${statementVersion}, ${meaning}, ${release}) as id`
     .execute(q.company)
     .catch(signingRefused);
+  const [signed] = rows;
+  if (!signed) throw new Error('lims.sign returned no Signature');
+  return signed.id;
 }
 
 /** lims.sign's own refusal (LA010) reaches the bench as a refusal; any other failure is thrown with its cause. */

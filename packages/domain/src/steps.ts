@@ -8,6 +8,8 @@ export interface StepFacts {
   assignee: PersonId | null;
   assigneeTrained: boolean;
   signers: Partial<Record<Meaning, PersonId>>;
+  /** True while a Critical Data Change on the Test's Result is neither approved, rejected nor withdrawn. */
+  pendingChange: boolean;
 }
 
 export interface Step {
@@ -70,7 +72,7 @@ export type StepName = keyof typeof steps;
 export const stepNames = Object.keys(steps).filter((key): key is StepName => Object.hasOwn(steps, key));
 
 export interface Refusal {
-  kind: Extract<RefusalKind, 'state' | 'role' | 'guard'>;
+  kind: Extract<RefusalKind, 'state' | 'role' | 'guard' | 'changePending'>;
   message: Sentence;
 }
 
@@ -85,6 +87,11 @@ export function refusal(
     return { kind: 'state', message: `The ${name} step needs a Test in ${step.from ?? 'no'} state, not ${state}.` };
   if (!roles.includes(step.role))
     return { kind: 'role', message: `The ${name} step is taken by the ${step.role} role.` };
+  if (step.signs !== null && facts.pendingChange)
+    return {
+      kind: 'changePending',
+      message: 'The Test cannot be signed while a Critical Data Change on it is pending.',
+    };
   const failed = step.guard?.(facts);
   return failed ? { kind: 'guard', message: failed } : null;
 }

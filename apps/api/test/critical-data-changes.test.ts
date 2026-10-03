@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { audited, type DB, postgresFault } from '@lims/db';
-import { stepRoute } from '@lims/domain';
+import { changeStepRoute, routes, stepRoute } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
-import { type Account, type Client, ok, signatureOf, startApi } from './harness.ts';
+import { type Account, type Client, ok, refusedWith as refusedOver, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_critical_data_changes_test');
 const [cora, samir, lena, ana, rui] = [
@@ -562,5 +562,124 @@ describe('the database refuses a malformed picklist reason, proposal or decision
       const error = await insertion(table, change);
       assert.deepEqual([error.code, error.constraint], [code, constraint], `${constraint}: ${error.message}`);
     }
+  });
+});
+
+/** The Approved signing body `by` sends from the Test page: the pending change's Record Version as the page shows it. */
+async function approvalOf(client: Client, testId: string, by: Account) {
+  const view = ok(await client.call(routes.test, { id: testId }));
+  const change = view.changes.find((c) => c.state === 'Pending') ?? assert.fail('the Test shows its pending change');
+  const { version, contentHash } = change.recordVersion;
+  const statementVersion = view.statement?.version ?? assert.fail('a signer sees the signature statement');
+  return {
+    changeId: change.id,
+    signature: {
+      username: by.username,
+      password: by.password,
+      recordVersion: { version, contentHash },
+      statementVersion,
+    },
+  };
+}
+
+const proposeOver = (testId: string, client: Client = as.ana, newValue = '0.0310') =>
+  client.call(changeStepRoute('proposeChange'), { testId, newValue, reasonId: reason.transcription });
+
+describe('the bench proposes, approves, rejects and withdraws a Critical Data Change over HTTP', () => {
+  it('each step offers its own picklist of reasons, ending with Other, which takes text', async () => {
+    const reasons = ok(await as.ana.call(routes.reasons, { step: 'proposeChange' }));
+    assert.equal(reasons.length, 3);
+    assert.deepEqual(reasons.map((r) => [r.label, r.needsText]).at(-1), ['Other', true]);
+    assert.ok(reasons.slice(0, -1).every((r) => !r.needsText));
+  });
+
+  it('the assigned Analyst proposes; the Test then shows it Pending and every signing waits for its decision', async () => {
+    const { testId } = await performedTest();
+    const { changeId } = ok(await proposeOver(testId));
+    const anaView = ok(await as.ana.call(routes.test, { id: testId }));
+    assert.deepEqual(
+      anaView.changes.map((c) => [c.id, c.state, c.oldValue, c.newValue, c.reason]),
+      [[changeId, 'Pending', saved, '0.0310', 'Transcription error']],
+    );
+    assert.deepEqual(anaView.changeNext, ['withdrawChange']);
+    const ruiView = ok(await as.rui.call(routes.test, { id: testId }));
+    assert.deepEqual(ruiView.changeNext, ['approveChange', 'rejectChange']);
+    assert.equal(ruiView.next, null);
+    const signature = await signatureOf(as.rui, testId, rui);
+    refusedOver(
+      await as.rui.call(stepRoute('review'), { commitKey: randomUUID(), testId, input: {}, signature }),
+      'changePending',
+    );
+    refusedOver(await proposeOver(testId, as.ana, '0.0320'), 'changePending');
+  });
+
+  it('a Reviewer approves with an Approved Signature, and the Result then holds the new value', async () => {
+    const { testId, resultId } = await performedTest();
+    ok(await proposeOver(testId));
+    ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    assert.equal(await resultValue(resultId), '0.0310');
+    const view = ok(await as.rui.call(routes.test, { id: testId }));
+    const approved =
+      view.signatures.find((s) => s.meaning === 'Approved') ?? assert.fail('the Approved Signature shows');
+    assert.deepEqual(
+      view.changes.map((c) => [c.state, c.decidedBy]),
+      [['Approved', approved.signer]],
+    );
+    assert.equal(approved.record, 'Critical Data Change');
+    assert.equal(approved.unsigned, false);
+    assert.equal(view.signatures.find((s) => s.meaning === 'Performed')?.unsigned, true);
+    const trail = ok(await as.rui.call(routes.testTrail, { id: testId })).entries.map((e) => e.raw.table);
+    assert.ok(trail.includes('critical_data_change') && trail.includes('critical_data_change_decision'));
+    assert.ok(trail.filter((t) => t === 'signature').length >= 2, 'the Approved Signature is on the Test trail');
+  });
+
+  it('an approval signed on sight of another Record Version of the change is refused', async () => {
+    const { testId } = await performedTest();
+    ok(await proposeOver(testId));
+    const approval = await approvalOf(as.rui, testId, rui);
+    const stale = { ...approval.signature, recordVersion: { ...approval.signature.recordVersion, version: 2 } };
+    refusedOver(
+      await as.rui.call(changeStepRoute('approveChange'), { testId, changeId: approval.changeId, signature: stale }),
+      'recordChanged',
+    );
+  });
+
+  it('a Reviewer rejects with a reason, the proposer withdraws, and neither touches the saved value', async () => {
+    const { testId, resultId } = await performedTest();
+    const { changeId } = ok(await proposeOver(testId));
+    ok(await as.rui.call(changeStepRoute('rejectChange'), { testId, changeId, reasonId: reason.rawData }));
+    const { changeId: second } = ok(await proposeOver(testId));
+    ok(await as.ana.call(changeStepRoute('withdrawChange'), { testId, changeId: second, reasonId: reason.inError }));
+    assert.equal(await resultValue(resultId), saved);
+    const view = ok(await as.ana.call(routes.test, { id: testId }));
+    assert.deepEqual(
+      view.changes.map((c) => [c.state, c.decisionReason]),
+      [
+        ['Rejected', 'Not supported by the raw data'],
+        ['Withdrawn', 'Proposed in error'],
+      ],
+    );
+    assert.deepEqual(view.changeNext, ['proposeChange']);
+  });
+
+  it('the registry and the database refuse the wrong person, a decided change and a reason without its text', async () => {
+    const { testId } = await performedTest();
+    const withdraw = (client: Client, changeId: string) =>
+      client.call(changeStepRoute('withdrawChange'), { testId, changeId, reasonId: reason.inError });
+    refusedOver(await proposeOver(testId, as.rui), 'role');
+    refusedOver(
+      await as.ana.call(changeStepRoute('proposeChange'), {
+        testId,
+        newValue: '0.0310',
+        reasonId: reason.proposeOther,
+      }),
+      'guard',
+    );
+    refusedOver(await proposeOver(testId, as.ana, saved), 'guard');
+    const { changeId } = ok(await proposeOver(testId));
+    refusedOver(await withdraw(as.rui, changeId), 'role');
+    refusedOver(await withdraw(as.dana, changeId), 'guard');
+    ok(await withdraw(as.ana, changeId));
+    refusedOver(await withdraw(as.ana, changeId), 'state');
   });
 });

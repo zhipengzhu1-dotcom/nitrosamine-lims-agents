@@ -246,6 +246,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'method':
     case 'signature_statement':
     case 'signing_role':
+    case 'picklist_reason':
       return true;
     case 'chain_verification':
       return Boolean(
@@ -279,6 +280,8 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'signature':
     case 'audit_export':
     case 'reauthentication':
+    case 'critical_data_change':
+    case 'critical_data_change_decision':
       return true;
   }
 }
@@ -297,7 +300,9 @@ export function trailRoutes(app: App, db: Kysely<DB>, readLimitSeconds?: number)
           .select(['test.id', 'test.sampleId', 'sample.submissionId', 'testReport.id as reportId'])
           .where('test.id', '=', id)
           .executeTakeFirst()) ?? refuse('notFound', 'This Lab has no such Test.');
-      const ids = [test.id, test.sampleId, ...(test.reportId ? [test.reportId] : [])];
+      const changes = await scope.from('criticalDataChange').select('id').where('testId', '=', id).execute();
+      // A Critical Data Change's Record Version and its Approved Signature name the change, not the Test.
+      const ids = [test.id, test.sampleId, ...(test.reportId ? [test.reportId] : []), ...changes.map((c) => c.id)];
       return trailOf(scope, { table: 'test', id }, (eb) =>
         eb.or([
           eb.and([

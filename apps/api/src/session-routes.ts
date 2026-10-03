@@ -7,6 +7,7 @@ import { preferenceRoutes } from './preferences.ts';
 import { readRoutes } from './reads.ts';
 import { staffRoutes } from './staff.ts';
 import { stepRoutes } from './steps.ts';
+import { changeRoutes } from './changes.ts';
 import { workstationRoutes } from './workstations.ts';
 
 /** Every route that needs a session. A locked session reaches only lock, unlock and sign-out; every other route answers sessionLocked. */
@@ -41,6 +42,7 @@ export function sessionRoutes(
     readRoutes(signedIn, db, verifyReadLimitSeconds);
     staffRoutes(signedIn, db, limits);
     stepRoutes(signedIn, db, credentials, release);
+    changeRoutes(signedIn, db, credentials, release);
     workstationRoutes(signedIn, db);
   });
 }

@@ -1,4 +1,5 @@
 export * from './audit.ts';
+export * from './changes.ts';
 export * from './http.ts';
 export * from './incidents.ts';
 export * from './steps.ts';
