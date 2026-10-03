@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { audited } from '@lims/db';
-import { routes, stepRoute } from '@lims/domain';
+import { incidentStepRoute, routes, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
 import { LOGIN } from '../src/auth.ts';
 import { stepAt, totpCode } from '../src/totp.ts';
@@ -784,4 +784,60 @@ it('5 consecutive failures, mixing sign-in and signing, lock the account; only t
     refusedWith(await signIn(account, account.password, code(1)), 'accountLocked'),
     'This account is locked.',
   );
+});
+
+it('the Acknowledged signing of a System Incident under the decided login takes the password and a fresh code, and its Signature records both', async () => {
+  const probe = 'RD-NB-DECIDED-PROBE';
+  await sql`alter table lims.result add constraint decided_probe check (notebook_ref <> ${sql.lit(probe)})`.execute(
+    api.superuser,
+  );
+  const ana = api.person('ana');
+  const analyst = await api.login(ana);
+  const testId = await assignedTo(ana);
+  const res = await fetch(api.base + stepRoute('enterResult').url, {
+    method: 'POST',
+    headers: { cookie: analyst.cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      commitKey: randomUUID(),
+      testId,
+      input: { ...result, notebookRef: probe },
+      signature: await signatureOf(analyst, testId, ana),
+    }),
+  });
+  const text = await res.text();
+  const reference = /reference (\w+), then reload/.exec(text)?.[1] ?? assert.fail(`no reference in ${text}`);
+
+  const { account, code } = await enrolled('incident.admin', ['Admin']);
+  const admin = new Client(decided.base);
+  ok(
+    await admin.call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId: api.labId,
+      code: code(),
+    }),
+  );
+  const qa = await api.login(api.person('quinn'));
+  ok(await qa.call(incidentStepRoute('answerImpact'), { reference, input: { answer: 'Yes' } }));
+  ok(await admin.call(incidentStepRoute('recordImmediateAction'), { reference, input: { text: 'Reran the entry.' } }));
+  ok(await admin.call(incidentStepRoute('recordCorrectiveAction'), { reference, input: { text: 'Added a check.' } }));
+  const { recordVersion, statement } = ok(await admin.call(routes.incident, { reference }));
+  const signature = {
+    username: account.username,
+    password: account.password,
+    recordVersion: { version: recordVersion.version, contentHash: recordVersion.contentHash },
+    statementVersion: statement.version,
+  };
+  const acknowledge = (extra: { code?: string }) =>
+    admin.call(incidentStepRoute('acknowledge'), { reference, input: {}, signature: { ...signature, ...extra } });
+
+  assert.equal(refusedWith(await acknowledge({}), 'badCredentials'), NOT_VALID);
+  assert.equal(
+    ok(await admin.call(routes.incident, { reference })).state,
+    'Open',
+    'a signing with no code moves nothing',
+  );
+  const acknowledged = ok(await acknowledge({ code: code(1) }));
+  assert.equal(acknowledged.state, 'Acknowledged');
+  assert.equal(acknowledged.acknowledged?.authenticator, 'PasswordAndCode');
 });
