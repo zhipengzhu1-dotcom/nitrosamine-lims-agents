@@ -59,6 +59,7 @@ const id = {
   lockedOut: randomUUID(),
   equipment: randomUUID(),
   equipmentEvent: randomUUID(),
+  manager: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -90,6 +91,7 @@ const fixture: [Table, Row][] = [
   ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
   // A second Admin, who created no account and issued no one-time link, so an enrolment grant can come from them.
   ['lims.person', { id: id.secondAdmin, username: 'refusal.second', display_name: 'Second Admin' }],
+  ['lims.person', { id: id.manager, username: 'refusal.manager', display_name: 'Refusal Manager' }],
   [
     'lims.person',
     {
@@ -113,6 +115,7 @@ const fixture: [Table, Row][] = [
   ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.otherLab, person_id: id.secondAdmin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
+  ['lims.membership', { lab_id: id.lab, person_id: id.manager, role: 'LabManager' }],
   [
     'lims.identity_verification',
     {
@@ -736,12 +739,15 @@ const signingStamp = (row: Row) =>
     ? client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', row.reauthentication_id])
     : Promise.resolve();
 
+/** Refusal Manager, who holds LabManager in the Lab, acting in that role. */
+const asLabManager = `select set_config('lims.actor', 'person:refusal.manager', true), set_config('lims.role', 'LabManager', true)`;
+
 /**
- * Who a table's triggers demand of a probe row, set after the audit context: the Lab Manager registers Equipment, and
- * a member of the Lab's staff (Refusal Person, its Analyst) records an Equipment Event.
+ * Who a table's triggers demand of a probe row, set after the audit context: the Lab's Lab Manager registers
+ * Equipment, and a member of the Lab's staff (Refusal Person, its Analyst) records an Equipment Event.
  */
 const actingFor: Partial<Record<Table, string>> = {
-  'lims.equipment': asRole('LabManager'),
+  'lims.equipment': asLabManager,
   'lims.equipment_event': `select set_config('lims.actor', 'person:refusal.person', true)`,
 };
 
@@ -3892,9 +3898,9 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
       await client.query('rollback');
     }
   };
-  /** Registers Equipment as the Lab Manager, the role the rest of the transaction then acts in. */
+  /** Registers Equipment as Refusal Manager, the Lab's Lab Manager, who then acts for the rest of the transaction. */
   const register = async (name: string) => {
-    await client.query(asRole('LabManager'));
+    await client.query(asLabManager);
     const row = { ...tables['lims.equipment'].row, name, serial: `SN-${name}` };
     const { rows } = await client.query<{ id: string }>(
       `${insert('lims.equipment', row)[0]} returning id`,
@@ -3983,6 +3989,43 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
     const row = tables['lims.equipment'].row;
     const error = await refusalOf(...insert('lims.equipment', row), true, row);
     assert.deepEqual([error.code, error.message], ['LA014', 'Equipment is registered only by the Lab Manager']);
+  });
+
+  it('a person acting as Lab Manager who holds it only in another Lab, or only Analyst in this Lab, is refused registering, moving and retiring Equipment', async () => {
+    const row = { ...tables['lims.equipment'].row, name: 'BAL-12 (fictional)', serial: 'SN-0012' };
+    const attempts: [string, (room: string) => Promise<unknown>][] = [
+      ['registered', () => client.query(...insert('lims.equipment', row))],
+      ['moved', (room) => client.query('update lims.equipment set room_id = $2 where id = $1', [id.equipment, room])],
+      [
+        'Retired',
+        () => client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [id.equipment]),
+      ],
+    ];
+    for (const [who, managerOf] of [
+      ['refusal.other', id.otherLab],
+      ['refusal.person', null],
+    ] as const)
+      for (const [what, attempt] of attempts)
+        await within(async () => {
+          if (managerOf) {
+            await client.query('select lims.lock_chains($1, $2)', [id.lab, managerOf]);
+            await client.query(`insert into lims.membership (lab_id, person_id, role) values ($1, $2, 'LabManager')`, [
+              managerOf,
+              id.otherPerson,
+            ]);
+          }
+          const room = await client.query<{ id: string }>(
+            `insert into lims.room (lab_id, name) values ($1, 'Weighing Room (fictional)') returning id`,
+            [id.lab],
+          );
+          await client.query(`select set_config('lims.actor', $1, true), set_config('lims.role', 'LabManager', true)`, [
+            `person:${who}`,
+          ]);
+          await assert.rejects(attempt(room.rows[0]?.id ?? assert.fail('the Room is added')), {
+            code: 'LA014',
+            message: `Equipment is ${what} only by the Lab Manager of its Lab, not ${who}`,
+          });
+        });
   });
 
   it('Equipment moved to another Room by anyone but the Lab Manager is refused', async () => {
@@ -4099,7 +4142,6 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
   it('Retired Equipment never changes, and no Equipment Event is recorded on it', async () => {
     await within(async () => {
       const balance = await register('BAL-04');
-      await client.query(asRole('LabManager'));
       await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
       await assert.rejects(client.query(`update lims.equipment set name = 'Renamed' where id = $1`, [balance]), {
         code: 'LA014',
@@ -4108,7 +4150,6 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
     });
     await within(async () => {
       const balance = await register('BAL-05');
-      await client.query(asRole('LabManager'));
       await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
       await assert.rejects(recordEvent(balance, 'Note'), {
         code: 'LA014',
@@ -4206,7 +4247,7 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
     });
     const refused = await suspectWhileHeld(async () => {
       await client.query('select lims.lock_chains($1)', [id.lab]);
-      await client.query(asRole('LabManager'));
+      await client.query(asLabManager);
       await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
     }, balance);
     assert.deepEqual(

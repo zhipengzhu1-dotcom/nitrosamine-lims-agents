@@ -95,24 +95,40 @@ language sql stable as $$
                     and m.role in ('SampleCustodian', 'Analyst', 'Reviewer', 'QA', 'LabManager'))
 $$;
 
--- Equipment is registered Quarantined by the Lab Manager with a Responsible Person on its Lab's staff, and its identity
--- never changes. Its Fitness Status moves to In use only from Quarantined or Suspended, in the transaction of QA's
--- Approved Signature over it as it was, and that write changes nothing else; to Suspended only from In use; to Retired
--- only by the Lab Manager; and Retired Equipment never changes. Only the Lab Manager moves Equipment to another Room,
--- and a Room move or a software or firmware version change suspends In use Equipment.
+-- The Lab Manager of the Equipment's Lab is acting: the transaction acts in the LabManager role, as the step registry
+-- gives the step, and its actor is a person who holds LabManager in that Lab, so no one registers, moves or retires
+-- Equipment in a Lab they do not manage, whatever role the write claims. `p_what` names the write for the refusal.
+create function lims.acting_lab_manager(p_lab_id uuid, p_what text) returns void
+language plpgsql stable set search_path = lims, pg_temp as $$
+declare
+  actor     text := current_setting('lims.actor', true);
+  acting_as text := current_setting('lims.role', true);
+begin
+  if acting_as is distinct from 'LabManager' then
+    raise exception 'Equipment is % only by the Lab Manager', p_what using errcode = 'LA014';
+  end if;
+  if not exists (select from person p join membership m on m.person_id = p.id
+                  where 'person:' || p.username = actor and m.lab_id = p_lab_id and m.role = 'LabManager') then
+    raise exception 'Equipment is % only by the Lab Manager of its Lab, not %', p_what,
+      case when actor like 'person:%' then substr(actor, 8) else coalesce(nullif(actor, ''), 'no actor') end
+      using errcode = 'LA014';
+  end if;
+end $$;
+
+-- Equipment is registered Quarantined by its Lab's Lab Manager with a Responsible Person on its Lab's staff, and its
+-- identity never changes. Its Fitness Status moves to In use only from Quarantined or Suspended, in the transaction of
+-- QA's Approved Signature over it as it was, and that write changes nothing else; to Suspended only from In use; to
+-- Retired only by its Lab's Lab Manager; and Retired Equipment never changes. Only its Lab's Lab Manager moves
+-- Equipment to another Room, and a Room move or a software or firmware version change suspends In use Equipment.
 create function lims.keep_equipment() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
-declare
-  acting_as text := current_setting('lims.role', true);
 begin
   if (tg_op = 'INSERT' or new.responsible_person_id <> old.responsible_person_id)
      and not staff_of(new.lab_id, new.responsible_person_id) then
     raise exception 'the Responsible Person of Equipment is a member of its Lab''s staff' using errcode = 'LA014';
   end if;
   if tg_op = 'INSERT' then
-    if acting_as is distinct from 'LabManager' then
-      raise exception 'Equipment is registered only by the Lab Manager' using errcode = 'LA014';
-    end if;
+    perform acting_lab_manager(new.lab_id, 'registered');
     if new.fitness_status <> 'Quarantined' then
       raise exception 'Equipment is registered Quarantined, not %', new.fitness_status using errcode = 'LA014';
     end if;
@@ -126,8 +142,8 @@ begin
      is distinct from (old.lab_id, old.id, old.kind, old.manufacturer, old.model, old.serial, old.registered_at) then
     raise exception 'the identity of Equipment never changes' using errcode = 'LA002';
   end if;
-  if new.room_id <> old.room_id and acting_as is distinct from 'LabManager' then
-    raise exception 'Equipment is moved only by the Lab Manager' using errcode = 'LA014';
+  if new.room_id <> old.room_id then
+    perform acting_lab_manager(new.lab_id, 'moved');
   end if;
   if (new.room_id, new.software_version, new.firmware_version)
      is distinct from (old.room_id, old.software_version, old.firmware_version)
@@ -155,8 +171,8 @@ begin
       end if;
     elsif new.fitness_status = 'Suspended' and old.fitness_status <> 'InUse' then
       raise exception 'Equipment is Suspended only from In use, not %', old.fitness_status using errcode = 'LA014';
-    elsif new.fitness_status = 'Retired' and current_setting('lims.role', true) is distinct from 'LabManager' then
-      raise exception 'Equipment is Retired only by the Lab Manager' using errcode = 'LA014';
+    elsif new.fitness_status = 'Retired' then
+      perform acting_lab_manager(new.lab_id, 'Retired');
     elsif new.fitness_status = 'Quarantined' then
       raise exception 'Equipment never returns to Quarantined; it is Suspended' using errcode = 'LA014';
     end if;
@@ -475,10 +491,12 @@ end $$;
 create index audit_entry_equipment_logbook_idx on lims.audit_entry ((new_row ->> 'id'), seq)
   where table_name = 'equipment';
 
-revoke execute on function lims.staff_of(uuid, uuid), lims.event_suspends(lims.equipment_event_kind),
+revoke execute on function lims.staff_of(uuid, uuid), lims.acting_lab_manager(uuid, text),
+  lims.event_suspends(lims.equipment_event_kind),
   lims.equipment_content(lims.equipment), lims.equipment_content_hash(lims.equipment),
   lims.equipment_event_content(lims.equipment_event), lims.version_equipment_record(uuid, text, uuid) from public;
-grant execute on function lims.staff_of(uuid, uuid), lims.event_suspends(lims.equipment_event_kind),
+grant execute on function lims.staff_of(uuid, uuid), lims.acting_lab_manager(uuid, text),
+  lims.event_suspends(lims.equipment_event_kind),
   lims.equipment_content(lims.equipment), lims.equipment_content_hash(lims.equipment),
   lims.equipment_event_content(lims.equipment_event), lims.version_equipment_record(uuid, text, uuid) to lims_app;
 -- keep_equipment runs as the writer and asks whether the Approved Signature was written in this transaction.
