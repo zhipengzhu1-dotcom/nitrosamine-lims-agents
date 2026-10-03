@@ -133,7 +133,7 @@ async function signThrough(
   tx: Transaction<DB>,
   by: Account,
   meaning: Meaning,
-  recordTable: 'critical_data_change' | 'test',
+  recordTable: 'critical_data_change' | 'test' | 'test_report',
   recordId: string,
 ): Promise<string> {
   const { id: sessionId } = await tx
@@ -489,6 +489,29 @@ describe('no Test step signs while a Critical Data Change on one of its Results 
     );
     await decide(changeId, test.testId, { outcome: 'Withdrawn', reasonId: reason.inError }, ana, 'Analyst');
     assert.ok(await review(), 'the Reviewed Signature is given once the change is decided');
+  });
+
+  it('a Released Signature on the Test Report built on the Test is refused while a change is pending', async () => {
+    // No step issues a Test Report while a change can be pending, so the owner issues one beside a pending change.
+    const test = await performedTest();
+    await propose(test);
+    const { id: reportId } = await audited(
+      api.superuser,
+      { actor: 'svc:test', role: 'system', reason: 'Issue a Test Report beside a pending change' },
+      (tx) =>
+        tx
+          .insertInto('testReport')
+          .values({ labId: api.labId, testId: test.testId, number: `CDC-R${test.testId.slice(0, 5)}` })
+          .returning('id')
+          .executeTakeFirstOrThrow(),
+    );
+    const error = await refusal(
+      acting(api.db, quinn, 'QA', (tx) => signThrough(tx, quinn, 'Released', 'test_report', reportId)),
+    );
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA010', 'a Test is not signed while a Critical Data Change on one of its Results is pending'],
+    );
   });
 });
 
