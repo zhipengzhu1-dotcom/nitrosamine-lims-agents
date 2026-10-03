@@ -311,8 +311,8 @@ create trigger service_identity_through_release_log before insert or update on l
 
 -- Approving a Release Log entry applies what it declares, in the signing transaction. A statement entry takes QA's
 -- Approved and any other the owner's, as Platform Operator; an entry is approved once, and is signed with no other
--- Signature Meaning, and no record but Equipment (0037) is otherwise signed Approved. A statement entry brings in the
--- version after the one in force.
+-- Signature Meaning, and no record but Equipment (0037) is otherwise signed Approved, by QA alone, since the
+-- Platform Operator's Approved is for the Release Log. A statement entry brings in the version after the one in force.
 create function lims.apply_release_log_entry() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -323,6 +323,9 @@ begin
   select * into v from record_version where id = new.record_version_id;
   if v.record_table not in ('release_log_entry', 'equipment') and new.meaning = 'Approved' then
     raise exception 'only a Release Log entry or Equipment is signed Approved' using errcode = 'LA011';
+  end if;
+  if v.record_table = 'equipment' and new.meaning = 'Approved' and new.role::text <> 'QA' then
+    raise exception 'Equipment is signed Approved only by QA, not %', new.role using errcode = 'LA010';
   end if;
   if v.record_table <> 'release_log_entry' then return null; end if;
   if new.meaning <> 'Approved' then
@@ -380,6 +383,18 @@ alter table lims.record_version
 alter table lims.signature
   add constraint signature_record_version_fkey foreign key (record_version_id, content_hash, canonical_form)
     references lims.record_version (id, content_hash, canonical_form);
+
+-- The foreign key no longer carries the Lab, so a Signature on a Lab record is held to that record's Lab here.
+create function lims.signature_in_record_lab() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+begin
+  if exists (select from record_version v where v.id = new.record_version_id and v.lab_id <> new.lab_id) then
+    raise exception 'a Signature on a Lab''s record is given in that Lab' using errcode = '23514';
+  end if;
+  return new;
+end $$;
+create trigger signature_in_record_lab after insert on lims.signature
+  for each row execute function lims.signature_in_record_lab();
 
 -- Canonical form 1 of a Release Log entry: everything it declares.
 create function lims.release_log_entry_content(p_id uuid) returns jsonb

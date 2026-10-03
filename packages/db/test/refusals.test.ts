@@ -4545,6 +4545,27 @@ describe("a Lab's time zone changes only through a migration, and a Signature an
     }
   });
 
+  covered.add('lims.signature.signature_in_record_lab');
+  it('a Signature on a Record Version in another Lab is refused', async () => {
+    const reauthentication = randomUUID();
+    const row = {
+      ...tables['lims.signature'].row,
+      lab_id: id.otherLab,
+      session_id: id.otherSession,
+      reauthentication_id: reauthentication,
+    };
+    const error = await refusalOf(...insert('lims.signature', row), true, row, actingFor['lims.signature'], [
+      ...(spec('lims.signature').prelude ?? []),
+      `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
+       values ('${id.otherLab}', '${reauthentication}', '${id.otherSession}', '${id.person}', 'Reviewed', 'Password')`,
+    ]);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', "a Signature on a Lab's record is given in that Lab"],
+      error.message,
+    );
+  });
+
   covered.add('lims.signature.signature_signed_time_zone_not_null');
   it('a Signature in a Lab that does not exist is refused', async () => {
     const error = await refusalOfRow('lims.signature', { lab_id: missing });
@@ -4762,9 +4783,10 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
     meaning: string,
     past: boolean,
     content?: string,
+    role = 'QA',
+    reauthentication: string = randomUUID(),
   ) => {
     if (past) await client.query('set local session_replication_role = replica');
-    const reauthentication = randomUUID();
     await client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', reauthentication]);
     await client.query(
       `with version as (
@@ -4782,11 +4804,11 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
        insert into lims.signature (lab_id, person_id, printed_name, username, role, meaning, record_version_id,
                                    content_hash, canonical_form, statement_version, statement_hash, authenticator,
                                    session_id, app_release, reauthentication_id, signed_time_zone)
-       select $1, $4, 'Refusal Person', 'refusal.person', 'QA', $5, id, content_hash, canonical_form, 1,
+       select $1, $4, 'Refusal Person', 'refusal.person', $9, $5, id, content_hash, canonical_form, 1,
               (select statement_hash from lims.signature_statement where version = 1), 'Password', $6, 'test', $7,
               (select time_zone from lims.lab where lab_id = $1)
          from version`,
-      [id.lab, table, recordId, id.person, meaning, id.session, reauthentication, content ?? null],
+      [id.lab, table, recordId, id.person, meaning, id.session, reauthentication, content ?? null, role],
     );
     if (past) await client.query('set local session_replication_role = origin');
   };
@@ -5127,6 +5149,19 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
       'Equipment signed with any meaning but Approved is refused',
       async () => signOver('equipment', id.equipment, 'Reviewed', false),
       'Equipment is signed only Approved',
+    ],
+    [
+      'Equipment signed Approved by a Platform Operator is refused; QA alone releases Equipment',
+      async () => {
+        const proof = randomUUID();
+        await client.query(
+          `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
+           values ($1, $2, $3, $4, 'Approved', 'Password')`,
+          [id.lab, proof, id.session, id.person],
+        );
+        await signOver('equipment', id.equipment, 'Approved', false, undefined, 'PlatformOperator', proof);
+      },
+      'Equipment is signed Approved only by QA, not PlatformOperator',
     ],
     [
       'Equipment signed Approved while In use is refused',
