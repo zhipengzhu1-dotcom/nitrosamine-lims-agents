@@ -2867,20 +2867,23 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
 });
 
 describe('a Release Log entry takes effect only once it is signed Approved, and the data class and the service identities change only through one', () => {
-  const latestVersion = (column: 'id' | 'content_hash') =>
-    `(select ${column} from lims.record_version where record_table = 'release_log_entry' and record_id = '${id.entry}'
+  const latestVersion = (column: 'id' | 'content_hash', table = 'release_log_entry', record: string = id.entry) =>
+    `(select ${column} from lims.record_version where record_table = '${table}' and record_id = '${record}'
        order by version desc limit 1)`;
   const asSigner = (username: string, role: string) =>
     `select set_config('lims.actor', 'person:${username}', true), set_config('lims.role', '${role}', true),
             set_config('lims.reason', 'Approve a Release Log entry', true)`;
-  const approve = (person: string, session: string) => `do $$
+  const signs = (person: string, session: string, meaning: string, table: string, record: string) => `do $$
     declare proof uuid;
     begin
       insert into lims.reauthentication (lab_id, session_id, person_id, meaning, authenticator)
-      values ('${id.lab}', '${session}', '${person}', 'Approved', 'Password') returning id into proof;
-      perform lims.sign(proof, '${session}', 'release_log_entry', '${id.entry}',
-                        ${latestVersion('id')}, ${latestVersion('content_hash')}, 1, 'Approved', 'test');
+      values ('${id.lab}', '${session}', '${person}', '${meaning}', 'Password') returning id into proof;
+      perform lims.sign(proof, '${session}', '${table}', '${record}',
+                        ${latestVersion('id', table, record)}, ${latestVersion('content_hash', table, record)}, 1,
+                        '${meaning}', 'test');
     end $$`;
+  const approve = (person: string, session: string, entry = id.entry) =>
+    signs(person, session, 'Approved', 'release_log_entry', entry);
   const stamp = (entry: string) => `select lims.set_this_transaction('lims.release_log', '${entry}')`;
   const probeEntry = `insert into lims.release_log_entry (id, kind, title, summary)
                       values ('${id.probeEntry}', 'ConfigurationChange', 'Probe entry', 'Retires an identity')`;
@@ -2936,6 +2939,35 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
       constraint: 'release_log_entry_file_vault_check',
     },
     {
+      name: 'a Release Log entry bringing a signature statement into force that also records a demo exception is refused',
+      table: 'lims.release_log_entry',
+      change: { statement_version: 2, statement: Buffer.from('A statement'), records_exceptions: '{TwoRole}' },
+      constraint: 'release_log_entry_statement_alone_check',
+    },
+    {
+      name: 'a Release Log entry bringing a signature statement into force that also sets the data class is refused',
+      table: 'lims.release_log_entry',
+      change: {
+        statement_version: 2,
+        statement: Buffer.from('A statement'),
+        sets_data_class: 'real',
+        file_vault_personal_key: true,
+      },
+      constraint: 'release_log_entry_statement_alone_check',
+    },
+    {
+      name: 'a Release Log entry that records and lapses the same demo exception is refused',
+      table: 'lims.release_log_entry',
+      change: { records_exceptions: '{TwoRole,Anchoring}', lapses_exceptions: '{Anchoring}' },
+      constraint: 'release_log_entry_exception_twice_check',
+    },
+    {
+      name: 'a service identity whose scope is not a table and INSERT, UPDATE or DELETE is refused',
+      table: 'lims.service_identity',
+      change: { scope: ['customer:INSERT', 'customer:insert'] },
+      constraint: 'service_identity_scope_pair_check',
+    },
+    {
       name: 'a service identity whose name is not svc: and a name is refused',
       table: 'lims.service_identity',
       change: { name: 'svc:' },
@@ -2988,8 +3020,10 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
       await refusedWith(
         'LA011',
         AUDIT_CONTEXT,
-        stamp(id.entry),
-        `update lims.deployment set data_class = 'real', set_by_entry_id = '${id.entry}'`,
+        `insert into lims.release_log_entry (id, kind, title, summary, sets_data_class, file_vault_personal_key)
+         values ('${id.probeEntry}', 'ConfigurationChange', 'Real data', 'Takes real data', 'real', true)`,
+        stamp(id.probeEntry),
+        `update lims.deployment set data_class = 'real', set_by_entry_id = '${id.probeEntry}'`,
       ),
       'the database holds records created under fictional: audit_export, customer, method, result, sample, submission, system_incident, test, test_report, training_record',
     );
@@ -3061,7 +3095,52 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
     );
   });
 
-  covered.add('lims.signature.apply_release_log_entry');
+  it('a service identity is not declared by an entry bringing a signature statement into force, which QA approves alone', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `insert into lims.release_log_entry (id, kind, title, summary, statement_version, statement)
+         values ('${id.probeEntry}', 'ConfigurationChange', 'Statement', 'A new statement', 2, 'A statement')`,
+        `insert into lims.service_identity (name, scope, created_by_entry_id)
+         values ('svc:smuggled', '{customer:INSERT}', '${id.probeEntry}')`,
+      ),
+      'an entry bringing a signature statement into force declares no service identity',
+    );
+  });
+
+  covered.add('lims.signature.take_effect_on_approval');
+  it('only a Release Log entry is signed Approved, and a Release Log entry takes no other Signature Meaning', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        asSigner('refusal.other', 'QA'),
+        signs(id.otherPerson, id.otherPersonSession, 'Approved', 'test', id.test),
+      ),
+      'only a Release Log entry is signed Approved',
+    );
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        asSigner('refusal.person', 'Analyst'),
+        signs(id.person, id.session, 'Performed', 'release_log_entry', id.entry),
+      ),
+      'a Release Log entry is signed Approved, not Performed',
+    );
+  });
+  it('an entry whose signature statement version does not follow the one in force is refused at its approval', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `insert into lims.release_log_entry (id, kind, title, summary, statement_version, statement)
+         values ('${id.probeEntry}', 'ConfigurationChange', 'Statement', 'A skipped version', 3, 'A statement')`,
+        asSigner('refusal.other', 'QA'),
+        approve(id.otherPerson, id.otherPersonSession, id.probeEntry),
+      ),
+      'the signature statement version 3 does not follow the version in force',
+    );
+  });
   it('a Release Log entry of the system is approved by the Platform Operator, not QA, and is approved once', async () => {
     assert.equal(
       await refusedWith('LA011', asSigner('refusal.other', 'QA'), approve(id.otherPerson, id.otherPersonSession)),
@@ -3075,6 +3154,17 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
         approve(id.operator, id.operatorSession),
       ),
       'the Release Log entry is already approved',
+    );
+  });
+
+  it('a record takes the data class of the deployment it is created under', async () => {
+    assert.equal(
+      await refusedWith(
+        'LA011',
+        AUDIT_CONTEXT,
+        `insert into lims.customer (name, data_class) values ('Claims real', 'real')`,
+      ),
+      'a record takes the data class of the deployment it is created under',
     );
   });
 
@@ -3099,25 +3189,16 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
       error.code === 'LA011' &&
       error.message ===
         `the service identity ${name} is not declared to insert customer, or its Release Log entry is not approved`;
-    await app.query('begin');
-    try {
-      await app.query(asService('svc:nobody'));
-      await assert.rejects(app.query(write), refusal('svc:nobody'));
-    } finally {
-      await app.query('rollback');
-    }
-    await app.query('begin');
-    try {
-      await app.query(asService('svc:refusal'));
-      await assert.rejects(app.query(write), refusal('svc:refusal'));
-    } finally {
-      await app.query('rollback');
-    }
+    // The scope binds once an entry is approved; this transaction approves the one declaring svc:refusal.
     await app.query('begin');
     try {
       await app.query(asSigner('refusal.operator', 'PlatformOperator'));
       await app.query(`select lims.lock_chains('company', '${id.lab}')`);
       await app.query(approve(id.operator, id.operatorSession));
+      await app.query('savepoint probe');
+      await app.query(asService('svc:nobody'));
+      await assert.rejects(app.query(write), refusal('svc:nobody'));
+      await app.query('rollback to savepoint probe');
       await app.query(asService('svc:refusal'));
       assert.equal((await app.query(write)).rowCount, 1, 'the approved entry opens the scope');
       await assert.rejects(

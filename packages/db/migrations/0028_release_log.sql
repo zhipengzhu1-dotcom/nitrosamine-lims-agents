@@ -23,7 +23,12 @@ create table lims.release_log_entry (
   recorded_at             timestamptz            not null default clock_timestamp(),
   constraint release_log_entry_kind_release_check check (kind <> 'Release' or release is not null),
   constraint release_log_entry_statement_pair_check check ((statement_version is null) = (statement is null)),
-  constraint release_log_entry_file_vault_check check (sets_data_class is null or file_vault_personal_key is not null)
+  constraint release_log_entry_file_vault_check check (sets_data_class is null or file_vault_personal_key is not null),
+  -- QA approves a statement entry alone, so it may carry no effect the Platform Operator approves.
+  constraint release_log_entry_statement_alone_check check (
+    statement_version is null
+    or (sets_data_class is null and file_vault_personal_key is null and records_exceptions = '{}' and lapses_exceptions = '{}')),
+  constraint release_log_entry_exception_twice_check check (not (records_exceptions && lapses_exceptions))
 );
 
 -- A service identity acts only inside the record types and actions its entry declares, as 'table:OP' pairs.
@@ -31,7 +36,9 @@ create table lims.service_identity (
   name                text primary key check (name like 'svc:_%'),
   scope               text[] not null check (cardinality(scope) > 0),
   created_by_entry_id uuid not null references lims.release_log_entry,
-  retired_by_entry_id uuid references lims.release_log_entry
+  retired_by_entry_id uuid references lims.release_log_entry,
+  constraint service_identity_scope_pair_check
+    check (array_to_string(scope, ' ') ~ '^[a-z_]+:(INSERT|UPDATE|DELETE)( [a-z_]+:(INSERT|UPDATE|DELETE))*$')
 );
 
 -- The one deployment and its data class. Every deployment starts fictional.
@@ -61,8 +68,12 @@ select set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 's
        set_config('lims.reason', 'Every deployment starts with the fictional data class', true);
 insert into lims.deployment default values;
 
+-- Every captured write reads the class under a share lock on the deployment row, so a write in flight and an approval
+-- changing the class take turns: the approval waits for the write to commit, and then the gate sees its record.
 create function lims.current_data_class() returns lims.data_class
-language sql stable as $$ select data_class from lims.deployment $$;
+language sql volatile security definer set search_path = lims, pg_temp as $$
+  select data_class from deployment for share
+$$;
 
 -- Every captured record carries the data class it was created under, so the gate can find a fictional one.
 do $$
@@ -80,7 +91,7 @@ end $$;
 -- structure and accounts (a real deployment creates its Lab and owner before its class can change), sign-in and
 -- signing infrastructure (whose rows hang off a record the gate finds) and change control itself.
 create function lims.fictional_records() returns text[]
-language plpgsql stable set search_path = lims, pg_temp as $$
+language plpgsql volatile security definer set search_path = lims, pg_temp as $$
 declare
   t     text;
   found boolean;
@@ -99,11 +110,34 @@ begin
   return out;
 end $$;
 
+-- Only a Release Log entry is signed Approved, so these index the approvals the scope check and the gate look up.
+create index signature_approved_idx on lims.signature (record_version_id) where meaning = 'Approved';
+create index record_version_record_idx on lims.record_version (record_table, record_id);
+
 -- True once a Release Log entry carries an Approved Signature.
 create function lims.release_log_entry_approved(p_id uuid) returns boolean
 language sql stable set search_path = lims, pg_temp as $$
   select exists (select from signature g join record_version v on v.id = g.record_version_id
                   where v.record_table = 'release_log_entry' and v.record_id = p_id and g.meaning = 'Approved')
+$$;
+
+-- The demo exceptions in force: each approved entry records or lapses some, in the order of their Approved
+-- Signatures, and the last approved word on an exception stands.
+create function lims.open_demo_exceptions() returns lims.demo_exception[]
+language sql volatile security definer set search_path = lims, pg_temp as $$
+  select coalesce(array_agg(x order by x), '{}')
+    from (select distinct on (ev.x) ev.x, ev.recorded
+            from (select g.signed_at, g.id, x, true as recorded
+                    from signature g join record_version v on v.id = g.record_version_id
+                    join release_log_entry e on e.id = v.record_id, unnest(e.records_exceptions) x
+                   where g.meaning = 'Approved' and v.record_table = 'release_log_entry'
+                  union all
+                  select g.signed_at, g.id, x, false
+                    from signature g join record_version v on v.id = g.record_version_id
+                    join release_log_entry e on e.id = v.record_id, unnest(e.lapses_exceptions) x
+                   where g.meaning = 'Approved' and v.record_table = 'release_log_entry') ev
+           order by ev.x, ev.signed_at desc, ev.id desc) last
+   where last.recorded
 $$;
 
 -- The data class changes only in the transaction that approves the entry setting it, and never to real while a
@@ -112,11 +146,19 @@ create function lims.data_class_through_release_log() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
   held text[];
+  standing demo_exception[];
 begin
   if new.set_by_entry_id is null or this_transaction('lims.release_log') is distinct from new.set_by_entry_id::text then
     raise exception 'the data class changes only when a Release Log entry setting it is signed Approved' using errcode = 'LA011';
   end if;
   if new.data_class = 'real' then
+    standing := open_demo_exceptions();
+    if standing <> '{}' then
+      raise exception 'these demo exceptions still stand: %', array_to_string(standing, ', ') using errcode = 'LA011';
+    end if;
+    if (select file_vault_personal_key from release_log_entry where id = new.set_by_entry_id) is not true then
+      raise exception 'the host records no personal FileVault key' using errcode = 'LA011';
+    end if;
     held := fictional_records();
     if held <> '{}' then
       raise exception 'the database holds records created under fictional: %', array_to_string(held, ', ') using errcode = 'LA011';
@@ -147,13 +189,18 @@ begin
   if entry_xmin is null or not written_here(entry_xmin) then
     raise exception 'a service identity is created or retired only by the Release Log entry written with it' using errcode = 'LA011';
   end if;
+  if (select statement_version from release_log_entry where id = entry_id) is not null then
+    raise exception 'an entry bringing a signature statement into force declares no service identity' using errcode = 'LA011';
+  end if;
   return new;
 end $$;
 create trigger service_identity_through_release_log before insert or update on lims.service_identity
   for each row execute function lims.service_identity_through_release_log();
 
 -- Approving a Release Log entry applies what it declares, in the signing transaction. A statement entry takes QA's
--- Approved and any other the owner's, as Platform Operator; an entry is approved once.
+-- Approved and any other the owner's, as Platform Operator; an entry is approved once, and is signed with no other
+-- Signature Meaning, and no other record is signed Approved. A statement entry brings in the version after the one in
+-- force.
 create function lims.apply_release_log_entry() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -162,8 +209,15 @@ declare
   approver text;
 begin
   select * into v from record_version where id = new.record_version_id;
-  if v.record_table <> 'release_log_entry' or new.meaning <> 'Approved' then return null; end if;
-  select * into e from release_log_entry where id = v.record_id;
+  if v.record_table <> 'release_log_entry' and new.meaning = 'Approved' then
+    raise exception 'only a Release Log entry is signed Approved' using errcode = 'LA011';
+  end if;
+  if v.record_table <> 'release_log_entry' then return null; end if;
+  if new.meaning <> 'Approved' then
+    raise exception 'a Release Log entry is signed Approved, not %', new.meaning using errcode = 'LA011';
+  end if;
+  -- The row lock makes a second approval of the entry wait for the first, and then see it.
+  select * into e from release_log_entry where id = v.record_id for update;
   approver := case when e.statement_version is not null then 'QA' else 'PlatformOperator' end;
   if new.role::text <> approver then
     raise exception 'a Release Log entry % is approved by %, not %',
@@ -181,11 +235,16 @@ begin
     perform set_this_transaction('lims.release_log', '');
   end if;
   if e.statement_version is not null then
+    if e.statement_version <> (select max(version) + 1 from signature_statement) then
+      raise exception 'the signature statement version % does not follow the version in force', e.statement_version
+        using errcode = 'LA011';
+    end if;
     insert into signature_statement (version, statement) values (e.statement_version, e.statement);
   end if;
   return null;
 end $$;
-create trigger apply_release_log_entry after insert on lims.signature
+-- Named to fire after the Signature's capture, which holds the Signature to the class it was created under.
+create trigger take_effect_on_approval after insert on lims.signature
   for each row execute function lims.apply_release_log_entry();
 
 insert into lims.signing_role (role, meaning) values ('PlatformOperator', 'Approved'), ('QA', 'Approved');
@@ -223,11 +282,11 @@ language sql stable as $$
     'lapsesExceptions', to_jsonb(e.lapses_exceptions),
     'statementVersion', e.statement_version,
     'statement', case when e.statement is null then null else convert_from(e.statement, 'UTF8') end,
-    'serviceIdentities', coalesce((select jsonb_agg(jsonb_build_object('name', s.name, 'scope', to_jsonb(s.scope),
-                                                                        'retired', s.retired_by_entry_id = e.id)
+    'serviceIdentities', coalesce((select jsonb_agg(jsonb_build_object('name', s.name, 'scope', to_jsonb(s.scope))
                                                      order by s.name)
-                                     from lims.service_identity s
-                                    where s.created_by_entry_id = e.id or s.retired_by_entry_id = e.id), '[]'::jsonb))
+                                     from lims.service_identity s where s.created_by_entry_id = e.id), '[]'::jsonb),
+    'retiresServiceIdentities', coalesce((select jsonb_agg(s.name order by s.name)
+                                            from lims.service_identity s where s.retired_by_entry_id = e.id), '[]'::jsonb))
   from lims.release_log_entry e
   where e.id = p_id
 $$;
@@ -253,8 +312,9 @@ begin
     values (p_lab_id, p_table, p_record_id, coalesce(latest.version, 0) + 1, 1, bytes);
 end $$;
 
--- A service identity declared or retired by an entry is part of the entry's content, so the entry is versioned once
--- the identities are written: the trigger fires on both tables.
+-- A service identity declared or retired by an entry is part of that entry's content, so the entry is versioned once
+-- the identities are written: the trigger fires on both tables. A retirement versions the retiring entry alone, so the
+-- approved entry that declared the identity keeps its signed Record Version.
 create or replace function lims.version_on_change() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -276,10 +336,8 @@ begin
       where sub.customer_id = r.id;
     when 'release_log_entry' then perform save_record_version(null, 'release_log_entry', r.id);
     when 'service_identity' then
-      perform save_record_version(null, 'release_log_entry', r.created_by_entry_id);
-      if r.retired_by_entry_id is not null then
-        perform save_record_version(null, 'release_log_entry', r.retired_by_entry_id);
-      end if;
+      perform save_record_version(null, 'release_log_entry',
+                                  case when tg_op = 'INSERT' then r.created_by_entry_id else r.retired_by_entry_id end);
   end case;
   return null;
 end $$;
@@ -289,10 +347,13 @@ create trigger version_record after insert or update or delete on lims.release_l
 create trigger version_record after insert or update or delete on lims.service_identity
   for each row execute function lims.version_on_change();
 
--- The Audit Trail capture now also holds a record to the data class it was created under, and holds a service
--- identity to the scope its approved Release Log entry declares. The transaction that seeds an empty database and
--- the database owner acting outside the LIMS are exempt from the scope, as they are from Identity Verification
--- (0015): the seed writes the entries that declare the identities, and the owner's writes are captured all the same.
+-- The Audit Trail capture now also holds a record to the data class of the deployment it was created under, and holds
+-- a service identity to the scope its approved Release Log entry declares. The scope binds once any Release Log entry
+-- is approved: the seed approves its entries, so a fresh database is held to them from the seed on, and a database
+-- that held people before the Release Log keeps signing in until the Platform Operator approves the entry this
+-- migration records for it. Setting the real data class is itself an approval, so on real data the scope always
+-- binds. The database owner acting outside the LIMS is exempt, as from Identity Verification (0015): the owner's
+-- writes are captured all the same.
 create or replace function lims.capture() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -312,9 +373,13 @@ begin
      and e.new_row ->> 'data_class' is distinct from e.old_row ->> 'data_class' then
     raise exception 'a record keeps the data class it was created under' using errcode = 'LA011';
   end if;
+  if tg_op = 'INSERT' and tg_table_name <> 'deployment'
+     and e.new_row ->> 'data_class' is distinct from current_data_class()::text then
+    raise exception 'a record takes the data class of the deployment it is created under' using errcode = 'LA011';
+  end if;
   if e.actor like 'svc:%'
-     and not ((select rolsuper from pg_roles where rolname = session_user)
-              or not exists (select from audit_entry where table_name = 'person' and at < now()))
+     and not (select rolsuper from pg_roles where rolname = session_user)
+     and exists (select from signature where meaning = 'Approved')
      and not exists (select from service_identity s
                       where s.name = e.actor and (tg_table_name || ':' || tg_op) = any (s.scope)
                         and release_log_entry_approved(s.created_by_entry_id)
@@ -343,8 +408,8 @@ grant insert (kind, title, summary, release, sets_data_class, file_vault_persona
               lapses_exceptions, statement_version, statement) on lims.release_log_entry to lims_app;
 grant insert (name, scope, created_by_entry_id) on lims.service_identity to lims_app;
 grant update (retired_by_entry_id) on lims.service_identity to lims_app;
-grant execute on function lims.current_data_class(), lims.fictional_records(), lims.release_log_entry_approved(uuid)
-  to lims_app;
+grant execute on function lims.current_data_class(), lims.fictional_records(), lims.release_log_entry_approved(uuid),
+  lims.open_demo_exceptions() to lims_app;
 
 -- lims.sign, with a company record's Record Version (no Lab) signable from any Lab the signer acts in.
 create or replace function lims.sign(p_reauthentication_id uuid, p_session_id uuid, p_record_table text, p_record_id uuid,
@@ -463,4 +528,24 @@ begin
           proof.session_id, p_app_release, proof.id);
   perform set_this_transaction('lims.signing', '');
   return signature_id;
+end $$;
+
+-- A database that held people before the Release Log (the hosted demo) gets the entry declaring the service identities
+-- the seed declares, unapproved, for the Platform Operator to approve (deploy/README.md).
+do $$
+declare
+  entry_id uuid;
+begin
+  if not exists (select from lims.person) then return; end if;
+  perform set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 'system', true),
+          set_config('lims.reason', 'Declare the service identities the LIMS already acts as', true);
+  insert into lims.release_log_entry (kind, title, summary)
+  values ('ConfigurationChange', 'Service identities of the API and the seed',
+          'Declares svc:seed, svc:sign-in, svc:session-sweep, svc:incident and the writes each may make.')
+  returning id into entry_id;
+  insert into lims.service_identity (name, scope, created_by_entry_id) values
+    ('svc:seed', '{customer:INSERT,method:INSERT,lab:INSERT,room:INSERT,person:INSERT,membership:INSERT,training_record:INSERT,release_log_entry:INSERT,service_identity:INSERT}', entry_id),
+    ('svc:sign-in', '{access_event:INSERT,person:UPDATE,credential_link:UPDATE}', entry_id),
+    ('svc:session-sweep', '{access_event:INSERT}', entry_id),
+    ('svc:incident', '{system_incident:INSERT}', entry_id);
 end $$;

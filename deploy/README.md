@@ -43,6 +43,7 @@ To stop it, run `docker compose -f deploy/compose.yaml down`. Never add `-v`: it
 ## Updating
 
 - **After a code change**, run `up -d --build` again. The `migrate` service applies any new migration before the API starts.
+- **After the update that adds the Release Log** (migration `0028_release_log.sql`), approve the entry "Service identities of the API and the seed" as the Platform Operator. The migration records it on a database that already held people. No screen shows the Release Log yet, so read the entry's ID and Record Version from `GET /api/release-log` and sign it with `POST /api/release-log/approvals`. Until an entry is approved, the database does not hold the service identities to a scope. Once one is, each service identity writes only what its approved entry declares.
 - **To patch images** (monthly, critical fixes within 7 days), look up the new digest of each base image and edit it in `deploy/Dockerfile` and `deploy/compose.yaml`. One way to read a digest is `docker buildx imagetools inspect postgres:18-alpine`.
 - **To validate the config without starting anything**, run `docker compose -f deploy/compose.yaml config`.
 
