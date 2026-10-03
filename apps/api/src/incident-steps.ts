@@ -17,7 +17,7 @@ import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
-import { signatureColumns, signatureOf } from './trail.ts';
+import { signatureReplyColumns, signatureReply } from './trail.ts';
 
 /** System Incidents are company records (map #1, lab-scope-incidents): Admin and QA of any Lab read and act on them. */
 function readableBy(actor: ActorContext): void {
@@ -101,7 +101,7 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
         .onRef('recordVersion.labId', '=', 'signature.labId')
         .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
     )
-    .select(signatureColumns)
+    .select(signatureReplyColumns)
     .select(
       sql<boolean>`record_version.content_hash <> lims.incident_content_hash(record_version.record_id)`.as('unsigned'),
     )
@@ -110,7 +110,7 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
     .where('signature.meaning', '=', 'Acknowledged')
     .orderBy('signature.signedAt')
     .executeTakeFirst()
-    .then((signed) => (signed ? signatureOf(signed, 'System Incident') : null));
+    .then((signed) => (signed ? signatureReply(signed, 'System Incident') : null));
   const {
     id,
     impactAnswer,

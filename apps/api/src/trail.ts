@@ -16,6 +16,7 @@ import {
   type Instant,
   isAuditedTable,
   type RecordIds,
+  type RecordVersionRef,
   recordKey,
   referencedRecords,
   type RowImage,
@@ -74,7 +75,7 @@ export const onWallClock = <At>(at: RawBuilder<At>, zone: RawBuilder<unknown>) =
  * `recordVersion`; `signedAtLab` is on the wall clock of the zone it was signed in, which no later change to its Lab's
  * zone moves. The record noun and `unsigned` depend on the record kind, so each read selects them itself.
  */
-export const signatureColumns = [
+export const signatureReplyColumns = [
   'signature.meaning',
   'signature.printedName as signer',
   'signature.username',
@@ -87,8 +88,8 @@ export const signatureColumns = [
   sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
 ] as const;
 
-/** A row selected with `signatureColumns` as the Signature a reply carries, with the signed record named `record`. */
-export function signatureOf<Row extends { version: number; canonicalForm: number; contentHash: string }>(
+/** A row selected with `signatureReplyColumns` as the Signature a reply carries, with the signed record named `record`. */
+export function signatureReply<Row extends RecordVersionRef>(
   { version, canonicalForm, contentHash, ...signature }: Row,
   record: string,
 ) {

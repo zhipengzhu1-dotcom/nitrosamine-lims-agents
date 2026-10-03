@@ -6,7 +6,7 @@ import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 import { statementInForce } from './signing.ts';
 import { factsFor, latestVersion, signedVersions } from './steps.ts';
-import { onWallClock, signatureColumns, signatureOf, trailRoutes } from './trail.ts';
+import { onWallClock, signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
@@ -74,7 +74,7 @@ async function testView(scope: Scope, id: string) {
     signatures: withheld
       ? []
       : await signedVersions(scope)
-          .select(signatureColumns)
+          .select(signatureReplyColumns)
           .select([
             'recordVersion.recordTable as record',
             sql<boolean>`exists (select from lims.record_version later
@@ -86,7 +86,7 @@ async function testView(scope: Scope, id: string) {
           .where('recordVersion.recordId', 'in', ids)
           .orderBy('signature.signedAt')
           .execute()
-          .then((rows) => rows.map(({ record, ...row }) => signatureOf(row, recordKind(record)))),
+          .then((rows) => rows.map(({ record, ...row }) => signatureReply(row, recordKind(record)))),
     withheld,
     next,
     statement: isCustomer ? null : await statementInForce(scope.company),
