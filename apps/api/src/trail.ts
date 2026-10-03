@@ -4,6 +4,7 @@ import {
   actorUsername,
   type AuditedTable,
   type AuditTrailVerification,
+  type Authenticator,
   auditedRecords,
   auditOp,
   type ChainReading,
@@ -15,6 +16,7 @@ import {
   type Instant,
   isAuditedTable,
   type RecordIds,
+  type RecordVersionRef,
   recordKey,
   referencedRecords,
   type RowImage,
@@ -68,10 +70,31 @@ export const onWallClock = <At>(at: RawBuilder<At>, zone: RawBuilder<unknown>) =
     || case when (${at} at time zone ${zone}) < (${at} at time zone 'UTC') then '-' else '+' end
     || to_char(greatest((${at} at time zone ${zone}) - (${at} at time zone 'UTC'),
                         (${at} at time zone 'UTC') - (${at} at time zone ${zone})), 'HH24:MI')`;
-/** A Signature's time on the wall clock of the zone it was signed in, which no later change to its Lab's zone moves. */
-export const signedAtLab = onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('signature.signed_time_zone')).as(
-  'signedAtLab',
-);
+/**
+ * What every read shows of a Signature and the Record Version it was given on, from `signature` joined to
+ * `recordVersion`; `signedAtLab` is on the wall clock of the zone it was signed in, which no later change to its Lab's
+ * zone moves. The record noun and `unsigned` depend on the record kind, so each read selects them itself.
+ */
+export const signatureReplyColumns = [
+  'signature.meaning',
+  'signature.printedName as signer',
+  'signature.username',
+  'signature.role',
+  sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
+  'signature.signedAt',
+  onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('signature.signed_time_zone')).as('signedAtLab'),
+  'recordVersion.version',
+  'recordVersion.canonicalForm',
+  sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
+] as const;
+
+/** A row selected with `signatureReplyColumns` as the Signature a reply carries, with the signed record named `record`. */
+export function signatureReply<Row extends RecordVersionRef>(
+  { version, canonicalForm, contentHash, ...signature }: Row,
+  record: string,
+) {
+  return { ...signature, record, recordVersion: { version, canonicalForm, contentHash } };
+}
 const entryAt = sql.ref('audit_entry.at');
 /** Selected as text, not a Date: the driver's Date keeps milliseconds, and order and labels compare `at` to the microsecond, as the hash renders it. */
 const atText = inUtc(entryAt);
