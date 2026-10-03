@@ -17,6 +17,8 @@ export type ArrayTypeImpl<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type AuditExportFormat = "CSV" | "JSON";
 
+export type ChangeOutcome = "Approved" | "Rejected" | "Withdrawn";
+
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
@@ -134,6 +136,34 @@ export interface CredentialLink {
   usedAt: Timestamp | null;
 }
 
+export interface CriticalDataChange {
+  field: string;
+  id: Generated<string>;
+  labId: string;
+  newValue: string;
+  oldValue: string;
+  proposedAt: Generated<Timestamp>;
+  proposedBy: Generated<string>;
+  proposedOnVersion: string;
+  reasonId: string;
+  reasonText: string | null;
+  resultId: string;
+  testId: string;
+}
+
+export interface CriticalDataChangeDecision {
+  changeId: string;
+  decidedAt: Generated<Timestamp>;
+  decidedBy: Generated<string>;
+  id: Generated<string>;
+  labId: string;
+  outcome: ChangeOutcome;
+  reasonId: string | null;
+  reasonText: string | null;
+  signatureId: string | null;
+  testId: string;
+}
+
 export interface Customer {
   id: Generated<string>;
   name: string;
@@ -188,6 +218,14 @@ export interface Person {
   passwordHash: string | null;
   reducedMotion: Generated<boolean>;
   username: string;
+}
+
+export interface PicklistReason {
+  id: Generated<string>;
+  label: string;
+  needsText: Generated<boolean>;
+  position: number;
+  step: string;
 }
 
 export interface Reauthentication {
@@ -366,6 +404,8 @@ export interface DB {
   chainVerification: ChainVerification;
   commitKey: CommitKey;
   credentialLink: CredentialLink;
+  criticalDataChange: CriticalDataChange;
+  criticalDataChangeDecision: CriticalDataChangeDecision;
   customer: Customer;
   enrolmentGrant: EnrolmentGrant;
   identityVerification: IdentityVerification;
@@ -373,6 +413,7 @@ export interface DB {
   membership: Membership;
   method: Method;
   person: Person;
+  picklistReason: PicklistReason;
   reauthentication: Reauthentication;
   recordVersion: RecordVersion;
   result: Result;
