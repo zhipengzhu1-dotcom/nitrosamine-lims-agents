@@ -190,11 +190,12 @@ create trigger keep_equipment before insert or update on lims.equipment
 
 -- An Equipment Event is recorded by the person acting, a member of the Lab's staff, at the database's instant, never
 -- on Retired Equipment, and an Event after which the Equipment must be checked again suspends In use Equipment. The
--- Lab's Audit Trail chain is taken first, before the Fitness Status is read: every write to Equipment holds that
--- chain, a signed step from its re-authentication record and an unsigned step from the lock the API takes before its
--- row, so an Event never reads a status that another transaction is changing, and a Suspect raised while QA approves
--- the Equipment lands after the approval and suspends it. The chain comes before the row here as it does in every
--- other Equipment write, so no two writers hold the row and the chain in opposite orders.
+-- Lab's Audit Trail chain is taken first, before the Fitness Status is read, so an Event never reads a status that
+-- another transaction is changing, and a Suspect raised while QA approves the Equipment lands after the approval and
+-- suspends it. Every API step on Equipment takes that chain before the row (a signed step at its re-authentication
+-- record, an unsigned step by lock_chains before its update). A BEFORE trigger cannot take it ahead of the row an
+-- UPDATE locks, so a writer that updates Equipment without taking the chain first can deadlock against a Suspect;
+-- Postgres then aborts one of the two and no record lands wrong. The status read relies on READ COMMITTED.
 create function lims.record_equipment_event() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 declare
@@ -224,6 +225,9 @@ end $$;
 
 create trigger record_equipment_event before insert on lims.equipment_event
   for each row execute function lims.record_equipment_event();
+
+-- The content hash and the Logbook read one piece of Equipment's Events, latest first.
+create index equipment_event_logbook_idx on lims.equipment_event (lab_id, equipment_id, recorded_at desc, id desc);
 
 -- Every Equipment Event but Suspect carries the Performed Signature of the person who recorded it by the time its
 -- transaction commits.
