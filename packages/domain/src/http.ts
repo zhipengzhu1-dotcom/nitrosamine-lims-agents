@@ -429,10 +429,12 @@ export type ListedBreak = Static<typeof listedBreak>;
 /**
  * Every break inside a chain verification System Incident's range, recomputed at `recomputedAt`, and whether they are
  * still the breaks the incident recorded; false means the chain changed inside the range after the incident was opened.
- * `recorded` is the breaks the incident stored when it opened, null for one opened before the LIMS stored them.
- * `incidents` names the System Incidents that record the breaks inside the range now, other than this one. When the
- * chain has changed there, the read records the change as Verify chain does, whether an Admin or QA reads, and
- * `opened` names every System Incident it opened, anywhere on the chain, with the reader as its requesting person.
+ * A contradicted Chain Verification is a break of its own kind at the entry it names: only an incident that stored one
+ * lists it, and an incident that stored other breaks, or none, lists the others, so two incidents at one entry each
+ * list their own break. `recorded` is the breaks the incident stored when it opened, null for one opened before the
+ * LIMS stored them. `incidents` names the System Incidents that record the listed breaks now, other than this one.
+ * When the chain has changed there, the read records the change as Verify chain does, whether an Admin or QA reads,
+ * and `opened` names every System Incident it opened, anywhere on the chain, with the reader as its requesting person.
  */
 const reference = Type.String({ pattern: `^${referencePattern}$` });
 const incidentBreaks = Type.Object({
