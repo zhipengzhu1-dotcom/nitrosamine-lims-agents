@@ -10,6 +10,7 @@ import {
   isTicks,
   mayTake,
   routes,
+  steps,
   unknownTick,
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
@@ -98,7 +99,7 @@ const asText = (value: unknown): Record<string, string> =>
 
 /** The Test checklist in force as staff see it while a Test awaits review, each evidence item with its value for this Test. */
 export async function testChecklist(scope: Scope, test: { id: string; state: string }): Promise<ChecklistView | null> {
-  if (scope.ctx.person.customerId !== null || test.state !== 'SubmittedForReview') return null;
+  if (scope.ctx.person.customerId !== null || test.state !== steps.review.from) return null;
   const inForce = await checklistInForce(scope.company, 'Test');
   if (!inForce) return null;
   const items = [];
@@ -279,7 +280,7 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
       const test =
         (await scope.from('test').select(['id', 'state']).where('id', '=', body.testId).executeTakeFirst()) ??
         refuse('notFound', 'This Lab has no such Test.');
-      if (test.state !== 'SubmittedForReview')
+      if (test.state !== steps.review.from)
         refuse('state', 'A Test Review is saved only while the Test is submitted for review.');
       const inForce =
         (await checklistInForce(scope.company, 'Test')) ??

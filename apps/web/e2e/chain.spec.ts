@@ -533,7 +533,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await unsignedBesideMeanings(page);
   for (const [meaning, record] of [
     ['Performed', 'Test'],
-    ['Reviewed', 'Test'],
+    ['Reviewed', 'Test Review'],
     ['Released', 'Test Report'],
   ] as const)
     await expect(signatureRow(page, meaning).locator('td[data-label="Record"]')).toHaveText(record);

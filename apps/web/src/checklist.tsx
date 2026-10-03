@@ -38,6 +38,7 @@ export function ChecklistPanel({
               <label>
                 Comment on “{item.text}”
                 <textarea
+                  disabled={!(item.key in ticks)}
                   value={ticks[item.key]?.comment ?? ''}
                   onChange={(e) => onChange({ ...ticks, [item.key]: { comment: e.target.value } })}
                 />

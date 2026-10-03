@@ -365,7 +365,7 @@ const checklistItem = Type.Union([tickedItem, evidenceItem]);
 /** An evidence item carries the value the server computed for this Test, as label and value pairs; a ticked item is the Reviewer's to tick. */
 const checklistItemView = Type.Union([
   tickedItem,
-  Type.Object({ ...evidenceItem.properties, value: Type.Record(Type.String(), Type.String()) }),
+  Type.Object({ ...evidenceItem.properties, value: Type.Record(Type.String(), Type.String()) }, closed),
 ]);
 export type ChecklistItemView = Static<typeof checklistItemView>;
 /** The Test Review Checklist version in force as the Reviewer sees it, its hash, and its items in order. */

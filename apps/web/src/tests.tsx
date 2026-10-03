@@ -109,7 +109,7 @@ export function Worklist({ me, open }: { me: ActorContext; open: string | null }
       )}
     </>
   );
-  if (open) return <TestPage me={me} id={open} list={list} afterStep={reload} />;
+  if (open) return <TestPage key={open} me={me} id={open} list={list} afterStep={reload} />;
   const action = me.roles.includes(steps.submit.role)
     ? stepAction('submit', null, ['A new Submission with one Sample and one Test'], reload)
     : null;
