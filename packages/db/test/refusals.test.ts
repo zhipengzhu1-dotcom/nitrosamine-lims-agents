@@ -1929,6 +1929,13 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { issued_by: id.verified },
       constraint: 'enrolment_grant_second_person_check',
     },
+    ...each(
+      'a person whose count of failed sign-ins starts below zero, toward a later lockout, is refused',
+      'lims.person',
+      'failed_logins',
+      [-1, -2147483648],
+      'person_failed_logins_check',
+    ),
   ]);
 });
 
