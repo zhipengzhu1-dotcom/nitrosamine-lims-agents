@@ -11,6 +11,11 @@ const DATABASE = checkoutDatabase('lims_refusals_test');
 const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
 
 type Row = Record<string, unknown>;
+type Literal = { literal: string };
+/** A column value written as the SQL given, for a value the fixture can only read from the database. */
+const literal = (text: string): Literal => ({ literal: text });
+const isLiteral = (value: unknown): value is Literal =>
+  typeof value === 'object' && value !== null && 'literal' in value;
 
 const id = {
   customer: randomUUID(),
@@ -43,6 +48,7 @@ const id = {
   admin: randomUUID(),
   operator: randomUUID(),
   verified: randomUUID(),
+  chainVerification: randomUUID(),
   identityVerification: randomUUID(),
   credentialLink: randomUUID(),
   secondAdmin: randomUUID(),
@@ -281,6 +287,17 @@ const fixture: [Table, Row][] = [
       session_lab_id: id.lab,
       session_id: id.session,
       roles: '{Analyst}',
+    },
+  ],
+  [
+    'lims.chain_verification',
+    {
+      id: id.chainVerification,
+      chain: 'company',
+      through: 1,
+      head: literal("(select hash from lims.audit_entry where chain = 'company' and seq = 1)"),
+      recomputed_from: 1,
+      verified_by: id.otherPerson,
     },
   ],
   [
@@ -593,6 +610,17 @@ const tables = {
     },
     notNull: ['id', 'kind', 'roles', 'at'],
   },
+  'lims.chain_verification': {
+    noun: 'Chain Verification',
+    row: {
+      chain: 'company',
+      through: 1,
+      head: literal("(select hash from lims.audit_entry where chain = 'company' and seq = 1)"),
+      recomputed_from: 1,
+      verified_by: id.otherPerson,
+    },
+    notNull: ['id', 'chain', 'through', 'head', 'recomputed_from', 'verified_by', 'verified_at'],
+  },
   'lims.audit_export': {
     noun: 'Audit Export',
     row: {
@@ -668,6 +696,7 @@ const auditedTables: Table[] = [
   'lims.system_incident',
   'lims.access_event',
   'lims.audit_export',
+  'lims.chain_verification',
   'lims.identity_verification',
   'lims.credential_link',
   'lims.enrolment_grant',
@@ -682,8 +711,11 @@ const bare = (table: string) => table.slice(table.indexOf('.') + 1);
 function insert(table: string, row: Row): [string, unknown[]] {
   const columns = Object.keys(row);
   const names = columns.map((column) => pg.escapeIdentifier(column)).join(', ');
-  const params = columns.map((_, i) => `$${i + 1}`).join(', ');
-  return [`insert into ${table} (${names}) values (${params})`, Object.values(row)];
+  const values: unknown[] = [];
+  const params = Object.values(row)
+    .map((value) => (isLiteral(value) ? value.literal : `$${values.push(value)}`))
+    .join(', ');
+  return [`insert into ${table} (${names}) values (${params})`, values];
 }
 
 // The Admin acts, so that an Identity Verification's checker is the actor of its write.
@@ -780,7 +812,7 @@ before(async () => {
   for (const [table, row] of fixture) {
     await client.query('begin');
     await client.query(AUDIT_CONTEXT);
-    const acting = actingFor[table];
+    const acting = table === 'lims.chain_verification' ? actingAs('QA') : actingFor[table];
     if (acting) await client.query(acting);
     await signingStamp(row);
     await client.query(...insert(table, row));
@@ -807,7 +839,7 @@ it('the base row of every table is accepted, so each refusal below comes from th
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      const acting = actingFor[table];
+      const acting = table === 'lims.chain_verification' ? actingAs('QA') : actingFor[table];
       if (acting) await client.query(acting);
       await signingStamp(tables[table].row);
       await client.query(...insert(table, tables[table].row));
@@ -856,6 +888,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
     'lims.audit_export': { id: id.auditExport },
+    'lims.chain_verification': { id: id.chainVerification },
     'lims.room': { id: id.room },
     'lims.workstation': { id: id.workstation },
     'lims.equipment': { id: id.equipment },
@@ -1119,6 +1152,12 @@ describe('the database refuses a reference to a row that does not exist', () => 
     },
     noLab('lims.membership', 'Lab membership'),
     noLab('lims.audit_export', 'Audit Export'),
+    {
+      name: 'a Chain Verification by a person who does not exist is refused',
+      table: 'lims.chain_verification',
+      change: { verified_by: missing },
+      constraint: 'chain_verification_verified_by_fkey',
+    },
     {
       name: 'an Audit Export for a Customer that does not exist is refused',
       table: 'lims.audit_export',
@@ -1430,6 +1469,33 @@ describe('the database refuses a value outside its allowed set', () => {
     ],
   ];
   refusesEach('23514', [
+    ...each(
+      'a Chain Verification of a chain the Audit Trail does not name is refused',
+      'lims.chain_verification',
+      'chain',
+      ['Company', 'lab', 'not-a-uuid'],
+      'chain_verification_chain_check',
+    ),
+    {
+      name: 'a Chain Verification through no entry is refused',
+      table: 'lims.chain_verification',
+      change: { through: 0 },
+      constraint: 'chain_verification_through_check',
+    },
+    ...each(
+      'a Chain Verification whose hash is not 32 bytes is refused',
+      'lims.chain_verification',
+      'head',
+      [Buffer.alloc(31), Buffer.alloc(33)],
+      'chain_verification_head_check',
+    ),
+    ...each(
+      'a Chain Verification that recomputed from before its first entry or after the entry past the one it verified through is refused',
+      'lims.chain_verification',
+      'recomputed_from',
+      [0, 3],
+      'chain_verification_recomputed_from_check',
+    ),
     {
       name: 'an Audit Export requested under any role but QA is refused',
       table: 'lims.audit_export',
@@ -2127,6 +2193,24 @@ describe('an audited write without an actor, a role and a reason is refused', ()
 
 describe('a Signature, a Record Version, a signature statement, a re-authentication record, an Access Event, an Audit Trail entry, a Commit Key, a System Incident or an Audit Export is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
+    {
+      name: 'updating a Chain Verification is refused',
+      table: 'lims.chain_verification',
+      trigger: 'refuse_change',
+      statement: 'update lims.chain_verification set through = through + 1',
+    },
+    {
+      name: 'deleting a Chain Verification is refused',
+      table: 'lims.chain_verification',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.chain_verification',
+    },
+    {
+      name: 'truncating the Chain Verifications is refused',
+      table: 'lims.chain_verification',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.chain_verification',
+    },
     {
       name: 'updating an Audit Export is refused',
       table: 'lims.audit_export',
@@ -3546,6 +3630,36 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
     assert.deepEqual(
       rows.map((row) => row.privilege),
       ['INSERT lab_id', 'INSERT person_id', 'INSERT token_hash', 'INSERT workstation_id'],
+    );
+  });
+});
+
+describe("a Chain Verification names an entry of its chain and that entry's hash", () => {
+  covered.add('lims.chain_verification.head_matches_entry');
+  it('a Chain Verification whose hash is not the hash of the entry it verified through is refused', async () => {
+    const error = await refusalOfRow('lims.chain_verification', { head: Buffer.alloc(32, 9) });
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA014', "a Chain Verification names an entry of its chain and that entry's hash"],
+    );
+  });
+  it('a Chain Verification through an entry its chain does not have is refused', async () => {
+    const error = await refusalOfRow('lims.chain_verification', { through: 1000000 });
+    assert.equal(error.code, 'LA014', error.message);
+  });
+  it('a Chain Verification recorded in a role other than QA is refused', async () => {
+    const error = await refusalOfRow('lims.chain_verification');
+    assert.deepEqual([error.code, error.message], ['LA015', 'a Chain Verification is recorded by QA, not system']);
+  });
+  it('a Chain Verification whose Verified by is not the acting QA is refused', async () => {
+    const error = await refusalOf(
+      `${actingAs('QA')};
+       insert into lims.chain_verification (chain, through, head, recomputed_from, verified_by)
+       select 'company', 1, hash, 1, '${id.person}' from lims.audit_entry where chain = 'company' and seq = 1`,
+    );
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA015', 'a Chain Verification is verified by the acting QA person:refusal.other, not person:refusal.person'],
     );
   });
 });

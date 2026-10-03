@@ -159,6 +159,7 @@ export const auditedTable = Type.Enum({
   signature_statement: 'signature_statement',
   signing_role: 'signing_role',
   reauthentication: 'reauthentication',
+  chain_verification: 'chain_verification',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;
 const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
@@ -301,20 +302,24 @@ const listedEvent = {
   sourceAddress: nullable(Type.String()),
   failureReason: nullable(signInFailure),
 };
-/** One of a person's Access Events; a Lockout lists the sessions in this Lab that it ended. */
+/**
+ * One of a person's Access Events; a Lockout lists the sessions in this Lab that it ended, or null when it was recorded
+ * before a Lockout was stamped at its lock's instant (#207), so the record cannot say which sessions it ended.
+ */
 const listedAccessEvent = Type.Union([
-  Type.Object({ ...listedEvent, kind: Type.Literal('Lockout'), endedSessions: Type.Array(endedSession) }),
+  Type.Object({ ...listedEvent, kind: Type.Literal('Lockout'), endedSessions: nullable(Type.Array(endedSession)) }),
   Type.Object({ ...listedEvent, kind: accessEventKindButLockout }),
 ]);
 export type ListedAccessEvent = Static<typeof listedAccessEvent>;
 /**
- * A person's Access Events as this Lab's Admin reads them, newest first: those of sessions in this Lab, those of no
- * session, and every Lockout. `earlierNotListed` says that older ones exist beyond the oldest listed.
+ * A page of a person's Access Events as this Lab's Admin reads them, newest first: those of sessions in this Lab, those
+ * of no session, and every Lockout. `earlier` is the oldest listed while earlier ones exist, so the Admin reads those
+ * before it, and is null once the person's oldest is listed.
  */
 const personAccessEvents = Type.Object({
   person: Type.Object({ id: uuid, printedName: Type.String(), username: Type.String() }),
   events: Type.Array(listedAccessEvent),
-  earlierNotListed: Type.Boolean(),
+  earlier: nullable(uuid),
 });
 export type PersonAccessEvents = Static<typeof personAccessEvents>;
 /** The roles an Admin grants. Platform Operator is held outside the LIMS, and Customer Users get portal accounts. */
@@ -387,7 +392,7 @@ const chainBreak = Type.Object({
   incidentState,
 });
 export type ChainBreak = Static<typeof chainBreak>;
-const chainVerification = Type.Object({
+const chainReading = Type.Object({
   chain: chainKind,
   verdict: chainVerdict,
   lastEntry: seq,
@@ -395,9 +400,13 @@ const chainVerification = Type.Object({
   /** Every break, in entry order; none when the chain is Intact. */
   breaks: Type.Array(chainBreak),
   report: Type.String(),
+  /** The first entry this verification recomputed: 1 for every entry, else the entry after the Chain Verification it resumed from. */
+  recomputedFrom: seq,
+  /** The Chain Verification resumed from: the entry it verified through, when, and who verified; null when none. */
+  verifiedBefore: nullable(Type.Object({ through: seq, at: instant, by: Type.String() })),
 });
-export type ChainVerification = Static<typeof chainVerification>;
-const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
+export type ChainReading = Static<typeof chainReading>;
+const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainReading) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
 const auditExportFormat = Type.Enum({ JSON: 'JSON', CSV: 'CSV' } as const satisfies { [K in db.AuditExportFormat]: K });
 export type AuditExportFormat = Static<typeof auditExportFormat>;
@@ -411,7 +420,7 @@ export const auditExportData = Type.Object({
   lab: Type.Object({ code: Type.String(), name: Type.String(), zone: Type.String() }),
   asOf: instant,
   generatedBy: Type.Object({ label: Type.String(), username: Type.String(), role }),
-  chains: Type.Array(chainVerification),
+  chains: Type.Array(chainReading),
   entries: Type.Array(exportedEntry),
 });
 export type AuditExportData = Static<typeof auditExportData>;
@@ -766,6 +775,8 @@ export const routes = {
     trail,
   ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
+  /** Verify chain from each chain's first entry, whatever Chain Verification it holds. */
+  recomputeAuditTrail: route('POST', '/api/audit/recompute', { body: noBody }, auditTrailVerification),
   /** The Customers QA can export for: those with a Sample in this Lab. */
   auditExportCustomers: route('GET', '/api/audit-exports/customers', {}, Type.Array(customerRef)),
   auditExport: route(
@@ -795,6 +806,13 @@ export const routes = {
     enrolmentGrantIssued,
   ),
   accessEvents: route('GET', '/api/staff/:id/access-events', { params: byId }, personAccessEvents),
+  /** The person's Access Events before one of theirs that this Lab sees, so the Admin reaches every one. */
+  earlierAccessEvents: route(
+    'GET',
+    '/api/staff/:id/access-events/before/:before',
+    { params: Type.Object({ id: uuid, before: uuid }) },
+    personAccessEvents,
+  ),
   grantMembership: route(
     'POST',
     '/api/staff/memberships',

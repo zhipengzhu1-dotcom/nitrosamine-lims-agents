@@ -109,6 +109,16 @@ export interface Authenticator {
   secretCiphertext: Buffer;
 }
 
+export interface ChainVerification {
+  chain: string;
+  head: Buffer;
+  id: Generated<string>;
+  recomputedFrom: Int8;
+  through: Int8;
+  verifiedAt: Generated<Timestamp>;
+  verifiedBy: string;
+}
+
 export interface CommitKey {
   committedAt: Generated<Timestamp>;
   key: string;
@@ -384,6 +394,7 @@ export interface DB {
   auditEntry: AuditEntry;
   auditExport: AuditExport;
   authenticator: Authenticator;
+  chainVerification: ChainVerification;
   commitKey: CommitKey;
   credentialLink: CredentialLink;
   customer: Customer;
