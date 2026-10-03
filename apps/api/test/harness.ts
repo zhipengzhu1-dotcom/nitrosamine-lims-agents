@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
 import { after } from 'node:test';
 import { audited, checkoutDatabase, createDb, type DB, databaseUrl, dbServer, type Role } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
@@ -19,6 +18,7 @@ import {
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import { type AppOptions, buildApp } from '../src/app.ts';
+import { LOGIN, type LoginPolicy } from '../src/auth.ts';
 
 type LogSink = NonNullable<AppOptions['log']>;
 
@@ -133,13 +133,26 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
       );
 }
 
-const accessEventKey = randomBytes(32);
+/** A fresh 32-byte key for one test API. */
+const key = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
+const accessEventKey = key();
+/**
+ * The demo login with the decided session limits, so a file signs one person in many times without a code, counts
+ * failures past the decided lockout and sets short passwords; decided-login.test.ts starts another API on `LOGIN.decided`.
+ */
+export const HARNESS_LOGIN: LoginPolicy = {
+  ...LOGIN.demo,
+  idleMs: LOGIN.decided.idleMs,
+  absoluteMs: LOGIN.decided.absoluteMs,
+};
+export const passwordPepper = key();
+export const totpKey = key();
 export const TEST_RELEASE = 'test-release';
 
 interface ListenOptions {
   secureCookie?: boolean;
   log?: LogSink;
-  login?: AppOptions['login'];
+  login?: LoginPolicy;
   sweepEveryMs?: number | null;
   logVolume?: AppOptions['logVolume'];
   trustedProxies?: string[];
@@ -151,7 +164,7 @@ async function listen(
   {
     secureCookie = false,
     log,
-    login = 'decided',
+    login = HARNESS_LOGIN,
     sweepEveryMs = null,
     logVolume = null,
     trustedProxies = ['127.0.0.1'],
@@ -163,7 +176,7 @@ async function listen(
     logVolume,
     secureCookie,
     accessEventKey,
-    login,
+    credentials: { policy: login, pepper: passwordPepper, totpKey },
     release: TEST_RELEASE,
     sweepEveryMs,
     trustedProxies,
@@ -287,7 +300,7 @@ export async function startApi(name: string) {
           .values({
             username,
             displayName: username,
-            passwordHash: await hashPassword(account.password),
+            passwordHash: await hashPassword(account.password, passwordPepper),
             customerId: opts.customerId ?? null,
           })
           .returning('id')
