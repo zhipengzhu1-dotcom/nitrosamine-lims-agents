@@ -10,6 +10,10 @@ The company's R&D laboratory, which tests mainly APIs for nitrosamine impurities
 One of the company's testing laboratories. Tests, equipment, stock and reports belong to exactly one Lab; methods, controlled company documents, people and Customers belong to the company.
 _Avoid_: Site, tenant, location
 
+**Lab time zone**:
+The time zone in which a Lab's own records show their wall-clock time, beside the UTC time. It is configuration of the LIMS, not an action a person takes, and each change to it shows in the Lab's Audit Trail. A Signature and a Received keep the Lab time zone that was in force when they were written, so a later change does not move their wall-clock time.
+_Avoid_: Site time, local time
+
 ### People and parties
 
 **Customer**:
