@@ -102,11 +102,23 @@ create function lims.propose_critical_data_change() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
   current_value text;
+  proposed_on   test;
 begin
   -- Holds the Lab's chain before the pending check, so of two proposals at once the second sees the first.
   perform lock_chains(new.lab_id::text);
   if new.proposed_by is distinct from acting_person() then
     raise exception 'a Critical Data Change is proposed by the person acting' using errcode = 'LA017';
+  end if;
+  select * into proposed_on from test where lab_id = new.lab_id and id = new.test_id;
+  if proposed_on.assignee_id is distinct from new.proposed_by or not exists (
+    select from membership m
+     where m.lab_id = new.lab_id and m.person_id = new.proposed_by and m.role = 'Analyst'
+       and current_setting('lims.role', true) = 'Analyst') then
+    raise exception 'a Critical Data Change is proposed by the assigned Analyst, acting as Analyst' using errcode = 'LA017';
+  end if;
+  if proposed_on.state not in ('SubmittedForReview', 'Reviewed') then
+    raise exception 'a Critical Data Change is proposed on a Test in SubmittedForReview or Reviewed state, not %',
+      proposed_on.state using errcode = 'LA017';
   end if;
   select value into current_value from result where lab_id = new.lab_id and id = new.result_id and test_id = new.test_id;
   if current_value is distinct from new.old_value then
@@ -144,6 +156,9 @@ begin
   end if;
   if new.outcome = 'Withdrawn' and new.decided_by <> change.proposed_by then
     raise exception 'only the proposer withdraws a Critical Data Change' using errcode = 'LA017';
+  end if;
+  if new.outcome = 'Withdrawn' and current_setting('lims.role', true) is distinct from 'Analyst' then
+    raise exception 'a Critical Data Change is withdrawn by its proposer, acting as Analyst' using errcode = 'LA017';
   end if;
   if new.outcome <> 'Withdrawn' and new.decided_by = change.proposed_by then
     raise exception 'the proposer cannot % their own Critical Data Change',

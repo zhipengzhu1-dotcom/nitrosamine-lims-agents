@@ -7,12 +7,13 @@ import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import { type Account, type Client, ok, refusedWith as refusedOver, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_critical_data_changes_test');
-const [cora, samir, lena, ana, rui] = [
+const [cora, samir, lena, ana, rui, quinn] = [
   api.person('cora'),
   api.person('samir'),
   api.person('lena'),
   api.person('ana'),
   api.person('rui'),
+  api.person('quinn'),
 ];
 const dana = await api.addPerson('dana.analyst-reviewer', ['Analyst', 'Reviewer'], { trained: true });
 const as = {
@@ -21,6 +22,7 @@ const as = {
   lena: await api.login(lena),
   ana: await api.login(ana),
   rui: await api.login(rui),
+  quinn: await api.login(quinn),
   dana: await api.login(dana),
 };
 
@@ -81,7 +83,13 @@ type DecisionRow = Insertable<DB['criticalDataChangeDecision']>;
 const snake = (name: string) => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 
 /** Proposes through a plain insert, as the app role may: the database stamps the proposer, time and Record Version. */
-function propose(test: { testId: string; resultId: string }, change: Partial<ChangeRow> = {}, by = ana, db = api.db) {
+function propose(
+  test: { testId: string; resultId: string },
+  change: Partial<ChangeRow> = {},
+  by = ana,
+  db = api.db,
+  role = 'Analyst',
+) {
   const row = {
     labId: api.labId,
     testId: test.testId,
@@ -93,7 +101,7 @@ function propose(test: { testId: string; resultId: string }, change: Partial<Cha
     ...change,
   };
   const columns = Object.keys(row).map((column) => sql.id(snake(column)));
-  return acting(db, by, 'Analyst', async (tx) => {
+  return acting(db, by, role, async (tx) => {
     const { rows } = await sql<{ id: string }>`insert into lims.critical_data_change (${sql.join(columns)})
       values (${sql.join(Object.values(row))}) returning id`.execute(tx);
     return rows[0]?.id ?? assert.fail('the proposal returns its id');
@@ -243,6 +251,43 @@ describe('a Critical Data Change is proposed by the person acting, on the value 
   });
 });
 
+describe('only the assigned Analyst, acting as Analyst, proposes, on a Test in SubmittedForReview or Reviewed state', () => {
+  it('a proposal from another Analyst, or from the assigned Analyst acting in another role, is refused', async () => {
+    const test = await performedTest(dana, as.dana);
+    const message = 'a Critical Data Change is proposed by the assigned Analyst, acting as Analyst';
+    await refusedWith(propose(test, {}, ana), message);
+    await refusedWith(propose(test, {}, dana, api.db, 'Reviewer'), message);
+  });
+
+  it('a proposal on a Reported Test is refused', async () => {
+    const test = await performedTest();
+    const sign = async (client: Client, step: 'review' | 'release', by: Account) =>
+      ok(
+        await client.call(stepRoute(step), {
+          commitKey: randomUUID(),
+          testId: test.testId,
+          input: {},
+          signature: await signatureOf(client, test.testId, by),
+        }),
+      );
+    await sign(as.rui, 'review', rui);
+    await sign(as.quinn, 'release', quinn);
+    await refusedWith(
+      propose(test),
+      'a Critical Data Change is proposed on a Test in SubmittedForReview or Reviewed state, not Reported',
+    );
+  });
+
+  it('a withdrawal from the proposer acting in another role is refused', async () => {
+    const test = await performedTest(dana, as.dana);
+    const changeId = await propose(test, {}, dana);
+    await refusedWith(
+      decide(changeId, test.testId, { outcome: 'Withdrawn', reasonId: reason.inError }, dana, 'Reviewer'),
+      'a Critical Data Change is withdrawn by its proposer, acting as Analyst',
+    );
+  });
+});
+
 describe('a Critical Data Change is decided once: withdrawn by its proposer, approved or rejected by a Reviewer', () => {
   it('a decision that names someone else as its decider is refused', async () => {
     const test = await performedTest();
@@ -290,7 +335,12 @@ describe('a Critical Data Change is decided once: withdrawn by its proposer, app
 
   it('the Analyst who signed Performed neither approves nor rejects a correction proposed by someone else', async () => {
     const test = await performedTest(dana, as.dana);
-    const changeId = await propose(test, {}, ana, api.superuser);
+    await audited(
+      api.superuser,
+      { actor: 'svc:test', role: 'system', reason: 'Reassign a performed Test, which no step does' },
+      (tx) => tx.updateTable('test').set({ assigneeId: ana.id }).where('id', '=', test.testId).execute(),
+    );
+    const changeId = await propose(test, {}, ana);
     await refusedWith(
       decide(changeId, test.testId, { outcome: 'Rejected', reasonId: reason.rawData }, dana, 'Reviewer'),
       'the Analyst who signed Performed cannot reject a correction to the Result',

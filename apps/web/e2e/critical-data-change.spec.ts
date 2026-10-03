@@ -51,7 +51,10 @@ test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs
   await changes.scrollIntoViewIfNeeded();
   await shot(page, 'approved');
   const entries = page.getByRole('region', { name: 'Audit Trail' }).getByRole('listitem');
-  await expect(entries.filter({ hasText: 'value 0.0300 to 0.0310' }).first(), 'the proposal is in the Audit Trail').toBeVisible();
+  await expect(
+    entries.filter({ hasText: 'value 0.0300 to 0.0310' }).first(),
+    'the proposal is in the Audit Trail',
+  ).toBeVisible();
   await expect(
     entries.filter({ hasText: 'Critical Data Change Decision' }).filter({ hasText: 'Approved' }).first(),
     'the approval is in the Audit Trail',
@@ -82,7 +85,9 @@ test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs
   await expect(page.getByRole('button', { name: 'Approve change' })).toBeVisible();
   await page.getByRole('button', { name: 'Reject change' }).click();
   await expect(sheet(page).getByLabel(/Password/)).toHaveCount(0);
-  await sheet(page).getByRole('combobox', { name: 'Reason', exact: true }).selectOption('Not supported by the raw data');
+  await sheet(page)
+    .getByRole('combobox', { name: 'Reason', exact: true })
+    .selectOption('Not supported by the raw data');
   await shot(page, 'reject-sheet');
   await sheet(page).getByRole('button', { name: 'Reject change' }).click();
   await railSays(page, 'The Critical Data Change is rejected. The Result is unchanged.');
