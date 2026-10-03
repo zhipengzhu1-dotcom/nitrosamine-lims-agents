@@ -268,8 +268,9 @@ insert into lims.signing_role (role, meaning) values
   on conflict do nothing;
 
 -- Authored is a Signature Meaning of a Document version only, and QA signs Approved only on one; another record kind
--- may be signed Approved in another role. A Document version is signed Authored, Reviewed or Approved, each by a
--- different person: Authored once, by its author in a business role, on the Draft; Reviewed In Review, after
+-- may be signed Approved in another role. Equipment and its Events are left to check_equipment_signing (0037), which
+-- gives each its one meaning, Equipment's being QA's Approved (#129). A Document version is signed Authored, Reviewed
+-- or Approved, each by a different person: Authored once, by its author in a business role, on the Draft; Reviewed In Review, after
 -- Authored, in the Reviewer role, by someone who did not author it; Approved once, In Review, after a Reviewed, in
 -- the QA role, by someone who neither authored nor reviewed it. lims.sign checks the signer, the proof, the role they
 -- hold and the version shown; this checks who may sign what.
@@ -284,6 +285,9 @@ begin
   select * into signed from record_version where lab_id = new.lab_id and id = new.record_version_id;
   if signed.id is null then
     return new; -- signature_record_version_fkey refuses it
+  end if;
+  if signed.record_table in ('equipment', 'equipment_event') then
+    return new;
   end if;
   if signed.record_table <> 'document_version' then
     if new.meaning = 'Authored' then
