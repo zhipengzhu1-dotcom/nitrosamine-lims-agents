@@ -26,8 +26,9 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "$WEB/api/me")
 [ "$code" = 401 ] || fail "GET $WEB/api/me answered $code, not 401 (the API behind the proxy is not answering)"
 echo "ok: the API answers through the web proxy"
 
+seeded=$(grep -c "^  { role: '[A-Za-z]*', username: '" packages/db/src/seed.ts)
 people=$(scripts/pg.sh psql -d "$DB" -tAc 'select count(*) from lims.person')
-[ "$people" = 8 ] || fail "$DB holds $people people, not the 8 the seed makes"
+[ "$people" = "$seeded" ] || fail "$DB holds $people people, not the $seeded the seed makes"
 echo "ok: $DB holds the seed; every account signs in with $PASSWORD"
 
 now=$(git rev-parse --short HEAD)$(git diff --quiet HEAD -- apps packages || echo -dirty)

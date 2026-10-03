@@ -29,7 +29,7 @@ Run it first, and again whenever a drive fails strangely. It is read-only.
 .claude/skills/verify/scripts/doctor.sh
 ```
 
-Every line must be `ok:`. It checks that `dev.sh` is alive, that the web port belongs to a process under it, that the API answers through the proxy, and that the database holds the 8 seeded people. Vite reloads the web code as you edit, but the API does not reload. If `apps/api/src`, `packages/*/src` or a migration changed after launch, doctor fails. Run down.sh, then up.sh. A `WARN:` line means HEAD moved since launch.
+Every line must be `ok:`. It checks that `dev.sh` is alive, that the web port belongs to a process under it, that the API answers through the proxy, and that the database holds every person `packages/db/src/seed.ts` seeds. Vite reloads the web code as you edit, but the API does not reload. If `apps/api/src`, `packages/*/src` or a migration changed after launch, doctor fails. Run down.sh, then up.sh. A `WARN:` line means HEAD moved since launch.
 
 ## Drive
 
