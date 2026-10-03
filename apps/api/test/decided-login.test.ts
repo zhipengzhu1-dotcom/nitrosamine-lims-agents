@@ -412,7 +412,7 @@ it('a Lockout that lands after the enrolment checked the password refuses it wit
   );
 });
 
-it('under the decided login, unlocking a locked session needs the password and a fresh code, and a refused unlock records WrongCode', async () => {
+it('under the decided login, unlocking a locked session needs the password and a fresh code', async () => {
   const { account, code } = await enrolled('ulla.unlock');
   const client = new Client(decided.base);
   ok(

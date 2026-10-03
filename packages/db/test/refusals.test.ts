@@ -1444,6 +1444,12 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { kind: 'UnlockFailed', failure_reason: 'WrongUserId', session_lab_id: id.lab, session_id: id.session },
       constraint: 'access_event_failure_kind_check',
     },
+    ...['NoCredential', 'NoLab', 'NoMembership', 'NotInWorkstationLab'].map((reason) => ({
+      name: `a failed unlock Access Event with the ${reason} reason, which no password, code or Lockout gives, is refused`,
+      table: 'lims.access_event' as const,
+      change: { kind: 'UnlockFailed', failure_reason: reason, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_kind_check',
+    })),
     ...each(
       'a Lab code that is not two to four capital letters is refused',
       'lims.lab',
