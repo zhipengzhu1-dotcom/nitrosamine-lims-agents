@@ -3338,6 +3338,58 @@ describe("a Lab's time zone changes only through a migration, and a Signature an
   });
 });
 
+describe('a kept time zone is a named zone of the time zone database, and a Sample keeps one exactly when it has a Received, even with the stamping triggers bypassed', () => {
+  // The stamping triggers overwrite any zone a statement gives, so these rows reach the constraints with triggers off.
+  async function refusalWithTriggersOff(table: Table, change: Row): Promise<pg.DatabaseError> {
+    const [statement, values] = insert(table, { ...tables[table].row, ...change });
+    await client.query('begin');
+    try {
+      await client.query('set local session_replication_role = replica');
+      await client.query(statement, values);
+    } catch (error) {
+      if (error instanceof pg.DatabaseError) return error;
+      throw error;
+    } finally {
+      await client.query('rollback');
+    }
+    return assert.fail(`the database accepted ${statement}`);
+  }
+  const received = '2026-09-30T00:00:00Z';
+  const notZones = ['Mars/Olympus_Mons', 'UTC+5', ''];
+  const cases: { name: string; table: Table; change: Row; constraint: string }[] = [
+    ...notZones.map((zone) => ({
+      name: `a Signature kept in ${JSON.stringify(zone)}, which is not a named zone, is refused`,
+      table: 'lims.signature' as const,
+      change: { signed_time_zone: zone },
+      constraint: 'signature_signed_time_zone_check',
+    })),
+    ...notZones.map((zone) => ({
+      name: `a Received kept in ${JSON.stringify(zone)}, which is not a named zone, is refused`,
+      table: 'lims.sample' as const,
+      change: { received_at: received, received_time_zone: zone },
+      constraint: 'sample_received_time_zone_check',
+    })),
+    {
+      name: 'a Received time zone on a Sample with no Received is refused',
+      table: 'lims.sample',
+      change: { received_time_zone: 'America/New_York' },
+      constraint: 'sample_received_time_zone_received_at_check',
+    },
+    {
+      name: 'a Received with no time zone is refused',
+      table: 'lims.sample',
+      change: { received_at: received },
+      constraint: 'sample_received_time_zone_received_at_check',
+    },
+  ];
+  for (const c of cases) {
+    covered.add(`${c.table}.${c.constraint}`);
+    it(c.name, async () =>
+      assertConstraint(await refusalWithTriggersOff(c.table, c.change), '23514', c.table, c.constraint),
+    );
+  }
+});
+
 describe('a person is inserted without a lockout, so the database stamps every lockout', () => {
   covered.add('lims.person.insert_unlocked');
   // A Customer User, the one person the app role may insert without an Identity Verification.
