@@ -4245,7 +4245,11 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     },
     {
       name: 'an Effective version Superseded by a later version Approved for a later Effective Date is refused',
-      statements: [...versionIn('Effective', '2026-01-01'), ...laterIn('Approved', '2099-01-01'), setStatus('Superseded')],
+      statements: [
+        ...versionIn('Effective', '2026-01-01'),
+        ...laterIn('Approved', '2099-01-01'),
+        setStatus('Superseded'),
+      ],
       message: 'a Document version is Superseded only by a later version whose Effective Date has come',
     },
     {

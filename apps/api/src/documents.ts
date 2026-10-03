@@ -312,8 +312,7 @@ export function documentRoutes(app: App, db: Kysely<DB>, credentials: Credential
         documentAuthors.find((r) => actor.roles.includes(r)) ??
         refuse('role', 'Writing a Document is taken by the Lab Manager, Analyst, Reviewer or QA role.');
       const today = await labToday(db, actor.lab.id);
-      if (body.effectiveDate < today)
-        refuse('guard', `An Effective Date must be ${today}, the Lab's today, or later.`);
+      if (body.effectiveDate < today) refuse('guard', `An Effective Date must be ${today}, the Lab's today, or later.`);
       const scope = labScope(db, actor);
       const id = await scope.write('createDocument', role, async (q) => {
         const document = await q
