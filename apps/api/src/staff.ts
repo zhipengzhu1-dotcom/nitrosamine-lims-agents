@@ -113,7 +113,9 @@ const LISTED_ACCESS_EVENTS = 100;
 /**
  * A page of a person's Access Events as this Lab's Admin reads them: the newest, or the newest before `before`, one of
  * theirs that this Lab sees. Each Lockout lists the sessions here that it ended, at its instant, whether or not a
- * request or the sweep has ended them yet.
+ * request or the sweep has ended them yet. A Lockout not stamped at a lock instant its person's Audit Trail holds was
+ * recorded before sessions ended there (#207), so it lists null rather than claim it ended none. The Audit Trail keeps
+ * that instant after an unlock clears the lock.
  */
 async function accessEventsOf(
   db: Kysely<DB>,
@@ -132,6 +134,11 @@ async function accessEventsOf(
     'workstationId',
     sql<string | null>`host(source_address)`.as('sourceAddress'),
     'failureReason',
+    sql<boolean>`access_event.kind = 'Lockout' and exists (
+      select from lims.audit_entry a
+       where a.chain = 'company' and a.table_name = 'person' and a.op = 'UPDATE'
+         and a.new_row ->> 'id' = access_event.subject_id::text
+         and (a.new_row ->> 'locked_at')::timestamptz = access_event.at)`.as('atLockInstant'),
   ]);
   if (before !== null) {
     const cursor = theirs.where('id', '=', before);
@@ -171,9 +178,11 @@ async function accessEventsOf(
       failureReason: e.failureReason,
     };
     if (e.kind !== 'Lockout') return Object.assign(listed, { kind: e.kind });
-    const endedSessions = ended
-      .filter((s) => s.lockoutId === e.id)
-      .map((s) => ({ id: s.id, signedInAt: s.signedInAt, workstation: workstation(s.workstationId) }));
+    const endedSessions = e.atLockInstant
+      ? ended
+          .filter((s) => s.lockoutId === e.id)
+          .map((s) => ({ id: s.id, signedInAt: s.signedInAt, workstation: workstation(s.workstationId) }))
+      : null;
     return Object.assign(listed, { kind: e.kind, endedSessions });
   });
   return {

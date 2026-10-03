@@ -10,7 +10,14 @@ import { Shell, words } from './rail.tsx';
 import { type Column, StackTable } from './stack.tsx';
 import { time } from './time.tsx';
 
-function EndedSessions({ sessions }: { sessions: readonly EndedSession[] }) {
+function EndedSessions({ sessions }: { sessions: readonly EndedSession[] | null }) {
+  if (sessions === null)
+    return (
+      <span className="muted">
+        This Lockout was recorded before the LIMS ended sessions at a Lockout&apos;s instant, so the record does not say
+        which sessions in this Lab it ended.
+      </span>
+    );
   if (sessions.length === 0) return <span>Ended no session in this Lab.</span>;
   return (
     <div>
@@ -84,7 +91,7 @@ function AccessEvents({
       {data && (
         <p className="muted">
           {earlierPage ? 'Earlier ones, newest first' : 'Newest first'}, those of {me.lab.name} and those of no session.
-          A Lockout lists the sessions here that it ended.
+          A Lockout lists the sessions here that it ended, where the record says which.
         </p>
       )}
       <StackTable columns={columns} rows={data?.events ?? noEvents} rowKey={(e) => e.id} />
