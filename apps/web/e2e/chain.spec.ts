@@ -147,22 +147,33 @@ async function wholeOnScreenAtEverySize(page: Page, whole: Locator, commit: Loca
 }
 
 type SheetState = 'open' | 'exiting' | 'gone';
+type ButtonState = 'absent' | 'hidden' | 'shown';
+/** The page at one DOM change while the sheet leaves: the sheet, the rail's commit button, and whether motion is reduced. */
+type LeavingState = { sheet: SheetState; button: ButtonState; reduced: boolean };
 
-/** Where the sheet stood when the rail's commit button first came back after `cancel`, read at each DOM change rather than on a clock. */
+/**
+ * Where the sheet stood when the rail's commit button first came back after `cancel`, read at each DOM change
+ * rather than on a clock. The states seen are attached to the test for a failure to explain itself.
+ */
 async function sheetWhenTheRailButtonIsBack(page: Page, cancel: () => Promise<void>): Promise<SheetState | undefined> {
   const seen = await page.evaluateHandle(() => {
-    const states: { sheet: SheetState; back: boolean }[] = [];
+    const states: LeavingState[] = [];
     const sheetState = (): SheetState => {
       const sheet = document.querySelector('form.sheet');
       if (!sheet) return 'gone';
       return sheet.matches('[data-closing]') ? 'exiting' : 'open';
     };
+    const buttonState = (): ButtonState => {
+      const button = document.querySelector('footer.rail .rbtn--commit');
+      if (!button) return 'absent';
+      return button.checkVisibility({ visibilityProperty: true }) ? 'shown' : 'hidden';
+    };
     const watcher = new MutationObserver(() => {
       const sheet = sheetState();
       states.push({
         sheet,
-        back:
-          document.querySelector('footer.rail .rbtn--commit')?.checkVisibility({ visibilityProperty: true }) ?? false,
+        button: buttonState(),
+        reduced: document.documentElement.matches('[data-reduce-motion]'),
       });
       if (sheet === 'gone') watcher.disconnect();
     });
@@ -171,7 +182,11 @@ async function sheetWhenTheRailButtonIsBack(page: Page, cancel: () => Promise<vo
   });
   await cancel();
   await expect(page.locator('form.sheet')).toHaveCount(0);
-  return (await seen.jsonValue()).find((s) => s.back)?.sheet;
+  const states = await seen.jsonValue();
+  await test
+    .info()
+    .attach('states while the sheet leaves', { body: JSON.stringify(states), contentType: 'text/plain' });
+  return states.find((s) => s.button === 'shown')?.sheet;
 }
 
 const shownOnce = (page: Page, text: string) =>
@@ -315,17 +330,17 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   const review = page.getByRole('button', { name: 'Review', exact: true });
   const cancel = () => page.getByRole('button', { name: 'Cancel' }).click();
   await page.evaluate(() => {
-    const lateButton = document.createElement('style');
-    lateButton.id = 'late-button';
-    lateButton.textContent = '.frame:has(> .sheet) .rbtn--commit { visibility: hidden }';
-    document.head.append(lateButton);
+    const buttonWaitsForSheet = document.createElement('style');
+    buttonWaitsForSheet.id = 'button-waits-for-sheet';
+    buttonWaitsForSheet.textContent = '.frame:has(> .sheet) .rbtn--commit { visibility: hidden }';
+    document.head.append(buttonWaitsForSheet);
   });
   await review.click();
   expect(
     await sheetWhenTheRailButtonIsBack(page, cancel),
-    'the order check catches a rail button that waits for the sheet to leave',
+    'the order rule catches a rail button that waits for the sheet to leave',
   ).toBe('gone');
-  await page.locator('#late-button').evaluate((lateButton) => lateButton.remove());
+  await page.locator('#button-waits-for-sheet').evaluate((style) => style.remove());
   await review.click();
   expect(await sheetWhenTheRailButtonIsBack(page, cancel), 'the rail button is back before the sheet has left').toBe(
     'exiting',
