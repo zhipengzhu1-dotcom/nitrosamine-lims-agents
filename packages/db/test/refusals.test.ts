@@ -2358,6 +2358,28 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
     }
   });
 
+  covered.add('lims.credential_link.link_not_from_the_grant_issuer');
+  it('a one-time link in the name of the Admin who issued the person’s enrolment grant is refused', async () => {
+    // The fixture's second Admin issued refusal.verified's enrolment grant.
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query("select set_config('lims.actor', 'person:refusal.second', true)");
+      await assert.rejects(
+        client.query('insert into lims.credential_link (person_id, token_hash) values ($1, $2)', [
+          id.verified,
+          Buffer.alloc(32, 14),
+        ]),
+        {
+          code: 'LA016',
+          message: 'a one-time link comes from an Admin who did not issue the person’s enrolment grant',
+        },
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
   covered.add('lims.enrolment_grant.use_grant_once');
   it('an enrolment grant is only ever marked used, once, even by the superuser', async () => {
     const once = 'an enrolment grant is only ever marked used, once';

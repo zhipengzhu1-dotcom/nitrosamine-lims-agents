@@ -235,6 +235,38 @@ it('two sign-ins racing with one code give one session and one refusal, recorded
   assert.equal(await failedLoginsOf(account.id), 0, 'a code spent by a racing request is not a wrong code');
 });
 
+it('two signings racing with one code give one Signature and one refusal, recorded as a code already used that counts toward no lockout', async () => {
+  const { account, code } = await enrolled('sia.race');
+  const client = new Client(decided.base);
+  ok(
+    await client.call(routes.login, {
+      username: account.username,
+      password: account.password,
+      labId: api.labId,
+      code: code(),
+    }),
+  );
+  const [first, second] = [await assignedTo(account), await assignedTo(account)];
+  // Both signings check the code, then wait on the person's row, which this transaction holds until both wait.
+  const { pending } = await api.superuser.transaction().execute(async (tx) => {
+    await tx.selectFrom('person').select('id').where('id', '=', account.id).forNoKeyUpdate().execute();
+    const pending = [first, second].map((testId) => enterResult(client, testId, account, { code: code(1) }));
+    for (const answer of pending) answer.catch(() => {});
+    await api.untilWaitingOnLocks(2);
+    return { pending };
+  });
+  const answers = await Promise.all(pending);
+  assert.deepEqual(answers.map((a) => (a.kind === 'reply' ? 'reply' : a.body.kind)).sort(), [
+    'badCredentials',
+    'reply',
+  ]);
+  assert.deepEqual((await eventsOf(account.id)).at(-1), {
+    kind: 'ReauthenticationFailed',
+    failureReason: 'CodeAlreadyUsed',
+  });
+  assert.equal(await failedLoginsOf(account.id), 0, 'a code spent by a racing signing is not a wrong code');
+});
+
 it('under the decided login, signing refuses without the typed user ID, the password and a fresh code', async () => {
   const { account, code } = await enrolled('sig.decided');
   const client = new Client(decided.base);
@@ -640,6 +672,25 @@ it('the Admin who created an account, and the Admin who issued its one-time link
     (await eventsOf(person.id)).map((event) => event.failureReason ?? event.kind),
     ['PasswordSet', 'EnrolmentGrantIssued', 'AuthenticatorEnrolled'],
   );
+});
+
+it('the Admin who issued an enrolment grant cannot then issue the one-time link, so no Admin holds both; the database refuses them', async () => {
+  const ada = await api.login(api.person('ada'));
+  const verification = ok(
+    await ada.call(routes.recordIdentityVerification, {
+      printedName: 'Rhea Holder',
+      evidence: 'Passport seen in person (fictional)',
+    }),
+  );
+  const { person } = ok(
+    await ada.call(routes.createAccount, { identityVerificationId: verification.id, username: 'rhea.holder' }),
+  );
+  await grantFor(person.id);
+  assert.equal(
+    refusedWith(await as.bea.call(routes.issueLink, { personId: person.id }), 'guard'),
+    'A one-time link comes from an Admin who did not issue the person’s enrolment grant.',
+  );
+  ok(await ada.call(routes.issueLink, { personId: person.id }));
 });
 
 it('an expired enrolment grant is refused with the uniform sentence', async () => {

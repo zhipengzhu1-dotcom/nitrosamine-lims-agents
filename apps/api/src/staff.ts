@@ -54,14 +54,25 @@ function heldApart(error: unknown): never {
   throw new Error('granting a Membership failed', { cause: error });
 }
 
-/** A fresh one-time link for the person; the LIMS keeps only its hash, and only the newest link counts. */
+/** What the database says when the acting Admin issued the person's enrolment grant. */
+function notTheGrantIssuer(error: unknown): never {
+  if (postgresFault(error)?.sqlstate === 'LA016')
+    refuse('guard', 'A one-time link comes from an Admin who did not issue the person’s enrolment grant.');
+  throw new Error('issuing a one-time link failed', { cause: error });
+}
+
+/**
+ * A fresh one-time link for the person, never from the Admin who issued their enrolment grant; the LIMS keeps only its
+ * hash, and only the newest link counts.
+ */
 async function issueLink(q: WriteQueries, personId: string) {
   const token = randomBytes(32).toString('base64url');
   const { expiresAt } = await q.company
     .insertInto('credentialLink')
     .values({ personId, tokenHash: hashToken(token) })
     .returning('expiresAt')
-    .executeTakeFirstOrThrow();
+    .executeTakeFirstOrThrow()
+    .catch(notTheGrantIssuer);
   return { token, expiresAt };
 }
 

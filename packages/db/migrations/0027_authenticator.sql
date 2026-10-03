@@ -106,6 +106,23 @@ end $$;
 create trigger granted_by_a_second_admin before insert on lims.enrolment_grant
   for each row execute function lims.granted_by_a_second_admin();
 
+-- The other order: the Admin who issued a person's enrolment grant never issues their one-time link afterwards, so no
+-- Admin holds both the link that sets the password and the grant that enrols the authenticator. The issuer of a link
+-- is the acting person the Audit Trail records.
+create function lims.link_not_from_the_grant_issuer() returns trigger
+language plpgsql as $$
+begin
+  if exists (select from lims.enrolment_grant g join lims.person p on p.id = g.issued_by
+              where g.person_id = new.person_id
+                and 'person:' || p.username = current_setting('lims.actor', true)) then
+    raise exception 'a one-time link comes from an Admin who did not issue the person’s enrolment grant'
+      using errcode = 'LA016';
+  end if;
+  return new;
+end $$;
+create trigger link_not_from_the_grant_issuer before insert on lims.credential_link
+  for each row execute function lims.link_not_from_the_grant_issuer();
+
 create function lims.use_grant_once() returns trigger language plpgsql as $$
 begin
   if tg_op = 'DELETE' or old.used_at is not null
