@@ -60,6 +60,7 @@ const id = {
   document: randomUUID(),
   emptyDocument: randomUUID(),
   documentVersion: randomUUID(),
+  reviewer: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -89,6 +90,7 @@ const fixture: [string, Row][] = [
   ],
   ['lims.person', { id: id.admin, username: 'refusal.admin', display_name: 'Refusal Admin' }],
   ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
+  ['lims.person', { id: id.reviewer, username: 'refusal.reviewer', display_name: 'Refusal Reviewer' }],
   // A second Admin, who created no account and issued no one-time link, so an enrolment grant can come from them.
   ['lims.person', { id: id.secondAdmin, username: 'refusal.second', display_name: 'Second Admin' }],
   [
@@ -114,6 +116,7 @@ const fixture: [string, Row][] = [
   ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.otherLab, person_id: id.secondAdmin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
+  ['lims.membership', { lab_id: id.lab, person_id: id.reviewer, role: 'Reviewer' }],
   [
     'lims.identity_verification',
     {
@@ -338,7 +341,7 @@ const fixture: [string, Row][] = [
       version: 1,
       title: 'Receiving samples (fictional)',
       body: 'Check the seal.',
-      author_id: id.admin,
+      author_id: id.person,
       effective_date: '2099-01-01',
     },
   ],
@@ -602,7 +605,7 @@ const tables = {
       version: 1,
       title: 'Sample label (fictional)',
       body: 'Write the Sample number.',
-      author_id: id.admin,
+      author_id: id.person,
       effective_date: '2099-01-01',
     },
     notNull: [
@@ -738,6 +741,12 @@ const asRole = (role: string) => `select set_config('lims.role', '${role}', true
 const actingAs = (role: 'QA' | 'Admin') =>
   `select set_config('lims.actor', 'person:${role === 'QA' ? 'refusal.other' : 'refusal.admin'}', true), set_config('lims.role', '${role}', true)`;
 
+/** Refusal Person, the Analyst, acts: a Document version is written by its author, who holds a business role. */
+const AS_ANALYST = `select set_config('lims.actor', 'person:refusal.person', true), set_config('lims.role', 'Analyst', true)`;
+
+/** Who writes a table's row in place of AUDIT_CONTEXT's Admin, if anyone. */
+const writerOf = (table: string) => (table === 'lims.document_version' ? AS_ANALYST : null);
+
 /** The stamp lims.sign leaves, so a probe row reaches the constraints behind the sign_only trigger. */
 const signingStamp = (row: Row) =>
   typeof row.reauthentication_id === 'string'
@@ -749,10 +758,12 @@ async function refusalOf(
   values: unknown[] = [],
   context = true,
   row: Row = {},
+  writer: string | null = null,
 ): Promise<pg.DatabaseError> {
   await client.query('begin');
   try {
     if (context) await client.query(AUDIT_CONTEXT);
+    if (writer) await client.query(writer);
     await signingStamp(row);
     await client.query(statement, values);
   } catch (error) {
@@ -781,7 +792,7 @@ async function refusalWithTriggersOff(statement: string, values: unknown[]): Pro
 
 function refusalOfRow(table: Table, change: Row = {}, context = true) {
   const row = { ...tables[table].row, ...change };
-  return refusalOf(...insert(table, row), context, row);
+  return refusalOf(...insert(table, row), context, row, writerOf(table));
 }
 
 function assertConstraint(error: pg.DatabaseError, code: string, table: Table, constraint: string): void {
@@ -810,6 +821,8 @@ before(async () => {
     await client.query('begin');
     await client.query(AUDIT_CONTEXT);
     if (table === 'lims.chain_verification') await client.query(actingAs('QA'));
+    const writer = writerOf(table);
+    if (writer) await client.query(writer);
     await signingStamp(row);
     await client.query(...insert(table, row));
     await client.query('commit');
@@ -836,6 +849,8 @@ it('the base row of every table is accepted, so each refusal below comes from th
     try {
       await client.query(AUDIT_CONTEXT);
       if (table === 'lims.chain_verification') await client.query(actingAs('QA'));
+      const writer = writerOf(table);
+      if (writer) await client.query(writer);
       await signingStamp(tables[table].row);
       await client.query(...insert(table, tables[table].row));
     } finally {
@@ -1091,7 +1106,7 @@ describe('a Document version is one open and one Effective version of its Docume
     const error = await refusalWithTriggersOff(
       `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id, effective_date)
        values ($1, $2, 1, 'Effective', 'One', 'One.', $3, '2026-01-01'), ($1, $2, 2, 'Effective', 'Two', 'Two.', $3, '2026-01-02')`,
-      [id.lab, id.emptyDocument, id.admin],
+      [id.lab, id.emptyDocument, id.person],
     );
     assert.deepEqual([error.code, error.constraint], ['23505', 'document_version_one_effective']);
   });
@@ -1115,7 +1130,7 @@ describe('a Document version is one open and one Effective version of its Docume
       statement: `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id,
                   abandon_reason, effective_date) values ($1, $2, 1, 'Abandoned', 'Again', 'Again.', $3, 'Again.',
                   '2099-01-01')`,
-      values: [id.lab, id.document, id.admin],
+      values: [id.lab, id.document, id.person],
       code: '23505',
       constraint: 'document_version_document_id_version_key',
     },
@@ -1123,7 +1138,7 @@ describe('a Document version is one open and one Effective version of its Docume
       name: 'a Document version numbered below 1 is refused',
       statement: `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date)
                   values ($1, $2, 0, 'Zero', 'Zero.', $3, '2099-01-01')`,
-      values: [id.lab, id.emptyDocument, id.admin],
+      values: [id.lab, id.emptyDocument, id.person],
       code: '23514',
       constraint: 'document_version_version_check',
     },
@@ -3919,7 +3934,7 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       `person:${username}`,
       role,
     );
-  const asAuthor = asPerson('refusal.admin', 'LabManager');
+  const asAuthor = asPerson('refusal.person', 'Analyst');
   const version = randomUUID();
   /** A Document version of the empty Document, written past the triggers as a past write left it. */
   const versionIn = (status: string, effectiveDate = '2099-01-01'): Statement[] => [
@@ -3931,7 +3946,7 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       version,
       id.emptyDocument,
       status,
-      id.admin,
+      id.person,
       effectiveDate,
     ),
     statement(
@@ -4050,7 +4065,7 @@ describe('a Document keeps its number, and its versions reach Effective only thr
         ...versionIn('Draft'),
         setTitle('Probe again'),
         setEffectiveDate('2099-02-01'),
-        ...signed('Authored', id.admin),
+        ...signed('Authored', id.person),
         setStatus('InReview'),
       );
       const { rows } = await client.query<{ version: number; title: string; effectiveDate: string }>(
@@ -4069,53 +4084,58 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     }
   });
 
+  /** Version 1 of the empty Document, a Draft by `author` dated `effectiveDate`. */
+  const draftBy = (author: string, effectiveDate = '2099-01-01') =>
+    statement(
+      `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date)
+       values ($1, $2, 1, 'Probe', 'Probe.', $3, $4)`,
+      id.lab,
+      id.emptyDocument,
+      author,
+      effectiveDate,
+    );
   covered.add('lims.document_version.open_document_version');
   it('a Document version opens only as the next Draft of its Document, by the person who writes it', async () => {
     const cases: [Statement, string][] = [
       [
         statement(
-          `insert into lims.document_version (lab_id, document_id, title, body, effective_date, version, author_id, status)
-           values ($1, $2, 'Probe', 'Probe.', '2099-01-01', 1, $3, 'Approved')`,
+          `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date, status)
+           values ($1, $2, 1, 'Probe', 'Probe.', $3, '2099-01-01', 'Approved')`,
           id.lab,
           id.emptyDocument,
-          id.admin,
+          id.person,
         ),
         'a Document version opens as a Draft, not Approved',
       ],
       [
         statement(
-          `insert into lims.document_version (lab_id, document_id, title, body, effective_date, version, author_id)
-           values ($1, $2, 'Probe', 'Probe.', '2099-01-01', 2, $3)`,
-          id.lab,
-          id.emptyDocument,
-          id.admin,
-        ),
-        'a Document version is the next version of its Document',
-      ],
-      [
-        statement(
-          `insert into lims.document_version (lab_id, document_id, title, body, effective_date, version, author_id)
-           values ($1, $2, 'Probe', 'Probe.', '2099-01-01', 1, $3)`,
+          `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date)
+           values ($1, $2, 2, 'Probe', 'Probe.', $3, '2099-01-01')`,
           id.lab,
           id.emptyDocument,
           id.person,
         ),
-        "a Document version's author is the person who writes it",
+        'a Document version is the next version of its Document',
       ],
-      [
-        statement(
-          `insert into lims.document_version (lab_id, document_id, title, body, effective_date, version, author_id)
-           values ($1, $2, 'Probe', 'Probe.', '2000-01-01', 1, $3)`,
-          id.lab,
-          id.emptyDocument,
-          id.admin,
-        ),
-        "a Document version's Effective Date is today or later in the Lab",
-      ],
+      [draftBy(id.reviewer), "a Document version's author is the person who writes it"],
+      [draftBy(id.person, '2000-01-01'), "a Document version's Effective Date is today or later in the Lab"],
     ];
     for (const [insert, message] of cases) {
-      const error = await refusal(insert);
+      const error = await refusal(asAuthor, insert);
       assert.deepEqual([error.code, error.message], ['LA014', message]);
+    }
+  });
+  it('a Document version is authored only by a person who holds a business role in its Lab', async () => {
+    const outsiders: [Statement, string][] = [
+      [asPerson('refusal.admin', 'Admin'), id.admin],
+      [asPerson('refusal.operator', 'PlatformOperator'), id.operator],
+    ];
+    for (const [acting, author] of outsiders) {
+      const error = await refusal(acting, draftBy(author));
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA014', "a Document version's author holds the Lab Manager, Analyst, Reviewer or QA role in its Lab"],
+      );
     }
   });
 
@@ -4148,7 +4168,7 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     },
     {
       name: 'a Document version Approved after its Effective Date has passed is refused',
-      statements: [...versionIn('InReview', '2000-01-01'), ...signed('Approved', id.person), setStatus('Approved')],
+      statements: [...versionIn('InReview', '2000-01-01'), ...signed('Approved', id.otherPerson), setStatus('Approved')],
       message: 'a Document version is not Approved after its Effective Date, 2000-01-01, has passed',
     },
     {
@@ -4168,7 +4188,7 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     },
     {
       name: 'a Document version Abandoned by someone who is neither its author nor QA is refused',
-      statements: [...versionIn('Draft'), asPerson('refusal.person', 'Analyst'), abandon('Not needed.')],
+      statements: [...versionIn('Draft'), asPerson('refusal.reviewer', 'Reviewer'), abandon('Not needed.')],
       message: 'a Document version is Abandoned by its author or QA',
     },
   ];
@@ -4211,41 +4231,41 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     },
     {
       name: 'signing a Document version Performed is refused',
-      statements: [...versionIn('Draft'), signing('Performed', id.admin)],
+      statements: [...versionIn('Draft'), signing('Performed', id.person)],
       message: 'a Document version is signed Authored, Reviewed or Approved, not Performed',
     },
     {
       name: 'signing a Document version Authored by someone other than its author is refused',
-      statements: [...versionIn('Draft'), signing('Authored', id.person)],
+      statements: [...versionIn('Draft'), signing('Authored', id.reviewer)],
       message: 'a Document version is signed Authored only by its author',
     },
     {
       name: 'signing a Document version Authored a second time is refused',
-      statements: [...versionIn('Draft'), ...signed('Authored', id.admin), signing('Authored', id.admin)],
+      statements: [...versionIn('Draft'), ...signed('Authored', id.person), signing('Authored', id.person)],
       message: 'a Document version is signed Authored once, while a Draft',
     },
     {
       name: 'signing a Draft Reviewed is refused',
-      statements: [...versionIn('Draft'), signing('Reviewed', id.person)],
+      statements: [...versionIn('Draft'), signing('Reviewed', id.reviewer)],
       message: 'a Document version is signed Reviewed while In Review, not Draft',
     },
     {
       name: 'signing a Document version Reviewed by its Authored signer is refused',
-      statements: [...versionIn('InReview'), ...signed('Authored', id.admin), signing('Reviewed', id.admin)],
+      statements: [...versionIn('InReview'), ...signed('Authored', id.person), signing('Reviewed', id.person)],
       message: 'a Document version is signed Reviewed by someone who has not authored or reviewed it',
     },
     {
       name: 'signing a Document version Approved with no Reviewed Signature is refused',
-      statements: [...versionIn('InReview'), ...signed('Authored', id.admin), signing('Approved', id.otherPerson)],
+      statements: [...versionIn('InReview'), ...signed('Authored', id.person), signing('Approved', id.otherPerson)],
       message: 'a Document version is signed Approved once, while In Review, after a Reviewed Signature',
     },
     {
       name: 'signing a Document version Approved by its Reviewed signer is refused',
       statements: [
         ...versionIn('InReview'),
-        ...signed('Authored', id.admin),
-        ...signed('Reviewed', id.otherPerson),
-        signing('Approved', id.otherPerson),
+        ...signed('Authored', id.person),
+        ...signed('Reviewed', id.reviewer),
+        signing('Approved', id.reviewer),
       ],
       message: 'a Document version is signed Approved by someone who has not authored or reviewed it',
     },
@@ -4253,9 +4273,9 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       name: 'signing a Document version Approved by its Authored signer is refused',
       statements: [
         ...versionIn('InReview'),
-        ...signed('Authored', id.admin),
-        ...signed('Reviewed', id.person),
-        signing('Approved', id.admin),
+        ...signed('Authored', id.person),
+        ...signed('Reviewed', id.reviewer),
+        signing('Approved', id.person),
       ],
       message: 'a Document version is signed Approved by someone who has not authored or reviewed it',
     },
@@ -4269,8 +4289,8 @@ describe('a Document keeps its number, and its versions reach Effective only thr
   it('an Approved signing by a third person, after Authored and Reviewed, passes the independence rules', async () => {
     const error = await refusal(
       ...versionIn('InReview'),
-      ...signed('Authored', id.admin),
-      ...signed('Reviewed', id.person),
+      ...signed('Authored', id.person),
+      ...signed('Reviewed', id.reviewer),
       signing('Approved', id.otherPerson),
     );
     assert.doesNotMatch(error.message, /Document version/);

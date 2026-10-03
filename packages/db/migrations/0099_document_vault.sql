@@ -102,8 +102,8 @@ language sql stable as $$
    where v.record_table = 'document_version' and v.record_id = p_id and s.meaning = p_meaning
 $$;
 
--- A version opens as a Draft, the next of its Document, written by the person acting, who is its author, with an
--- Effective Date that has not passed in the Lab.
+-- A version opens as a Draft, the next of its Document, written by the person acting, who is its author and holds a
+-- business role in the Document's Lab, with an Effective Date that has not passed in the Lab.
 create function lims.open_document_version() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 begin
@@ -120,6 +120,14 @@ begin
   if nullif(current_setting('lims.actor', true), '') is not null and exists (select from person where id = new.author_id
                 and 'person:' || username is distinct from current_setting('lims.actor', true)) then
     raise exception 'a Document version''s author is the person who writes it' using errcode = 'LA014';
+  end if;
+  -- An author who is not recorded, or a Document of another Lab, is left to the foreign keys.
+  if exists (select from person where id = new.author_id)
+     and exists (select from document where id = new.document_id and lab_id = new.lab_id)
+     and not exists (select from membership where lab_id = new.lab_id and person_id = new.author_id
+                        and role in ('LabManager', 'Analyst', 'Reviewer', 'QA')) then
+    raise exception 'a Document version''s author holds the Lab Manager, Analyst, Reviewer or QA role in its Lab'
+      using errcode = 'LA014';
   end if;
   return new;
 end $$;
