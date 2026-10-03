@@ -3497,9 +3497,10 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
          returning id, content_hash, canonical_form)
        insert into lims.signature (lab_id, person_id, printed_name, username, role, meaning, record_version_id,
                                    content_hash, canonical_form, statement_version, statement_hash, authenticator,
-                                   session_id, app_release, reauthentication_id)
+                                   session_id, app_release, reauthentication_id, signed_time_zone)
        select $1, $4, 'Refusal Admin', 'refusal.admin', 'QA', $5, id, content_hash, canonical_form, 1,
-              (select statement_hash from lims.signature_statement where version = 1), 'Password', $6, 'test', $7
+              (select statement_hash from lims.signature_statement where version = 1), 'Password', $6, 'test', $7,
+              (select time_zone from lims.lab where lab_id = $1)
          from version`,
       [id.lab, table, recordId, personId, meaning, id.session, reauthentication, stale],
     );
