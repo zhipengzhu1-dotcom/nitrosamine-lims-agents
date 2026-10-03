@@ -1,5 +1,6 @@
 import { createDb } from '@lims/db';
 import { buildApp } from './app.ts';
+import { LOGIN } from './auth.ts';
 import { apiConfig, SWEEP_EVERY_MS } from './config.ts';
 import { logFile, systemClock } from './log.ts';
 
@@ -10,7 +11,7 @@ await buildApp(createDb(config.databaseUrl), {
   secureCookie: config.secureCookie,
   accessEventKey: config.accessEventKey,
   trustedProxies: config.trustedProxies,
-  login: config.login,
+  credentials: { policy: LOGIN[config.login], pepper: config.passwordPepper, totpKey: config.totpKey },
   release: config.release,
   sweepEveryMs: SWEEP_EVERY_MS,
 }).listen(config.listen);

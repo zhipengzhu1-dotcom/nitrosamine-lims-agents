@@ -67,3 +67,12 @@ export function dbConfig(alsoReads: readonly string[] = []): DbConfig {
   if (!database) throw new Error('LIMS_DB is not set. Name the database this process uses, such as LIMS_DB=lims_dev.');
   return { server, database, demoPassword };
 }
+
+/** The seed's settings: `dbConfig` plus LIMS_PASSWORD_PEPPER, the API's hex pepper, given when the seeded accounts are to sign in under the decided login, which admits no hash made without it. */
+export function seedConfig(): DbConfig & { passwordPepper: Buffer | undefined } {
+  const config = dbConfig(['LIMS_PASSWORD_PEPPER']);
+  const pepper = process.env.LIMS_PASSWORD_PEPPER;
+  if (pepper !== undefined && !/^([0-9a-f]{2}){32,}$/i.test(pepper))
+    throw new Error('LIMS_PASSWORD_PEPPER must hold the password pepper: at least 64 hex digits');
+  return { ...config, passwordPepper: pepper === undefined ? undefined : Buffer.from(pepper, 'hex') };
+}

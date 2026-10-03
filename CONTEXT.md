@@ -76,6 +76,10 @@ _Avoid_: Full name, signing name
 The link through which a person sets their own password, so that the Admin never sees or sets it. It works once and expires; the LIMS keeps only a hash of it.
 _Avoid_: Invitation, reset email, activation code
 
+**Enrolment grant**:
+The second person at an authenticator enrolment: a one-time token, carried by an enrolment link, that an Admin issues for a person, so that no one person holds both the password and the authenticator of another. The issuer is never the person, the Admin who created the account, or an Admin who issued one of its one-time links, and the Admin who issues it issues no one-time link for that person afterwards; the database refuses each. It works once and expires; the LIMS keeps only a hash of it.
+_Avoid_: Invitation, second-factor reset, approval
+
 ### Sample chain
 
 **Submission**:
@@ -517,7 +521,7 @@ The permanent, system-generated history of every change to records, accounts and
 _Avoid_: Log, history, change log
 
 **Access Event**:
-The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock (succeeded or failed), lockout, takeover, Lab switch, failed Re-authentication at signing, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. A lockout is stamped at the instant the lock landed, and each of the person's sessions still live then ends at that instant. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
+The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock (succeeded or failed), lockout, takeover, Lab switch, failed Re-authentication at signing, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. A failed sign-in, Lab switch, Re-authentication or unlock records why it failed, in one vocabulary shared by all four, such as a wrong password, a wrong code or a locked account. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. A lockout is stamped at the instant the lock landed, and each of the person's sessions still live then ends at that instant. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
 _Avoid_: Login log, session log, access log
 
 **Audit Export**:

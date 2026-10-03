@@ -51,6 +51,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   [K in StepName]: { route: Route; body: StepBody<K> };
 } = {
   login: entry(routes.login, { username: cora.username, password: 'not-the-password' }),
+  enrolAuthenticator: entry(routes.enrolAuthenticator, { username: cora.username, password: 'not-the-password' }),
   switchLab: entry(routes.switchLab, { username: cora.username, password: 'not-the-password', labId: api.labId }),
   verifyAuditTrail: entry(routes.verifyAuditTrail, {}),
   setPreferences: entry(routes.setPreferences, { reducedMotion: true }),
@@ -79,6 +80,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
     roomId: randomUUID(),
     responsiblePersonId: randomUUID(),
   }),
+  issueEnrolmentGrant: entry(routes.issueEnrolmentGrant, { personId: randomUUID() }),
   grantMembership: entry(routes.grantMembership, { personId: randomUUID(), role: 'Analyst', reason: 'New starter' }),
   changePrintedName: entry(routes.changePrintedName, {
     personId: randomUUID(),
@@ -95,6 +97,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   registerRoom: entry(routes.registerRoom, { name: 'Balance Room (fictional)', reason: 'Register a Room' }),
   enrolWorkstation: entry(routes.enrolWorkstation, { workstationId: randomUUID(), reason: 'Enrol the bench PC' }),
   unlock: entry(routes.unlock, { password: 'not-the-password' }),
+  changePassword: entry(routes.changePassword, { password: 'not-the-password', newPassword: 'Benchline-2026-unused' }),
   lock: entry(routes.lock, {}),
   logout: entry(routes.logout, {}),
 };

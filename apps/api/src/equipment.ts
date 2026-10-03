@@ -20,7 +20,7 @@ import {
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
-import { reauthenticate, sourceAddressOf } from './auth.ts';
+import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope, type WriteQueries } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
@@ -247,7 +247,13 @@ async function recordEvent(
   return event.id;
 }
 
-function registerEquipmentStep<K extends EquipmentStepName>(app: App, db: Kysely<DB>, name: K, release: string) {
+function registerEquipmentStep<K extends EquipmentStepName>(
+  app: App,
+  db: Kysely<DB>,
+  credentials: Credentials,
+  name: K,
+  release: string,
+) {
   const step = equipmentSteps[name];
   const route = equipmentStepRoute(name);
   app.post<{ Body: EquipmentStepBody<K> }>(route.url, { schema: route.schema }, async (req) => {
@@ -276,8 +282,9 @@ function registerEquipmentStep<K extends EquipmentStepName>(app: App, db: Kysely
     const reauthenticated = signature
       ? await reauthenticate(
           db,
+          credentials,
           { actor, session: req.sessionKey },
-          { username: signature.username, password: signature.password },
+          { username: signature.username, password: signature.password, code: signature.code },
           role,
           sourceAddressOf(req),
           'ReauthenticationFailed',
@@ -288,7 +295,10 @@ function registerEquipmentStep<K extends EquipmentStepName>(app: App, db: Kysely
       name,
       role,
       async (q) => {
-        const proof = signs && signature ? await proveReauthentication(q, actor, sessionId, signs) : null;
+        const proof =
+          signs && signature && reauthenticated
+            ? await proveReauthentication(q, actor, sessionId, signs, reauthenticated)
+            : null;
         if (proof && signs === 'Approved' && signature) {
           const latest = await versionForSigning(q, proof, 'equipment', body.id);
           await signRecord(q, {
@@ -327,7 +337,7 @@ function registerEquipmentStep<K extends EquipmentStepName>(app: App, db: Kysely
 }
 
 /** The Equipment list, view and registration for the Lab's staff, and `POST /api/equipment-steps/:step`, one route per registry entry. */
-export function equipmentRoutes(app: App, db: Kysely<DB>, release: string): void {
+export function equipmentRoutes(app: App, db: Kysely<DB>, credentials: Credentials, release: string): void {
   app.route({
     ...routes.equipmentList,
     handler: async (req) => {
@@ -391,5 +401,5 @@ export function equipmentRoutes(app: App, db: Kysely<DB>, release: string): void
       return readEquipment(scope, db, id);
     },
   });
-  for (const name of equipmentStepNames) registerEquipmentStep(app, db, name, release);
+  for (const name of equipmentStepNames) registerEquipmentStep(app, db, credentials, name, release);
 }

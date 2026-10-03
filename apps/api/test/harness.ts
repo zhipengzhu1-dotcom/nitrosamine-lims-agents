@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
 import { after } from 'node:test';
 import { audited, checkoutDatabase, createDb, type DB, databaseUrl, dbServer, type Role } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
@@ -19,6 +18,7 @@ import {
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import { type AppOptions, buildApp } from '../src/app.ts';
+import { LOGIN, type LoginPolicy } from '../src/auth.ts';
 
 type LogSink = NonNullable<AppOptions['log']>;
 
@@ -133,13 +133,54 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
       );
 }
 
-const accessEventKey = randomBytes(32);
+/** The UTC instant `at` as ISO 8601 on the wall clock of `timeZone`, with that zone's offset, as Intl renders it. */
+export function onLabClock(at: string, timeZone = 'America/New_York'): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset',
+    // oxlint-disable-next-line no-restricted-globals -- parses an instant to render it; reads no clock
+  }).formatToParts(new Date(at));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '';
+  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice(3);
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${at.slice(19, -1)}${offset}`;
+}
+
+/**
+ * A database Lab-clock rendering cut from microseconds to the milliseconds a driver Date keeps, so it compares with
+ * `onLabClock` of that Date. It truncates, as the driver does when it parses the microseconds.
+ */
+export const toMillis = (atLab: string | null) => atLab?.replace(/(\.\d{3})\d{3}/, '$1');
+
+/** The Audit Trail reason `moveLabZone` writes. */
+export const labZoneMoveReason = 'Move the Lab to another time zone';
+
+/** A fresh 32-byte key for one test API. */
+const key = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
+const accessEventKey = key();
+/**
+ * The demo login with the decided session limits, so a file signs one person in many times without a code, counts
+ * failures past the decided lockout and sets short passwords; decided-login.test.ts starts another API on `LOGIN.decided`.
+ */
+export const HARNESS_LOGIN: LoginPolicy = {
+  ...LOGIN.demo,
+  idleMs: LOGIN.decided.idleMs,
+  absoluteMs: LOGIN.decided.absoluteMs,
+};
+export const passwordPepper = key();
+export const totpKey = key();
 export const TEST_RELEASE = 'test-release';
 
 interface ListenOptions {
   secureCookie?: boolean;
   log?: LogSink;
-  login?: AppOptions['login'];
+  login?: LoginPolicy;
   sweepEveryMs?: number | null;
   logVolume?: AppOptions['logVolume'];
   trustedProxies?: string[];
@@ -151,7 +192,7 @@ async function listen(
   {
     secureCookie = false,
     log,
-    login = 'decided',
+    login = HARNESS_LOGIN,
     sweepEveryMs = null,
     logVolume = null,
     trustedProxies = ['127.0.0.1'],
@@ -163,7 +204,7 @@ async function listen(
     logVolume,
     secureCookie,
     accessEventKey,
-    login,
+    credentials: { policy: login, pepper: passwordPepper, totpKey },
     release: TEST_RELEASE,
     sweepEveryMs,
     trustedProxies,
@@ -263,6 +304,12 @@ export async function startApi(name: string) {
         .where('endedAt', 'is', null)
         .execute();
     },
+    /** Moves the default Lab to `timeZone` through the Audit Trail, as the migration service would. */
+    async moveLabZone(timeZone: string): Promise<void> {
+      await audited(superuser, { actor: 'svc:migrate', role: 'system', reason: labZoneMoveReason }, (tx) =>
+        tx.updateTable('lab').set({ timeZone }).where('labId', '=', labId).execute(),
+      );
+    },
     labId,
     qcLabId,
     methodId,
@@ -287,7 +334,7 @@ export async function startApi(name: string) {
           .values({
             username,
             displayName: username,
-            passwordHash: await hashPassword(account.password),
+            passwordHash: await hashPassword(account.password, passwordPepper),
             customerId: opts.customerId ?? null,
           })
           .returning('id')

@@ -117,13 +117,18 @@ const recordVersionRef = Type.Object({
   contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
 });
 export type RecordVersionRef = Static<typeof recordVersionRef>;
+/** What proved a signer at their Signature: the password alone under the demo login, or the password and an authenticator code. */
+export const authenticator = Type.Enum({ Password: 'Password', PasswordAndCode: 'PasswordAndCode' } as const);
+export type Authenticator = Static<typeof authenticator>;
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
   username: Type.String(),
   role: role,
+  /** Null only on a Signature given before the signing function recorded what proved the signer. */
+  authenticator: nullable(authenticator),
   signedAt: instant,
-  /** `signedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
+  /** `signedAt` on the wall clock of the zone its Lab was in at signing, ISO 8601 with that offset, as the database renders it. */
   signedAtLab: instant,
   /** The signed record's glossary noun, such as "Test Report". */
   record: Type.String(),
@@ -228,6 +233,8 @@ const staffPerson = Type.Object({
   roles: Type.Array(role),
   /** True once the person has set a password through their one-time link. */
   credentialSet: Type.Boolean(),
+  /** True once the person has enrolled their authenticator through an enrolment grant. */
+  authenticatorEnrolled: Type.Boolean(),
   identityVerifiedAt: nullable(instant),
   /** Who checked the person's identity and what they checked; null for a seeded demo account. */
   identityVerifiedBy: nullable(Type.String()),
@@ -259,6 +266,9 @@ const accessEventKindButLockout = Type.Enum({
   LabSwitchFailed: 'LabSwitchFailed',
   ReauthenticationFailed: 'ReauthenticationFailed',
   PasswordSet: 'PasswordSet',
+  PasswordChanged: 'PasswordChanged',
+  AuthenticatorEnrolled: 'AuthenticatorEnrolled',
+  EnrolmentGrantIssued: 'EnrolmentGrantIssued',
 } as const satisfies { [K in Exclude<db.AccessEventKind, 'Lockout'>]: K });
 const signInFailure = Type.Enum({
   UnknownUserId: 'UnknownUserId',
@@ -273,6 +283,12 @@ const signInFailure = Type.Enum({
   OtherUserId: 'OtherUserId',
   SessionEnded: 'SessionEnded',
   WrongUserId: 'WrongUserId',
+  WrongCode: 'WrongCode',
+  NoAuthenticator: 'NoAuthenticator',
+  AlreadyEnrolled: 'AlreadyEnrolled',
+  OtherPersonSignedIn: 'OtherPersonSignedIn',
+  CodeAlreadyUsed: 'CodeAlreadyUsed',
+  NoEnrolmentGrant: 'NoEnrolmentGrant',
 } as const satisfies { [K in db.SignInFailure]: K });
 /** A session a Lockout ended, at the Lockout's instant: when it was signed in, and on which Workstation. */
 const endedSession = Type.Object({ id: uuid, signedInAt: instant, workstation: nullable(Type.String()) });
@@ -307,6 +323,11 @@ export const grantableRoles = ['SampleCustodian', 'Analyst', 'Reviewer', 'QA', '
 const accountCreated = Type.Object({
   person: staffPerson,
   link: Type.Object({ token: Type.String(), expiresAt: instant }),
+});
+/** The enrolment grant's token goes to the person, who enrols their authenticator with it; the LIMS keeps only its hash. */
+const enrolmentGrantIssued = Type.Object({
+  person: staffPerson,
+  grant: Type.Object({ token: Type.String(), expiresAt: instant }),
 });
 const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
 /** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
@@ -602,9 +623,18 @@ export const isRefusalKind = (value: unknown): value is RefusalKind => refusalKi
 export const refusalBody = Type.Object({ kind: Type.Enum(refusalKinds), message: Type.String() });
 export type RefusalBody = Static<typeof refusalBody>;
 
+/** The six-digit code from the person's authenticator, which the decided login asks for; any other text is a wrong code. */
+const code = Type.Optional(text);
 /** A sign-in names its Lab; the schema lets it out so that the API can answer `labNotChosen` after the password. */
-const signIn = Type.Object({ username: text, password: text, labId: Type.Optional(uuid) }, closed);
-const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, closed);
+const signIn = Type.Object({ username: text, password: text, code, labId: Type.Optional(uuid) }, closed);
+const labSwitch = Type.Object({ username: text, password: text, code, labId: uuid }, closed);
+/** The grant is the token from a second Admin's enrolment link; without one the enrolment is the uniform credential refusal. */
+const authenticatorEnrolment = Type.Object(
+  { username: text, password: text, grant: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })) },
+  closed,
+);
+/** An enrolled authenticator's secret, shown once: as text, and as the otpauth URI its QR code carries. */
+const enrolled = Type.Object({ secret: Type.String(), otpauth: Type.String() });
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
@@ -613,8 +643,8 @@ const byReference = Type.Object({ reference: Type.String({ pattern: `^${referenc
 const actionText = Type.String({ minLength: 1, maxLength: 2000, pattern: '\\S' });
 /** The Record Version the signer saw, as the screen showed it: the signing is refused if the record has moved on. */
 const seenVersion = Type.Object({ version: recordVersionRef.properties.version, contentHash: sha256Hex }, closed);
-const typedCredentials = Type.Object({ username: text, password: text }, closed);
-/** What a signer types on the signature sheet: their user ID and their password. */
+const typedCredentials = Type.Object({ username: text, password: text, code }, closed);
+/** What a signer types on the signature sheet: their user ID, their password and, under the decided login, a fresh code. */
 export type TypedCredentials = Static<typeof typedCredentials>;
 /** What a signing sends: the typed credentials, the Record Version the sheet showed and the signature statement version it showed. */
 const signingBody = Type.Object(
@@ -622,7 +652,9 @@ const signingBody = Type.Object(
   closed,
 );
 export type SigningBody = Static<typeof signingBody>;
-const reauthentication = Type.Object({ password: text }, closed);
+const reauthentication = Type.Object({ password: text, code }, closed);
+/** A signed-in password change: the current password and, under the decided login, a fresh code, then the new password. */
+const passwordChange = Type.Object({ password: text, code, newPassword: text }, closed);
 const room = Type.Object({ id: uuid, name: Type.String() });
 const workstation = Type.Object({
   id: uuid,
@@ -696,6 +728,8 @@ function route<
 /** Every route the API serves besides the steps. */
 export const routes = {
   labs: route('GET', '/api/labs', {}, Type.Array(lab)),
+  /** Tells the sign-in page, before any session, whether this login asks for an authenticator code. */
+  loginPolicy: route('GET', '/api/login', {}, Type.Object({ secondFactor: Type.Boolean() })),
   login: route('POST', '/api/login', { body: signIn }, signedIn),
   switchLab: route('POST', '/api/lab-switch', { body: labSwitch }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
@@ -706,6 +740,12 @@ export const routes = {
     Type.Object({ locked: Type.Literal(true), message: Type.String() }),
   ),
   unlock: route('POST', '/api/unlock', { body: reauthentication }, signedIn),
+  changePassword: route(
+    'POST',
+    '/api/password',
+    { body: passwordChange },
+    Type.Object({ changed: Type.Literal(true) }),
+  ),
   workstations: route('GET', '/api/workstations', {}, workstations),
   registerRoom: route('POST', '/api/rooms', { body: roomRegistration }, room),
   registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
@@ -748,6 +788,12 @@ export const routes = {
     accountCreated,
   ),
   issueLink: route('POST', '/api/staff/links', { body: Type.Object({ personId: uuid }, closed) }, accountCreated),
+  issueEnrolmentGrant: route(
+    'POST',
+    '/api/staff/enrolment-grants',
+    { body: Type.Object({ personId: uuid }, closed) },
+    enrolmentGrantIssued,
+  ),
   accessEvents: route('GET', '/api/staff/:id/access-events', { params: byId }, personAccessEvents),
   grantMembership: route(
     'POST',
@@ -761,6 +807,7 @@ export const routes = {
     { body: Type.Object({ personId: uuid, printedName: text, reason: reasonText }, closed) },
     staffPerson,
   ),
+  enrolAuthenticator: route('POST', '/api/authenticator', { body: authenticatorEnrolment }, enrolled),
   setPasswordThroughLink: route(
     'POST',
     '/api/credentials',
