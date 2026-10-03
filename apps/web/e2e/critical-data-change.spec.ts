@@ -16,7 +16,7 @@ async function shot(page: Page, name: string) {
             a.playState === 'running' &&
             a.effect?.getComputedTiming().endTime !== Number.POSITIVE_INFINITY,
         )
-        .map((a) => a.finished.catch(() => undefined)),
+        .map((a) => a.finished.catch(() => null)),
     ),
   );
   await page.screenshot({ path: test.info().outputPath(`${test.info().project.name}-${name}.png`) });

@@ -103,6 +103,7 @@ function changeAction(
         });
       else if (pending && name !== 'approveChange')
         await api(changeStepRoute(name), { testId, changeId: pending.id, reasonId, ...reasonText });
+      else throw new Error(`the ${name} step was offered with no pending change or signing to send`);
       await onDone();
       return changeUi[name].done;
     },
