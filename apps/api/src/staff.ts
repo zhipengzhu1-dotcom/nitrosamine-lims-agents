@@ -112,8 +112,9 @@ const LISTED_ACCESS_EVENTS = 100;
 
 /**
  * The person's newest Access Events that this Lab sees, each Lockout listing the sessions here that it ended, at its
- * instant, whether or not a request or the sweep has ended them yet. A Lockout not stamped at its person's lock instant
- * was recorded before sessions ended there, so it lists null rather than claim it ended none.
+ * instant, whether or not a request or the sweep has ended them yet. A Lockout not stamped at a lock instant its
+ * person's Audit Trail holds was recorded before sessions ended there (#207), so it lists null rather than claim it
+ * ended none. The Audit Trail keeps that instant after an unlock clears the lock.
  */
 async function accessEventsOf(scope: Scope, personId: string, limits: SessionLimits) {
   const rows = await scope
@@ -125,9 +126,10 @@ async function accessEventsOf(scope: Scope, personId: string, limits: SessionLim
       'workstationId',
       sql<string | null>`host(source_address)`.as('sourceAddress'),
       'failureReason',
-      sql<boolean>`coalesce(access_event.at = (select p.locked_at from lims.person p where p.id = access_event.subject_id), false)`.as(
-        'atLockInstant',
-      ),
+      sql<boolean>`access_event.kind = 'Lockout' and exists (
+        select from lims.audit_entry a
+         where a.table_name = 'person' and (a.new_row ->> 'id')::uuid = access_event.subject_id
+           and (a.new_row ->> 'locked_at')::timestamptz = access_event.at)`.as('atLockInstant'),
     ])
     .where('subjectId', '=', personId)
     .orderBy('at', 'desc')
