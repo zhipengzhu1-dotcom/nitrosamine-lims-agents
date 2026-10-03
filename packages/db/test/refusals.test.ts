@@ -3959,6 +3959,13 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     ),
     triggersOn,
   ];
+  /** The role each Meaning is signed in, as lims.sign writes the role the signer acts in. */
+  const signingRoles: Record<string, string> = {
+    Authored: 'Analyst',
+    Reviewed: 'Reviewer',
+    Approved: 'QA',
+    Performed: 'Analyst',
+  };
   /** A Signature on the version, written past the triggers as lims.sign left it. */
   const signed = (meaning: string, person: string): Statement[] => [
     triggersOff,
@@ -3966,12 +3973,13 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       `insert into lims.signature (lab_id, person_id, printed_name, username, role, meaning, record_version_id,
                                    content_hash, canonical_form, statement_version, statement_hash, authenticator,
                                    session_id, app_release, reauthentication_id, signed_time_zone)
-       select $1, $2, 'Signer', 'signer', 'QA', $3, v.id, v.content_hash, 1, 1, $4, 'Password', $5, 'test',
+       select $1, $2, 'Signer', 'signer', $3, $4, v.id, v.content_hash, 1, 1, $5, 'Password', $6, 'test',
               gen_random_uuid(), 'UTC'
-         from lims.record_version v where v.record_table = 'document_version' and v.record_id = $6
+         from lims.record_version v where v.record_table = 'document_version' and v.record_id = $7
         order by v.version desc limit 1`,
       id.lab,
       person,
+      signingRoles[meaning],
       meaning,
       zeros,
       id.session,
@@ -3980,15 +3988,26 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     triggersOn,
   ];
   /** The insert lims.sign makes, which reaches document_signing before sign_only refuses it. */
-  const signing = (meaning: string, person: string): Statement =>
+  const signing = (meaning: string, person: string, role = signingRoles[meaning]): Statement =>
     statement(
-      `insert into lims.signature (lab_id, person_id, meaning, record_version_id)
-       values ($1, $2, $3, (select id from lims.record_version where record_table = 'document_version'
-                                and record_id = $4 order by version desc limit 1))`,
+      `insert into lims.signature (lab_id, person_id, role, meaning, record_version_id)
+       values ($1, $2, $3, $4, (select id from lims.record_version where record_table = 'document_version'
+                                    and record_id = $5 order by version desc limit 1))`,
       id.lab,
       person,
+      role,
       meaning,
       version,
+    );
+  /** The insert lims.sign makes on a Test's Record Version. */
+  const signingTest = (meaning: string, role: string): Statement =>
+    statement(
+      'insert into lims.signature (lab_id, person_id, role, meaning, record_version_id) values ($1, $2, $3, $4, $5)',
+      id.lab,
+      id.person,
+      role,
+      meaning,
+      id.laterRecordVersion,
     );
   const setStatus = (status: string) =>
     statement('update lims.document_version set status = $1 where id = $2', status, version);
@@ -4284,16 +4303,33 @@ describe('a Document keeps its number, and its versions reach Effective only thr
   const signings: { name: string; statements: Statement[]; message: string }[] = [
     {
       name: 'signing a Test Authored is refused',
+      statements: [signingTest('Authored', 'Analyst')],
+      message: 'Authored is a Signature Meaning of a Document version only',
+    },
+    {
+      name: 'signing a Test Approved in the role QA is refused',
+      statements: [signingTest('Approved', 'QA')],
+      message: 'QA signs Approved only on a Document version',
+    },
+    {
+      name: 'signing a Document version Authored in a role that is not a business role is refused',
+      statements: [...versionIn('Draft'), signing('Authored', id.person, 'Admin')],
+      message: 'a Document version is signed Authored in the Lab Manager, Analyst, Reviewer or QA role, not Admin',
+    },
+    {
+      name: 'signing a Document version Reviewed in a role other than Reviewer is refused',
+      statements: [...versionIn('InReview'), ...signed('Authored', id.person), signing('Reviewed', id.reviewer, 'QA')],
+      message: 'a Document version is signed Reviewed in the Reviewer role, not QA',
+    },
+    {
+      name: 'signing a Document version Approved in a role other than QA is refused',
       statements: [
-        statement(
-          'insert into lims.signature (lab_id, person_id, meaning, record_version_id) values ($1, $2, $3, $4)',
-          id.lab,
-          id.person,
-          'Authored',
-          id.laterRecordVersion,
-        ),
+        ...versionIn('InReview'),
+        ...signed('Authored', id.person),
+        ...signed('Reviewed', id.reviewer),
+        signing('Approved', id.otherPerson, 'Reviewer'),
       ],
-      message: 'Authored and Approved are Signature Meanings of a Document version',
+      message: 'a Document version is signed Approved in the QA role, not Reviewer',
     },
     {
       name: 'signing a Document version Performed is refused',
@@ -4359,6 +4395,10 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       ...signed('Reviewed', id.reviewer),
       signing('Approved', id.otherPerson),
     );
+    assert.doesNotMatch(error.message, /Document version/);
+  });
+  it('a Test Approved in the role Reviewer passes the Document rules, for the record kinds that add it', async () => {
+    const error = await refusal(signingTest('Approved', 'Reviewer'));
     assert.doesNotMatch(error.message, /Document version/);
   });
 });

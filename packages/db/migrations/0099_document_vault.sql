@@ -257,10 +257,12 @@ select set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 's
 insert into lims.signing_role (role, meaning) values
   ('LabManager', 'Authored'), ('Analyst', 'Authored'), ('Reviewer', 'Authored'), ('QA', 'Authored'), ('QA', 'Approved');
 
--- Authored and Approved are Signature Meanings of a Document version, which is signed Authored, Reviewed or Approved,
--- each by a different person: Authored once, by its author, on the Draft; Reviewed In Review, after Authored, by
--- someone who did not author it; Approved once, In Review, after a Reviewed, by someone who neither authored nor
--- reviewed it. lims.sign checks the signer, the proof and the version shown; this checks who may sign what.
+-- Authored is a Signature Meaning of a Document version only, and QA signs Approved only on one; another record kind
+-- may be signed Approved in another role. A Document version is signed Authored, Reviewed or Approved, each by a
+-- different person: Authored once, by its author in a business role, on the Draft; Reviewed In Review, after
+-- Authored, in the Reviewer role, by someone who did not author it; Approved once, In Review, after a Reviewed, in
+-- the QA role, by someone who neither authored nor reviewed it. lims.sign checks the signer, the proof, the role they
+-- hold and the version shown; this checks who may sign what.
 create function lims.check_document_signing() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -273,15 +275,28 @@ begin
   if signed.id is null then
     return new; -- signature_record_version_fkey refuses it
   end if;
-  if new.meaning in ('Authored', 'Approved') and signed.record_table <> 'document_version' then
-    raise exception 'Authored and Approved are Signature Meanings of a Document version' using errcode = 'LA010';
-  end if;
   if signed.record_table <> 'document_version' then
+    if new.meaning = 'Authored' then
+      raise exception 'Authored is a Signature Meaning of a Document version only' using errcode = 'LA010';
+    end if;
+    if new.meaning = 'Approved' and new.role = 'QA' then
+      raise exception 'QA signs Approved only on a Document version' using errcode = 'LA010';
+    end if;
     return new;
   end if;
   if new.meaning not in ('Authored', 'Reviewed', 'Approved') then
     raise exception 'a Document version is signed Authored, Reviewed or Approved, not %', new.meaning
       using errcode = 'LA010';
+  end if;
+  if new.meaning = 'Authored' and new.role not in ('LabManager', 'Analyst', 'Reviewer', 'QA') then
+    raise exception 'a Document version is signed Authored in the Lab Manager, Analyst, Reviewer or QA role, not %',
+      new.role using errcode = 'LA010';
+  end if;
+  if new.meaning = 'Reviewed' and new.role <> 'Reviewer' then
+    raise exception 'a Document version is signed Reviewed in the Reviewer role, not %', new.role using errcode = 'LA010';
+  end if;
+  if new.meaning = 'Approved' and new.role <> 'QA' then
+    raise exception 'a Document version is signed Approved in the QA role, not %', new.role using errcode = 'LA010';
   end if;
   select * into doc from document_version where id = signed.record_id;
   authors := document_signers(doc.id, 'Authored');
