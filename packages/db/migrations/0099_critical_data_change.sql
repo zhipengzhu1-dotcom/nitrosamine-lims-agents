@@ -150,6 +150,9 @@ declare
   change  critical_data_change;
   signed  record;
 begin
+  -- Holds the Lab's chain before the decision row exists, as a proposal does, so of two decisions at once the second
+  -- waits here for the first to commit instead of deadlocking on the one decision a change takes.
+  perform lock_chains(new.lab_id::text);
   select * into change from critical_data_change where lab_id = new.lab_id and id = new.change_id;
   if new.decided_by is distinct from acting_person() then
     raise exception 'a Critical Data Change is decided by the person acting' using errcode = 'LA017';

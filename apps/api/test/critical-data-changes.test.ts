@@ -416,6 +416,33 @@ describe('a Critical Data Change is decided once: withdrawn by its proposer, app
   });
 });
 
+describe('a decision takes the Lab chain before it is written, so two decisions at once take turns', () => {
+  it('a withdrawal that starts while a rejection holds the chain waits, then meets the decision already made', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    let withdrawal: Promise<Refusal> | undefined;
+    await acting(api.db, rui, 'Reviewer', async (tx) => {
+      await sql`select lims.lock_chains(${api.labId}::text)`.execute(tx);
+      withdrawal = refusal(
+        decide(changeId, test.testId, { outcome: 'Withdrawn', reasonId: reason.inError }, ana, 'Analyst'),
+      );
+      await api.untilWaitingOnLocks(1);
+      await tx
+        .insertInto('criticalDataChangeDecision')
+        .values({ labId: api.labId, changeId, testId: test.testId, outcome: 'Rejected', reasonId: reason.rawData })
+        .execute();
+    });
+    const error = (await withdrawal) ?? assert.fail('the withdrawal was started');
+    assert.deepEqual([error.code, error.constraint], ['23505', 'critical_data_change_decision_lab_id_change_id_key']);
+    const { outcome } = await api.db
+      .selectFrom('criticalDataChangeDecision')
+      .select('outcome')
+      .where('changeId', '=', changeId)
+      .executeTakeFirstOrThrow();
+    assert.equal(outcome, 'Rejected');
+  });
+});
+
 describe('no Test step signs while a Critical Data Change on one of its Results is pending, even past the registry', () => {
   it('a Reviewed Signature on the Test is refused while a change is pending, and given once it is decided', async () => {
     const test = await performedTest();
