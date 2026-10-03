@@ -114,6 +114,14 @@ function Recorded({ record }: { record: Recording | null }) {
   );
 }
 
+/** The breaks a chain-verify incident records; one opened before the LIMS recorded ranges names only its first entry. */
+function breakRange({ firstFailure: first, lastFailure: last, breakCount: count }: SystemIncident): string {
+  if (!first) return '';
+  if (!last || !count) return `, first failing entry ${first}`;
+  const breaks = count === 1 ? 'one break' : `${count} breaks`;
+  return last === first ? `, ${breaks} at entry ${first}` : `, ${breaks} from entry ${first} to entry ${last}`;
+}
+
 const breakColumns: Column<BreakInRange>[] = [
   { head: 'Entry', cell: (b) => b.entry },
   { head: 'Kind', cell: (b) => words(b.kind) },
@@ -196,9 +204,7 @@ function IncidentRecord({
             <dt>Chain</dt>
             <dd>
               {view.chain}
-              {view.breakCount && view.lastFailure
-                ? `, ${view.breakCount} ${view.breakCount === 1 ? 'break' : 'breaks'} from entry ${view.firstFailure} to entry ${view.lastFailure}`
-                : view.firstFailure && `, first failing entry ${view.firstFailure}`}
+              {breakRange(view)}
             </dd>
           </>
         )}
