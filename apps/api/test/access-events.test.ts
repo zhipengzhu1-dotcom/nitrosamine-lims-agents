@@ -326,7 +326,7 @@ it("under a Lockout, the Admin sees each of the person's sessions in this Lab th
   const lockout = events.find((e) => e.kind === 'Lockout');
   assert.ok(lockout?.kind === 'Lockout', 'the Lockout is listed');
   assert.deepEqual(
-    lockout.endedSessions.map((s) => [s.id, s.workstation]),
+    lockout.endedSessions?.map((s) => [s.id, s.workstation]),
     [
       [ended.id, null],
       [notYetNoticed.id, null],
@@ -345,6 +345,74 @@ it("under a Lockout, the Admin sees each of the person's sessions in this Lab th
       'SignInSucceeded',
     ],
     'newest first, with no event of the session in the QC Lab',
+  );
+});
+
+it('a Lockout stamped at the lock instant that ended no session in this Lab lists none', async () => {
+  const person = await api.addPerson('access.lockout-no-session', ['Analyst']);
+  await lockOut(person);
+
+  const { events } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  const lockout = events.find((e) => e.kind === 'Lockout');
+  assert.ok(lockout?.kind === 'Lockout', 'the Lockout is listed');
+  assert.deepEqual(lockout.endedSessions, [], 'the record proves the Lockout ended no session here');
+});
+
+/** Clears the person's lock, as an account unlock (#101) may, which lock_once refuses to lims_app today. */
+async function clearLock(account: Account): Promise<void> {
+  await audited(api.superuser, SYSTEM, async (tx) => {
+    await sql`alter table lims.person disable trigger lock_once`.execute(tx);
+    await tx.updateTable('person').set({ lockedAt: null }).where('id', '=', account.id).execute();
+    await sql`alter table lims.person enable trigger lock_once`.execute(tx);
+  });
+}
+
+it("a Lockout stamped at the lock instant still lists none after its person's lock is cleared", async () => {
+  const person = await api.addPerson('access.lockout-cleared', ['Analyst']);
+  await lockOut(person);
+  await clearLock(person);
+
+  const { events } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  const lockout = events.find((e) => e.kind === 'Lockout');
+  assert.ok(lockout?.kind === 'Lockout', 'the Lockout is listed');
+  assert.deepEqual(
+    lockout.endedSessions,
+    [],
+    'the Audit Trail still holds the lock instant the Lockout was stamped at',
+  );
+});
+
+/** Locks the person out as the LIMS did before #207: the Lockout is written after the lock, at its own instant. */
+async function lockOutUnstamped(account: Account): Promise<void> {
+  await audited(api.superuser, SYSTEM, async (tx) => {
+    await tx.updateTable('person').set({ lockedAt: sql`clock_timestamp()` }).where('id', '=', account.id).execute();
+    await sql`alter table lims.access_event disable trigger stamp_lockout`.execute(tx);
+    await tx
+      .insertInto('accessEvent')
+      .values({
+        kind: 'Lockout',
+        subjectId: account.id,
+        sourceAddress: '192.0.2.1',
+        roles: ['Analyst'],
+        at: sql`clock_timestamp() + interval '1 second'`,
+      })
+      .execute();
+    await sql`alter table lims.access_event enable trigger stamp_lockout`.execute(tx);
+  });
+}
+
+it('a Lockout recorded before Lockouts were stamped at the lock instant does not say it ended no session', async () => {
+  const person = await api.addPerson('access.lockout-unstamped', ['Analyst']);
+  await api.login(person);
+  await lockOutUnstamped(person);
+
+  const { events } = ok(await ada.call(routes.accessEvents, { id: person.id }));
+  const lockout = events.find((e) => e.kind === 'Lockout');
+  assert.ok(lockout?.kind === 'Lockout', 'the Lockout is listed');
+  assert.equal(
+    lockout.endedSessions,
+    null,
+    "the Lockout's instant is not a lock instant its person's Audit Trail holds, so the record cannot say what it ended",
   );
 });
 
@@ -485,7 +553,7 @@ it('a sign-out that meets a Lockout not yet committed ends its session at the Lo
   const lockout = events.find((e) => e.kind === 'Lockout');
   assert.ok(lockout?.kind === 'Lockout');
   assert.deepEqual(
-    lockout.endedSessions.map((s) => s.id),
+    lockout.endedSessions?.map((s) => s.id),
     [session.id],
   );
   assert.ok(!events.some((e) => e.kind === 'SignOut'), 'no sign-out is recorded for a session the Lockout ended');
