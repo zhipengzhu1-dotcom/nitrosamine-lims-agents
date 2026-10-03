@@ -6,7 +6,13 @@ import { refuse } from './refuse.ts';
 import type { WriteQueries } from './scope.ts';
 
 /** The records a Signature can be given on, each with its own canonical content in the database. */
-export type Signable = 'test' | 'test_report' | 'system_incident' | 'critical_data_change';
+export type Signable =
+  | 'test'
+  | 'test_report'
+  | 'system_incident'
+  | 'equipment'
+  | 'equipment_event'
+  | 'critical_data_change';
 
 /** The Record Version the signer saw: its id and the hash the sheet showed. */
 export interface Seen {

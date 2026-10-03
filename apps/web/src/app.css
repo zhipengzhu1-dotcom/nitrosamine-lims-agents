@@ -343,6 +343,9 @@ th {
   font-size: 13px;
   cursor: pointer;
 }
+.record-steps {
+  margin-bottom: 12px;
+}
 .pipe input {
   flex: none;
   width: 18px;
@@ -1451,4 +1454,9 @@ a.btn {
 }
 .changes p {
   margin: 4px 0 0;
+}
+
+/* The stored breaks follow the recomputed table, so the heading stands off it. */
+.recorded-breaks {
+  margin-top: 24px;
 }

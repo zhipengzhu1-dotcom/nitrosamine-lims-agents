@@ -297,8 +297,9 @@ $$;
 
 alter table lims.record_version
   drop constraint record_version_record_table_check,
-  add constraint record_version_record_table_check
-    check (record_table in ('test', 'test_report', 'system_incident', 'critical_data_change'));
+  add constraint record_version_record_table_check check (
+    record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'critical_data_change')
+  );
 
 create or replace function lims.save_record_version(p_lab_id uuid, p_table text, p_record_id uuid) returns void
 language plpgsql security definer set search_path = lims, pg_temp as $$
@@ -310,6 +311,9 @@ begin
     when 'test' then test_content(p_lab_id, p_record_id)
     when 'test_report' then test_report_content(p_lab_id, p_record_id)
     when 'system_incident' then incident_content(p_record_id)
+    when 'equipment' then (select equipment_content(e) from equipment e where e.lab_id = p_lab_id and e.id = p_record_id)
+    when 'equipment_event' then
+      (select equipment_event_content(v) from equipment_event v where v.lab_id = p_lab_id and v.id = p_record_id)
     when 'critical_data_change' then critical_data_change_content(p_lab_id, p_record_id)
   end)::text, 'UTF8');
   if bytes is null then return; end if;

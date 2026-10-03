@@ -73,6 +73,15 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   }),
   createAccount: entry(routes.createAccount, { identityVerificationId: randomUUID(), username: 'nell.newcomer' }),
   issueLink: entry(routes.issueLink, { personId: randomUUID() }),
+  registerEquipment: entry(routes.registerEquipment, {
+    kind: 'Balance',
+    name: 'BAL-99 (fictional)',
+    manufacturer: 'Fictional Instruments',
+    model: 'RX-5',
+    serial: 'SN-0099',
+    roomId: randomUUID(),
+    responsiblePersonId: randomUUID(),
+  }),
   issueEnrolmentGrant: entry(routes.issueEnrolmentGrant, { personId: randomUUID() }),
   grantMembership: entry(routes.grantMembership, { personId: randomUUID(), role: 'Analyst', reason: 'New starter' }),
   changePrintedName: entry(routes.changePrintedName, {

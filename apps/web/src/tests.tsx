@@ -236,7 +236,8 @@ export function TestPage({
 
 const resultLine = (r: Result) => `Result: ${r.analyte} ${r.value} ${r.unit}, performed on ${r.performedOn}`;
 
-const signatureKey = (s: Signature) => s.meaning + s.signedAt;
+/** A Signature's key among a record's Signatures: its Meaning and when it was given. */
+export const signatureKey = (s: Signature) => s.meaning + s.signedAt;
 
 /** The rail's line for a record with a Signature Meaning no Signature gives on it as it reads now, or nothing to say. */
 export function unsignedNotice(rows: Signature[]): string | undefined {

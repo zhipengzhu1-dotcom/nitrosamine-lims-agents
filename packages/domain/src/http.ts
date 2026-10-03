@@ -2,6 +2,7 @@ import type * as db from '@lims/db';
 import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
 import { type ChangeStepName, changeStepNames, reasonSteps } from './changes.ts';
+import type { EquipmentStepName } from './equipment.ts';
 import type { IncidentStepName } from './incidents.ts';
 import { type Step, type StepName, stepNames, steps } from './steps.ts';
 
@@ -451,6 +452,47 @@ const chainReading = Type.Object({
   verifiedBefore: nullable(Type.Object({ through: seq, at: instant, by: Type.String() })),
 });
 export type ChainReading = Static<typeof chainReading>;
+/**
+ * One break as the chain reads now: its first entry, its kind, and the last entry it covers, which is past the first
+ * only for a run of missing entries.
+ */
+const breakInRange = Type.Object({
+  entry: seq,
+  kind: Type.Enum({
+    Changed: 'Changed',
+    Missing: 'Missing',
+    HeadMoved: 'HeadMoved',
+    Contradicted: 'Contradicted',
+  } as const),
+  through: seq,
+});
+export type BreakInRange = Static<typeof breakInRange>;
+/**
+ * A break inside a System Incident's range, listed either as the chain reads now or as the incident stored it.
+ * `matches` says whether the other list holds the same break: the same entry, last entry and fingerprint.
+ */
+const listedBreak = Type.Object({ ...breakInRange.properties, matches: Type.Boolean() });
+export type ListedBreak = Static<typeof listedBreak>;
+/**
+ * Every break inside a chain verification System Incident's range, recomputed at `recomputedAt`, and whether they are
+ * still the breaks the incident recorded; false means the chain changed inside the range after the incident was opened.
+ * A contradicted Chain Verification is a break of its own kind at the entry it names: only an incident that stored one
+ * lists it, or one that stored none and records that break by its fingerprint, and every other incident lists the
+ * other kinds, so two incidents at one entry each list their own break. `recorded` is the breaks the incident stored
+ * when it opened, null for one opened before the LIMS stored them. `incidents` names the System Incidents that record the listed breaks now, other than this one.
+ * When the chain has changed there, the read records the change as Verify chain does, whether an Admin or QA reads,
+ * and `opened` names every System Incident it opened, anywhere on the chain, with the reader as its requesting person.
+ */
+const reference = Type.String({ pattern: `^${referencePattern}$` });
+const incidentBreaks = Type.Object({
+  recomputedAt: instant,
+  asRecorded: Type.Boolean(),
+  breaks: Type.Array(listedBreak),
+  recorded: Type.Union([Type.Array(listedBreak), Type.Null()]),
+  incidents: Type.Array(reference),
+  opened: Type.Array(reference),
+});
+export type IncidentBreaks = Static<typeof incidentBreaks>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainReading) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
 const auditExportFormat = Type.Enum({ JSON: 'JSON', CSV: 'CSV' } as const satisfies { [K in db.AuditExportFormat]: K });
@@ -553,6 +595,96 @@ const incidentRow = Type.Object({
   chain: systemIncident.properties.chain,
 });
 export type IncidentRow = Static<typeof incidentRow>;
+
+const fitnessStatus = Type.Enum({
+  Quarantined: 'Quarantined',
+  InUse: 'InUse',
+  Suspended: 'Suspended',
+  Expired: 'Expired',
+  Retired: 'Retired',
+} as const satisfies { [K in db.FitnessStatus]: K });
+/** Whether Equipment may be used: Quarantined until QA approves it, In use, Suspended, Expired past its due date, or Retired. */
+export type FitnessStatus = Static<typeof fitnessStatus>;
+const storedFitnessStatus = Type.Enum({
+  Quarantined: 'Quarantined',
+  InUse: 'InUse',
+  Suspended: 'Suspended',
+  Retired: 'Retired',
+} as const satisfies { [K in Exclude<db.FitnessStatus, 'Expired'>]: K });
+const equipmentEventKind = Type.Enum({
+  Cleaning: 'Cleaning',
+  Maintenance: 'Maintenance',
+  Repair: 'Repair',
+  SoftwareChange: 'SoftwareChange',
+  FirmwareChange: 'FirmwareChange',
+  Note: 'Note',
+  Suspect: 'Suspect',
+} as const satisfies { [K in db.EquipmentEventKind]: K });
+export type EquipmentEventKind = Static<typeof equipmentEventKind>;
+const roomRef = Type.Object({ id: Type.String(), name: Type.String() });
+export type RoomRef = Static<typeof roomRef>;
+/**
+ * One line of the Logbook, in the database's time order: an Equipment Event, a Fitness Status change, or a move. An
+ * Event carries its Performed Signature, null only on a Suspect; a change carries the Approved Signature given in the
+ * write that made it, null on a change no one signed.
+ */
+const logbookEntry = Type.Union([
+  Type.Object({
+    entry: Type.Literal('event'),
+    kind: equipmentEventKind,
+    note: Type.String(),
+    by: recorder,
+    at: instant,
+    signature: nullable(signature),
+  }),
+  Type.Object({
+    entry: Type.Literal('status'),
+    from: nullable(storedFitnessStatus),
+    to: storedFitnessStatus,
+    by: recorder,
+    at: instant,
+    signature: nullable(signature),
+  }),
+  Type.Object({ entry: Type.Literal('move'), from: roomRef, to: roomRef, by: recorder, at: instant }),
+]);
+export type LogbookEntry = Static<typeof logbookEntry>;
+const equipment = Type.Object({
+  id: Type.String(),
+  kind: Type.String(),
+  name: Type.String(),
+  manufacturer: Type.String(),
+  model: Type.String(),
+  serial: Type.String(),
+  assetNumber: nullable(Type.String()),
+  softwareVersion: nullable(Type.String()),
+  firmwareVersion: nullable(Type.String()),
+  room: roomRef,
+  responsiblePerson: recorder,
+  fitnessStatus: storedFitnessStatus,
+  registeredAt: instant,
+  /** The Record Version an Approved signing from this session binds: the Equipment as it is now. */
+  recordVersion: recordVersionRef,
+  statement: signatureStatement,
+  /** The Approved Signatures given on the Equipment, oldest first. */
+  signatures: Type.Array(signature),
+  logbook: Type.Array(logbookEntry),
+});
+export type Equipment = Static<typeof equipment>;
+/** One line of the Equipment list: enough to pick one out. */
+const equipmentRow = Type.Object({
+  id: Type.String(),
+  name: Type.String(),
+  kind: Type.String(),
+  room: Type.String(),
+  fitnessStatus: storedFitnessStatus,
+});
+export type EquipmentRow = Static<typeof equipmentRow>;
+/** What a registration may name: the Lab's Rooms and the staff who may answer for Equipment. */
+const equipmentChoices = Type.Object({
+  rooms: Type.Array(roomRef),
+  staff: Type.Array(Type.Object({ id: Type.String(), ...recorder.properties })),
+});
+export type EquipmentChoices = Static<typeof equipmentChoices>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** What a committed step answers, and what a retry of the same press answers again. */
 export type StepTaken = Static<typeof stepTaken>;
@@ -801,6 +933,35 @@ export const routes = {
   /** The System Incidents not yet Closed, newest first, for Admin and QA. */
   incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
   incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
+  /** Every break inside a chain verification System Incident's range, as this Lab's chain or the company chain reads now. */
+  incidentBreaks: route('GET', '/api/incidents/:reference/breaks', { params: byReference }, incidentBreaks),
+  /** The Lab's Equipment, by name, for its staff. */
+  equipmentList: route('GET', '/api/equipment', {}, Type.Array(equipmentRow)),
+  equipmentChoices: route('GET', '/api/equipment/choices', {}, equipmentChoices),
+  equipment: route('GET', '/api/equipment/:id', { params: byId }, equipment),
+  /** The Lab Manager registers Equipment, which starts Quarantined. */
+  registerEquipment: route(
+    'POST',
+    '/api/equipment',
+    {
+      body: Type.Object(
+        {
+          kind: text,
+          name: text,
+          manufacturer: text,
+          model: text,
+          serial: text,
+          assetNumber: Type.Optional(text),
+          softwareVersion: Type.Optional(text),
+          firmwareVersion: Type.Optional(text),
+          roomId: uuid,
+          responsiblePersonId: uuid,
+        },
+        closed,
+      ),
+    },
+    equipment,
+  ),
   /** The reasons a Critical Data Change step offers, in picklist order, ending with Other. */
   reasons: route(
     'GET',
@@ -849,6 +1010,47 @@ export function incidentStepRoute<K extends IncidentStepName>(name: K) {
     closed,
   );
   return route('POST', `/api/incident-steps/${name}`, { body }, systemIncident);
+}
+
+const equipmentStepInputs = {
+  approve: Type.Object({}, closed),
+  markSuspect: Type.Object({ reason: actionText }, closed),
+  /** A software or firmware change names the version now installed, so the record's identity stays current. */
+  recordEvent: Type.Union([
+    Type.Object(
+      {
+        kind: Type.Enum({ Cleaning: 'Cleaning', Maintenance: 'Maintenance', Repair: 'Repair', Note: 'Note' } as const),
+        note: actionText,
+      },
+      closed,
+    ),
+    Type.Object(
+      {
+        kind: Type.Enum({ SoftwareChange: 'SoftwareChange', FirmwareChange: 'FirmwareChange' } as const),
+        note: actionText,
+        version: text,
+      },
+      closed,
+    ),
+  ]),
+  move: Type.Object({ roomId: uuid }, closed),
+  retire: Type.Object({}, closed),
+} satisfies { [K in EquipmentStepName]: TSchema };
+/** What each Equipment step takes, as its route validates it. */
+export type EquipmentStepInputs = { [K in EquipmentStepName]: Static<(typeof equipmentStepInputs)[K]> };
+export interface EquipmentStepBody<K extends EquipmentStepName> {
+  id: string;
+  input: EquipmentStepInputs[K];
+  signature?: SigningBody;
+}
+
+/** The route of one step on Equipment: the body names the Equipment, carries the step's input, and a signature when the step signs. */
+export function equipmentStepRoute<K extends EquipmentStepName>(name: K) {
+  const body = Type.Object(
+    { ...byId.properties, input: equipmentStepInputs[name], signature: Type.Optional(signingBody) },
+    closed,
+  );
+  return route('POST', `/api/equipment-steps/${name}`, { body }, equipment);
 }
 
 /** The route of one step, whose body requires a Commit Key, a testId when the step starts from a state, and a signature when it signs. */
