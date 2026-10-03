@@ -5,6 +5,7 @@ import type { JsonObject } from '@lims/db';
 import {
   type ChecklistDraft,
   type ChecklistView,
+  evidenceSources,
   type ReviewSaved,
   routes,
   type StepInput,
@@ -152,6 +153,11 @@ function reviewContent(review: string) {
     .orderBy('version', 'desc')
     .executeTakeFirstOrThrow();
 }
+
+it('the evidence sources the domain names are the rows of lims.evidence_source, so no evidence item reads as unknown', async () => {
+  const rows = await api.superuser.selectFrom('evidenceSource').select('source').execute();
+  assert.deepEqual(rows.map((r) => r.source).sort(), [...evidenceSources].sort());
+});
 
 it('a Reviewer sees the Test checklist in force while the Test awaits review, with no ticks, and a Customer sees none', async () => {
   await api.approveChecklist();
