@@ -87,9 +87,17 @@ begin
   end loop;
 end $$;
 
--- The tables the gate reads for a fictional record: every one that carries the class except the deployment's own
+-- The tables the gate does not read for a fictional record, among those that carry the class: the deployment's own
 -- structure and accounts (a real deployment creates its Lab and owner before its class can change), sign-in and
--- signing infrastructure (whose rows hang off a record the gate finds) and change control itself.
+-- signing infrastructure (whose rows hang off a record the gate finds) and change control itself. Every other table
+-- that carries the class is read, so a captured table added later is read unless it is named here.
+create function lims.gate_exempt_tables() returns text[]
+language sql immutable as $$
+  select array['access_event', 'credential_link', 'deployment', 'identity_verification', 'lab', 'membership', 'person',
+               'reauthentication', 'record_version', 'release_log_entry', 'room', 'service_identity', 'signature',
+               'signature_statement', 'signing_role', 'workstation']
+$$;
+
 create function lims.fictional_records() returns text[]
 language plpgsql volatile security definer set search_path = lims, pg_temp as $$
 declare
@@ -97,12 +105,11 @@ declare
   found boolean;
   out   text[] := '{}';
 begin
-  for t in select c.table_name from information_schema.columns c
-            where c.table_schema = 'lims' and c.column_name = 'data_class'
-              and c.table_name not in ('deployment', 'release_log_entry', 'service_identity', 'signature_statement',
-                                       'signing_role', 'lab', 'person', 'membership', 'identity_verification',
-                                       'credential_link', 'room', 'workstation', 'access_event', 'reauthentication',
-                                       'record_version', 'signature')
+  -- The catalog, not information_schema, which would hide a table this role holds no privilege on.
+  for t in select c.relname from pg_attribute a join pg_class c on c.oid = a.attrelid
+             join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'lims' and c.relkind = 'r' and a.attname = 'data_class' and not a.attisdropped
+              and c.relname <> all (gate_exempt_tables())
             order by 1 loop
     execute format('select exists (select from lims.%I where data_class = ''fictional'')', t) into found;
     if found then out := out || t; end if;

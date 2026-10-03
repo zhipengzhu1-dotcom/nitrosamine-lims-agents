@@ -40,3 +40,23 @@ test('the Customer portal carries the fictional-data banner', async ({ page }) =
   await expect(banner(page)).toBeVisible();
   await shot(page, 'portal');
 });
+
+test('a deployment whose data class is real shows no banner', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'the class is read the same way on every browser');
+  await page.route('**/api/deployment', (route) => route.fulfill({ json: { dataClass: 'real' } }));
+  const answered = page.waitForResponse('**/api/deployment');
+  await page.goto('/');
+  await answered;
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  await expect(banner(page)).toHaveCount(0);
+});
+
+test('a deployment whose data class cannot be read keeps the banner', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'the class is read the same way on every browser');
+  await page.route('**/api/deployment', (route) => route.fulfill({ status: 500, json: { reference: 'probe' } }));
+  const answered = page.waitForResponse('**/api/deployment');
+  await page.goto('/');
+  await answered;
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  await expect(banner(page)).toBeVisible();
+});

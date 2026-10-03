@@ -309,6 +309,68 @@ describe('the real data class is set by an approved Release Log entry once every
   });
 });
 
+describe('no captured table escapes the real-data gate', () => {
+  let d: Deployment;
+  before(async () => {
+    d = await deployment('lims_data_class_coverage_test');
+  });
+  after(() => d.end());
+
+  it('every captured table but the deployment carries the data class it was created under', async () => {
+    const { rows } = await d.owner.query<{ table: string }>(
+      `select c.relname as table from pg_trigger g join pg_class c on c.oid = g.tgrelid
+         join pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'lims' and g.tgname = 'capture' and c.relname <> 'deployment'
+          and not exists (select from pg_attribute a where a.attrelid = c.oid and a.attname = 'data_class' and not a.attisdropped)
+        order by 1`,
+    );
+    assert.deepEqual(rows, []);
+  });
+
+  it('the gate leaves out only the named structure, account, sign-in, signing and change-control tables', async () => {
+    const { rows } = await d.owner.query<{ exempt: string[] }>('select lims.gate_exempt_tables() as exempt');
+    assert.deepEqual(rows[0]?.exempt, [
+      'access_event',
+      'credential_link',
+      'deployment',
+      'identity_verification',
+      'lab',
+      'membership',
+      'person',
+      'reauthentication',
+      'record_version',
+      'release_log_entry',
+      'room',
+      'service_identity',
+      'signature',
+      'signature_statement',
+      'signing_role',
+      'workstation',
+    ]);
+  });
+
+  it('a captured table added later is read by the gate without being named', async () => {
+    await d.owner.query('begin');
+    try {
+      await d.owner.query(AS_SERVICE('svc:test'));
+      // As a migration creates it: owned by the schema's owner.
+      await d.owner.query('set local role lims_owner');
+      await d.owner.query(
+        `create table lims.later_record (id uuid primary key default gen_random_uuid(),
+                                         data_class lims.data_class not null default lims.current_data_class())`,
+      );
+      await d.owner.query(
+        'create trigger capture after insert or update or delete on lims.later_record for each row execute function lims.capture()',
+      );
+      await d.owner.query('insert into lims.later_record default values');
+      const { rows } = await d.owner.query<{ held: string[] }>('select lims.fictional_records() as held');
+      assert.deepEqual(rows[0]?.held, ['later_record']);
+    } finally {
+      await d.owner.query('rollback');
+    }
+  });
+});
+
 describe('a captured write and a change of the data class take turns', () => {
   let d: Deployment;
   let other: pg.Client;
