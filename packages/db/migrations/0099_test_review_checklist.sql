@@ -274,7 +274,7 @@ begin
 end $$;
 
 -- Reviewed binds a Test Review complete on the Test checklist in force and saved by the signer; Approved binds a
--- checklist version once, and only one newer than the version in force.
+-- checklist version once, by a QA who did not draft it, and only one newer than the version in force.
 create function lims.check_review_signing() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 declare
@@ -315,6 +315,9 @@ begin
     if exists (select from signature s join record_version rv on rv.lab_id = s.lab_id and rv.id = s.record_version_id
                 where rv.record_table = 'review_checklist_version' and rv.record_id = chosen.id and s.meaning = 'Approved') then
       raise exception 'a Review Checklist version is signed Approved once' using errcode = 'LA010';
+    end if;
+    if chosen.saved_by = (select 'person:' || p.username from person p where p.id = new.person_id) then
+      raise exception 'a Review Checklist version is approved by a QA who did not draft it' using errcode = 'LA010';
     end if;
     select * into current from review_checklist_version where id = review_checklist_in_force(chosen.kind);
     if current.version >= chosen.version then

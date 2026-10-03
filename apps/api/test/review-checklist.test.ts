@@ -25,6 +25,7 @@ const [cora, samir, lena, ana, rui, quinn] = [
   api.person('quinn'),
 ];
 const rhea = await api.addPerson('rhea.second-reviewer', ['Reviewer']);
+const qiao = await api.addPerson('qiao.second-qa', ['QA']);
 const as = {
   cora: await api.login(cora),
   samir: await api.login(samir),
@@ -33,6 +34,7 @@ const as = {
   rui: await api.login(rui),
   quinn: await api.login(quinn),
   rhea: await api.login(rhea),
+  qiao: await api.login(qiao),
 };
 const performedSignature: ChecklistDraft['items'][number] = {
   key: 'performedSignature',
@@ -172,7 +174,7 @@ it('a Reviewer sees the Test checklist in force while the Test awaits review, wi
 
 it('an evidence item on an approved version shows the value the server computed: the Performed signer and role', async () => {
   const version = await draftNext([performedSignature]);
-  ok(await approveAs(as.quinn, quinn, version));
+  ok(await approveAs(as.qiao, qiao, version));
   const testId = await awaitingReview();
   const evidence = (await checklistOf(testId)).items.find((i) => i.key === 'performedSignature');
   assert.ok(evidence && !evidence.ticked, 'the evidence item is shown, not ticked');
@@ -182,7 +184,7 @@ it('an evidence item on an approved version shows the value the server computed:
 it('saving a Test Review that ticks an evidence item or a key the checklist lacks is refused as an unknown field', async () => {
   const testId = await awaitingReview();
   if (!(await checklistOf(testId)).items.some((i) => !i.ticked))
-    ok(await approveAs(as.quinn, quinn, await draftNext([performedSignature])));
+    ok(await approveAs(as.qiao, qiao, await draftNext([performedSignature])));
   const checklist = await checklistOf(testId);
   const evidence = checklist.items.find((i) => !i.ticked) ?? assert.fail('the version in force has an evidence item');
   const save = (ticks: Ticks) => as.rui.call(routes.saveReview, { testId, checklistVersion: checklist.version, ticks });
@@ -278,7 +280,7 @@ it('a draft leaves the version in force; once QA approves it, a Test Review save
   const review = await saved(testId);
   const next = await draftNext();
   assert.equal((await checklistOf(testId)).version, before.version, 'a draft is not in force');
-  ok(await approveAs(as.quinn, quinn, next));
+  ok(await approveAs(as.qiao, qiao, next));
   assert.equal((await checklistOf(testId)).version, next, 'the approved version is in force');
   assert.equal(
     refusedWith(await signReview(testId, review), 'recordChanged'),
@@ -338,15 +340,28 @@ it('only QA drafts or approves a Review Checklist version, and only a Reviewer s
 it('approving a version already approved, or one older than the version in force, is refused', async () => {
   const older = await draftNext();
   const newer = await draftNext();
-  ok(await approveAs(as.quinn, quinn, newer));
+  ok(await approveAs(as.qiao, qiao, newer));
   assert.equal(
-    refusedWith(await approveAs(as.quinn, quinn, newer), 'state'),
+    refusedWith(await approveAs(as.qiao, qiao, newer), 'state'),
     `Version ${newer} of the Test Review Checklist is already approved.`,
   );
   assert.equal(
-    refusedWith(await approveAs(as.quinn, quinn, older), 'state'),
+    refusedWith(await approveAs(as.qiao, qiao, older), 'state'),
     `Version ${newer} of the Test Review Checklist is in force, so version ${older} cannot be approved.`,
   );
+});
+
+it('a QA does not approve a Review Checklist version they drafted, and another QA does', async () => {
+  const version = await draftNext();
+  const drafted = (await versions()).versions.find((v) => v.version === version);
+  assert.equal(drafted?.draftedBy, quinn.username, 'the version names the QA who drafted it');
+  assert.equal(
+    refusedWith(await approveAs(as.quinn, quinn, version), 'guard'),
+    `You drafted version ${version} of the Test Review Checklist, so another QA approves it.`,
+  );
+  assert.equal((await versions()).inForce === version, false, 'the refused approval puts nothing in force');
+  ok(await approveAs(as.qiao, qiao, version));
+  assert.equal((await versions()).inForce, version, 'the second QA puts the version in force');
 });
 
 it('a draft whose evidence the checklist kind cannot show, or whose keys repeat, is refused', async () => {

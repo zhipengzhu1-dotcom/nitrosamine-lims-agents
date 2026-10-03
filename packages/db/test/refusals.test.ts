@@ -4122,9 +4122,9 @@ describe('a Signature is written only by the signing function, which refuses eve
       `select lims.version_review_checklist('${reauthentication}', '${version}')`,
       signChecklist(version, reauthentication),
     ];
-    /** Version 2 of the Test checklist, a copy of version 1, saved by QA and not yet approved. */
-    const draftV2 = () => [
-      asPerson('QA'),
+    /** Version 2 of the Test checklist, a copy of version 1, saved by `drafter` and not yet approved. */
+    const draftV2 = (drafter = actingAs('QA')) => [
+      drafter,
       `insert into lims.review_checklist_version (id, kind, version) values ('${v2}', 'Test', 2);
        insert into lims.review_checklist_item (version_id, kind, position, key, text, ticked, needs_comment, evidence)
        select '${v2}', kind, position, key, text, ticked, needs_comment, evidence
@@ -4258,6 +4258,11 @@ describe('a Signature is written only by the signing function, which refuses eve
         name: 'approving a Review Checklist version older than the one in force is refused',
         statements: () => [...holdsQaAndReviewer, ...draftV2(), ...approve(v2), ...approve(v1, secondApproval)],
         message: () => 'version 2 of the Test Review Checklist is in force, so version 1 cannot be approved',
+      },
+      {
+        name: 'a QA signing Approved on a Review Checklist version they drafted is refused',
+        statements: () => [...holdsQaAndReviewer, ...draftV2(asPerson('QA')), ...approve(v2)],
+        message: () => 'a Review Checklist version is approved by a QA who did not draft it',
       },
     ];
     for (const c of reviewCases)

@@ -406,6 +406,8 @@ const checklistVersions = Type.Object({
       version: Type.Integer({ minimum: 1 }),
       contentHash: sha256Hex,
       approved: Type.Boolean(),
+      /** The user ID of the QA who drafted the version; null for the version the LIMS seeded. */
+      draftedBy: nullable(Type.String()),
       items: Type.Array(checklistItem),
     }),
   ),

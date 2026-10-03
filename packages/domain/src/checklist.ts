@@ -33,6 +33,17 @@ export function checklistRefusal(items: readonly ChecklistItem[], ticks: Ticks):
   return null;
 }
 
+/** Refuses a QA approving a checklist version they drafted, so that a second QA has read every version put in force. */
+export function selfApprovalRefusal(
+  kind: ChecklistKind,
+  version: { version: number; draftedBy: string | null },
+  username: string,
+): Sentence | null {
+  return version.draftedBy === username
+    ? `You drafted version ${version.version} of the ${kind} Review Checklist, so another QA approves it.`
+    : null;
+}
+
 /** The first tick that names no ticked item of the checklist: an evidence item, or a key the checklist does not hold. */
 export function unknownTick(items: readonly ChecklistItem[], ticks: Ticks): Sentence | null {
   for (const key of Object.keys(ticks)) {

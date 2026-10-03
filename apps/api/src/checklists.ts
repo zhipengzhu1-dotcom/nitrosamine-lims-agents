@@ -10,6 +10,7 @@ import {
   isTicks,
   mayTake,
   routes,
+  selfApprovalRefusal,
   steps,
   unknownTick,
 } from '@lims/domain';
@@ -62,6 +63,7 @@ async function versionsOf(company: Company, kind: ChecklistKind): Promise<Checkl
     .select([
       'v.id',
       'v.version',
+      'v.savedBy',
       sql<string>`encode(lims.review_checklist_content_hash(v.id), 'hex')`.as('contentHash'),
       // A checklist is company-wide, so its Approved Signature may sit in any Lab's records (D9).
       sql<boolean>`exists (select from lims.signature s join lims.record_version rv
@@ -84,11 +86,12 @@ async function versionsOf(company: Company, kind: ChecklistKind): Promise<Checkl
     kind,
     statement: await statementInForce(company),
     inForce: inForce?.version ?? null,
-    versions: versions.map(({ id, version, contentHash, approved }) => ({
+    versions: versions.map(({ id, version, savedBy, contentHash, approved }) => ({
       id,
       version,
       contentHash,
       approved,
+      draftedBy: savedBy.startsWith('person:') ? savedBy.slice('person:'.length) : null,
       items: items.filter((i) => i.versionId === id).map((row) => itemOf(row)),
     })),
   };
@@ -212,6 +215,8 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
         refuse('notFound', `The ${kind} Review Checklist has no version ${version}.`);
       const inForce = await checklistInForce(scope.company, kind);
       if (chosen.approved) refuse('state', `Version ${version} of the ${kind} Review Checklist is already approved.`);
+      const drafter = selfApprovalRefusal(kind, chosen, actor.person.username);
+      if (drafter) refuse('guard', drafter);
       if (inForce && inForce.version >= version)
         refuse(
           'state',
