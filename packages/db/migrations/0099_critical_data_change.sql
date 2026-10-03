@@ -223,15 +223,19 @@ end $$;
 create trigger apply after insert on lims.critical_data_change_decision
   for each row when (new.outcome = 'Approved') execute function lims.apply_critical_data_change();
 
--- A Result's value is Critical Data (ADR 0001): it changes in place only as an approved Critical Data Change applies.
+-- A Result's value is Critical Data (ADR 0001): it changes in place only as an approved Critical Data Change applies,
+-- in the transaction that approved it, and the Result is never removed or moved to another Test.
 create function lims.refuse_unapproved_value_change() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 begin
+  if (new.lab_id, new.test_id) is distinct from (old.lab_id, old.test_id) then
+    raise exception 'a Result stays on the Test it was entered on' using errcode = 'LA017';
+  end if;
   if new.value is distinct from old.value and not exists (
     select from critical_data_change c
       join critical_data_change_decision d on d.lab_id = c.lab_id and d.change_id = c.id and d.outcome = 'Approved'
      where c.lab_id = old.lab_id and c.result_id = old.id
-       and c.id::text = this_transaction('lims.critical_data_change')
+       and c.id::text = this_transaction('lims.critical_data_change') and written_here(d.xmin)
        and c.old_value = old.value and c.new_value = new.value) then
     raise exception 'a Result''s value changes only through an approved Critical Data Change' using errcode = 'LA017';
   end if;
@@ -240,6 +244,17 @@ end $$;
 
 create trigger value_through_change before update on lims.result
   for each row execute function lims.refuse_unapproved_value_change();
+
+create function lims.refuse_removal() returns trigger
+language plpgsql as $$
+begin
+  raise exception '% rows are never removed', tg_table_name using errcode = 'LA002';
+end $$;
+
+create trigger refuse_removal before delete on lims.result
+  for each row execute function lims.refuse_removal();
+create trigger refuse_truncate before truncate on lims.result
+  for each statement execute function lims.refuse_removal();
 
 -- Canonical form 1 of a Critical Data Change: what an approver signs. It names the Test and the Record Version and
 -- hash it was proposed on, so the approval binds the record as it read.

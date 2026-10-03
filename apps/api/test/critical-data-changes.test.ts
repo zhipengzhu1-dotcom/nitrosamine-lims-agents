@@ -442,6 +442,56 @@ describe("a Result's value changes only through an approved Critical Data Change
     );
   });
 
+  it('a Result removed and entered again with a new value, or truncated, is refused', async () => {
+    const test = await performedTest();
+    const svc = { actor: 'svc:test', role: 'system', reason: 'Replace a Result' };
+    const replaced = await refusal(
+      audited(api.superuser, svc, async (tx) => {
+        const row = await tx.selectFrom('result').selectAll().where('id', '=', test.resultId).executeTakeFirstOrThrow();
+        await tx.deleteFrom('result').where('id', '=', test.resultId).execute();
+        await tx
+          .insertInto('result')
+          .values({ ...row, value: '0.0310' })
+          .execute();
+      }),
+    );
+    assert.deepEqual([replaced.code, replaced.message], ['LA002', 'result rows are never removed']);
+    const truncated = await refusal(audited(api.superuser, svc, (tx) => sql`truncate lims.result cascade`.execute(tx)));
+    assert.deepEqual([truncated.code, truncated.message], ['LA002', 'result rows are never removed']);
+    assert.equal(await resultValue(test.resultId), saved);
+  });
+
+  it('an approval from an earlier transaction is not replayed to change the value again', async () => {
+    const test = await performedTest();
+    const first = await propose(test);
+    await approve(first, test.testId);
+    const back = await propose(test, { oldValue: '0.0310', newValue: saved });
+    await approve(back, test.testId);
+    await refusedWith(
+      audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Replay an approval' }, async (tx) => {
+        await sql`select lims.set_this_transaction('lims.critical_data_change', ${first})`.execute(tx);
+        await tx.updateTable('result').set({ value: '0.0310' }).where('id', '=', test.resultId).execute();
+      }),
+      "a Result's value changes only through an approved Critical Data Change",
+    );
+  });
+
+  it('a Result moved to another Test is refused', async () => {
+    const test = await performedTest();
+    const { testId: other } = ok(
+      await as.cora.call(stepRoute('submit'), {
+        commitKey: randomUUID(),
+        input: { methodId: api.methodId, description: 'Sertraline HCl tablets (fictional)' },
+      }),
+    );
+    await refusedWith(
+      audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Move a Result' }, (tx) =>
+        tx.updateTable('result').set({ testId: other }).where('id', '=', test.resultId).execute(),
+      ),
+      'a Result stays on the Test it was entered on',
+    );
+  });
+
   it('a proposal and its decision are never changed or removed', async () => {
     const test = await performedTest();
     const changeId = await propose(test);
