@@ -134,7 +134,8 @@ export type RecomputedChain = {
   breaks: RecordedBreak[];
 } & Resumed;
 
-type TimedOut = { timedOut: ChainKind; withinSeconds: number };
+/** A chain whose recompute the read limit stopped, with the database's error, so that a System Incident can record it. */
+type TimedOut = { timedOut: ChainKind; withinSeconds: number; error: Error };
 export type VerifiedChains = { at: Instant; chains: RecomputedChain[] } | TimedOut;
 type Recomputed = Omit<RecomputedChain, 'chain' | 'chainId'>;
 
@@ -152,8 +153,11 @@ async function recompute(tx: Kysely<DB>, chain: string, everyEntry: boolean): Pr
       left join lateral (select * from lims.latest_chain_verification(${chain}) where not ${everyEntry}) as c on true
       left join lims.person as p on p.id = c.verified_by
     ), found as (
-      select b.*, row_number() over (order by b.seq) as n
-      from resume, lims.chain_breaks(${chain}, resume.through, resume.head) as b
+      select b.*, row_number() over (order by b.seq, b.kind) as n
+      from (select w.seq, w.kind, w.through, w.fingerprint
+            from resume, lims.chain_breaks(${chain}, resume.through, resume.head) as w
+            union all
+            select v.seq, v.kind, v.through, v.fingerprint from lims.chain_verification_breaks(${chain}) as v) as b
     ), recorded as (
       select seq, kind, through, 1 as breaks, fingerprint from found where n <= ${BREAKS_ONE_BY_ONE}
       union all
@@ -170,7 +174,7 @@ async function recompute(tx: Kysely<DB>, chain: string, everyEntry: boolean): Pr
         select json_agg(json_build_object(
           'entry', r.seq::text, 'kind', r.kind, 'through', r.through::text, 'breaks', r.breaks,
           'fingerprint', encode(r.fingerprint, 'hex')
-        ) order by r.seq)
+        ) order by r.seq, r.kind)
         from recorded as r
       ), '[]') as breaks
     from resume left join lims.audit_chain as chain_now on chain_now.chain = ${chain}`.execute(tx);
@@ -191,7 +195,7 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     /**
      * Recomputes this Lab's chain and the company chain from one snapshot, each from its latest Chain Verification
      * unless `everyEntry` asks for the whole chain, and each within `readLimitSeconds`: the first chain that overruns it is
-     * answered as `timedOut` instead of a failure.
+     * answered as `timedOut`, with the error, for the caller to record and refuse.
      */
     verifyAuditTrail: async ({
       everyEntry = false,
@@ -207,7 +211,8 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
           ['company', 'company'],
         ] as const) {
           const found = await recompute(tx, chainId, everyEntry).catch((error: unknown): TimedOut => {
-            if (postgresFault(error)?.sqlstate === '57014') return { timedOut: chain, withinSeconds: readLimitSeconds };
+            if (error instanceof Error && postgresFault(error)?.sqlstate === '57014')
+              return { timedOut: chain, withinSeconds: readLimitSeconds, error };
             throw new Error(`Verify chain could not recompute the ${chain} chain`, { cause: error });
           });
           if ('timedOut' in found) return found;

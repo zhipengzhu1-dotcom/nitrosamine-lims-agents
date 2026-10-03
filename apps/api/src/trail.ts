@@ -37,7 +37,7 @@ import {
 import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { Value } from 'typebox/value';
 import type { App } from './app.ts';
-import { openChainIncidents } from './incident.ts';
+import { openChainIncidents, openSystemIncident } from './incident.ts';
 import { refuse } from './refuse.ts';
 import {
   labScope,
@@ -320,7 +320,7 @@ export function trailRoutes(app: App, db: Kysely<DB>, readLimitSeconds?: number)
 async function verify(db: Kysely<DB>, req: FastifyRequest, options: VerifyOptions): Promise<AuditTrailVerification> {
   if (!req.actor.roles.includes('QA')) refuse('role', 'Verifying the Audit Trail is a QA action.');
   const scope = labScope(db, req.actor);
-  const { at, chains: recomputed } = chainsOf(await scope.verifyAuditTrail(options));
+  const { at, chains: recomputed } = await chainsOf(db, req, await scope.verifyAuditTrail(options));
   const chains = await chainReadings(db, req.log, req.actor, recomputed);
   const intact = recomputed.filter((c) => c.breaks.length === 0 && c.lastEntry !== '0');
   if (intact.length > 0)
@@ -341,14 +341,22 @@ async function verify(db: Kysely<DB>, req: FastifyRequest, options: VerifyOption
   return { at, chains };
 }
 
-/** The recomputed chains, or the refusal that names the chain whose recompute did not finish within the read limit. */
-export function chainsOf(verified: VerifiedChains): Extract<VerifiedChains, { chains: RecomputedChain[] }> {
-  if ('timedOut' in verified)
-    refuse(
-      'state',
-      `Verifying the ${verified.timedOut === 'lab' ? 'Lab' : 'company'} chain did not finish within ${verified.withinSeconds} seconds. Try again when the LIMS is less busy.`,
-    );
-  return verified;
+/**
+ * The recomputed chains, or, once a System Incident under the request's reference records the overrun, the refusal
+ * that names the chain whose recompute did not finish within the read limit, the limit and that incident; the incident
+ * is written on `db`'s own connection, so it lands while the read's transaction is aborted.
+ */
+export async function chainsOf(
+  db: Kysely<DB>,
+  req: FastifyRequest,
+  verified: VerifiedChains,
+): Promise<Extract<VerifiedChains, { chains: RecomputedChain[] }>> {
+  if (!('timedOut' in verified)) return verified;
+  await openSystemIncident(db, req, verified.error);
+  return refuse(
+    'state',
+    `Verifying the ${verified.timedOut === 'lab' ? 'Lab' : 'company'} chain did not finish within ${verified.withinSeconds} seconds, and System Incident ${req.id} records it. Try again when the LIMS is less busy.`,
+  );
 }
 
 /**

@@ -450,11 +450,11 @@ export function describeTrail(
 }
 
 /**
- * What a break is, as `lims.chain_breaks` finds it: an entry that fails to verify, a run of entries that are gone, or,
- * after the last entry, a chain head that does not match it. `More` is every break after the ones a verification
- * records one by one, taken together.
+ * What a break is, as `lims.chain_breaks` finds it: an entry that fails to verify, a run of entries that are gone,
+ * after the last entry a chain head that does not match it, or a Chain Verification the Audit Trail no longer matches.
+ * `More` is every break after the ones a verification records one by one, taken together.
  */
-export type BreakKind = 'Changed' | 'Missing' | 'HeadMoved' | 'More';
+export type BreakKind = 'Changed' | 'Missing' | 'HeadMoved' | 'Contradicted' | 'More';
 
 /**
  * A break as the database found it, with the System Incident that records it, before it is read for QA; `through` is
@@ -467,6 +467,7 @@ const failureOf = ({ entry, kind, through, breaks }: Omit<ChainBreakFound, 'inci
     Changed: `entry ${entry} fails to verify`,
     Missing: through === entry ? `entry ${entry} is missing` : `entries ${entry} to ${through} are missing`,
     HeadMoved: `the chain head does not match entry ${String(BigInt(entry) - 1n)}`,
+    Contradicted: `the Chain Verification through entry ${entry} does not match the Audit Trail`,
     More: `${breaks} more ${breaks === 1 ? 'break' : 'breaks'}, from entry ${entry} to entry ${through}`,
   })[kind];
 

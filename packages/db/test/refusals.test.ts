@@ -295,7 +295,7 @@ const fixture: [string, Row][] = [
       through: 1,
       head: literal("(select hash from lims.audit_entry where chain = 'company' and seq = 1)"),
       recomputed_from: 1,
-      verified_by: id.person,
+      verified_by: id.otherPerson,
     },
   ],
   [
@@ -578,7 +578,7 @@ const tables = {
       through: 1,
       head: literal("(select hash from lims.audit_entry where chain = 'company' and seq = 1)"),
       recomputed_from: 1,
-      verified_by: id.person,
+      verified_by: id.otherPerson,
     },
     notNull: ['id', 'chain', 'through', 'head', 'recomputed_from', 'verified_by', 'verified_at'],
   },
@@ -745,6 +745,7 @@ before(async () => {
   for (const [table, row] of fixture) {
     await client.query('begin');
     await client.query(AUDIT_CONTEXT);
+    if (table === 'lims.chain_verification') await client.query(actingAs('QA'));
     await signingStamp(row);
     await client.query(...insert(table, row));
     await client.query('commit');
@@ -770,6 +771,7 @@ it('the base row of every table is accepted, so each refusal below comes from th
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
+      if (table === 'lims.chain_verification') await client.query(actingAs('QA'));
       await signingStamp(tables[table].row);
       await client.query(...insert(table, tables[table].row));
     } finally {
@@ -3484,6 +3486,21 @@ describe("a Chain Verification names an entry of its chain and that entry's hash
   it('a Chain Verification through an entry its chain does not have is refused', async () => {
     const error = await refusalOfRow('lims.chain_verification', { through: 1000000 });
     assert.equal(error.code, 'LA014', error.message);
+  });
+  it('a Chain Verification recorded in a role other than QA is refused', async () => {
+    const error = await refusalOfRow('lims.chain_verification');
+    assert.deepEqual([error.code, error.message], ['LA015', 'a Chain Verification is recorded by QA, not system']);
+  });
+  it('a Chain Verification whose Verified by is not the acting QA is refused', async () => {
+    const error = await refusalOf(
+      `${actingAs('QA')};
+       insert into lims.chain_verification (chain, through, head, recomputed_from, verified_by)
+       select 'company', 1, hash, 1, '${id.person}' from lims.audit_entry where chain = 'company' and seq = 1`,
+    );
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA015', 'a Chain Verification is verified by the acting QA person:refusal.other, not person:refusal.person'],
+    );
   });
 });
 

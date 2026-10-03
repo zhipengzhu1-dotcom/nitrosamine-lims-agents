@@ -15,6 +15,7 @@ import {
   type ShownValue,
   storedInstants,
 } from '@lims/domain';
+import type { FastifyRequest } from 'fastify';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { PDF_COLUMNS, textPdf } from './pdf.ts';
@@ -241,11 +242,14 @@ const fileStem = (name: string, asOf: Instant) =>
 
 /**
  * One Customer's Audit Export as one snapshot of the database holds it, other Customers' identifiers redacted, with
- * the chains as that snapshot recomputes them.
+ * the chains as that snapshot recomputes them; `db` and `req` serve the System Incident a recompute that overruns the
+ * read limit opens, outside the snapshot's transaction.
  */
 async function exportData(
   scope: Scope,
   customerId: string,
+  db: Kysely<DB>,
+  req: FastifyRequest,
 ): Promise<Omit<AuditExportData, 'chains'> & { recomputed: RecomputedChain[] }> {
   const customer =
     (await customersSeen(scope).where('id', '=', customerId).executeTakeFirst()) ??
@@ -280,7 +284,7 @@ async function exportData(
       ]),
     ]),
   );
-  const verified = chainsOf(await scope.verifyAuditTrail());
+  const verified = await chainsOf(db, req, await scope.verifyAuditTrail());
   const [images, lab] = await Promise.all([
     imagesFor(scope, entries),
     scope.company
@@ -318,7 +322,7 @@ export function auditExportRoutes(app: App, db: Kysely<DB>): void {
         .transaction()
         .setIsolationLevel('repeatable read')
         .setAccessMode('read only')
-        .execute((tx) => exportData(labScope(tx, req.actor), customerId));
+        .execute((tx) => exportData(labScope(tx, req.actor), customerId, db, req));
       const data: AuditExportData = {
         ...head,
         chains: await chainReadings(db, req.log, req.actor, recomputed),
