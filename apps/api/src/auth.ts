@@ -251,16 +251,23 @@ export type { Reauthenticated };
 /**
  * Runs `write` in one audited transaction that holds the re-authenticated person's row first, so a Lockout lands wholly
  * before the write, which it then refuses as accountLocked and records as a failed authentication, or wholly after it.
- * The transaction is stamped with the person re-authenticated, which lims.unlock_session requires.
+ * The transaction is stamped with the person re-authenticated, which lims.unlock_session requires. `declare` runs
+ * before anything else and takes no lock: a declaration the database needs before the transaction's first lock.
  */
 export async function auditedAfterReauthentication<R>(
   db: Kysely<DB>,
   ctx: AuditContext,
   reauthenticated: Reauthenticated | undefined,
   write: (tx: Transaction<DB>) => Promise<R>,
+  declare?: (tx: Transaction<DB>) => Promise<void>,
 ): Promise<R> {
-  if (!reauthenticated) return audited(db, ctx, write);
+  if (!reauthenticated)
+    return audited(db, ctx, async (tx) => {
+      await declare?.(tx);
+      return write(tx);
+    });
   const done = await audited(db, ctx, async (tx) => {
+    await declare?.(tx);
     if (await resetFailuresUnlessLocked(tx, reauthenticated.personId)) return null;
     await sql`select lims.set_this_transaction('lims.reauthenticated', ${reauthenticated.personId})`.execute(tx);
     return { written: await write(tx) };

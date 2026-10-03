@@ -2885,6 +2885,8 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
   const approve = (person: string, session: string, entry = id.entry) =>
     signs(person, session, 'Approved', 'release_log_entry', entry);
   const stamp = (entry: string) => `select lims.set_this_transaction('lims.release_log', '${entry}')`;
+  /** Declares a change of the data class and takes the company chain, as an approval setting the class does first. */
+  const declared = ['select lims.declare_data_class_change()', `select lims.lock_chains('company')`];
   const probeEntry = `insert into lims.release_log_entry (id, kind, title, summary)
                       values ('${id.probeEntry}', 'ConfigurationChange', 'Probe entry', 'Retires an identity')`;
 
@@ -2968,6 +2970,12 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
       constraint: 'service_identity_scope_pair_check',
     },
     {
+      name: 'a service identity whose scope holds two pairs in one element is refused',
+      table: 'lims.service_identity',
+      change: { scope: ['customer:INSERT person:UPDATE'] },
+      constraint: 'service_identity_scope_pair_check',
+    },
+    {
       name: 'a service identity whose name is not svc: and a name is refused',
       table: 'lims.service_identity',
       change: { name: 'svc:' },
@@ -3020,6 +3028,7 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
       await refusedWith(
         'LA011',
         AUDIT_CONTEXT,
+        ...declared,
         `insert into lims.release_log_entry (id, kind, title, summary, sets_data_class, file_vault_personal_key)
          values ('${id.probeEntry}', 'ConfigurationChange', 'Real data', 'Takes real data', 'real', true)`,
         stamp(id.probeEntry),
@@ -3032,6 +3041,7 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
   covered.add('lims.deployment.deployment_set_by_entry_id_fkey');
   it('the deployment cannot cite a Release Log entry that does not exist', async () => {
     const error = await refusalOf(`update lims.deployment set set_by_entry_id = '${missing}'`, [], true, {}, [
+      ...declared,
       stamp(missing),
     ]);
     assertConstraint(error, '23503', 'lims.deployment', 'deployment_set_by_entry_id_fkey');
@@ -3040,6 +3050,7 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
   covered.add('lims.deployment.capture');
   it('a change to the deployment without an actor, a role and a reason is refused', async () => {
     const error = await refusalOf(`update lims.deployment set set_by_entry_id = '${id.entry}'`, [], false, {}, [
+      ...declared,
       stamp(id.entry),
     ]);
     assert.deepEqual([error.code, error.message], ['LA001', 'an audited write needs an actor, a role and a reason']);

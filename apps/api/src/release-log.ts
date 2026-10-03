@@ -4,7 +4,7 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { type Login, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
-import { type LabQueries, labScope, type Scope } from './scope.ts';
+import { type LabQueries, labScope, type Scope, type WriteQueries } from './scope.ts';
 import { statementInForce } from './steps.ts';
 
 /** Anchoring of the Audit Trail is not built, so the gate reads it as not live until the build that makes it a record. */
@@ -164,6 +164,11 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
       if (declared.statementVersion !== undefined && declared.statementVersion !== (await nextStatementVersion(scope)))
         refuse('guard', 'A new signature statement takes the version after the one in force.');
       if (declared.setsDataClass === 'real') await gateReal(scope, login, declared.fileVaultPersonalKey ?? false);
+      if (
+        declared.setsDataClass === 'fictional' &&
+        (await scope.company.selectFrom('deployment').select('dataClass').executeTakeFirstOrThrow()).dataClass === 'real'
+      )
+        refuse('state', 'The deployment holds real data, so no entry sets it back to the fictional data class.');
       const id = await scope.write(reason, role, async (q) => {
         const entry = await q.company
           .insertInto('releaseLogEntry')
@@ -207,6 +212,14 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
         'ReauthenticationFailed',
       );
       const sessionId = req.sessionKey.id;
+      // An entry setting the data class says so before the transaction's first chain, so the database locks the
+      // deployment row ahead of every chain, the order each captured write takes them in.
+      const declareClassChange =
+        entry.setsDataClass === null
+          ? undefined
+          : async (q: WriteQueries) => {
+              await sql`select lims.declare_data_class_change()`.execute(q.company);
+            };
       await scope.write(
         'Approve the Release Log entry',
         role,
@@ -228,6 +241,7 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
             .catch(signingRefused);
         },
         reauthenticated,
+        declareClassChange,
       );
       req.log.info({ entryId: entry.id }, 'release log entry approved');
       return one(scope, entry.id);

@@ -324,6 +324,42 @@ describe('approving a Release Log entry', () => {
     assert.match(message, /Every demo exception is recorded as lapsed; .*TwoRole/);
   });
 
+  it('an entry setting the data class is approved after a mistyped password, which leaves a failure count to clear', async () => {
+    const entry = await record(operator, { setsDataClass: 'fictional', fileVaultPersonalKey: false });
+    refusedWith(await approve(operator, entry, ada, { password: 'wrong' }), 'badCredentials');
+    assert.equal(ok(await approve(operator, entry, ada)).approved, true);
+    const { dataClass, setByEntryId } = await api.superuser
+      .selectFrom('deployment')
+      .select(['dataClass', 'setByEntryId'])
+      .executeTakeFirstOrThrow();
+    assert.deepEqual({ dataClass, setByEntryId }, { dataClass: 'fictional', setByEntryId: entry.id });
+  });
+
+  it('an entry setting the fictional data class is refused while the deployment holds real data', async () => {
+    // No approval can make this seeded deployment real, so the owner sets the class with every trigger off, and back.
+    const setClass = (to: 'real' | 'fictional') =>
+      api.superuser.connection().execute(async (c) => {
+        await sql`set session_replication_role = replica`.execute(c);
+        await sql`update lims.deployment set data_class = ${to}::lims.data_class`.execute(c);
+        await sql`reset session_replication_role`.execute(c);
+      });
+    await setClass('real');
+    try {
+      assert.match(
+        refusedWith(
+          await operator.call(
+            routes.recordReleaseLogEntry,
+            draft({ setsDataClass: 'fictional', fileVaultPersonalKey: true }),
+          ),
+          'state',
+        ),
+        /real data/,
+      );
+    } finally {
+      await setClass('fictional');
+    }
+  });
+
   it('an unknown entry is not found', async () => {
     const entry = await record(operator);
     const missing = { ...entry, id: '00000000-0000-4000-8000-000000000000' };

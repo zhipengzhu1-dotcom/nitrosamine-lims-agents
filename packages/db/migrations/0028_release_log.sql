@@ -31,14 +31,19 @@ create table lims.release_log_entry (
   constraint release_log_entry_exception_twice_check check (not (records_exceptions && lapses_exceptions))
 );
 
+-- True when every element of a scope is one 'table:OP' pair.
+create function lims.scope_pairs(p_scope text[]) returns boolean
+language sql immutable as $$
+  select coalesce(bool_and(x ~ '^[a-z_]+:(INSERT|UPDATE|DELETE)$'), true) from unnest(p_scope) x
+$$;
+
 -- A service identity acts only inside the record types and actions its entry declares, as 'table:OP' pairs.
 create table lims.service_identity (
   name                text primary key check (name like 'svc:_%'),
   scope               text[] not null check (cardinality(scope) > 0),
   created_by_entry_id uuid not null references lims.release_log_entry,
   retired_by_entry_id uuid references lims.release_log_entry,
-  constraint service_identity_scope_pair_check
-    check (array_to_string(scope, ' ') ~ '^[a-z_]+:(INSERT|UPDATE|DELETE)( [a-z_]+:(INSERT|UPDATE|DELETE))*$')
+  constraint service_identity_scope_pair_check check (lims.scope_pairs(scope))
 );
 
 -- The one deployment and its data class. Every deployment starts fictional.
@@ -68,12 +73,51 @@ select set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 's
        set_config('lims.reason', 'Every deployment starts with the fictional data class', true);
 insert into lims.deployment default values;
 
--- Every captured write reads the class under a share lock on the deployment row, so a write in flight and an approval
--- changing the class take turns: the approval waits for the write to commit, and then the gate sees its record.
+-- Every captured insert takes a share lock on the one deployment row here, so a change of the class serialises with
+-- captured writes: the approval waits for a write in flight to commit, and then the gate sees its record.
 create function lims.current_data_class() returns lims.data_class
 language sql volatile security definer set search_path = lims, pg_temp as $$
   select data_class from deployment for share
 $$;
+
+-- The deployment row is locked before any Audit Trail chain, by every transaction that writes a captured row: a share
+-- lock for an ordinary write, and for a transaction that declared it changes the data class, the lock its update
+-- takes. A change of the class that took a chain first would wait on a writer's share lock while the writer waits on
+-- that chain. The transaction declares the change before its first chain, so lock_chain takes the update's lock.
+create function lims.declare_data_class_change() returns void
+language plpgsql security definer set search_path = lims, pg_temp as $$
+begin
+  if this_transaction('lims.chains') is not null then
+    raise exception 'a change of the data class is declared before the transaction takes any Audit Trail chain'
+      using errcode = 'LA004';
+  end if;
+  perform set_this_transaction('lims.data_class_change', 'declared');
+end $$;
+
+create or replace function lims.lock_chain(p_chain text) returns void
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  held   text[] := coalesce(string_to_array(this_transaction('lims.chains'), ','), '{}');
+  latest text   := held[cardinality(held)];
+begin
+  if not p_chain = any(held) then
+    if latest is not null and (p_chain = 'company' or (latest <> 'company' and p_chain::uuid < latest::uuid)) then
+      raise exception 'chain % is locked after chain %; declare both chains when the transaction starts', p_chain, latest
+        using errcode = 'LA004';
+    end if;
+    if latest is null then
+      if this_transaction('lims.data_class_change') = 'declared' then
+        perform from deployment for no key update;
+        perform set_this_transaction('lims.data_class_change', 'locked');
+      else
+        perform from deployment for share;
+      end if;
+    end if;
+    insert into audit_chain (chain) values (p_chain) on conflict do nothing;
+    perform set_this_transaction('lims.chains', array_to_string(held || p_chain, ','));
+  end if;
+  perform from audit_chain where chain = p_chain for update;
+end $$;
 
 -- Every captured record carries the data class it was created under, so the gate can find a fictional one.
 do $$
@@ -147,8 +191,8 @@ language sql volatile security definer set search_path = lims, pg_temp as $$
    where last.recorded
 $$;
 
--- The data class changes only in the transaction that approves the entry setting it, and never to real while a
--- fictional record is held.
+-- The data class changes only in the transaction that approves the entry setting it, never to real while a fictional
+-- record is held, and never from real back to fictional, which would stamp later real records fictional.
 create function lims.data_class_through_release_log() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -157,6 +201,13 @@ declare
 begin
   if new.set_by_entry_id is null or this_transaction('lims.release_log') is distinct from new.set_by_entry_id::text then
     raise exception 'the data class changes only when a Release Log entry setting it is signed Approved' using errcode = 'LA011';
+  end if;
+  if this_transaction('lims.data_class_change') is distinct from 'locked' then
+    raise exception 'the data class changes only in a transaction that declared it before taking any Audit Trail chain'
+      using errcode = 'LA004';
+  end if;
+  if old.data_class = 'real' and new.data_class = 'fictional' then
+    raise exception 'a deployment holding real data does not return to the fictional data class' using errcode = 'LA011';
   end if;
   if new.data_class = 'real' then
     standing := open_demo_exceptions();
@@ -224,7 +275,7 @@ begin
     raise exception 'a Release Log entry is signed Approved, not %', new.meaning using errcode = 'LA011';
   end if;
   -- The row lock makes a second approval of the entry wait for the first, and then see it.
-  select * into e from release_log_entry where id = v.record_id for update;
+  select * into e from release_log_entry where id = v.record_id for no key update;
   approver := case when e.statement_version is not null then 'QA' else 'PlatformOperator' end;
   if new.role::text <> approver then
     raise exception 'a Release Log entry % is approved by %, not %',
@@ -355,12 +406,13 @@ create trigger version_record after insert or update or delete on lims.service_i
   for each row execute function lims.version_on_change();
 
 -- The Audit Trail capture now also holds a record to the data class of the deployment it was created under, and holds
--- a service identity to the scope its approved Release Log entry declares. The scope binds once any Release Log entry
--- is approved: the seed approves its entries, so a fresh database is held to them from the seed on, and a database
--- that held people before the Release Log keeps signing in until the Platform Operator approves the entry this
--- migration records for it. Setting the real data class is itself an approval, so on real data the scope always
--- binds. The database owner acting outside the LIMS is exempt, as from Identity Verification (0015): the owner's
--- writes are captured all the same.
+-- a service identity to the scope its approved Release Log entry declares. The scope binds once a Release Log entry
+-- declaring a service identity is approved, and always on the real data class. The seed approves its identities
+-- entry, so a fresh database is held to it from the seed on. A database that held people before the Release Log keeps
+-- its service identities unscoped, as before #102, until a Platform Operator approves the identities entry this
+-- migration records for it; approving any other entry first leaves sign-in working (deploy/README.md). The database
+-- owner acting outside the LIMS is exempt, as from Identity Verification (0015): the owner's writes are captured all
+-- the same.
 create or replace function lims.capture() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -386,7 +438,8 @@ begin
   end if;
   if e.actor like 'svc:%'
      and not (select rolsuper from pg_roles where rolname = session_user)
-     and exists (select from signature where meaning = 'Approved')
+     and (exists (select from service_identity d where release_log_entry_approved(d.created_by_entry_id))
+          or current_data_class() = 'real')
      and not exists (select from service_identity s
                       where s.name = e.actor and (tg_table_name || ':' || tg_op) = any (s.scope)
                         and release_log_entry_approved(s.created_by_entry_id)
@@ -416,7 +469,7 @@ grant insert (kind, title, summary, release, sets_data_class, file_vault_persona
 grant insert (name, scope, created_by_entry_id) on lims.service_identity to lims_app;
 grant update (retired_by_entry_id) on lims.service_identity to lims_app;
 grant execute on function lims.current_data_class(), lims.fictional_records(), lims.release_log_entry_approved(uuid),
-  lims.open_demo_exceptions() to lims_app;
+  lims.open_demo_exceptions(), lims.declare_data_class_change(), lims.scope_pairs(text[]) to lims_app;
 
 -- lims.sign, with a company record's Record Version (no Lab) signable from any Lab the signer acts in.
 create or replace function lims.sign(p_reauthentication_id uuid, p_session_id uuid, p_record_table text, p_record_id uuid,
