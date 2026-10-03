@@ -3,12 +3,12 @@ import {
   type ActorContext,
   type ChecklistItem,
   type ChecklistKind,
-  type ChecklistVersions,
   type ChecklistView,
   checklistRefusal,
   evidenceSources,
   isTicks,
   mayTake,
+  recordKind,
   routes,
   selfApprovalRefusal,
   steps,
@@ -21,6 +21,7 @@ import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type Scope } from './scope.ts';
 import { latestVersion, proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
+import { signatureReply, signatureReplyColumns } from './trail.ts';
 
 type Company = LabQueries['company'];
 
@@ -58,7 +59,38 @@ export async function checklistInForce(company: Company, kind: ChecklistKind) {
   return version && { ...version, items: (await itemsOf(company, [version.id])).map((row) => itemOf(row)) };
 }
 
-async function versionsOf(company: Company, kind: ChecklistKind): Promise<ChecklistVersions> {
+/**
+ * The Approved Signature of each version among `versionIds`, by version id. A checklist is company-wide, so its approving
+ * QA signs it in their own Lab (D9) and every Lab reads that Signature, reachable only through the version it signs. It
+ * shows as unsigned once the version no longer hashes to the content it was approved with.
+ */
+async function approvalsOf(db: Kysely<DB>, versionIds: string[]) {
+  if (!versionIds.length) return new Map<string, never>();
+  const rows = await db
+    .selectFrom('signature')
+    .innerJoin('recordVersion', (j) =>
+      j
+        .onRef('recordVersion.labId', '=', 'signature.labId')
+        .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
+    )
+    .select(signatureReplyColumns)
+    .select([
+      'recordVersion.recordId',
+      sql<boolean>`record_version.content_hash <> lims.review_checklist_content_hash(record_version.record_id)`.as(
+        'unsigned',
+      ),
+    ])
+    .where('recordVersion.recordTable', '=', 'review_checklist_version')
+    .where('recordVersion.recordId', 'in', versionIds)
+    .where('signature.meaning', '=', 'Approved')
+    .execute();
+  return new Map(
+    rows.map(({ recordId, ...row }) => [recordId, signatureReply(row, recordKind('review_checklist_version'))]),
+  );
+}
+
+/** Every version of one checklist read through the Lab's company tables; `db` reads only the Approved Signatures across Labs. */
+async function versionsOf(company: Company, db: Kysely<DB>, kind: ChecklistKind) {
   const versions = await company
     .selectFrom('reviewChecklistVersion as v')
     .select([
@@ -66,22 +98,13 @@ async function versionsOf(company: Company, kind: ChecklistKind): Promise<Checkl
       'v.version',
       'v.savedBy',
       sql<string>`encode(lims.review_checklist_content_hash(v.id), 'hex')`.as('contentHash'),
-      // A checklist is company-wide, so its Approved Signature may sit in any Lab's records (D9).
-      sql<boolean>`exists (select from lims.signature s join lims.record_version rv
-        on rv.lab_id = s.lab_id and rv.id = s.record_version_id
-        where rv.record_table = 'review_checklist_version' and rv.record_id = v.id and s.meaning = 'Approved')`.as(
-        'approved',
-      ),
     ])
     .where('v.kind', '=', kind)
     .orderBy('v.version')
     .execute();
-  const items = versions.length
-    ? await itemsOf(
-        company,
-        versions.map((v) => v.id),
-      )
-    : [];
+  const ids = versions.map((v) => v.id);
+  const items = ids.length ? await itemsOf(company, ids) : [];
+  const approvals = await approvalsOf(db, ids);
   const inForce = await checklistInForce(company, kind);
   const newest = versions.at(-1)?.version ?? 0;
   const sources = await company.selectFrom('evidenceSource').select('source').where('kind', '=', kind).execute();
@@ -90,11 +113,11 @@ async function versionsOf(company: Company, kind: ChecklistKind): Promise<Checkl
     statement: await statementInForce(company),
     inForce: inForce?.version ?? null,
     evidenceSources: evidenceSources.filter((source) => sources.some((s) => s.source === source)),
-    versions: versions.map(({ id, version, savedBy, contentHash, approved }) => ({
+    versions: versions.map(({ id, version, savedBy, contentHash }) => ({
       id,
       version,
       contentHash,
-      approved,
+      approval: approvals.get(id) ?? null,
       state: versionStateOf(version, newest, inForce?.version ?? null),
       draftedBy: savedBy.startsWith('person:') ? savedBy.slice('person:'.length) : null,
       items: items.filter((i) => i.versionId === id).map((row) => itemOf(row)),
@@ -153,7 +176,7 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
     ...routes.reviewChecklists,
     handler: async (req) => {
       if (req.actor.person.customerId !== null) refuse('role', 'A Review Checklist is not shown to a Customer User.');
-      return versionsOf(labScope(db, req.actor).company, req.params.kind);
+      return versionsOf(labScope(db, req.actor).company, db, req.params.kind);
     },
   });
 
@@ -205,7 +228,7 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
           .execute();
       });
       req.log.info({ step: 'draftReviewChecklist', kind }, 'step taken');
-      return versionsOf(scope.company, kind);
+      return versionsOf(scope.company, db, kind);
     },
   });
 
@@ -218,10 +241,10 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
         refuse('role', 'A Review Checklist version is approved by QA.');
       const scope = labScope(db, actor);
       const chosen =
-        (await versionsOf(scope.company, kind)).versions.find((v) => v.version === version) ??
+        (await versionsOf(scope.company, db, kind)).versions.find((v) => v.version === version) ??
         refuse('notFound', `The ${kind} Review Checklist has no version ${version}.`);
       const inForce = await checklistInForce(scope.company, kind);
-      if (chosen.approved) refuse('state', `Version ${version} of the ${kind} Review Checklist is already approved.`);
+      if (chosen.approval) refuse('state', `Version ${version} of the ${kind} Review Checklist is already approved.`);
       const drafter = selfApprovalRefusal(kind, chosen, actor.person.username);
       if (drafter) refuse('guard', drafter);
       if (inForce && inForce.version >= version)
@@ -279,7 +302,7 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
         reauthenticated,
       );
       req.log.info({ step: 'approveReviewChecklist', kind, version }, 'step taken');
-      return versionsOf(scope.company, kind);
+      return versionsOf(scope.company, db, kind);
     },
   });
 

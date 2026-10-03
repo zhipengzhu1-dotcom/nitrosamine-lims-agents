@@ -407,7 +407,8 @@ const checklistVersions = Type.Object({
       id: uuid,
       version: Type.Integer({ minimum: 1 }),
       contentHash: sha256Hex,
-      approved: Type.Boolean(),
+      /** The Approved Signature that put the version in force, read from whichever Lab the approving QA signed in; null on a version never approved. */
+      approval: nullable(signature),
       /** In force, the Draft QA may approve, or Superseded, as the server decides it (D14). */
       state: Type.Enum(checklistVersionStates),
       /** The user ID of the QA who drafted the version; null for the version the LIMS seeded. */

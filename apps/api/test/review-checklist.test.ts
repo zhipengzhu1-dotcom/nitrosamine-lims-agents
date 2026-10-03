@@ -14,7 +14,7 @@ import {
   type Ticks,
 } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, type Client, ok, onLabClock, refusedWith, startApi, toMillis } from './harness.ts';
 
 const api = await startApi('lims_api_review_checklist_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -391,6 +391,45 @@ it('a QA does not approve a Review Checklist version they drafted, and another Q
   assert.equal((await versions()).inForce === version, false, 'the refused approval puts nothing in force');
   ok(await approveAs(as.qiao, qiao, version));
   assert.equal((await versions()).inForce, version, 'the second QA puts the version in force');
+});
+
+it('an approved version shows its Approved Signature in every Lab, with printed name, time and meaning, and a draft shows none', async () => {
+  const version = await draftNext();
+  ok(await approveAs(as.qiao, qiao, version));
+  const draft = await draftNext();
+  const inQc = ok(await (await api.login(rui, api.qcLabId)).call(routes.reviewChecklists, { kind: 'Test' }));
+  const shown = inQc.versions.find((v) => v.version === version) ?? assert.fail(`no version ${version}`);
+  const approval = shown.approval ?? assert.fail('a Reviewer in the QC Lab sees the Approved Signature QA gave in R&D');
+  const stored = await api.superuser
+    .selectFrom('signature')
+    .innerJoin('recordVersion', (j) =>
+      j
+        .onRef('recordVersion.labId', '=', 'signature.labId')
+        .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
+    )
+    .select(['signature.printedName', 'signature.signedAt'])
+    .where('recordVersion.recordId', '=', shown.id)
+    .executeTakeFirstOrThrow();
+  assert.deepEqual(
+    {
+      meaning: approval.meaning,
+      signer: approval.signer,
+      username: approval.username,
+      role: approval.role,
+      signedAt: approval.signedAt,
+      record: approval.record,
+    },
+    {
+      meaning: 'Approved',
+      signer: stored.printedName,
+      username: qiao.username,
+      role: 'QA',
+      signedAt: stored.signedAt.toISOString(),
+      record: 'Review Checklist version',
+    },
+  );
+  assert.equal(toMillis(approval.signedAtLab), onLabClock(approval.signedAt), 'the time on the signing Lab’s clock');
+  assert.equal(inQc.versions.find((v) => v.version === draft)?.approval, null, 'a draft carries no Approved Signature');
 });
 
 it('each version reads with its state: the version in force, the newest draft above it, and an older draft Superseded', async () => {

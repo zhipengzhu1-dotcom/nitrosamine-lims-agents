@@ -10,9 +10,10 @@ import {
   routes,
   selfApprovalRefusal,
 } from '@lims/domain';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api, useApi, useFresh } from './api.ts';
 import { type RailAction, Shell, Status } from './rail.tsx';
+import { Signatures } from './tests.tsx';
 
 type Version = ChecklistVersions['versions'][number];
 type Fill = 'tick' | 'comment' | EvidenceSource;
@@ -175,12 +176,14 @@ const fills = (sources: readonly EvidenceSource[], current: Fill): Fill[] => [
 
 function VersionCard({ version, fresh }: { version: Version; fresh: boolean }) {
   const mark = version.state;
+  const approval = useMemo(() => (version.approval ? [version.approval] : []), [version.approval]);
   return (
     <article className="card checklist-version" aria-labelledby={`version-${version.version}`}>
       <h3 id={`version-${version.version}`}>
         Version {version.version} <Status key={mark} mark={mark} fresh={fresh} />
       </h3>
       <p className="muted">Drafted by {version.draftedBy ?? 'the LIMS, as seeded'}</p>
+      {approval.length > 0 && <Signatures rows={approval} />}
       <ol className="checklist-version__items">
         {version.items.map((item) => (
           <li key={item.key}>

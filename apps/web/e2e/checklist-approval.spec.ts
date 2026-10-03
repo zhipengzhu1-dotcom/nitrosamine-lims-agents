@@ -66,4 +66,11 @@ test('QA drafts a Review Checklist version, is refused approving their own draft
     `Approved Signature recorded in the Audit Trail. Version ${next} of the ${kind} Review Checklist is in force.`,
   );
   await expect(drafted.getByText('In force', { exact: true })).toBeVisible();
+  const approval = drafted.locator('tr', {
+    has: page.locator('td[data-label="Meaning"] .sig', { hasText: 'Approved' }),
+  });
+  await expect(approval.locator('td[data-label="Signed by"]'), 'the version shows who signed it').toContainText(
+    '(qiu.qa, QA)',
+  );
+  await expect(approval.locator('td[data-label="Time"]'), 'and when').not.toBeEmpty();
 });
