@@ -102,7 +102,6 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
         .onRef('recordVersion.labId', '=', 'signature.labId')
         .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
     )
-    .innerJoin('lab', 'lab.labId', 'signature.labId')
     .select([
       'signature.meaning',
       'signature.printedName as signer',
@@ -110,7 +109,7 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
       'signature.role',
       sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
       'signature.signedAt',
-      onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('lab.time_zone')).as('signedAtLab'),
+      onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('signature.signed_time_zone')).as('signedAtLab'),
       'recordVersion.version',
       'recordVersion.canonicalForm',
       sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),

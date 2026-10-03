@@ -133,6 +133,25 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
       );
 }
 
+/** The UTC instant `at` as ISO 8601 on the wall clock of `timeZone`, with that zone's offset, as Intl renders it. */
+export function onLabClock(at: string, timeZone = 'America/New_York'): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset',
+    // oxlint-disable-next-line no-restricted-globals -- parses an instant to render it; reads no clock
+  }).formatToParts(new Date(at));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '';
+  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice(3);
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${at.slice(19, -1)}${offset}`;
+}
+
 /** A fresh 32-byte key for one test API. */
 const key = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
 const accessEventKey = key();

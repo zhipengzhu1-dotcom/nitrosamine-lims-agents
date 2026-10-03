@@ -13,7 +13,7 @@ import {
   type TrailEntry,
 } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
+import { type Account, type Client, ok, onLabClock, refusedWith, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_trail_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -115,24 +115,6 @@ it("the Test's trail lists the Test's, its Result's and Signatures' entries with
   const otherTrail = await trailOf(other);
   assert.ok(!entries.some((e) => otherTrail.entries.some((o) => o.raw.chain === e.raw.chain && o.seq === e.seq)));
 });
-
-function onLabClock(at: string, timeZone = 'America/New_York'): string {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-    timeZoneName: 'longOffset',
-    // oxlint-disable-next-line no-restricted-globals -- parses an instant to render it; reads no clock
-  }).formatToParts(new Date(at));
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '';
-  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice(3);
-  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${at.slice(19, -1)}${offset}`;
-}
 
 it("each entry carries the actor's label and role, the field's glossary name, old and new value, the reason, and UTC plus Lab-zone time; company-chain entries carry UTC only", async () => {
   const id = await submitTestTo('Assigned');
