@@ -4,6 +4,7 @@ import {
   type ChangeStepBody,
   type ChangeStepName,
   changeRefusal,
+  type RefusalKind,
   changeStepRoute,
   changeSteps,
   routes,
@@ -16,15 +17,24 @@ import { labScope } from './scope.ts';
 import { proveReauthentication, signRecord } from './signing.ts';
 import { changeFactsFor, seenVersion } from './steps.ts';
 
+/** The refusal kind of each SQLSTATE the change triggers raise, as the step registry names the same refusal. */
+const refusalKinds: Readonly<Record<string, Exclude<RefusalKind, 'failure'>>> = {
+  LA017: 'guard',
+  LA018: 'changePending',
+  LA019: 'recordChanged',
+  LA020: 'state',
+};
+
 /**
- * The database's own refusals of a proposal or decision (LA017, and a second decision on one change) reach the bench as
- * refusals; any other failure is thrown with its cause.
+ * The database's own refusals of a proposal or decision, and a second decision on one change, reach the bench as the
+ * registry's refusals; any other failure is thrown with its cause.
  */
 function changeRefused(error: unknown): never {
   const fault = postgresFault(error);
-  if (fault?.sqlstate === '23505') refuse('stale', 'The Critical Data Change has moved on. Reload the Test.');
-  if (fault?.sqlstate === 'LA017' && error instanceof Error)
-    refuse('guard', `The Critical Data Change was refused: ${error.message}.`);
+  if (fault?.sqlstate === '23505' && fault.constraint === 'critical_data_change_decision_lab_id_change_id_key')
+    refuse('stale', 'The Critical Data Change has moved on. Reload the Test.');
+  const kind = fault && refusalKinds[fault.sqlstate];
+  if (kind && error instanceof Error) refuse(kind, `The Critical Data Change was refused: ${error.message}.`);
   throw new Error('the Critical Data Change step failed in the database', { cause: error });
 }
 

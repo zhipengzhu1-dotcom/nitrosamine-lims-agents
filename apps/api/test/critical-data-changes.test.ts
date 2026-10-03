@@ -195,9 +195,9 @@ async function refusal(write: Promise<unknown>): Promise<Refusal> {
   return assert.fail('the database accepted the write');
 }
 
-async function refusedWith(write: Promise<unknown>, message: string): Promise<void> {
+async function refusedWith(write: Promise<unknown>, message: string, code = 'LA017'): Promise<void> {
   const error = await refusal(write);
-  assert.deepEqual([error.code, error.message], ['LA017', message]);
+  assert.deepEqual([error.code, error.message], [code, message]);
 }
 
 const resultValue = async (resultId: string) =>
@@ -229,6 +229,7 @@ describe('a Critical Data Change is proposed by the person acting, on the value 
     await refusedWith(
       propose(await performedTest(), { oldValue: '0.0299' }),
       "the old value is not the Result's current value",
+      'LA019',
     );
   });
 
@@ -238,6 +239,7 @@ describe('a Critical Data Change is proposed by the person acting, on the value 
     await refusedWith(
       propose(test, { newValue: '0.0320' }),
       'a Critical Data Change on this Result is already pending',
+      'LA018',
     );
   });
 
@@ -277,6 +279,7 @@ describe('only the assigned Analyst, acting as Analyst, proposes, on a Test in S
     await refusedWith(
       propose(test),
       'a Critical Data Change is proposed on a Test in SubmittedForReview or Reviewed state, not Reported',
+      'LA020',
     );
   });
 
@@ -391,7 +394,11 @@ describe('a Critical Data Change is decided once: withdrawn by its proposer, app
       { actor: 'svc:test', role: 'system', reason: 'Change the Test after a proposal' },
       (tx) => tx.updateTable('result').set({ notebookRef: 'NB-RD-0001-013' }).where('id', '=', test.resultId).execute(),
     );
-    await refusedWith(approve(changeId, test.testId), 'the Test changed after the Critical Data Change was proposed');
+    await refusedWith(
+      approve(changeId, test.testId),
+      'the Test changed after the Critical Data Change was proposed',
+      'LA019',
+    );
   });
 
   it('an approval makes the new value current, under a Record Version of the change that its Signature binds', async () => {
@@ -904,6 +911,59 @@ describe('the bench proposes, approves, rejects and withdraws a Critical Data Ch
     refusedOver(await withdraw(as.dana, changeId), 'guard');
     ok(await withdraw(as.ana, changeId));
     refusedOver(await withdraw(as.ana, changeId), 'state');
+  });
+});
+
+/**
+ * Sends `presses` while the Lab chain is held, so each passes the registry and then waits in the database; `meanwhile`
+ * writes under the held chain before it is let go, so a press can meet what the registry did not see.
+ */
+async function pastTheRegistry<T>(
+  presses: (() => Promise<T>)[],
+  meanwhile: (tx: Transaction<DB>) => Promise<unknown> = async () => {},
+): Promise<T[]> {
+  let pressed: Promise<T[]> | undefined;
+  await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Hold the Lab chain' }, async (tx) => {
+    await sql`select lims.lock_chains(${api.labId}::text)`.execute(tx);
+    pressed = Promise.all(presses.map((press) => press()));
+    await api.untilWaitingOnLocks(presses.length);
+    await meanwhile(tx);
+  });
+  return pressed ?? assert.fail('the presses were sent');
+}
+
+describe("a refusal only the database sees reaches the bench as the registry's own kind", () => {
+  it('a second proposal sent at once is refused as changePending', async () => {
+    const { testId } = await performedTest();
+    const answers = await pastTheRegistry([() => proposeOver(testId), () => proposeOver(testId, as.ana, '0.0320')]);
+    const [first, second] = answers.sort((a, b) => Number(b.kind === 'reply') - Number(a.kind === 'reply'));
+    assert.ok(first && second);
+    ok(first);
+    refusedOver(second, 'changePending');
+  });
+
+  it('a proposal that meets a Test released meanwhile is refused as state', async () => {
+    const { testId } = await performedTest();
+    const [answer] = await pastTheRegistry([() => proposeOver(testId)], (tx) =>
+      tx.updateTable('test').set({ state: 'Reported' }).where('id', '=', testId).execute(),
+    );
+    assert.ok(answer);
+    refusedOver(answer, 'state');
+  });
+
+  it('an approval that meets a Test changed after the proposal is refused as recordChanged', async () => {
+    const test = await performedTest();
+    ok(await proposeOver(test.testId));
+    await audited(
+      api.superuser,
+      { actor: 'svc:test', role: 'system', reason: 'Change the Test after a proposal' },
+      (tx) => tx.updateTable('result').set({ notebookRef: 'NB-RD-0001-013' }).where('id', '=', test.resultId).execute(),
+    );
+    const approval = await approvalOf(as.rui, test.testId, rui);
+    refusedOver(
+      await as.rui.call(changeStepRoute('approveChange'), { testId: test.testId, ...approval }),
+      'recordChanged',
+    );
   });
 });
 

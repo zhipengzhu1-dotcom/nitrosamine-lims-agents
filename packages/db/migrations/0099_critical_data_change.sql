@@ -1,6 +1,8 @@
 -- Critical Data Changes on saved values (#105; ADR 0001; #45). A saved Result value changes only through an approved
 -- Critical Data Change: a proposal, then one decision (Approved, Rejected or Withdrawn). Every step off the normal path
--- takes its reason from the picklist store.
+-- takes its reason from the picklist store. A step refused by who takes it or what it carries raises LA017; one that
+-- meets a change already pending raises LA018, one that meets the record changed since it was read LA019, and one on a
+-- Test in the wrong state LA020, so the API answers each as the step registry would.
 
 set local role lims_owner;
 
@@ -119,17 +121,17 @@ begin
   end if;
   if proposed_on.state not in ('SubmittedForReview', 'Reviewed') then
     raise exception 'a Critical Data Change is proposed on a Test in SubmittedForReview or Reviewed state, not %',
-      proposed_on.state using errcode = 'LA017';
+      proposed_on.state using errcode = 'LA020';
   end if;
   select value into current_value from result where lab_id = new.lab_id and id = new.result_id and test_id = new.test_id;
   if current_value is distinct from new.old_value then
-    raise exception 'the old value is not the Result''s current value' using errcode = 'LA017';
+    raise exception 'the old value is not the Result''s current value' using errcode = 'LA019';
   end if;
   if exists (select from critical_data_change c
               where c.lab_id = new.lab_id and c.result_id = new.result_id
                 and not exists (select from critical_data_change_decision d
                                  where d.lab_id = c.lab_id and d.change_id = c.id)) then
-    raise exception 'a Critical Data Change on this Result is already pending' using errcode = 'LA017';
+    raise exception 'a Critical Data Change on this Result is already pending' using errcode = 'LA018';
   end if;
   perform check_picklist_reason('proposeChange', new.reason_id, new.reason_text);
   new.proposed_at := clock_timestamp();
@@ -201,7 +203,7 @@ begin
                 where v.lab_id = change.lab_id and v.record_table = 'test' and v.record_id = change.test_id
                   and v.version > (select version from record_version
                                     where lab_id = change.lab_id and id = change.proposed_on_version)) then
-      raise exception 'the Test changed after the Critical Data Change was proposed' using errcode = 'LA017';
+      raise exception 'the Test changed after the Critical Data Change was proposed' using errcode = 'LA019';
     end if;
   else
     perform check_picklist_reason(case new.outcome when 'Rejected' then 'rejectChange' else 'withdrawChange' end,
