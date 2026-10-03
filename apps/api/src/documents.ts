@@ -259,6 +259,10 @@ function registerDocumentStep<K extends DocumentStepName>(
             statementVersion: signature.statementVersion,
             release,
           });
+        } else {
+          // A signing step takes the Lab chain first, through its re-authentication record; so does this step, before
+          // it locks the version's row, so the two never deadlock.
+          await sql`select lims.lock_chains(${actor.lab.id}::text)`.execute(q.company);
         }
         await move(q, name, body, newest.id, facts, due);
       },
