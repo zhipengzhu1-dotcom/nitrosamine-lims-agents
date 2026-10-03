@@ -83,11 +83,13 @@ test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs
 
   await openTest(page, 'rui.reviewer', testId);
   await expect(page.getByRole('button', { name: 'Approve change' })).toBeVisible();
+  await shot(page, 'reject-offered');
   await page.getByRole('button', { name: 'Reject change' }).click();
   await expect(sheet(page).getByLabel(/Password/)).toHaveCount(0);
   await sheet(page)
     .getByRole('combobox', { name: 'Reason', exact: true })
     .selectOption('Not supported by the raw data');
+  await sheet(page).evaluate((form) => Promise.all(form.getAnimations({ subtree: true }).map((a) => a.finished)));
   await shot(page, 'reject-sheet');
   await sheet(page).getByRole('button', { name: 'Reject change' }).click();
   await railSays(page, 'The Critical Data Change is rejected. The Result is unchanged.');
