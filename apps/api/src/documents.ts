@@ -53,7 +53,7 @@ async function readDocument(scope: Scope, id: string) {
       'documentVersion.body',
       'person.username',
       'person.displayName',
-      sql<string | null>`to_char(document_version.effective_date, 'YYYY-MM-DD')`.as('effectiveDate'),
+      sql<string>`to_char(document_version.effective_date, 'YYYY-MM-DD')`.as('effectiveDate'),
       'documentVersion.abandonReason',
     ])
     .where('documentVersion.documentId', '=', id)
@@ -162,7 +162,7 @@ async function move<K extends DocumentStepName>(
   const input: DocumentStepBody<DocumentStepName>['input'] = body.input;
   if (name === 'signAuthored') await moved({ status: 'InReview' });
   if (name === 'abandon' && 'reason' in input) await moved({ status: 'Abandoned', abandonReason: input.reason });
-  if (name === 'signApproved' && 'effectiveDate' in input) {
+  if (name === 'signApproved') {
     await moved({ status: 'Approved' });
     if (!due) return;
     const { documentId } = await q
@@ -219,11 +219,14 @@ function registerDocumentStep<K extends DocumentStepName>(
         );
     }
     let due = false;
-    if ('effectiveDate' in body.input) {
+    if (name === 'signApproved') {
       const today = await labToday(db, actor.lab.id);
-      if (body.input.effectiveDate < today)
-        refuse('guard', `The Effective Date is ${today}, the Lab's today, or later.`);
-      due = body.input.effectiveDate === today;
+      if (newest.effectiveDate < today)
+        refuse(
+          'guard',
+          `This version's Effective Date, ${newest.effectiveDate}, has passed in the Lab, so it is not Approved. Abandon it.`,
+        );
+      due = newest.effectiveDate === today;
     }
     const reauthenticated =
       step.signs !== null && signature
@@ -241,14 +244,6 @@ function registerDocumentStep<K extends DocumentStepName>(
       name,
       role,
       async (q) => {
-        if (name === 'signApproved' && 'effectiveDate' in body.input)
-          await q
-            .update('documentVersion')
-            .set({ effectiveDate: body.input.effectiveDate })
-            .where('id', '=', newest.id)
-            .where('status', '=', 'InReview')
-            .execute()
-            .catch(movedOn);
         if (step.signs !== null && signature && reauthenticated && seen) {
           const proof = await proveReauthentication(q, actor, req.sessionKey.id, step.signs, reauthenticated);
           await signRecord(q, {
@@ -316,6 +311,8 @@ export function documentRoutes(app: App, db: Kysely<DB>, credentials: Credential
       const role =
         documentAuthors.find((r) => actor.roles.includes(r)) ??
         refuse('role', `Writing a Document is taken by the ${documentAuthors.join(', ')} role.`);
+      const today = await labToday(db, actor.lab.id);
+      if (body.effectiveDate < today) refuse('guard', `The Effective Date is ${today}, the Lab's today, or later.`);
       const scope = labScope(db, actor);
       const id = await scope.write('createDocument', role, async (q) => {
         const document = await q
@@ -328,6 +325,7 @@ export function documentRoutes(app: App, db: Kysely<DB>, credentials: Credential
             version: 1,
             title: body.title,
             body: body.body,
+            effectiveDate: body.effectiveDate,
             authorId: actor.person.id,
           })
           .execute();

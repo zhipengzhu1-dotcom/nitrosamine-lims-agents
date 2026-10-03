@@ -339,6 +339,7 @@ const fixture: [string, Row][] = [
       title: 'Receiving samples (fictional)',
       body: 'Check the seal.',
       author_id: id.admin,
+      effective_date: '2099-01-01',
     },
   ],
 ];
@@ -602,8 +603,20 @@ const tables = {
       title: 'Sample label (fictional)',
       body: 'Write the Sample number.',
       author_id: id.admin,
+      effective_date: '2099-01-01',
     },
-    notNull: ['lab_id', 'id', 'document_id', 'version', 'status', 'title', 'body', 'author_id', 'saved_at'],
+    notNull: [
+      'lab_id',
+      'id',
+      'document_id',
+      'version',
+      'status',
+      'title',
+      'body',
+      'author_id',
+      'effective_date',
+      'saved_at',
+    ],
   },
   'lims.chain_verification': {
     noun: 'Chain Verification',
@@ -1098,23 +1111,17 @@ describe('a Document version is one open and one Effective version of its Docume
     {
       name: 'a second version 1 of a Document is refused',
       statement: `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id,
-                  abandon_reason) values ('${id.lab}', '${id.document}', 1, 'Abandoned', 'Again', 'Again.', '${id.admin}', 'Again.')`,
+                  abandon_reason, effective_date) values ('${id.lab}', '${id.document}', 1, 'Abandoned', 'Again', 'Again.',
+                  '${id.admin}', 'Again.', '2099-01-01')`,
       code: '23505',
       constraint: 'document_version_document_id_version_key',
     },
     {
       name: 'a Document version numbered below 1 is refused',
-      statement: `insert into lims.document_version (lab_id, document_id, version, title, body, author_id)
-                  values ('${id.lab}', '${id.emptyDocument}', 0, 'Zero', 'Zero.', '${id.admin}')`,
+      statement: `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date)
+                  values ('${id.lab}', '${id.emptyDocument}', 0, 'Zero', 'Zero.', '${id.admin}', '2099-01-01')`,
       code: '23514',
       constraint: 'document_version_version_check',
-    },
-    {
-      name: 'an Approved Document version with no Effective Date is refused',
-      statement: `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id)
-                  values ('${id.lab}', '${id.emptyDocument}', 1, 'Approved', 'No date', 'No date.', '${id.admin}')`,
-      code: '23514',
-      constraint: 'document_version_effective_date_check',
     },
   ];
   for (const c of pastTriggers) {
@@ -3900,7 +3907,7 @@ describe('a Document keeps its number, and its versions reach Effective only thr
   const asAuthor = asPerson('refusal.admin', 'LabManager');
   const version = randomUUID();
   /** A Document version of the empty Document, written past the triggers as a past write left it. */
-  const versionIn = (status: string, effectiveDate = 'null') =>
+  const versionIn = (status: string, effectiveDate = `'2099-01-01'`) =>
     `set local session_replication_role = replica;
      insert into lims.document_version (lab_id, id, document_id, version, status, title, body, author_id, effective_date)
      values ('${id.lab}', '${version}', '${id.emptyDocument}', 1, '${status}', 'Probe', 'Probe.', '${id.admin}', ${effectiveDate});
@@ -3982,17 +3989,19 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       await client.query(AUDIT_CONTEXT);
       await client.query(versionIn('Draft'));
       await client.query(`update lims.document_version set title = 'Probe again' where id = $1`, [version]);
+      await client.query(`update lims.document_version set effective_date = '2099-02-01' where id = $1`, [version]);
       await client.query(signed('Authored', id.admin));
       await client.query(`update lims.document_version set status = 'InReview' where id = $1`, [version]);
-      await client.query(`update lims.document_version set effective_date = '2099-01-01' where id = $1`, [version]);
-      const { rows } = await client.query<{ version: number; title: string }>(
-        `select version, convert_from(content, 'UTF8')::jsonb ->> 'title' as title from lims.record_version
-          where record_table = 'document_version' and record_id = $1 order by version`,
+      const { rows } = await client.query<{ version: number; title: string; effectiveDate: string }>(
+        `select version, convert_from(content, 'UTF8')::jsonb ->> 'title' as title,
+                convert_from(content, 'UTF8')::jsonb ->> 'effectiveDate' as "effectiveDate"
+           from lims.record_version where record_table = 'document_version' and record_id = $1 order by version`,
         [version],
       );
       assert.deepEqual(rows, [
-        { version: 1, title: 'Probe' },
-        { version: 2, title: 'Probe again' },
+        { version: 1, title: 'Probe', effectiveDate: '2099-01-01' },
+        { version: 2, title: 'Probe again', effectiveDate: '2099-01-01' },
+        { version: 3, title: 'Probe again', effectiveDate: '2099-02-01' },
       ]);
     } finally {
       await client.query('rollback');
@@ -4002,16 +4011,29 @@ describe('a Document keeps its number, and its versions reach Effective only thr
   covered.add('lims.document_version.open_document_version');
   it('a Document version opens only as the next Draft of its Document, by the person who writes it', async () => {
     const insertVersion = (columns: string, values: string) =>
-      `insert into lims.document_version (lab_id, document_id, title, body, ${columns})
+      `insert into lims.document_version (lab_id, document_id, title, body, effective_date, ${columns})
        values ('${id.lab}', '${id.emptyDocument}', 'Probe', 'Probe.', ${values})`;
     const cases: [string, string, string][] = [
       [
         'version, author_id, status',
-        `1, '${id.admin}', 'Approved'`,
+        `'2099-01-01', 1, '${id.admin}', 'Approved'`,
         'a Document version opens as a Draft, not Approved',
       ],
-      ['version, author_id', `2, '${id.admin}'`, 'a Document version is the next version of its Document'],
-      ['version, author_id', `1, '${id.person}'`, "a Document version's author is the person who writes it"],
+      [
+        'version, author_id',
+        `'2099-01-01', 2, '${id.admin}'`,
+        'a Document version is the next version of its Document',
+      ],
+      [
+        'version, author_id',
+        `'2099-01-01', 1, '${id.person}'`,
+        "a Document version's author is the person who writes it",
+      ],
+      [
+        'version, author_id',
+        `'2000-01-01', 1, '${id.admin}'`,
+        "a Document version's Effective Date is today or later in the Lab",
+      ],
     ];
     for (const [columns, values, message] of cases) {
       const error = await refusal(insertVersion(columns, values));
@@ -4027,12 +4049,12 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       message: "a Document version's content changes only while it is a Draft",
     },
     {
-      name: 'an Effective Date set on a Draft is refused',
+      name: "a change to a Document version's Effective Date once it left Draft is refused",
       statements: [
-        versionIn('Draft'),
-        `update lims.document_version set status = 'Approved', effective_date = '2099-01-01' where id = '${version}'`,
+        versionIn('InReview'),
+        `update lims.document_version set effective_date = '2099-02-01' where id = '${version}'`,
       ],
-      message: "a Document version's Effective Date is set once, while In Review",
+      message: "a Document version's content changes only while it is a Draft",
     },
     {
       name: 'a Draft that goes straight to Effective is refused',
@@ -4048,25 +4070,26 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       name: 'a Document version Approved with no Approved Signature is refused',
       statements: [
         versionIn('InReview'),
-        `update lims.document_version set status = 'Approved', effective_date = '2099-01-01' where id = '${version}'`,
+        `update lims.document_version set status = 'Approved' where id = '${version}'`,
       ],
       message: 'a Document version is Approved only by an Approved Signature over its content as it is now',
     },
     {
+      name: 'a Document version Approved after its Effective Date has passed is refused',
+      statements: [
+        versionIn('InReview', `'2000-01-01'`),
+        signed('Approved', id.person),
+        `update lims.document_version set status = 'Approved' where id = '${version}'`,
+      ],
+      message: 'a Document version is not Approved after its Effective Date, 2000-01-01, has passed',
+    },
+    {
       name: 'an Effective Date before the Lab’s today is refused',
       statements: [
-        versionIn('InReview'),
+        versionIn('Draft'),
         `update lims.document_version set effective_date = '2000-01-01' where id = '${version}'`,
       ],
       message: "a Document version's Effective Date is today or later in the Lab",
-    },
-    {
-      name: 'an Effective Date set a second time is refused',
-      statements: [
-        versionIn('Approved', `'2099-01-01'`),
-        `update lims.document_version set effective_date = '2099-02-01' where id = '${version}'`,
-      ],
-      message: "a Document version's Effective Date is set once, while In Review",
     },
     {
       name: 'a Document version that takes effect before its Effective Date is refused',

@@ -542,7 +542,8 @@ const documentVersion = Type.Object({
   title: Type.String(),
   body: Type.String(),
   author: recorder,
-  effectiveDate: nullable(calendarDate),
+  /** The Lab day it takes effect, written on the Draft and covered by every Signature. */
+  effectiveDate: calendarDate,
   abandonReason: nullable(Type.String()),
   /** Its Signatures in the order given, each with the Record Version it was given on. */
   signatures: Type.Array(signature),
@@ -824,7 +825,12 @@ export const routes = {
   createDocument: route(
     'POST',
     '/api/documents',
-    { body: Type.Object({ documentType: documentType, title: text, body: documentBody }, closed) },
+    {
+      body: Type.Object(
+        { documentType: documentType, title: text, body: documentBody, effectiveDate: calendarDate },
+        closed,
+      ),
+    },
     documentView,
   ),
 } satisfies Record<string, Route>;
@@ -857,7 +863,7 @@ export function incidentStepRoute<K extends IncidentStepName>(name: K) {
 const documentStepInputs = {
   signAuthored: Type.Object({}, closed),
   signReviewed: Type.Object({}, closed),
-  signApproved: Type.Object({ effectiveDate: calendarDate }, closed),
+  signApproved: Type.Object({}, closed),
   abandon: Type.Object({ reason: reasonText }, closed),
 } satisfies { [K in DocumentStepName]: TObject };
 /** What each Document step takes, as its route validates it. */

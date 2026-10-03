@@ -144,7 +144,7 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       title: { label: 'Title' },
       body: { label: 'Body' },
       author_id: { label: 'Author', ref: 'person' },
-      effective_date: { label: 'Effective Date', movedByStep: true },
+      effective_date: { label: 'Effective Date' },
       abandon_reason: { label: 'Abandon reason', movedByStep: true },
       saved_at: { label: 'Saved at', shows: 'instant' },
     },

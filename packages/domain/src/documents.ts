@@ -40,8 +40,8 @@ export interface DocumentStep<K extends DocumentStepName = DocumentStepName> {
 
 /**
  * How a Document version becomes Effective: its author signs Authored on the Draft, a Reviewer who did not author it
- * signs Reviewed, and QA, who neither authored nor reviewed it, signs Approved with its Effective Date. Its author or
- * QA may Abandon an open version with a reason. The API refuses and the web offers by this table, and the database
+ * signs Reviewed, and QA, who neither authored nor reviewed it, signs Approved. All three sign the Effective Date the
+ * author wrote on the Draft. Its author or QA may Abandon an open version with a reason. The API refuses and the web offers by this table, and the database
  * holds the same rules.
  */
 export const documentSteps: { [K in DocumentStepName]: DocumentStep<K> } = {

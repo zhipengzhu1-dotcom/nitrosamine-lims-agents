@@ -60,15 +60,13 @@ create table lims.document_version (
   title          text                 not null check (btrim(title) <> ''),
   body           text                 not null,
   author_id      uuid                 not null references lims.person,
-  effective_date date,
+  effective_date date                 not null,
   abandon_reason text,
   saved_at       timestamptz          not null default now(),
   foreign key (lab_id, document_id) references lims.document (lab_id, id),
   unique (document_id, version),
   constraint document_version_abandon_reason_check
-    check ((status = 'Abandoned') = (nullif(btrim(abandon_reason), '') is not null)),
-  constraint document_version_effective_date_check
-    check (status not in ('Approved', 'Effective', 'Superseded') or effective_date is not null)
+    check ((status = 'Abandoned') = (nullif(btrim(abandon_reason), '') is not null))
 );
 
 create unique index document_version_one_effective on lims.document_version (document_id) where status = 'Effective';
@@ -76,8 +74,9 @@ create unique index document_version_one_effective on lims.document_version (doc
 create unique index document_version_one_open on lims.document_version (document_id)
   where status in ('Draft', 'InReview', 'Approved');
 
--- Canonical form 1 of a Document version: what its Signatures cover. Its status, Effective Date and abandon reason are
--- left out, so that approval leaves the Authored and Reviewed Signatures standing; the Audit Trail records each.
+-- Canonical form 1 of a Document version: what its Signatures cover, the Effective Date among it, because each Signature
+-- approves what takes effect and when. Its status and abandon reason are left out, so that approval leaves the Authored
+-- and Reviewed Signatures standing; the Audit Trail records each.
 create function lims.document_version_content(p_id uuid) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
@@ -87,6 +86,7 @@ language sql stable as $$
     'version', v.version,
     'title', v.title,
     'body', v.body,
+    'effectiveDate', v.effective_date,
     'author', p.username)
   from lims.document_version v
   join lims.document d on d.id = v.document_id
@@ -102,10 +102,14 @@ language sql stable as $$
    where v.record_table = 'document_version' and v.record_id = p_id and s.meaning = p_meaning
 $$;
 
--- A version opens as a Draft, the next of its Document, written by the person acting, who is its author.
+-- A version opens as a Draft, the next of its Document, written by the person acting, who is its author, with an
+-- Effective Date that has not passed in the Lab.
 create function lims.open_document_version() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 begin
+  if new.effective_date < (select (clock_timestamp() at time zone time_zone)::date from lab where lab_id = new.lab_id) then
+    raise exception 'a Document version''s Effective Date is today or later in the Lab' using errcode = 'LA014';
+  end if;
   if new.status <> 'Draft' then
     raise exception 'a Document version opens as a Draft, not %', new.status using errcode = 'LA014';
   end if;
@@ -123,7 +127,9 @@ end $$;
 -- A version moves Draft to In Review on its Authored Signature, In Review to Approved on its Approved Signature over
 -- its content as it is now, Approved to Effective once its Effective Date has come in the Lab's zone, and Effective to
 -- Superseded when a later version takes effect. An open version may be Abandoned, by its author or QA, with a reason.
--- What the Signatures cover changes only while Draft, and the Effective Date is set once, In Review, never in the past.
+-- What the Signatures cover, the Effective Date among it, changes only while Draft, and the Effective Date is never
+-- written in the past. A version whose Effective Date has passed is not Approved: its Signatures would approve a day
+-- it did not take effect on.
 create function lims.move_document_version() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -132,17 +138,12 @@ begin
   select (clock_timestamp() at time zone time_zone)::date into lab_today from lab where lab_id = old.lab_id;
   if (new.lab_id, new.document_id, new.version, new.author_id, new.saved_at)
      is distinct from (old.lab_id, old.document_id, old.version, old.author_id, old.saved_at)
-     or ((new.title, new.body) is distinct from (old.title, old.body)
+     or ((new.title, new.body, new.effective_date) is distinct from (old.title, old.body, old.effective_date)
          and not (old.status = 'Draft' and new.status = 'Draft')) then
     raise exception 'a Document version''s content changes only while it is a Draft' using errcode = 'LA014';
   end if;
-  if new.effective_date is distinct from old.effective_date then
-    if old.effective_date is not null or old.status <> 'InReview' then
-      raise exception 'a Document version''s Effective Date is set once, while In Review' using errcode = 'LA014';
-    end if;
-    if new.effective_date < lab_today then
-      raise exception 'a Document version''s Effective Date is today or later in the Lab' using errcode = 'LA014';
-    end if;
+  if new.effective_date is distinct from old.effective_date and new.effective_date < lab_today then
+    raise exception 'a Document version''s Effective Date is today or later in the Lab' using errcode = 'LA014';
   end if;
   if new.status = old.status then
     return new;
@@ -162,6 +163,10 @@ begin
         where v.record_table = 'document_version' and v.record_id = new.id and s.meaning = 'Approved'
           and v.content_hash = sha256(convert_to(document_version_content(new.id)::text, 'UTF8'))) then
     raise exception 'a Document version is Approved only by an Approved Signature over its content as it is now'
+      using errcode = 'LA014';
+  end if;
+  if new.status = 'Approved' and new.effective_date < lab_today then
+    raise exception 'a Document version is not Approved after its Effective Date, %, has passed', new.effective_date
       using errcode = 'LA014';
   end if;
   if new.status = 'Effective' and new.effective_date > lab_today then
@@ -297,5 +302,5 @@ revoke execute on function lims.document_type_code(lims.document_type), lims.doc
   lims.document_signers(uuid, lims.meaning) from public;
 grant select on lims.document, lims.document_version to lims_app;
 grant insert (lab_id, document_type) on lims.document to lims_app;
-grant insert (lab_id, document_id, version, title, body, author_id) on lims.document_version to lims_app;
-grant update (status, effective_date, abandon_reason) on lims.document_version to lims_app;
+grant insert (lab_id, document_id, version, title, body, author_id, effective_date) on lims.document_version to lims_app;
+grant update (status, abandon_reason) on lims.document_version to lims_app;

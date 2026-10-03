@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { audited } from '@lims/db';
 import { type DocumentStepName, documentStepRoute, routes, type SigningBody } from '@lims/domain';
 import { sql } from 'kysely';
 import { type Account, type Answer, type Client, ok, refusedWith, startApi } from './harness.ts';
@@ -26,8 +27,26 @@ const { rows } = await sql<{ today: string; later: string }>`
     from lims.lab where lab_id = ${api.labId}`.execute(api.superuser);
 const { today, later } = rows[0] ?? assert.fail('the Lab is recorded');
 
-const draft = (client: Client, title = 'Receiving samples (fictional)') =>
-  client.call(routes.createDocument, { documentType: 'SOP', title, body: 'Check the seal and the label.' });
+const draft = (client: Client, title = 'Receiving samples (fictional)', effectiveDate = today) =>
+  client.call(routes.createDocument, {
+    documentType: 'SOP',
+    title,
+    body: 'Check the seal and the label.',
+    effectiveDate,
+  });
+
+/** Writes a Document's Effective Date `days` away past the trigger that freezes it, as a tampered row would hold it. */
+const moveEffectiveDate = (documentId: string, days: number) =>
+  audited(
+    api.superuser,
+    { actor: 'svc:test', role: 'system', reason: 'Move an Effective Date behind its Signatures' },
+    async (tx) => {
+      await sql`alter table lims.document_version disable trigger move_document_version`.execute(tx);
+      await sql`update lims.document_version set effective_date = effective_date + ${days}::integer
+               where document_id = ${documentId}`.execute(tx);
+      await sql`alter table lims.document_version enable trigger move_document_version`.execute(tx);
+    },
+  );
 
 async function signing(client: Client, documentId: string, account: Account): Promise<SigningBody> {
   const { recordVersion, statement } = ok(await client.call(routes.document, { id: documentId }));
@@ -46,17 +65,10 @@ async function step(
   account: Account,
   name: DocumentStepName,
   documentId: string,
-  input: { effectiveDate?: string; reason?: string },
+  reason = '',
 ): Promise<Answer<typeof routes.document>> {
-  if (name === 'abandon')
-    return client.call(documentStepRoute('abandon'), { documentId, input: { reason: input.reason ?? '' } });
+  if (name === 'abandon') return client.call(documentStepRoute('abandon'), { documentId, input: { reason } });
   const signature = await signing(client, documentId, account);
-  if (name === 'signApproved')
-    return client.call(documentStepRoute('signApproved'), {
-      documentId,
-      input: { effectiveDate: input.effectiveDate ?? '' },
-      signature,
-    });
   return client.call(documentStepRoute(name), { documentId, input: {}, signature });
 }
 
@@ -75,9 +87,9 @@ it('the database numbers each Document {Lab}-{Type}-{NNNN}, the next of its type
 
 it('a Draft becomes Effective today through Authored by its author, Reviewed by a Reviewer and Approved by QA', async () => {
   const { id } = ok(await draft(as.lena));
-  ok(await step(as.lena, lena, 'signAuthored', id, {}));
-  ok(await step(as.rui, rui, 'signReviewed', id, {}));
-  const effective = ok(await step(as.quinn, quinn, 'signApproved', id, { effectiveDate: today }));
+  ok(await step(as.lena, lena, 'signAuthored', id));
+  ok(await step(as.rui, rui, 'signReviewed', id));
+  const effective = ok(await step(as.quinn, quinn, 'signApproved', id));
   const [version] = effective.versions;
   assert.deepEqual([version?.status, version?.effectiveDate], ['Effective', today]);
   assert.deepEqual(
@@ -95,39 +107,67 @@ it('a Draft becomes Effective today through Authored by its author, Reviewed by 
   );
 });
 
-it('an Effective Date after the Lab’s today leaves the version Approved, and one before it is refused', async () => {
-  const { id } = ok(await draft(as.lena));
-  ok(await step(as.lena, lena, 'signAuthored', id, {}));
-  ok(await step(as.rui, rui, 'signReviewed', id, {}));
-  assert.match(
-    refusedWith(await step(as.quinn, quinn, 'signApproved', id, { effectiveDate: '2020-01-01' }), 'guard'),
-    /The Effective Date is .* the Lab's today, or later\./,
+it('an Effective Date after the Lab’s today leaves the version Approved, and a Draft dated before it is refused', async () => {
+  assert.equal(
+    refusedWith(await draft(as.lena, 'Back-dated (fictional)', '2020-01-01'), 'guard'),
+    `The Effective Date is ${today}, the Lab's today, or later.`,
   );
-  const approved = ok(await step(as.quinn, quinn, 'signApproved', id, { effectiveDate: later }));
+  const { id } = ok(await draft(as.lena, 'Receiving samples (fictional)', later));
+  ok(await step(as.lena, lena, 'signAuthored', id));
+  ok(await step(as.rui, rui, 'signReviewed', id));
+  const approved = ok(await step(as.quinn, quinn, 'signApproved', id));
   assert.deepEqual(
     approved.versions.map((v) => [v.status, v.effectiveDate]),
     [['Approved', later]],
   );
 });
 
+it('QA does not Approve a version whose Effective Date has passed in the Lab', async () => {
+  const { id } = ok(await draft(as.lena));
+  ok(await step(as.lena, lena, 'signAuthored', id));
+  ok(await step(as.rui, rui, 'signReviewed', id));
+  await moveEffectiveDate(id, -1);
+  assert.match(
+    refusedWith(await step(as.quinn, quinn, 'signApproved', id), 'guard'),
+    /^This version's Effective Date, \d{4}-\d{2}-\d{2}, has passed in the Lab, so it is not Approved\. Abandon it\.$/,
+  );
+});
+
+it('every Signature on a version reads unsigned once its Effective Date changes behind it', async () => {
+  const { id } = ok(await draft(as.lena, 'Receiving samples (fictional)', later));
+  ok(await step(as.lena, lena, 'signAuthored', id));
+  ok(await step(as.rui, rui, 'signReviewed', id));
+  ok(await step(as.quinn, quinn, 'signApproved', id));
+  await moveEffectiveDate(id, 1);
+  const moved = ok(await as.ana.call(routes.document, { id }));
+  assert.deepEqual(
+    moved.versions[0]?.signatures.map((s) => [s.meaning, s.unsigned]),
+    [
+      ['Authored', true],
+      ['Reviewed', true],
+      ['Approved', true],
+    ],
+  );
+});
+
 it('the author does not review, a reviewer does not approve, and Approved waits for a Reviewed', async () => {
   const { id } = ok(await draft(as.rhea));
-  ok(await step(as.rhea, rhea, 'signAuthored', id, {}));
+  ok(await step(as.rhea, rhea, 'signAuthored', id));
   assert.equal(
-    refusedWith(await step(as.rhea, rhea, 'signReviewed', id, {}), 'guard'),
+    refusedWith(await step(as.rhea, rhea, 'signReviewed', id), 'guard'),
     'The author of a Document version does not review it.',
   );
   assert.equal(
-    refusedWith(await step(as.quinn, quinn, 'signApproved', id, { effectiveDate: today }), 'guard'),
+    refusedWith(await step(as.quinn, quinn, 'signApproved', id), 'guard'),
     'A Document version is Approved only after it is Reviewed.',
   );
-  ok(await step(as.remy, remy, 'signReviewed', id, {}));
+  ok(await step(as.remy, remy, 'signReviewed', id));
   assert.equal(
-    refusedWith(await step(as.remy, remy, 'signApproved', id, { effectiveDate: today }), 'guard'),
+    refusedWith(await step(as.remy, remy, 'signApproved', id), 'guard'),
     'A Document version is Approved by someone who neither authored nor reviewed it.',
   );
   assert.equal(
-    refusedWith(await step(as.ana, api.person('ana'), 'signAuthored', id, {}), 'guard'),
+    refusedWith(await step(as.ana, api.person('ana'), 'signAuthored', id), 'guard'),
     'A Document version is signed Authored by its author.',
   );
 });
@@ -135,10 +175,10 @@ it('the author does not review, a reviewer does not approve, and Approved waits 
 it('the author Abandons a Draft with a reason and it keeps its number; someone else may not', async () => {
   const { id, number } = ok(await draft(as.lena));
   assert.equal(
-    refusedWith(await step(as.ana, api.person('ana'), 'abandon', id, { reason: 'Not needed.' }), 'guard'),
+    refusedWith(await step(as.ana, api.person('ana'), 'abandon', id, 'Not needed.'), 'guard'),
     'A Document version is Abandoned by its author or QA.',
   );
-  const abandoned = ok(await step(as.lena, lena, 'abandon', id, { reason: 'Replaced by a Form.' }));
+  const abandoned = ok(await step(as.lena, lena, 'abandon', id, 'Replaced by a Form.'));
   assert.deepEqual(
     [abandoned.number, abandoned.versions[0]?.status, abandoned.versions[0]?.abandonReason],
     [number, 'Abandoned', 'Replaced by a Form.'],

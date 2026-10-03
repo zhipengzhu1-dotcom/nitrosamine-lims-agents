@@ -156,7 +156,7 @@ export interface DocumentVersion {
   authorId: string;
   body: string;
   documentId: string;
-  effectiveDate: Timestamp | null;
+  effectiveDate: Timestamp;
   id: Generated<string>;
   labId: string;
   savedAt: Generated<Timestamp>;
