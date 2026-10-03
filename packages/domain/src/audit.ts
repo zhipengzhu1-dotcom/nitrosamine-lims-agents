@@ -3,7 +3,7 @@ import type {
   BreakInRange,
   ChainBreak,
   ChainKind,
-  ChainVerification,
+  ChainReading,
   Instant,
   RawEntry,
   RecordRef,
@@ -191,6 +191,19 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       statement: { label: 'Statement', shows: 'utf8' },
       statement_hash: { label: 'SHA-256', shows: 'hex' },
       approved_at: { label: 'Approved at', shows: 'instant' },
+    },
+  },
+  chain_verification: {
+    kind: 'Chain Verification',
+    chain: 'company',
+    label: (row) => `${row.chain === 'company' ? 'company' : 'Lab'} chain through entry ${text(row.through)}`,
+    fields: {
+      chain: { label: 'Chain' },
+      through: { label: 'Verified through entry' },
+      head: { label: 'Hash of that entry', shows: 'hex' },
+      recomputed_from: { label: 'Recomputed from entry' },
+      verified_by: { label: 'Verified by', ref: 'person' },
+      verified_at: { label: 'Verified at', shows: 'instant' },
     },
   },
   reauthentication: {
@@ -438,9 +451,9 @@ export function describeTrail(
 }
 
 /**
- * What a break is, as `lims.chain_breaks` finds it: an entry that fails to verify, a run of entries that are gone, or,
- * after the last entry, a chain head that does not match it. `More` is every break after the ones a verification
- * records one by one, taken together.
+ * What a break is, as `lims.chain_breaks` finds it: an entry that fails to verify, a run of entries that are gone,
+ * after the last entry a chain head that does not match it, or a Chain Verification the Audit Trail no longer matches.
+ * `More` is every break after the ones a verification records one by one, taken together.
  */
 export type BreakKind = BreakInRange['kind'] | 'More';
 
@@ -455,6 +468,7 @@ const failureOf = ({ entry, kind, through, breaks }: Omit<ChainBreakFound, 'inci
     Changed: `entry ${entry} fails to verify`,
     Missing: through === entry ? `entry ${entry} is missing` : `entries ${entry} to ${through} are missing`,
     HeadMoved: `the chain head does not match entry ${String(BigInt(entry) - 1n)}`,
+    Contradicted: `the Chain Verification through entry ${entry} does not match the Audit Trail`,
     More: `${breaks} more ${breaks === 1 ? 'break' : 'breaks'}, from entry ${entry} to entry ${through}`,
   })[kind];
 
@@ -464,11 +478,26 @@ export const breakLine = (b: ChainBreak) => `${b.failure}, recorded as System In
 /** A break as one line of text: `breakLine` and the System Incident's state now. */
 export const breakReport = (b: ChainBreak) => `${breakLine(b)} (${b.incidentState})`;
 
+export type Resumed = Pick<ChainReading, 'recomputedFrom' | 'verifiedBefore'>;
+
+export const fromTheFirstEntry: Resumed = { recomputedFrom: '1', verifiedBefore: null };
+
+/** Which entries a reading recomputed, and the Chain Verification before them that it trusted; `when` renders the Instant. */
+export const resumedLine = (c: Resumed, when: (at: Instant) => string) =>
+  c.verifiedBefore === null
+    ? 'Every entry recomputed.'
+    : `Recomputed from entry ${c.recomputedFrom}; entries through ${c.verifiedBefore.through} were verified ${when(c.verifiedBefore.at)} by ${c.verifiedBefore.by}.`;
+
 /**
  * How QA reads a recomputed chain: intact through its last entry, or through the entry before its first break, with
- * every break and the System Incident that records each, which `breakReport` reads out.
+ * every break and the System Incident that records each, which `breakReport` reads out, and where the recompute began.
  */
-export function chainVerification(chain: ChainKind, lastEntry: string, found: ChainBreakFound[]): ChainVerification {
+export function chainReading(
+  chain: ChainKind,
+  lastEntry: string,
+  found: ChainBreakFound[],
+  resumed: Resumed = fromTheFirstEntry,
+): ChainReading {
   const breaks = found.map(({ entry, kind, through, breaks: count, incident, incidentState }) => ({
     entry,
     failure: failureOf({ entry, kind, through, breaks: count }),
@@ -484,6 +513,7 @@ export function chainVerification(chain: ChainKind, lastEntry: string, found: Ch
       intactThrough: lastEntry,
       breaks,
       report: `verified through entry ${lastEntry}`,
+      ...resumed,
     };
   const intactThrough = String(BigInt(first.entry) - 1n);
   return {
@@ -493,5 +523,6 @@ export function chainVerification(chain: ChainKind, lastEntry: string, found: Ch
     intactThrough,
     breaks,
     report: `intact through entry ${intactThrough}`,
+    ...resumed,
   };
 }

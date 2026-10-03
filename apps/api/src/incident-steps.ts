@@ -19,7 +19,7 @@ import { openChainIncidents } from './incident.ts';
 import { refuse } from './refuse.ts';
 import { labScope } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
-import { signedAtLab } from './trail.ts';
+import { chainsOf, signedAtLab } from './trail.ts';
 
 /** System Incidents are company records (map #1, lab-scope-incidents): Admin and QA of any Lab read and act on them. */
 function readableBy(actor: ActorContext): void {
@@ -324,7 +324,9 @@ export function incidentRoutes(app: App, db: Kysely<DB>, credentials: Credential
       // A read that detects an unrecorded change records it, whoever reads: the opening is the LIMS recording what it
       // found (EU Annex 11 §13), not a QA step.
       if (listed.asRecorded) return { ...listed, opened: [] };
-      const verified = (await scope.verifyAuditTrail()).chains.find((c) => c.chainId === chain);
+      const verified = (await chainsOf(db, req, await scope.verifyAuditTrail())).chains.find(
+        (c) => c.chainId === chain,
+      );
       const found = verified ? await openChainIncidents(db, req.log, req.actor, chain, verified.breaks) : [];
       const inRange = found.filter(
         (b) =>

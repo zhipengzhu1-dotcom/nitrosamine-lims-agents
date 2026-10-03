@@ -319,8 +319,8 @@ it("a cited record's own trail holds only that record's entries, and a record ou
 
 it("QA's Verify chain on an untouched chain replies Intact, verified through entry N, with N the chain's last entry; another role is refused", async () => {
   await submitTestTo('Ready');
-  const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   const [labLast, companyLast] = [await lastEntryOf(api.labId), await lastEntryOf('company')];
+  const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   assert.deepEqual(verified.chains, [
     {
       chain: 'lab',
@@ -329,6 +329,8 @@ it("QA's Verify chain on an untouched chain replies Intact, verified through ent
       breaks: [],
       verdict: 'Intact',
       report: `verified through entry ${labLast}`,
+      recomputedFrom: '1',
+      verifiedBefore: null,
     },
     {
       chain: 'company',
@@ -337,6 +339,8 @@ it("QA's Verify chain on an untouched chain replies Intact, verified through ent
       breaks: [],
       verdict: 'Intact',
       report: `verified through entry ${companyLast}`,
+      recomputedFrom: '1',
+      verifiedBefore: null,
     },
   ]);
   assert.equal(
@@ -531,7 +535,12 @@ it('after an entry is altered by the database owner, Verify chain names it as th
 
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   const incident = verified.chains[0]?.breaks[0]?.incident ?? assert.fail('the break names a System Incident');
-  assert.deepEqual(verified.chains[0], {
+  const {
+    recomputedFrom: _from,
+    verifiedBefore: _before,
+    ...shown
+  } = verified.chains[0] ?? assert.fail('the Lab chain');
+  assert.deepEqual(shown, {
     chain: 'lab',
     lastEntry: String(last),
     intactThrough: String(altered - 1n),
@@ -576,8 +585,16 @@ it('after an entry is altered by the database owner, Verify chain names it as th
   assert.ok(entry, 'the trail still reads after a break; the break is reported by Verify chain');
 });
 
-it("after the company chain's head is moved, two QAs verifying at once open one System Incident naming the entry after the last that verifies, and the entries written since, its own among them, open no other", async () => {
+it("after the company chain's head is moved off the entry that records its latest Chain Verification, two QAs verifying at once open one System Incident for each of its two breaks, that Chain Verification and the entry after the last, and the entries written since, their own among them, open no other", async () => {
+  ok(await as.quinn.call(routes.verifyAuditTrail));
   const last = await lastEntryOf('company');
+  const { through: verified } = await api.db
+    .selectFrom('chainVerification')
+    .select('through')
+    .where('chain', '=', 'company')
+    .orderBy('through', 'desc')
+    .executeTakeFirstOrThrow();
+  assert.equal(String(BigInt(verified) + 1n), last, 'the last company entry records the latest Chain Verification');
   await api.superuser.transaction().execute(async (tx) => {
     await sql`set local session_replication_role = replica`.execute(tx);
     await sql`update lims.audit_chain set head = sha256(head) where chain = 'company'`.execute(tx);
@@ -586,27 +603,38 @@ it("after the company chain's head is moved, two QAs verifying at once open one 
   const raced = await Promise.all([as.quinn, other].map((qa) => qa.call(routes.verifyAuditTrail)));
   const [first, second] = raced.map((answer) => ok(answer).chains[1]?.breaks ?? assert.fail('the company chain'));
   assert.ok(first && second);
-  assert.equal(second[0]?.incident, first[0]?.incident, 'two QAs verifying at once share one System Incident');
-  const incident = first[0]?.incident ?? assert.fail('the moved head names a System Incident');
   const after = String(BigInt(last) + 1n);
   assert.deepEqual(
     [first.map((b) => b.entry), second.map((b) => b.entry)],
-    [[after], [after]],
-    'whichever verification reads the other one incident written on the moved head, the failing entry is the same',
+    [
+      [verified, after],
+      [verified, after],
+    ],
+    'whichever verification reads the incidents the other wrote on the moved head, the failing entries are the same',
   );
-  assert.equal(alarmsFor([incident]).length, 1, 'two QAs verifying at once raise one alarm');
+  assert.deepEqual(
+    second.map((b) => b.incident),
+    first.map((b) => b.incident),
+    'two QAs verifying at once share the System Incidents',
+  );
+  assert.equal(first[0]?.failure, `the Chain Verification through entry ${verified} does not match the Audit Trail`);
+  const incidents = first.map((b) => b.incident);
+  assert.equal(alarmsFor(incidents).length, 2, 'two QAs verifying at once raise one alarm for each System Incident');
 
   await submitTestTo('Ready');
   const again = ok(await as.quinn.call(routes.verifyAuditTrail)).chains[1]?.breaks;
   assert.deepEqual(
-    again?.map((b) => b.entry),
-    [after],
+    again?.map((b) => [b.entry, b.incident]),
+    first.map((b) => [b.entry, b.incident]),
     'the first entry written on the moved head is the one that fails, and the entries after it verify',
   );
-  assert.equal(again?.[0]?.incident, incident);
-  assert.deepEqual(await chainIncidents('company'), [{ reference: incident, firstFailure: after }]);
+  assert.deepEqual(await chainIncidents('company'), [
+    { reference: incidents[0], firstFailure: verified },
+    { reference: incidents[1], firstFailure: after },
+  ]);
 
-  const listed = ok(await as.quinn.call(routes.incidentBreaks, { reference: incident }));
+  const headMoved = incidents[1] ?? assert.fail('the incident on the moved head');
+  const listed = ok(await as.quinn.call(routes.incidentBreaks, { reference: headMoved }));
   const read = (breaks: ListedBreak[] | null) => breaks?.map((b) => [b.entry, b.through, b.matches]);
   assert.deepEqual(
     [listed.asRecorded, read(listed.breaks), read(listed.recorded)],
@@ -1153,4 +1181,143 @@ it("QA's read of a changed System Incident names every System Incident it opened
     'Verify chain finds the same incidents',
   );
   assert.equal((await chainIncidents(lab.labId)).length, after, 'and opens none again');
+});
+
+const chainVerificationsOf = (chain: string) =>
+  api.db
+    .selectFrom('chainVerification')
+    .select(['through', 'recomputedFrom', 'verifiedBy', sql<string>`encode(head, 'hex')`.as('head')])
+    .where('chain', '=', chain)
+    .orderBy('verifiedAt')
+    .execute();
+
+it('Verify chain records a Chain Verification for each intact chain and resumes from it next time, so a changed entry behind it is found only by Recompute every entry, which records none for a broken chain', async () => {
+  const lab = await labOfItsOwn('CKP', 4);
+  const last = String(lab.last);
+  const first = await lab.verify();
+  assert.deepEqual([first.verdict, first.recomputedFrom, first.verifiedBefore], ['Intact', '1', null]);
+  const [recorded] = await chainVerificationsOf(lab.labId);
+  const head = await api.db
+    .selectFrom('auditEntry')
+    .select(sql<string>`encode(hash, 'hex')`.as('hash'))
+    .where('chain', '=', lab.labId)
+    .where('seq', '=', last)
+    .executeTakeFirstOrThrow();
+  assert.deepEqual(recorded, { through: last, recomputedFrom: '1', verifiedBy: recorded?.verifiedBy, head: head.hash });
+  assert.equal(
+    (
+      await api.db
+        .selectFrom('person')
+        .select('username')
+        .where('id', '=', recorded?.verifiedBy ?? '')
+        .executeTakeFirst()
+    )?.username,
+    'ckp.qa',
+    'the QA who verified is recorded',
+  );
+
+  const second = await lab.verify();
+  assert.equal(
+    second.recomputedFrom,
+    String(lab.last + 1n),
+    'the next verification resumes after the Chain Verification',
+  );
+  assert.deepEqual(
+    [second.verifiedBefore?.through, second.verifiedBefore?.by, second.verdict],
+    [last, 'ckp.qa', 'Intact'],
+  );
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 2, 'each intact verification is recorded');
+
+  const behind = String(lab.last - 2n);
+  await lab.alter(behind);
+  assert.equal(
+    (await lab.verify()).verdict,
+    'Intact',
+    'a routine verification does not look behind the Chain Verification',
+  );
+  const every = ok(await lab.client.call(routes.recomputeAuditTrail)).chains[0] ?? assert.fail('the Lab chain');
+  assert.deepEqual(
+    [every.verdict, every.recomputedFrom, every.verifiedBefore, every.breaks.map((b) => b.entry)],
+    ['Broken', '1', null, [behind]],
+  );
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 3, 'a broken chain records no Chain Verification');
+  assert.equal(
+    ok(await lab.client.call(routes.recomputeAuditTrail)).chains[0]?.breaks[0]?.incident,
+    every.breaks[0]?.incident,
+    'recomputing again names the same System Incident',
+  );
+  const after = await lab.verify();
+  assert.deepEqual(
+    [after.verdict, after.recomputedFrom, after.breaks.map((b) => b.incident)],
+    ['Broken', '1', [every.breaks[0]?.incident]],
+    'once a System Incident records a break, a routine verification no longer resumes past it',
+  );
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 3, 'nor records a Chain Verification over it');
+});
+
+it('after a Chain Verification, a consistent rewrite of the Lab chain behind it makes Verify chain answer Broken at the Chain Verification the Audit Trail no longer matches, with a System Incident; a second Verify chain names the same incident and records no new Chain Verification', async () => {
+  const lab = await labOfItsOwn('CFW', 4);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 1);
+  const from = lab.last - 2n;
+  await api.superuser.transaction().execute(async (tx) => {
+    await sql`set local session_replication_role = replica`.execute(tx);
+    await sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq = ${String(from)}`.execute(
+      tx,
+    );
+    for (let seq = from; seq <= lab.last; seq++)
+      await sql`update lims.audit_entry e set prev_hash = p.hash, hash = sha256(p.hash || lims.audit_entry_bytes(e))
+          from lims.audit_entry p
+         where p.chain = e.chain and p.seq = e.seq - 1 and e.chain = ${lab.labId} and e.seq = ${String(seq)}`.execute(
+        tx,
+      );
+    await sql`update lims.audit_chain c set head = e.hash
+          from lims.audit_entry e where e.chain = c.chain and e.seq = c.seq and c.chain = ${lab.labId}`.execute(tx);
+  });
+  const broken = await lab.verify();
+  const [found] = broken.breaks;
+  assert.deepEqual(
+    [broken.verdict, broken.recomputedFrom, broken.verifiedBefore, found?.entry, found?.failure],
+    [
+      'Broken',
+      '1',
+      null,
+      String(lab.last),
+      `the Chain Verification through entry ${lab.last} does not match the Audit Trail`,
+    ],
+  );
+  assert.match(found?.incident ?? '', /^[0-9A-Z]{8}$/, 'the break names a System Incident');
+  assert.deepEqual(
+    (await lab.verify()).breaks.map((b) => b.incident),
+    [found?.incident],
+    'verifying again names the same System Incident',
+  );
+  assert.equal(
+    (await chainVerificationsOf(lab.labId)).length,
+    1,
+    'a chain whose Chain Verification is contradicted records no new one',
+  );
+});
+
+it("Verify chain refuses, naming the chain and the read limit, when a chain's recompute does not finish within it, and opens the System Incident the refusal names", async () => {
+  const slow = await startApi('lims_api_trail_slow_test', { verifyReadLimitSeconds: 0.3 });
+  const qa = await slow.login(await slow.addPerson('slow.qa', ['QA']));
+  const holder = await slow.superuser.connection().execute(async (held) => {
+    await sql`begin`.execute(held);
+    await sql`lock table lims.chain_verification in access exclusive mode`.execute(held);
+    const refused = refusedWith(await qa.call(routes.verifyAuditTrail), 'state');
+    await sql`rollback`.execute(held);
+    return refused;
+  });
+  const reference =
+    /System Incident (\w+) records it/.exec(holder)?.[1] ?? assert.fail(`no System Incident in ${holder}`);
+  assert.equal(
+    holder,
+    `Verifying the Lab chain did not finish within 0.3 seconds, and System Incident ${reference} records it. Try again when the LIMS is less busy.`,
+  );
+  assert.deepEqual(
+    await slow.db.selectFrom('systemIncident').select(['kind', 'reference', 'sqlstate', 'step']).execute(),
+    [{ kind: 'UnexpectedFailure', reference, sqlstate: '57014', step: 'verifyAuditTrail' }],
+    'the overrun leaves one System Incident',
+  );
 });

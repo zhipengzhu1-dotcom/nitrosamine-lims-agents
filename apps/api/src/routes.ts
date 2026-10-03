@@ -9,10 +9,15 @@ import { sessionRoutes } from './session-routes.ts';
 export function apiRoutes(
   app: App,
   db: Kysely<DB>,
-  options: { accessEventKey: Buffer; secureCookie: boolean; release: string },
+  options: {
+    accessEventKey: Buffer;
+    secureCookie: boolean;
+    release: string;
+    verifyReadLimitSeconds?: number | undefined;
+  },
   credentials: Credentials,
 ): void {
   loginRoutes(app, db, options.accessEventKey, options.secureCookie, credentials);
   enrolmentRoute(app, db, options.accessEventKey, credentials);
-  sessionRoutes(app, db, credentials, options.release);
+  sessionRoutes(app, db, credentials, options.release, options.verifyReadLimitSeconds);
 }
