@@ -38,6 +38,7 @@ Each feature file starts with an H1 and one paragraph on the behaviour a user se
 - [Record Versions and unsigned Signatures](./record-versions.md) covers the Record Version a Test and its Test Report show, the version each Signature binds to, and the `Unsigned` Status after a change behind the chain.
 - [Staff accounts](./staff-accounts.md) covers Identity Verification, account creation with a one-time link, Memberships and printed-name changes, for the Admin at `#/staff`.
 - [Workstations, Lock and Switch user](./workstations.md) covers registering and enrolling a Workstation, and the rail's Lock and Switch user.
+- [System Incidents](./system-incidents.md) covers the `Incidents` list for Admin and QA, QA's impact answer, the Admin's immediate and corrective actions, the Acknowledged signing and the close.
 - [Your preferences: reduced motion](./preferences.md) covers the per-person reduced-motion preference and how it combines with the device's setting.
 
 Not mapped yet: the nav modules (Equipment, Inventory, Deviations, Documents, Training, Stability, Notebooks, Dashboards). Each is a placeholder page at `#/<module>` that says what it will hold. Add a feature file when one of them gets behaviour.

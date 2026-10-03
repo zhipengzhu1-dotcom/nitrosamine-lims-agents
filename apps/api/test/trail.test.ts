@@ -679,9 +679,7 @@ it('Verify chain on a break whose System Incident is Closed still reports the ch
   const [closed, recurring] = [String(lab.last - 2n), String(lab.last)] as const;
   await lab.alter(closed);
   const incident = (await lab.verify()).breaks[0]?.incident ?? assert.fail('the break names a System Incident');
-  await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Close a System Incident' }, (tx) =>
-    tx.updateTable('systemIncident').set({ state: 'Closed' }).where('reference', '=', incident).execute(),
-  );
+  await closeIncident(incident);
 
   const again = await lab.verify();
   assert.equal(again.verdict, 'Broken', 'a Closed incident does not make the break verify');
@@ -708,10 +706,9 @@ const tamper = (changes: Change[]) =>
     for (const change of changes) await change.execute(tx);
   });
 
+/** A Closed incident as a fixture: the state is set behind the Open → Acknowledged → Closed trigger, as tampering is. */
 const closeIncident = (reference: string) =>
-  audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Close a System Incident' }, (tx) =>
-    tx.updateTable('systemIncident').set({ state: 'Closed' }).where('reference', '=', reference).execute(),
-  );
+  tamper([sql`update lims.system_incident set state = 'Closed' where reference = ${reference}`]);
 
 /** Changes the entry before `entry` and stores the hash its new content gives, so that only `entry`'s link breaks. */
 const recomputed = (labId: string, entry: string, reason: string) => [

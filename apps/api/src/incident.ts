@@ -5,6 +5,8 @@ import { audited, type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
   type ChainBreakFound,
+  incidentStepNames,
+  incidentStepRoute,
   type IncidentState,
   referencePattern,
   routes,
@@ -32,6 +34,7 @@ export function referenceOf(bytes: Uint8Array): string {
 const STEP_OF_ROUTE = new Map<string, string>([
   ...Object.entries(routes).map(([name, route]): [string, string] => [`${route.method} ${route.url}`, name]),
   ...stepNames.map((name): [string, string] => [`POST ${stepRoute(name).url}`, name]),
+  ...incidentStepNames.map((name): [string, string] => [`POST ${incidentStepRoute(name).url}`, name]),
 ]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

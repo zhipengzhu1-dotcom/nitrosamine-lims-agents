@@ -1,12 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { type DB, postgresFault } from '@lims/db';
+import type { DB } from '@lims/db';
 import {
   type ActorContext,
   type Meaning,
   type PersonId,
   pressText,
   type RouteReply,
-  type SignatureStatement,
   type SigningBody,
   refusal,
   type Step,
@@ -24,9 +23,7 @@ import type { App } from './app.ts';
 import { type Credentials, type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
-
-/** The records a Signature can be given on, each with its own canonical content in the database. */
-export type Signable = 'test' | 'test_report';
+import { proveReauthentication, type Seen, type Signable, signRecord, statementInForce } from './signing.ts';
 
 interface Effect<I> {
   signedRecord?: 'test_report';
@@ -155,11 +152,6 @@ export function latestVersion(q: LabQueries, table: Signable, recordId: string) 
     .executeTakeFirstOrThrow();
 }
 
-interface Seen {
-  id: string;
-  contentHash: string;
-}
-
 interface Signing {
   reauthenticated: Reauthenticated;
   meaning: Meaning;
@@ -170,49 +162,22 @@ interface Signing {
   release: string;
 }
 
-/** Signs through lims.sign, the only path to a Signature, against a re-authentication record written here that names what proved the signer. */
+/** Signs the Test, or the Test Report this step issued on it. */
 async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signing: Signing) {
   const { reauthenticated, meaning, table, testId, seen, statementVersion, release } = signing;
   const recordId =
     table === 'test'
       ? testId
       : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id;
-  const proof = await q
-    .insert('reauthentication', {
-      sessionId,
-      personId: ctx.person.id,
-      meaning,
-      authenticator: reauthenticated.authenticator,
-    })
-    .returning('id')
-    .executeTakeFirstOrThrow();
-  await sql`select lims.sign(${proof.id}, ${sessionId}, ${table}, ${recordId}, ${seen.id},
-                             decode(${seen.contentHash}, 'hex'), ${statementVersion}, ${meaning}, ${release})`
-    .execute(q.company)
-    .catch(signingRefused);
-}
-
-/** lims.sign's own refusal (LA010) reaches the bench as a refusal; any other failure is thrown with its cause. */
-function signingRefused(error: unknown): never {
-  if (postgresFault(error)?.sqlstate === 'LA010' && error instanceof Error)
-    refuse('signingRefused', `The Signature was refused: ${error.message}.`);
-  throw new Error('signing failed', { cause: error });
-}
-
-/** The signature statement with the highest version: what the sheet shows and what lims.sign records. */
-export function statementInForce(scope: LabQueries): Promise<SignatureStatement> {
-  return scope.company
-    .selectFrom('signatureStatement')
-    .select(['version', sql<string>`convert_from(statement, 'UTF8')`.as('text')])
-    .orderBy('version', 'desc')
-    .executeTakeFirstOrThrow();
+  const proof = await proveReauthentication(q, ctx, sessionId, meaning, reauthenticated);
+  await signRecord(q, { proof, sessionId, meaning, table, recordId, seen, statementVersion, release });
 }
 
 async function seenVersion(scope: LabQueries, testId: string, signature: SigningBody): Promise<Seen> {
   const latest = await latestVersion(scope, 'test', testId);
   if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
     refuse('recordChanged', 'The Test changed since this screen loaded it. Read it again before signing.');
-  if ((await statementInForce(scope)).version !== signature.statementVersion)
+  if ((await statementInForce(scope.company)).version !== signature.statementVersion)
     refuse(
       'signingRefused',
       'The Signature Statement changed since this screen loaded it. Read it again before signing.',

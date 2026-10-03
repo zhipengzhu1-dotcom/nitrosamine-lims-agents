@@ -24,6 +24,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 2 | Authenticator revocation and replacement behind a new Identity Verification and enrolment grant ([#13](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13)) | |
 | 2 | Breach-list check at every sign-in ([#13](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13)) | |
 | 2 | Release Log, service identities, real-data gate and banner | |
+| 2 | Close System Incidents with QA's impact answer (QA answers whether the incident could have affected results or records, the Admin records the immediate and corrective actions, signs Acknowledged and closes it; the database allows only Open → Acknowledged → Closed) | Partly: [#104](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/104) built the answer, the actions, the Acknowledged signing and the close. Unbuilt: the linked Data Integrity Deviation a Yes answer opens ([#149](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/149), once Deviations exist) |
 | 3 | Critical Data Change | |
 | 3 | Return | |
 | 3 | Holds | |

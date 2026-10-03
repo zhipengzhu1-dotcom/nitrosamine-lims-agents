@@ -4,7 +4,8 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
+import { statementInForce } from './signing.ts';
+import { factsFor, latestVersion, signedVersions } from './steps.ts';
 import { onWallClock, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
@@ -105,7 +106,7 @@ async function testView(scope: Scope, id: string) {
           ),
     withheld,
     next,
-    statement: isCustomer ? null : await statementInForce(scope),
+    statement: isCustomer ? null : await statementInForce(scope.company),
   };
 }
 
@@ -150,41 +151,6 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
       if (!report) return refuse('notFound', 'This Test has no released Test Report.');
       const { version, canonicalForm, contentHash } = await latestVersion(scope, 'test_report', report.id);
       return { report, recordVersion: { version, canonicalForm, contentHash }, test, result, signatures };
-    },
-  });
-
-  app.route({
-    ...routes.incident,
-    handler: async (req) => {
-      if (!req.actor.roles.some((role) => role === 'Admin' || role === 'QA'))
-        refuse('role', 'Reading a System Incident is an Admin or QA action.');
-      return (
-        (await db
-          .selectFrom('systemIncident')
-          .select([
-            'reference',
-            'kind',
-            'state',
-            'step',
-            'recordId',
-            'requestedBy',
-            'sessionLabId',
-            'errorClass',
-            'sqlstate',
-            'constraintName',
-            'subjectId',
-            sql<string | null>`host(source_address)`.as('sourceAddress'),
-            sql<string | null>`encode(typed_user_id_hmac, 'hex')`.as('typedUserIdHmac'),
-            'chain',
-            'firstFailure',
-            'lastFailure',
-            'breakCount',
-            'openedAt',
-            'loggedAt',
-          ])
-          .where('reference', '=', req.params.reference)
-          .executeTakeFirst()) ?? refuse('notFound', `No System Incident has the reference ${req.params.reference}.`)
-      );
     },
   });
 }

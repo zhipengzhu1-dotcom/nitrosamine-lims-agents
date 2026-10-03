@@ -4,6 +4,7 @@ import type { App } from './app.ts';
 import { actorFor, labSwitchRoute, lockScreenRoutes, SESSION_COOKIE, type Credentials } from './auth.ts';
 import { passwordChangeRoute } from './password-change.ts';
 import { preferenceRoutes } from './preferences.ts';
+import { incidentRoutes } from './incident-steps.ts';
 import { readRoutes } from './reads.ts';
 import { staffRoutes } from './staff.ts';
 import { stepRoutes } from './steps.ts';
@@ -35,6 +36,7 @@ export function sessionRoutes(app: App, db: Kysely<DB>, credentials: Credentials
     readRoutes(signedIn, db);
     staffRoutes(signedIn, db, limits);
     stepRoutes(signedIn, db, credentials, release);
+    incidentRoutes(signedIn, db, credentials, release);
     workstationRoutes(signedIn, db);
   });
 }

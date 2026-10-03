@@ -5,6 +5,7 @@ import {
   mayTake,
   type IncidentState,
   type Lab,
+  type Meaning,
   type RecordVersionRef,
   type Role,
   pressText,
@@ -12,6 +13,7 @@ import {
   type SignatureStatement,
   type StepInput,
   type StepName,
+  incidentReaders,
   staffRefusal,
   stepRoute,
   steps,
@@ -24,11 +26,13 @@ import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } fr
 import { CodeField, useLoginPolicy } from './form.tsx';
 import { reducedMotion } from './motion.ts';
 
-export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room';
+export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room' | 'choice';
 export interface Field<N extends string = string> {
   name: N;
   label: string;
   kind: FieldKind;
+  /** The words a `choice` field offers, as the LIMS records them. */
+  options?: readonly string[];
 }
 
 /** The web's only per-step table: what each step asks for. Role, states and Signature Meaning come from the registry. */
@@ -58,8 +62,6 @@ export const stepUi: {
   review: { label: 'Review', fields: [] },
   release: { label: 'Release', fields: [], record: 'The Test Report this release issues' },
 };
-
-type SignedMeaning = NonNullable<(typeof steps)[StepName]['signs']>;
 
 /** What the signature sheet says a signing re-enters under this login; a given Signature's note comes from the Signature itself. */
 const signingNote = (secondFactor: boolean) =>
@@ -118,11 +120,13 @@ const markLook = {
  * Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
  * the word and glyph are final, and an accent plays around them.
  */
-export function Status(props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook }) {
+export function Status(
+  props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook; fresh?: boolean },
+) {
   if ('mark' in props) {
     const { tone, glyph } = markLook[props.mark];
     return (
-      <span className={`status status--${tone}`}>
+      <span className={`status status--${tone} ${props.fresh ? 'status--fresh' : ''}`}>
         {props.mark}
         <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
           {glyph}
@@ -148,7 +152,7 @@ export interface RailAction {
   label: string;
   context: string;
   fields: readonly Field[];
-  signs: ({ meaning: SignedMeaning; what: string[]; role: Role } & SigningView) | null;
+  signs: ({ meaning: Meaning; what: string[]; role: Role } & SigningView) | null;
   run: (input: Record<string, string>, credentials: TypedCredentials | null) => Promise<string>;
 }
 
@@ -240,6 +244,7 @@ export const modules = [
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
   { key: 'audit-export', name: 'Audit Export', holds: '', takes: 'generateAuditExport' },
+  { key: 'incidents', name: 'Incidents', holds: '', roles: incidentReaders },
   { key: 'workstations', name: 'Workstations', holds: '' },
   { key: 'staff', name: 'Staff', holds: '' },
 ] as const;
@@ -274,6 +279,7 @@ export function Shell({
           {modules
             .filter((m) => m.key !== 'staff' || staffRefusal(me.roles) === null)
             .filter((m) => !('takes' in m) || mayTake(m.takes, me.roles))
+            .filter((m) => !('roles' in m) || m.roles.some((role) => me.roles.includes(role)))
             .map((m) => (
               <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
                 {m.name}
@@ -706,6 +712,17 @@ function FieldInput({ field, value, onChange }: { field: Field; value: string; o
   if (field.kind === 'method' || field.kind === 'analyst')
     return <LookupSelect field={field} value={value} onChange={change} />;
   if (field.kind === 'room') return <RoomSelect value={value} onChange={change} />;
+  if (field.kind === 'choice')
+    return (
+      <select required value={value} onChange={change}>
+        <option value="">Choose…</option>
+        {field.options?.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    );
   const props = { required: true, value, onChange: change };
   if (field.kind === 'date') return <input type="date" {...props} />;
   if (field.kind === 'decimal') return <input inputMode="decimal" pattern={decimalPattern} {...props} />;

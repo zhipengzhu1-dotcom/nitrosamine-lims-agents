@@ -27,8 +27,9 @@ type CompanyTable =
   | 'identityVerification'
   | 'credentialLink'
   | 'enrolmentGrant'
-  | 'signatureStatement';
-type LabTable = Exclude<keyof DB, CompanyTable | 'accessEvent' | 'auditEntry' | 'session' | 'systemIncident'>;
+  | 'signatureStatement'
+  | 'systemIncident';
+type LabTable = Exclude<keyof DB, CompanyTable | 'accessEvent' | 'auditEntry' | 'session'>;
 
 function inLab(q: Kysely<DB>, labId: string) {
   const ofLab = (table: LabTable) => sql<boolean>`${sql.ref(`${table}.labId`)} = ${labId}`;
