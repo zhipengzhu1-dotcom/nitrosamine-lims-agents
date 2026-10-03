@@ -413,7 +413,7 @@ export async function auditedAfterReauthentication<R>(
  * given, must be theirs too, and the code, under the decided login, must be current and unspent. Success writes nothing
  * and answers a `Reauthenticated` for the write it enables, which `auditedAfterReauthentication` holds and which spends
  * the code. A failure refuses as badCredentials, counts toward the lockout and writes
- * `failureEvent`, with why for a failed re-authentication; a lockout it applies is an Access Event.
+ * `failureEvent` with why; a lockout it applies is an Access Event.
  */
 export async function reauthenticate(
   db: Kysely<DB>,
@@ -445,10 +445,7 @@ export async function reauthenticate(
     sessionId: session.id,
     workstationId: session.workstationId,
   };
-  const failed = (failureReason: SignInFailure): AccessEvent =>
-    failureEvent === 'ReauthenticationFailed'
-      ? { ...event, kind: failureEvent, failureReason }
-      : { ...event, kind: failureEvent };
+  const failed = (failureReason: SignInFailure): AccessEvent => ({ ...event, kind: failureEvent, failureReason });
   if (theirs && proven && person.passwordHash && !('refused' in checked))
     return new Reauthenticated(person.id, checked, notValid, {
       byLockout: failed('AccountLocked'),
@@ -812,8 +809,8 @@ export function loginRoutes(
 
 /**
  * The routes a locked session still reaches: sign-out, lock and unlock. Lock hides the session behind sessionLocked;
- * only the same person's password unlocks it, and a wrong one is an UnlockFailed Access Event that counts toward
- * lockout. Each change is an Access Event under the person whose session it is.
+ * only the same person's password unlocks it, and a wrong one is an UnlockFailed Access Event, with why, that counts
+ * toward lockout. Each change is an Access Event under the person whose session it is.
  */
 export function lockScreenRoutes(app: App, db: Kysely<DB>, credentials: Credentials): void {
   const limits = credentials.policy;

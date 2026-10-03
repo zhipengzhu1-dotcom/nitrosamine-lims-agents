@@ -412,7 +412,7 @@ it('a Lockout that lands after the enrolment checked the password refuses it wit
   );
 });
 
-it('under the decided login, unlocking a locked session needs the password and a fresh code', async () => {
+it('under the decided login, unlocking a locked session needs the password and a fresh code, and a refused unlock records WrongCode', async () => {
   const { account, code } = await enrolled('ulla.unlock');
   const client = new Client(decided.base);
   ok(
@@ -434,12 +434,12 @@ it('under the decided login, unlocking a locked session needs the password and a
     ok(await client.call(routes.unlock, { password: account.password, code: code(1) })).person.id,
     account.id,
   );
-  assert.deepEqual((await eventsOf(account.id)).map((event) => event.kind).slice(-5), [
-    'Lock',
-    'UnlockFailed',
-    'UnlockFailed',
-    'UnlockFailed',
-    'Unlock',
+  assert.deepEqual((await eventsOf(account.id)).slice(-5), [
+    { kind: 'Lock', failureReason: null },
+    { kind: 'UnlockFailed', failureReason: 'WrongCode' },
+    { kind: 'UnlockFailed', failureReason: 'WrongCode' },
+    { kind: 'UnlockFailed', failureReason: 'WrongCode' },
+    { kind: 'Unlock', failureReason: null },
   ]);
 });
 

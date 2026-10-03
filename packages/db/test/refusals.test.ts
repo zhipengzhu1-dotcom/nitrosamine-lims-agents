@@ -1432,6 +1432,18 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { kind: 'SignInFailed', failure_reason: 'WrongUserId' },
       constraint: 'access_event_failure_kind_check',
     },
+    {
+      name: 'a failed unlock Access Event without a failure reason is refused',
+      table: 'lims.access_event',
+      change: { kind: 'UnlockFailed', failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_check',
+    },
+    {
+      name: 'a failed unlock Access Event with the typed-user-ID failure of a signing is refused',
+      table: 'lims.access_event',
+      change: { kind: 'UnlockFailed', failure_reason: 'WrongUserId', session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_kind_check',
+    },
     ...each(
       'a Lab code that is not two to four capital letters is refused',
       'lims.lab',
@@ -1692,7 +1704,11 @@ describe('the database refuses a value outside its allowed set', () => {
     ...(['SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'] as const).map((kind) => ({
       name: `an Access Event of kind ${kind} without a session is refused`,
       table: 'lims.access_event' as const,
-      change: { kind, failure_reason: null, ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }) },
+      change: {
+        kind,
+        failure_reason: kind === 'UnlockFailed' ? 'WrongPassword' : null,
+        ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }),
+      },
       constraint: 'access_event_session_kind_check',
     })),
     ...(['IdleExpiry', 'AbsoluteExpiry'] as const).flatMap((kind) => [
