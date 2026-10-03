@@ -136,9 +136,12 @@ function DocumentRecord({
   const done = async () => {
     await Promise.all([reload(), afterStep()]);
   };
+  // Abandon ends the record, so it never takes the commit's look, even when it is the only step open.
+  const primary = view?.steps.find((name) => name !== 'abandon');
+  const action = view && primary ? documentAction(me, primary, view, done) : null;
   // oxlint-disable-next-line react-perf/jsx-no-new-array-as-prop -- the rail is not memoized and each action is rebuilt per render, so a stable array would save nothing
-  const [action = null, ...secondary] = view
-    ? view.steps.flatMap((name) => documentAction(me, name, view, done) ?? [])
+  const secondary = view
+    ? view.steps.filter((name) => name !== primary).flatMap((name) => documentAction(me, name, view, done) ?? [])
     : [];
   const [newest, ...earlier] = view?.versions ?? [];
   const frame = (record: ReactNode) => (

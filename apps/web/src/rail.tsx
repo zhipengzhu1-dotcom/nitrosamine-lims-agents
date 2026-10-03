@@ -313,14 +313,7 @@ export function Shell({
       <main className="plane" inert={committing}>
         {children}
       </main>
-      <Rail
-        key={railKey}
-        me={me}
-        action={action}
-        secondary={action ? secondary : noActions}
-        notice={notice}
-        onCommitting={setCommitting}
-      />
+      <Rail key={railKey} me={me} action={action} secondary={secondary} notice={notice} onCommitting={setCommitting} />
     </div>
   );
 }

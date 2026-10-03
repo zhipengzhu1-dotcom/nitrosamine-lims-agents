@@ -72,6 +72,10 @@ test('a Draft SOP becomes Effective through Authored, Reviewed and Approved by t
   expect((await commit.boundingBox())?.height, 'a gloved finger can press it').toBeGreaterThanOrEqual(44);
   await sign(page, 'Authored', 'lena.manager', 'The version is now In Review.');
   await expect(page.getByRole('heading', { name: /^RD-SOP-\d{4} In Review$/ })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Abandon', exact: true }),
+    'Abandon stays a quiet button when it is the only step',
+  ).toHaveClass(/rbtn--quiet/);
   await signOutFromRail(page);
 
   await signIn(page, 'rui.reviewer');
