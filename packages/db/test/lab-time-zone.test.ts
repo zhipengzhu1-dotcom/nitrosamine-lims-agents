@@ -190,3 +190,25 @@ describe('the migration that stamps the Lab time zone', () => {
     );
   });
 });
+
+describe('the migration that checks each kept time zone', () => {
+  // before() migrates through it over a Signature and received and unreceived Samples, so any old row it refused
+  // fails every test here; this one shows the checks were validated over those rows, not added as not valid.
+  it('applies over the Signatures and Samples written before it, received or not, and validates every check', async () => {
+    const { rows } = await client.query<{ name: string; validated: boolean }>(
+      'select conname as name, convalidated as validated from pg_constraint where conname = any($1) order by conname',
+      [
+        [
+          'sample_received_time_zone_check',
+          'sample_received_time_zone_received_at_check',
+          'signature_signed_time_zone_check',
+        ],
+      ],
+    );
+    assert.deepEqual(rows, [
+      { name: 'sample_received_time_zone_check', validated: true },
+      { name: 'sample_received_time_zone_received_at_check', validated: true },
+      { name: 'signature_signed_time_zone_check', validated: true },
+    ]);
+  });
+});
