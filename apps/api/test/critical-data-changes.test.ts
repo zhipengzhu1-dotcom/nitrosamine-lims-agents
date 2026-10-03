@@ -4,7 +4,16 @@ import { describe, it } from 'node:test';
 import { audited, type DB, postgresFault } from '@lims/db';
 import { changeStepRoute, routes, stepRoute, unsignedMeanings } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
-import { type Account, type Client, ok, refusedWith as refusedOver, signatureOf, startApi } from './harness.ts';
+import {
+  type Account,
+  type Client,
+  ok,
+  onLabClock,
+  refusedWith as refusedOver,
+  signatureOf,
+  startApi,
+  toMillis,
+} from './harness.ts';
 
 const api = await startApi('lims_api_critical_data_changes_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -1133,6 +1142,36 @@ describe('after an approval the assigned Analyst signs the corrected Result Perf
       refusedOver(await signStep(as.dana, 'signPerformedAgain', testId, dana), 'guard'),
       'Only the assigned Analyst can sign the Test Performed again.',
     );
+  });
+});
+
+describe("a Critical Data Change's proposed and decided times keep the Lab wall clock of the zone in force then", () => {
+  it('proposedAtLab and decidedAtLab carry the Lab offset, name the UTC instant, and stay put when the zone changes', async () => {
+    const { timeZone } = await api.db
+      .selectFrom('lab')
+      .select('timeZone')
+      .where('labId', '=', api.labId)
+      .executeTakeFirstOrThrow();
+    const { testId } = await performedTest();
+    const { changeId } = ok(await proposeOver(testId));
+    const shown = async () =>
+      ok(await as.ana.call(routes.test, { id: testId })).changes.find((c) => c.id === changeId) ??
+      assert.fail('the Test shows the change');
+    assert.equal((await shown()).decidedAtLab, null, 'a pending change has no decided time');
+    ok(await as.ana.call(changeStepRoute('withdrawChange'), { testId, changeId, reasonId: reason.inError }));
+    const withdrawn = await shown();
+    const decidedAt = withdrawn.decidedAt ?? assert.fail('the decided time');
+    assert.deepEqual(
+      [toMillis(withdrawn.proposedAtLab), toMillis(withdrawn.decidedAtLab)],
+      [onLabClock(withdrawn.proposedAt, timeZone), onLabClock(decidedAt, timeZone)],
+      'a Withdrawn decision, which no Signature carries, shows its time on the Lab wall clock',
+    );
+    await api.moveLabZone('Asia/Tokyo');
+    try {
+      assert.deepEqual(await shown(), withdrawn, 'the zone change moves neither time');
+    } finally {
+      await api.moveLabZone(timeZone);
+    }
   });
 });
 

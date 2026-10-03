@@ -48,8 +48,8 @@ const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
  * A point in time: on the wire, and so in the web and the tests, an ISO 8601 string the database clock produced, in
- * UTC unless its name ends in `Lab` (`atLab`, `receivedAtLab`, `signedAtLab`): that one carries the offset of the
- * owning Lab's time zone in force when it was written, and the database renders it as text. For a UTC field the API hands Fastify the Date that Kysely returns, and Fastify
+ * UTC unless its name ends in `Lab` (`atLab`, `receivedAtLab`, `signedAtLab`, `proposedAtLab`, `decidedAtLab`): that
+ * one carries the offset of the owning Lab's time zone in force when it was written, and the database renders it as text. For a UTC field the API hands Fastify the Date that Kysely returns, and Fastify
  * writes it with toISOString.
  */
 export type Instant = string & { readonly [instantBrand]: true };
@@ -368,8 +368,12 @@ const criticalDataChange = Type.Object({
   reasonText: nullable(Type.String()),
   proposedBy: Type.String(),
   proposedAt: instant,
+  /** `proposedAt` on the wall clock of the zone its Lab was in then, ISO 8601 with that offset, as the database renders it. */
+  proposedAtLab: instant,
   decidedBy: nullable(Type.String()),
   decidedAt: nullable(instant),
+  /** `decidedAt` on the wall clock of the zone its Lab was in then, ISO 8601 with that offset, as the database renders it. */
+  decidedAtLab: nullable(instant),
   decisionReason: nullable(Type.String()),
   decisionReasonText: nullable(Type.String()),
   recordVersion: recordVersionRef,

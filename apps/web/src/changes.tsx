@@ -119,11 +119,12 @@ export function Changes({ rows }: { rows: CriticalDataChange[] }) {
         <li key={c.id}>
           <Status mark={c.state} /> <b className="value">{valueLine(c)}</b>
           <p>
-            {reasonLine(c.reason, c.reasonText)}. Proposed by {c.proposedBy}, <When at={c.proposedAt} atLab={null} />.
+            {reasonLine(c.reason, c.reasonText)}. Proposed by {c.proposedBy},{' '}
+            <When at={c.proposedAt} atLab={c.proposedAtLab} />.
           </p>
           {c.decidedBy && c.decidedAt && (
             <p>
-              {c.state} by {c.decidedBy}, <When at={c.decidedAt} atLab={null} />
+              {c.state} by {c.decidedBy}, <When at={c.decidedAt} atLab={c.decidedAtLab} />
               {c.decisionReason && `: ${reasonLine(c.decisionReason, c.decisionReasonText)}`}.
             </p>
           )}

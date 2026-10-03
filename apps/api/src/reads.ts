@@ -3,10 +3,10 @@ import { nextStep, openChangeSteps, recordKind, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
-import { labScope, type Scope } from './scope.ts';
+import { labScope, onWallClock, type Scope } from './scope.ts';
 import { statementInForce } from './signing.ts';
 import { changeFactsFor, changesOf, factsFor, latestVersion, signedVersions, superseded } from './steps.ts';
-import { onWallClock, signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
+import { signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {

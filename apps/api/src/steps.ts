@@ -24,7 +24,7 @@ import type { App } from './app.ts';
 import { type Credentials, type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
 import { incidentRoutes } from './incident-steps.ts';
 import { refuse } from './refuse.ts';
-import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
+import { type LabQueries, labScope, onWallClock, type WriteQueries } from './scope.ts';
 import { proveReauthentication, type Seen, type Signable, signRecord, statementInForce } from './signing.ts';
 
 interface Effect<I> {
@@ -190,7 +190,14 @@ export async function changeFactsFor(q: LabQueries, ctx: ActorContext, test: Cha
   return { facts, pending };
 }
 
-/** The Test's Critical Data Changes, oldest first, each with its decision once made and its own Record Version. */
+/** The Lab's time zone in force at the instant in `column`, so no later change of the zone moves its wall clock. */
+const labZoneAt = (column: string) => sql`lims.lab_time_zone_at(critical_data_change.lab_id, ${sql.ref(column)})`;
+
+/**
+ * The Test's Critical Data Changes, oldest first, each with its decision once made and its own Record Version. The
+ * proposed and decided times carry the Lab's wall clock beside UTC, as a Signature's time does, because a Rejected or
+ * Withdrawn decision has no Signature to carry it.
+ */
 export async function changesOf(q: LabQueries, testId: string) {
   const rows = await q
     .from('criticalDataChange')
@@ -216,8 +223,12 @@ export async function changesOf(q: LabQueries, testId: string) {
       'criticalDataChange.reasonText',
       'proposer.displayName as proposedBy',
       'criticalDataChange.proposedAt',
+      onWallClock(sql.ref<Date>('critical_data_change.proposed_at'), labZoneAt('critical_data_change.proposed_at')).as(
+        'proposedAtLab',
+      ),
       'decider.displayName as decidedBy',
       'd.decidedAt',
+      onWallClock(sql.ref<Date | null>('d.decided_at'), labZoneAt('d.decided_at')).as('decidedAtLab'),
       'decisionReason.label as decisionReason',
       'd.reasonText as decisionReasonText',
     ])
