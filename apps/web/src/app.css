@@ -1134,7 +1134,8 @@ a.btn {
     flex-basis: 100%;
     font-size: 14px;
   }
-  .rbtn--commit {
+  .rbtn--commit,
+  .rbtn--second {
     order: 2;
     flex-basis: 100%;
   }
@@ -1211,7 +1212,8 @@ a.btn {
   .rail__context {
     order: 3;
   }
-  .rbtn--commit {
+  .rbtn--commit,
+  .rbtn--second {
     order: 4;
   }
   .top {

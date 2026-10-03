@@ -14,7 +14,7 @@ async function openTest(page: Page, username: string, testId: string) {
   await expect(page.getByRole('heading', { name: 'Critical Data Changes' })).toBeVisible();
 }
 
-test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs it Approved, and a second proposal is withdrawn', async ({
+test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs it Approved, a second proposal is withdrawn and a third rejected', async ({
   page,
 }) => {
   const testId = await submittedTest(page, `Metformin HCl tablets (fictional, change ${randomUUID()})`);
@@ -50,6 +50,12 @@ test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs
   await expect(page.locator('dd.value')).toContainText('0.0310 ppm');
   await changes.scrollIntoViewIfNeeded();
   await shot(page, 'approved');
+  const entries = page.getByRole('region', { name: 'Audit Trail' }).getByRole('listitem');
+  await expect(entries.filter({ hasText: 'value 0.0300 to 0.0310' }).first(), 'the proposal is in the Audit Trail').toBeVisible();
+  await expect(
+    entries.filter({ hasText: 'Critical Data Change Decision' }).filter({ hasText: 'Approved' }).first(),
+    'the approval is in the Audit Trail',
+  ).toBeVisible();
 
   await openTest(page, 'ana.analyst', testId);
   await page.getByRole('button', { name: 'Propose change' }).click();
@@ -65,4 +71,24 @@ test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs
   await expect(page.locator('dd.value')).toContainText('0.0310 ppm');
   await changes.scrollIntoViewIfNeeded();
   await shot(page, 'withdrawn');
+
+  await page.getByRole('button', { name: 'Propose change' }).click();
+  await sheet(page).getByLabel('New value as written').fill('0.0330');
+  await sheet(page).getByRole('combobox', { name: 'Reason', exact: true }).selectOption('Calculation error');
+  await sheet(page).getByRole('button', { name: 'Propose change' }).click();
+  await railSays(page, 'waits for a Reviewer');
+
+  await openTest(page, 'rui.reviewer', testId);
+  await expect(page.getByRole('button', { name: 'Approve change' })).toBeVisible();
+  await page.getByRole('button', { name: 'Reject change' }).click();
+  await expect(sheet(page).getByLabel(/Password/)).toHaveCount(0);
+  await sheet(page).getByRole('combobox', { name: 'Reason', exact: true }).selectOption('Not supported by the raw data');
+  await shot(page, 'reject-sheet');
+  await sheet(page).getByRole('button', { name: 'Reject change' }).click();
+  await railSays(page, 'The Critical Data Change is rejected. The Result is unchanged.');
+  await expect(changes).toContainText('Rejected by');
+  await expect(changes).toContainText('Not supported by the raw data');
+  await expect(page.locator('dd.value')).toContainText('0.0310 ppm');
+  await changes.scrollIntoViewIfNeeded();
+  await shot(page, 'rejected');
 });

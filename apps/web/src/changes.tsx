@@ -12,6 +12,7 @@ import { type Field, type RailAction, Status } from './rail.tsx';
 import { When } from './time.tsx';
 
 type TestView = RouteReply<typeof routes.test>;
+type Reasons = RouteReply<typeof routes.reasons>;
 
 const changeUi: { [K in ChangeStepName]: { label: string; done: string } } = {
   proposeChange: { label: 'Propose change', done: 'The Critical Data Change is proposed and waits for a Reviewer.' },
@@ -23,14 +24,30 @@ const changeUi: { [K in ChangeStepName]: { label: string; done: string } } = {
 const valueLine = (c: CriticalDataChange) => `Result ${c.field}: ${c.oldValue} → ${c.newValue} ${c.unit}`;
 const reasonLine = (reason: string, text: string | null) => (text ? `${reason}: ${text}` : reason);
 
+const reasonStepOf = (name: ChangeStepName | undefined): ReasonStep =>
+  name === undefined || name === 'approveChange' ? 'proposeChange' : name;
+
 /**
- * The rail's action for the first Critical Data Change step this person may take on the Test, or null. The reasons
- * come from the step's picklist on the server; an approval signs the pending change's own Record Version.
+ * The rail's actions for the first two Critical Data Change steps this person may take on the Test, so a Reviewer
+ * meets reject beside approve; none while a Test step is open. The reasons come from each step's picklist on the
+ * server; an approval signs the pending change's own Record Version.
  */
-export function useChangeAction(view: TestView | undefined, onDone: () => Promise<void>): RailAction | null {
-  const name = view?.next ? undefined : view?.changeNext[0];
-  const reasonStep: ReasonStep = name === undefined || name === 'approveChange' ? 'proposeChange' : name;
-  const { data: reasons } = useApi(routes.reasons, { step: reasonStep });
+export function useChangeActions(
+  view: TestView | undefined,
+  onDone: () => Promise<void>,
+): [RailAction | null, RailAction | null] {
+  const [first, second] = view?.next ? [] : (view?.changeNext ?? []);
+  const { data: firstReasons } = useApi(routes.reasons, { step: reasonStepOf(first) });
+  const { data: secondReasons } = useApi(routes.reasons, { step: reasonStepOf(second) });
+  return [changeAction(view, first, firstReasons, onDone), changeAction(view, second, secondReasons, onDone)];
+}
+
+function changeAction(
+  view: TestView | undefined,
+  name: ChangeStepName | undefined,
+  reasons: Reasons | undefined,
+  onDone: () => Promise<void>,
+): RailAction | null {
   if (!view || !name || !reasons) return null;
   const pending = view.changes.find((c) => c.state === 'Pending');
   const takesReason = name !== 'approveChange';

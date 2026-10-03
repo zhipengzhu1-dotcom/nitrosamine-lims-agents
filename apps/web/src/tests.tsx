@@ -10,7 +10,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
-import { Changes, useChangeAction } from './changes.tsx';
+import { Changes, useChangeActions } from './changes.tsx';
 import { Shell, Status, stateOrder, stepAction, words } from './rail.tsx';
 import { Split } from './split.tsx';
 import { type Column, StackTable } from './stack.tsx';
@@ -139,7 +139,7 @@ export function TestPage({
   const refresh = async () => {
     await Promise.all([reload(), reloadTrail(), afterStep?.()]);
   };
-  const changeAction = useChangeAction(view, refresh);
+  const [changeAction, otherChangeAction] = useChangeActions(view, refresh);
   const action = view?.next
     ? stepAction(
         view.next,
@@ -150,7 +150,14 @@ export function TestPage({
       )
     : changeAction;
   const frame = (record: ReactNode) => (
-    <Shell me={me} active="tests" action={action} notice={view && unsignedNotice(view.signatures)} railKey={id}>
+    <Shell
+      me={me}
+      active="tests"
+      action={action}
+      secondary={otherChangeAction}
+      notice={view && unsignedNotice(view.signatures)}
+      railKey={id}
+    >
       {list ? <Split list={list} record={record} closeHref="#/tests" /> : record}
     </Shell>
   );

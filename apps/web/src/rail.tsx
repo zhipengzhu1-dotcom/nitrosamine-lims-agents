@@ -267,6 +267,7 @@ export type Module = (typeof modules)[number];
 type ModuleKey = Module['key'];
 
 /**
+ * `secondary` is a second step the person may take instead of `action`, such as rejecting a change beside approving it.
  * `notice` is what the rail says when the person has no step to take here, such as which Signatures are unsigned.
  * A new `railKey` starts the rail afresh, so a sheet or answer for one record never stays on for the next. The plane
  * takes no press while a commit waits for its answer, so the answer is shown beside the record it was taken on.
@@ -275,6 +276,7 @@ export function Shell({
   me,
   active,
   action,
+  secondary = null,
   notice,
   railKey,
   children,
@@ -282,6 +284,7 @@ export function Shell({
   me: ActorContext;
   active: ModuleKey | null;
   action: RailAction | null;
+  secondary?: RailAction | null;
   notice?: string | undefined;
   railKey?: string;
   children: ReactNode;
@@ -305,7 +308,7 @@ export function Shell({
       <main className="plane" inert={committing}>
         {children}
       </main>
-      <Rail key={railKey} me={me} action={action} notice={notice} onCommitting={setCommitting} />
+      <Rail key={railKey} me={me} action={action} secondary={secondary} notice={notice} onCommitting={setCommitting} />
     </div>
   );
 }
@@ -343,11 +346,13 @@ function unansweredText(e: unknown, signs: boolean): string {
 function Rail({
   me,
   action,
+  secondary,
   notice,
   onCommitting,
 }: {
   me: ActorContext;
   action: RailAction | null;
+  secondary: RailAction | null;
   notice?: string | undefined;
   onCommitting: (committing: boolean) => void;
 }) {
@@ -488,7 +493,7 @@ function Rail({
     }
   }
 
-  const direct = action && !action.fields.length && !action.signs;
+  const press = (a: RailAction) => (!a.fields.length && !a.signs ? void commit(a) : open(a));
   const shown = sheet?.action;
   return (
     <>
@@ -671,9 +676,20 @@ function Rail({
             data-instant={instant || undefined}
             disabled={busy}
             aria-busy={busy}
-            onClick={() => (direct ? void commit(action) : open(action))}
+            onClick={() => press(action)}
           >
             {action.label}
+          </button>
+        )}
+        {secondary && !opened && (
+          <button
+            type="button"
+            className="rbtn rbtn--quiet rbtn--second"
+            disabled={busy}
+            aria-busy={busy}
+            onClick={() => press(secondary)}
+          >
+            {secondary.label}
           </button>
         )}
         <fieldset id="rail-session" className="rail__session" disabled={busy || locking}>
