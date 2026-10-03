@@ -2,6 +2,8 @@
 -- Critical Data Change: a proposal, then one decision (Approved, Rejected or Withdrawn). Every step off the normal path
 -- takes its reason from the picklist store.
 
+set local role lims_owner;
+
 select set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 'system', true),
        set_config('lims.reason', 'Build Critical Data Changes and the picklist reasons', true);
 
@@ -301,6 +303,7 @@ end $$;
 create trigger version_record after insert on lims.critical_data_change
   for each row execute function lims.version_critical_data_change();
 
+grant execute on function lims.acting_person() to lims_app;
 grant select on lims.picklist_reason to lims_app;
 grant select on lims.critical_data_change, lims.critical_data_change_decision to lims_app;
 grant insert (lab_id, test_id, result_id, field, old_value, new_value, reason_id, reason_text)

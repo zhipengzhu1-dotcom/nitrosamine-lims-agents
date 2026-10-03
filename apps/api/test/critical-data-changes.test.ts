@@ -1,0 +1,566 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { describe, it } from 'node:test';
+import { audited, type DB, postgresFault } from '@lims/db';
+import { stepRoute } from '@lims/domain';
+import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
+import { type Account, type Client, ok, signatureOf, startApi } from './harness.ts';
+
+const api = await startApi('lims_api_critical_data_changes_test');
+const [cora, samir, lena, ana, rui] = [
+  api.person('cora'),
+  api.person('samir'),
+  api.person('lena'),
+  api.person('ana'),
+  api.person('rui'),
+];
+const dana = await api.addPerson('dana.analyst-reviewer', ['Analyst', 'Reviewer'], { trained: true });
+const as = {
+  cora: await api.login(cora),
+  samir: await api.login(samir),
+  lena: await api.login(lena),
+  ana: await api.login(ana),
+  rui: await api.login(rui),
+  dana: await api.login(dana),
+};
+
+const saved = '0.0300';
+
+/** Walks a fresh Test to SubmittedForReview: its Result saved and signed Performed by `analyst`. */
+async function performedTest(analyst: Account = ana, client: Client = as.ana) {
+  const commit = () => randomUUID();
+  const { testId } = ok(
+    await as.cora.call(stepRoute('submit'), {
+      commitKey: commit(),
+      input: { methodId: api.methodId, description: 'Metformin HCl tablets (fictional)' },
+    }),
+  );
+  ok(await as.samir.call(stepRoute('receive'), { commitKey: commit(), testId, input: {} }));
+  ok(await as.lena.call(stepRoute('assign'), { commitKey: commit(), testId, input: { assigneeId: analyst.id } }));
+  const input = {
+    analyte: 'NDMA',
+    value: saved,
+    unit: 'ppm',
+    injectionSequenceRef: 'SEQ-2026-0042',
+    notebookRef: 'NB-RD-0001-012',
+    performedOn: '2026-09-30',
+  };
+  const signature = await signatureOf(client, testId, analyst);
+  ok(await client.call(stepRoute('enterResult'), { commitKey: commit(), testId, input, signature }));
+  const { id: resultId } = await api.db
+    .selectFrom('result')
+    .select('id')
+    .where('testId', '=', testId)
+    .executeTakeFirstOrThrow();
+  return { testId, resultId };
+}
+
+const reasonOf = async (step: string, label: string) =>
+  (
+    await api.db
+      .selectFrom('picklistReason')
+      .select('id')
+      .where('step', '=', step)
+      .where('label', '=', label)
+      .executeTakeFirstOrThrow()
+  ).id;
+
+const reason = {
+  transcription: await reasonOf('proposeChange', 'Transcription error'),
+  proposeOther: await reasonOf('proposeChange', 'Other'),
+  rawData: await reasonOf('rejectChange', 'Not supported by the raw data'),
+  inError: await reasonOf('withdrawChange', 'Proposed in error'),
+};
+
+const acting = <T>(db: Kysely<DB>, person: Account, role: string, fn: (tx: Transaction<DB>) => Promise<T>) =>
+  audited(db, { actor: `person:${person.username}`, role, reason: 'Act on a Critical Data Change' }, fn);
+
+type ChangeRow = Insertable<DB['criticalDataChange']>;
+type DecisionRow = Insertable<DB['criticalDataChangeDecision']>;
+
+const snake = (name: string) => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
+/** Proposes through a plain insert, as the app role may: the database stamps the proposer, time and Record Version. */
+function propose(test: { testId: string; resultId: string }, change: Partial<ChangeRow> = {}, by = ana, db = api.db) {
+  const row = {
+    labId: api.labId,
+    testId: test.testId,
+    resultId: test.resultId,
+    field: 'value',
+    oldValue: saved,
+    newValue: '0.0310',
+    reasonId: reason.transcription,
+    ...change,
+  };
+  const columns = Object.keys(row).map((column) => sql.id(snake(column)));
+  return acting(db, by, 'Analyst', async (tx) => {
+    const { rows } = await sql<{ id: string }>`insert into lims.critical_data_change (${sql.join(columns)})
+      values (${sql.join(Object.values(row))}) returning id`.execute(tx);
+    return rows[0]?.id ?? assert.fail('the proposal returns its id');
+  });
+}
+
+function decide(
+  changeId: string,
+  testId: string,
+  decision: Partial<DecisionRow> & Pick<DecisionRow, 'outcome'>,
+  by: Account,
+  role: string,
+  db = api.db,
+) {
+  return acting(db, by, role, (tx) =>
+    tx
+      .insertInto('criticalDataChangeDecision')
+      .values({ labId: api.labId, changeId, testId, ...decision })
+      .execute(),
+  );
+}
+
+/** The Approved Signature `by` gives, through lims.sign, on the change's latest Record Version, inside `tx`. */
+async function signApproved(tx: Transaction<DB>, by: Account, changeId: string): Promise<string> {
+  const { id: sessionId } = await tx
+    .selectFrom('session')
+    .select('id')
+    .where('personId', '=', by.id)
+    .where('endedAt', 'is', null)
+    .orderBy('createdAt', 'desc')
+    .executeTakeFirstOrThrow();
+  const { id: proof } = await tx
+    .insertInto('reauthentication')
+    .values({ labId: api.labId, sessionId, personId: by.id, meaning: 'Approved', authenticator: 'Password' })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  const seen = await tx
+    .selectFrom('recordVersion')
+    .select(['id', sql<string>`encode(content_hash, 'hex')`.as('hash')])
+    .where('recordTable', '=', 'critical_data_change')
+    .where('recordId', '=', changeId)
+    .orderBy('version', 'desc')
+    .executeTakeFirstOrThrow();
+  const { version } = await tx
+    .selectFrom('signatureStatement')
+    .select('version')
+    .orderBy('version', 'desc')
+    .executeTakeFirstOrThrow();
+  const { rows } = await sql<{ id: string }>`select lims.sign(${proof}, ${sessionId}, 'critical_data_change',
+    ${changeId}, ${seen.id}, decode(${seen.hash}, 'hex'), ${version}, 'Approved', 'test-release') as id`.execute(tx);
+  return rows[0]?.id ?? assert.fail('lims.sign returns the Signature');
+}
+
+const approve = (changeId: string, testId: string, by = rui) =>
+  acting(api.db, by, 'Reviewer', async (tx) => {
+    const signatureId = await signApproved(tx, by, changeId);
+    await tx
+      .insertInto('criticalDataChangeDecision')
+      .values({ labId: api.labId, changeId, testId, outcome: 'Approved', signatureId })
+      .execute();
+  });
+
+interface Refusal {
+  code: string;
+  constraint: string | null;
+  column: string | null;
+  message: string;
+}
+
+async function refusal(write: Promise<unknown>): Promise<Refusal> {
+  try {
+    await write;
+  } catch (error) {
+    const fault = postgresFault(error);
+    let e: unknown = error;
+    while (e instanceof Error && e.cause instanceof Error) e = e.cause;
+    if (fault && e instanceof Error)
+      return { code: fault.sqlstate, constraint: fault.constraint, column: fault.column, message: e.message };
+    throw error;
+  }
+  return assert.fail('the database accepted the write');
+}
+
+async function refusedWith(write: Promise<unknown>, message: string): Promise<void> {
+  const error = await refusal(write);
+  assert.deepEqual([error.code, error.message], ['LA017', message]);
+}
+
+const resultValue = async (resultId: string) =>
+  (await api.db.selectFrom('result').select('value').where('id', '=', resultId).executeTakeFirstOrThrow()).value;
+
+describe('a Critical Data Change is proposed by the person acting, on the value as it stands, one at a time', () => {
+  it('a proposal stamps its proposer, its time and the Test Record Version it was made on', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    const row = await api.db
+      .selectFrom('criticalDataChange as c')
+      .innerJoin('recordVersion as v', (j) =>
+        j.onRef('v.labId', '=', 'c.labId').onRef('v.id', '=', 'c.proposedOnVersion'),
+      )
+      .select(['c.proposedBy', 'v.recordTable', 'v.recordId'])
+      .where('c.id', '=', changeId)
+      .executeTakeFirstOrThrow();
+    assert.deepEqual([row.proposedBy, row.recordTable, row.recordId], [ana.id, 'test', test.testId]);
+  });
+
+  it('a proposal that names someone else as its proposer is refused', async () => {
+    await refusedWith(
+      propose(await performedTest(), { proposedBy: lena.id }, ana, api.superuser),
+      'a Critical Data Change is proposed by the person acting',
+    );
+  });
+
+  it("a proposal whose old value is not the Result's current value is refused", async () => {
+    await refusedWith(
+      propose(await performedTest(), { oldValue: '0.0299' }),
+      "the old value is not the Result's current value",
+    );
+  });
+
+  it('a second proposal on a Result while one is pending is refused', async () => {
+    const test = await performedTest();
+    await propose(test);
+    await refusedWith(
+      propose(test, { newValue: '0.0320' }),
+      'a Critical Data Change on this Result is already pending',
+    );
+  });
+
+  it("a reason from another step's picklist, Other without its text, and text on any other reason are refused", async () => {
+    const test = await performedTest();
+    await refusedWith(
+      propose(test, { reasonId: reason.rawData }),
+      'the reason is not one the proposeChange step offers',
+    );
+    await refusedWith(propose(test, { reasonId: reason.proposeOther }), 'the reason Other needs its text');
+    await refusedWith(propose(test, { reasonText: 'Typed it wrong' }), 'only the reason Other takes text');
+    await propose(test, { reasonId: reason.proposeOther, reasonText: 'Wrong dilution factor typed' });
+  });
+});
+
+describe('a Critical Data Change is decided once: withdrawn by its proposer, approved or rejected by a Reviewer', () => {
+  it('a decision that names someone else as its decider is refused', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    await refusedWith(
+      decide(
+        changeId,
+        test.testId,
+        { outcome: 'Withdrawn', reasonId: reason.inError, decidedBy: ana.id },
+        rui,
+        'Reviewer',
+        api.superuser,
+      ),
+      'a Critical Data Change is decided by the person acting',
+    );
+  });
+
+  it('only the proposer withdraws, and a withdrawn change takes no second decision', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    await refusedWith(
+      decide(changeId, test.testId, { outcome: 'Withdrawn', reasonId: reason.inError }, rui, 'Reviewer'),
+      'only the proposer withdraws a Critical Data Change',
+    );
+    await decide(changeId, test.testId, { outcome: 'Withdrawn', reasonId: reason.inError }, ana, 'Analyst');
+    const error = await refusal(
+      decide(changeId, test.testId, { outcome: 'Rejected', reasonId: reason.rawData }, rui, 'Reviewer'),
+    );
+    assert.deepEqual([error.code, error.constraint], ['23505', 'critical_data_change_decision_lab_id_change_id_key']);
+    assert.equal(await resultValue(test.resultId), saved, 'a withdrawn change leaves the value as it was');
+  });
+
+  it('the proposer neither approves nor rejects their own change', async () => {
+    const test = await performedTest(dana, as.dana);
+    const changeId = await propose(test, {}, dana);
+    await refusedWith(
+      decide(changeId, test.testId, { outcome: 'Rejected', reasonId: reason.rawData }, dana, 'Reviewer'),
+      'the proposer cannot reject their own Critical Data Change',
+    );
+    await refusedWith(
+      approve(changeId, test.testId, dana),
+      'the proposer cannot approve their own Critical Data Change',
+    );
+  });
+
+  it('the Analyst who signed Performed neither approves nor rejects a correction proposed by someone else', async () => {
+    const test = await performedTest(dana, as.dana);
+    const changeId = await propose(test, {}, ana, api.superuser);
+    await refusedWith(
+      decide(changeId, test.testId, { outcome: 'Rejected', reasonId: reason.rawData }, dana, 'Reviewer'),
+      'the Analyst who signed Performed cannot reject a correction to the Result',
+    );
+    await refusedWith(
+      approve(changeId, test.testId, dana),
+      'the Analyst who signed Performed cannot approve a correction to the Result',
+    );
+  });
+
+  it('a rejection is refused from anyone not acting as a Reviewer, and takes a rejectChange reason', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    await refusedWith(
+      decide(changeId, test.testId, { outcome: 'Rejected', reasonId: reason.rawData }, lena, 'LabManager'),
+      'a Critical Data Change is rejected by a Reviewer, who could approve it',
+    );
+    await refusedWith(
+      decide(changeId, test.testId, { outcome: 'Rejected', reasonId: reason.inError }, rui, 'Reviewer'),
+      'the reason is not one the rejectChange step offers',
+    );
+    await decide(changeId, test.testId, { outcome: 'Rejected', reasonId: reason.rawData }, rui, 'Reviewer');
+    assert.equal(await resultValue(test.resultId), saved, 'a rejected change leaves the value as it was');
+  });
+
+  it('an approval that names a Signature other than its own Approved one on the change is refused', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    const { id: performed } = await api.db
+      .selectFrom('signature')
+      .select('id')
+      .where('meaning', '=', 'Performed')
+      .where('personId', '=', ana.id)
+      .executeTakeFirstOrThrow();
+    await refusedWith(
+      decide(changeId, test.testId, { outcome: 'Approved', signatureId: performed }, rui, 'Reviewer'),
+      'an approval names the Approved Signature its approver gave on the proposal in this transaction',
+    );
+  });
+
+  it('an approval is refused once the Test changed after the proposal', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    await audited(
+      api.superuser,
+      { actor: 'svc:test', role: 'system', reason: 'Change the Test after a proposal' },
+      (tx) => tx.updateTable('result').set({ notebookRef: 'NB-RD-0001-013' }).where('id', '=', test.resultId).execute(),
+    );
+    await refusedWith(approve(changeId, test.testId), 'the Test changed after the Critical Data Change was proposed');
+  });
+
+  it('an approval makes the new value current, under a Record Version of the change that its Signature binds', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    await approve(changeId, test.testId);
+    assert.equal(await resultValue(test.resultId), '0.0310');
+    const signed = await api.db
+      .selectFrom('signature as s')
+      .innerJoin('recordVersion as v', (j) =>
+        j.onRef('v.labId', '=', 's.labId').onRef('v.id', '=', 's.recordVersionId'),
+      )
+      .select([
+        's.personId',
+        'v.recordTable',
+        sql<string>`convert_from(v.content, 'UTF8')::jsonb ->> 'newValue'`.as('newValue'),
+      ])
+      .where('v.recordId', '=', changeId)
+      .where('s.meaning', '=', 'Approved')
+      .executeTakeFirstOrThrow();
+    assert.deepEqual(signed, { personId: rui.id, recordTable: 'critical_data_change', newValue: '0.0310' });
+  });
+});
+
+describe("a Result's value changes only through an approved Critical Data Change, even for the superuser", () => {
+  it('a direct change of a saved value is refused', async () => {
+    const test = await performedTest();
+    await refusedWith(
+      audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Change a value directly' }, (tx) =>
+        tx.updateTable('result').set({ value: '0.0310' }).where('id', '=', test.resultId).execute(),
+      ),
+      "a Result's value changes only through an approved Critical Data Change",
+    );
+  });
+
+  it('a proposal and its decision are never changed or removed', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    await decide(changeId, test.testId, { outcome: 'Withdrawn', reasonId: reason.inError }, ana, 'Analyst');
+    const svc = { actor: 'svc:test', role: 'system', reason: 'Rewrite a decided proposal' };
+    for (const table of ['critical_data_change', 'critical_data_change_decision'] as const)
+      for (const statement of [
+        sql`update ${sql.table(`lims.${table}`)} set lab_id = lab_id`,
+        sql`delete from ${sql.table(`lims.${table}`)}`,
+        sql`truncate ${sql.table(`lims.${table}`)} cascade`,
+      ]) {
+        const error = await refusal(audited(api.superuser, svc, (tx) => statement.execute(tx)));
+        assert.deepEqual([error.code, error.message], ['LA002', `${table} rows are never changed or removed`]);
+      }
+  });
+
+  it('a picklist reason, a proposal and a decision written without an actor, a role and a reason are refused', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    // The proposal and decision triggers would refuse first, so they are off and the capture is what refuses.
+    for (const statements of [
+      [sql`insert into lims.picklist_reason (step, position, label) values ('proposeChange', 9, 'Weighing error')`],
+      [
+        sql`alter table lims.critical_data_change disable trigger propose`,
+        sql`insert into lims.critical_data_change (lab_id, test_id, result_id, field, old_value, new_value, reason_id,
+            proposed_by, proposed_on_version)
+          select lab_id, test_id, result_id, field, old_value, '0.0320', reason_id, proposed_by, proposed_on_version
+            from lims.critical_data_change where id = ${changeId}`,
+      ],
+      [
+        sql`alter table lims.critical_data_change_decision disable trigger decide`,
+        sql`insert into lims.critical_data_change_decision (lab_id, change_id, test_id, outcome, decided_by, reason_id)
+          values (${api.labId}, ${changeId}, ${test.testId}, 'Withdrawn', ${ana.id}, ${reason.inError})`,
+      ],
+    ]) {
+      const error = await refusal(
+        api.superuser.transaction().execute(async (tx) => {
+          for (const statement of statements) await statement.execute(tx);
+        }),
+      );
+      assert.deepEqual([error.code, error.message], ['LA001', 'an audited write needs an actor, a role and a reason']);
+    }
+  });
+});
+
+describe('the database refuses a malformed picklist reason, proposal or decision, even with its triggers off', async () => {
+  const pending = await performedTest();
+  const pendingId = await propose(pending);
+  const decided = await performedTest();
+  const decidedId = await propose(decided);
+  await decide(decidedId, decided.testId, { outcome: 'Withdrawn', reasonId: reason.inError }, ana, 'Analyst');
+  const { id: decisionId } = await api.db
+    .selectFrom('criticalDataChangeDecision')
+    .select('id')
+    .where('changeId', '=', decidedId)
+    .executeTakeFirstOrThrow();
+  const { proposedOnVersion } = await api.db
+    .selectFrom('criticalDataChange')
+    .select('proposedOnVersion')
+    .where('id', '=', pendingId)
+    .executeTakeFirstOrThrow();
+  const nowhere = randomUUID();
+
+  const base = {
+    picklist_reason: { id: randomUUID(), step: 'proposeChange', position: 9, label: 'Weighing error' },
+    critical_data_change: {
+      labId: api.labId,
+      id: randomUUID(),
+      testId: decided.testId,
+      resultId: decided.resultId,
+      field: 'value',
+      oldValue: saved,
+      newValue: '0.0310',
+      reasonId: reason.transcription,
+      reasonText: null,
+      proposedBy: ana.id,
+      proposedAt: sql`clock_timestamp()`,
+      proposedOnVersion,
+    },
+    critical_data_change_decision: {
+      labId: api.labId,
+      id: randomUUID(),
+      changeId: pendingId,
+      testId: pending.testId,
+      outcome: 'Withdrawn',
+      decidedBy: ana.id,
+      decidedAt: sql`clock_timestamp()`,
+      reasonId: reason.inError,
+      reasonText: null,
+      signatureId: null,
+    },
+  } as const;
+  type Table = keyof typeof base;
+  const tableNames: Table[] = ['picklist_reason', 'critical_data_change', 'critical_data_change_decision'];
+
+  /** Inserts the table's base row with `change` applied, every user trigger off, and rolls the insert back. */
+  const insertion = (table: Table, change: Record<string, unknown>) =>
+    refusal(
+      api.superuser.transaction().execute(async (tx) => {
+        await sql`alter table ${sql.table(`lims.${table}`)} disable trigger user`.execute(tx);
+        const row = { ...base[table], ...change };
+        const columns = Object.keys(row).map((column) => sql.id(snake(column)));
+        await sql`insert into ${sql.table(`lims.${table}`)} (${sql.join(columns)})
+                  values (${sql.join(Object.values(row))})`.execute(tx);
+        throw new Error(`the database accepted a ${table} row`);
+      }),
+    );
+
+  it('the base rows are accepted with the triggers off, so each refusal below comes from its one change', async () => {
+    for (const table of tableNames) {
+      const error = await insertion(table, {}).catch((e: unknown) => e);
+      assert.ok(error instanceof Error && error.message === `the database accepted a ${table} row`, String(error));
+    }
+  });
+
+  const required: Record<Table, string[]> = {
+    picklist_reason: ['id', 'step', 'position', 'label'],
+    critical_data_change: [
+      'labId',
+      'id',
+      'testId',
+      'resultId',
+      'field',
+      'oldValue',
+      'newValue',
+      'reasonId',
+      'proposedBy',
+      'proposedAt',
+      'proposedOnVersion',
+    ],
+    critical_data_change_decision: ['labId', 'id', 'changeId', 'testId', 'outcome', 'decidedBy', 'decidedAt'],
+  };
+  it('every required field refuses a null', async () => {
+    for (const table of tableNames)
+      for (const column of required[table]) {
+        const error = await insertion(table, { [column]: null });
+        assert.deepEqual([error.code, error.column], ['23502', snake(column)], `${table}.${column}: ${error.message}`);
+      }
+  });
+
+  const cases: [Table, Record<string, unknown>, string, string][] = [
+    ['picklist_reason', { step: 'Not a step' }, '23514', 'picklist_reason_step_check'],
+    ['picklist_reason', { position: 0 }, '23514', 'picklist_reason_position_check'],
+    ['picklist_reason', { label: ' ' }, '23514', 'picklist_reason_label_check'],
+    ['picklist_reason', { id: reason.transcription }, '23505', 'picklist_reason_pkey'],
+    ['picklist_reason', { position: 1 }, '23505', 'picklist_reason_step_position_key'],
+    ['picklist_reason', { label: 'Other' }, '23505', 'picklist_reason_step_label_key'],
+    ['critical_data_change', { field: 'unit' }, '23514', 'critical_data_change_field_check'],
+    ['critical_data_change', { oldValue: 'about 0.03' }, '23514', 'critical_data_change_old_value_check'],
+    ['critical_data_change', { newValue: '3e-2' }, '23514', 'critical_data_change_new_value_check'],
+    ['critical_data_change', { reasonText: ' ' }, '23514', 'critical_data_change_reason_text_check'],
+    ['critical_data_change', { newValue: saved }, '23514', 'critical_data_change_values_differ_check'],
+    ['critical_data_change', { labId: nowhere }, '23503', 'critical_data_change_lab_id_fkey'],
+    ['critical_data_change', { testId: nowhere }, '23503', 'critical_data_change_lab_id_test_id_fkey'],
+    ['critical_data_change', { resultId: nowhere }, '23503', 'critical_data_change_lab_id_result_id_fkey'],
+    [
+      'critical_data_change',
+      { proposedOnVersion: nowhere },
+      '23503',
+      'critical_data_change_lab_id_proposed_on_version_fkey',
+    ],
+    ['critical_data_change', { reasonId: nowhere }, '23503', 'critical_data_change_reason_id_fkey'],
+    ['critical_data_change', { proposedBy: nowhere }, '23503', 'critical_data_change_proposed_by_fkey'],
+    ['critical_data_change', { id: pendingId }, '23505', 'critical_data_change_pkey'],
+    ['critical_data_change_decision', { reasonText: ' ' }, '23514', 'critical_data_change_decision_reason_text_check'],
+    ['critical_data_change_decision', { signatureId: nowhere }, '23514', 'decision_signed_only_if_approved_check'],
+    ['critical_data_change_decision', { reasonId: null }, '23514', 'decision_reason_unless_approved_check'],
+    [
+      'critical_data_change_decision',
+      { changeId: nowhere },
+      '23503',
+      'critical_data_change_decision_lab_id_change_id_test_id_fkey',
+    ],
+    ['critical_data_change_decision', { labId: nowhere }, '23503', 'critical_data_change_decision_lab_id_fkey'],
+    ['critical_data_change_decision', { decidedBy: nowhere }, '23503', 'critical_data_change_decision_decided_by_fkey'],
+    ['critical_data_change_decision', { reasonId: nowhere }, '23503', 'critical_data_change_decision_reason_id_fkey'],
+    [
+      'critical_data_change_decision',
+      { outcome: 'Approved', reasonId: null, signatureId: nowhere },
+      '23503',
+      'critical_data_change_decision_lab_id_signature_id_fkey',
+    ],
+    ['critical_data_change_decision', { id: decisionId }, '23505', 'critical_data_change_decision_pkey'],
+    [
+      'critical_data_change_decision',
+      { changeId: decidedId, testId: decided.testId },
+      '23505',
+      'critical_data_change_decision_lab_id_change_id_key',
+    ],
+  ];
+  it('each check, key and reference refuses the row that breaks it', async () => {
+    for (const [table, change, code, constraint] of cases) {
+      const error = await insertion(table, change);
+      assert.deepEqual([error.code, error.constraint], [code, constraint], `${constraint}: ${error.message}`);
+    }
+  });
+});
