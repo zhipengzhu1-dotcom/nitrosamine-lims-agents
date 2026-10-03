@@ -210,6 +210,9 @@ export function staffRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): vo
       const { personId, role, reason } = req.body;
       const labId = req.actor.lab.id;
       return adminScope(db, req.actor).write(reason, 'Admin', async (q) => {
+        // The person first, then the deployment the Membership's data class reads, then the chain: the order an
+        // approval setting the data class takes them in, so the two never wait on each other (0015, 0028).
+        await q.company.selectFrom('person').select('id').where('id', '=', personId).forUpdate().execute();
         const person = await onePerson(q, labId, personId);
         if (person.roles.includes(role))
           refuse('state', `The person ${person.printedName} already holds ${role} in this Lab.`);

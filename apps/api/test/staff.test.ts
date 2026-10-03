@@ -399,3 +399,37 @@ it('a new one-time link replaces the earlier one, and none is issued once the pe
     { actor: 'person:ada.admin', reason: 'Issue a new one-time link' },
   ]);
 });
+
+it('granting a Membership locks the person before the deployment, the order a class-setting approval takes them in', async () => {
+  const { person } = await newStarter();
+  /** True while some backend waits on a lock to insert a Membership. */
+  const grantWaiting = async () =>
+    (
+      await sql<{ waiting: boolean }>`select exists (select from pg_stat_activity
+                                        where wait_event_type = 'Lock' and query ilike '%insert into%membership%') as waiting`.execute(
+        api.superuser,
+      )
+    ).rows[0]?.waiting;
+  // Hold the deployment row as an approval setting the data class does; the waiting grant must already hold the person.
+  const { grant } = await api.superuser.transaction().execute(async (tx) => {
+    await sql`select from lims.deployment for no key update`.execute(tx);
+    const pending = as.ada.call(routes.grantMembership, {
+      personId: person.id,
+      role: 'Analyst',
+      reason: 'New starter',
+    });
+    const until = Date.now() + 10_000;
+    while (!(await grantWaiting())) if (Date.now() > until) assert.fail('the grant never waited on the deployment');
+    const probe = await api.superuser
+      .connection()
+      .execute((c) => sql`select from lims.person where id = ${person.id} for no key update nowait`.execute(c))
+      .then(
+        () => 'free',
+        (error: unknown) => (error instanceof Error && 'code' in error ? error.code : error),
+      );
+    assert.equal(probe, '55P03', 'the person row is locked by the waiting grant');
+    // Wrapped, so the transaction commits and frees the deployment without waiting for the grant.
+    return { grant: pending };
+  });
+  assert.deepEqual(ok(await grant).roles, ['Analyst']);
+});
