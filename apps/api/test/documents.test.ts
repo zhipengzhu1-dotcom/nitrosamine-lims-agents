@@ -1,14 +1,8 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import {
-  type DocumentStepName,
-  type DocumentStepInputs,
-  documentStepRoute,
-  routes,
-  type SigningBody,
-} from '@lims/domain';
+import { type DocumentStepName, documentStepRoute, routes, type SigningBody } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, type Answer, type Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_documents_test');
 const lena = api.person('lena');
@@ -46,19 +40,24 @@ async function signing(client: Client, documentId: string, account: Account): Pr
   };
 }
 
-async function step<K extends DocumentStepName>(
+/** Takes a step on the Document's newest version, signing as `account` when the step signs. */
+async function step(
   client: Client,
   account: Account,
-  name: K,
+  name: DocumentStepName,
   documentId: string,
-  input: DocumentStepInputs[K],
-) {
-  const signs = name !== 'abandon';
-  return client.call(documentStepRoute(name), {
-    documentId,
-    input,
-    ...(signs ? { signature: await signing(client, documentId, account) } : {}),
-  });
+  input: { effectiveDate?: string; reason?: string },
+): Promise<Answer<typeof routes.document>> {
+  if (name === 'abandon')
+    return client.call(documentStepRoute('abandon'), { documentId, input: { reason: input.reason ?? '' } });
+  const signature = await signing(client, documentId, account);
+  if (name === 'signApproved')
+    return client.call(documentStepRoute('signApproved'), {
+      documentId,
+      input: { effectiveDate: input.effectiveDate ?? '' },
+      signature,
+    });
+  return client.call(documentStepRoute(name), { documentId, input: {}, signature });
 }
 
 it('the database numbers each Document {Lab}-{Type}-{NNNN}, the next of its type in the Lab', async () => {

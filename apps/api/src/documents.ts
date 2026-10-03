@@ -100,12 +100,16 @@ async function readDocument(scope: Scope, id: string) {
   };
   const view = {
     ...document,
-    versions: versions.map(({ username, displayName, ...version }) => ({
-      ...version,
-      author: { username, displayName },
-      signatures: signatures
-        .filter((s) => s.recordId === version.id)
-        .map(({ recordId: _, ...s }) => signatureReply(s, 'Document version')),
+    versions: versions.map((v) => ({
+      id: v.id,
+      version: v.version,
+      status: v.status,
+      title: v.title,
+      body: v.body,
+      author: { username: v.username, displayName: v.displayName },
+      effectiveDate: v.effectiveDate,
+      abandonReason: v.abandonReason,
+      signatures: signatures.filter((s) => s.recordId === v.id).map((s) => signatureReply(s, 'Document version')),
     })),
     recordVersion: latest
       ? { version: latest.version, canonicalForm: latest.canonicalForm, contentHash: latest.contentHash }
@@ -145,17 +149,16 @@ async function move<K extends DocumentStepName>(
   due: boolean,
 ): Promise<void> {
   const from = facts.status;
-  const moved = (change: UpdateObject<DB, 'documentVersion'>, status = from) =>
-    q
+  const moved = async (change: UpdateObject<DB, 'documentVersion'>, status = from) => {
+    const result = await q
       .update('documentVersion')
       .set(change)
       .where('id', '=', versionId)
       .where('status', '=', status)
       .executeTakeFirstOrThrow()
-      .catch(movedOn)
-      .then((result) => {
-        if (!result.numUpdatedRows) refuse('stale', 'The Document has moved on. Reload it.');
-      });
+      .catch(movedOn);
+    if (!result.numUpdatedRows) refuse('stale', 'The Document has moved on. Reload it.');
+  };
   const input: DocumentStepBody<DocumentStepName>['input'] = body.input;
   if (name === 'signAuthored') await moved({ status: 'InReview' });
   if (name === 'abandon' && 'reason' in input) await moved({ status: 'Abandoned', abandonReason: input.reason });
@@ -285,12 +288,13 @@ export function documentRoutes(app: App, db: Kysely<DB>, credentials: Credential
           'documentVersion.title',
           'documentVersion.status',
         ])
-        .where(({ eb, selectFrom }) =>
+        .where((eb) =>
           eb(
             'documentVersion.version',
             '=',
-            selectFrom('documentVersion as v')
-              .select(({ fn }) => fn.max('v.version').as('max'))
+            eb
+              .selectFrom('documentVersion as v')
+              .select((v) => v.fn.max('v.version').as('max'))
               .whereRef('v.documentId', '=', 'document.id'),
           ),
         )
