@@ -200,7 +200,9 @@ it('Reviewed on a Test Review that leaves a ticked item unticked is refused, nam
   await api.approveChecklist();
   const testId = await awaitingReview();
   const item = (await checklistOf(testId)).items.find((i) => i.key === 'auditTrailReviewed') ?? assert.fail();
-  const review = await saved(testId, ({ auditTrailReviewed: _, ...rest }) => rest);
+  const review = await saved(testId, (ticks) =>
+    Object.fromEntries(Object.entries(ticks).filter(([key]) => key !== item.key)),
+  );
   assert.equal(
     refusedWith(await signReview(testId, review), 'checklistIncomplete'),
     `Tick “${item.text}” before signing Reviewed.`,

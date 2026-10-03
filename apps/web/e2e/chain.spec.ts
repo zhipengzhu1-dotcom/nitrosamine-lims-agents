@@ -1,6 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, signOutFromRail, test, utcThenLabClock } from './walk.ts';
+import {
+  expect,
+  type Locator,
+  type Page,
+  signOutFromRail,
+  test,
+  utcThenLabClock,
+  checklistInForce,
+  tickChecklist,
+} from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {
@@ -328,8 +337,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await railSays(page, 'Performed Signature recorded in the Audit Trail. The Test is now Submitted For Review.');
   await signOutFromRail(page);
 
+  await checklistInForce();
   await signIn(page, 'rui.reviewer');
   await openTheTest();
+  await tickChecklist(page);
   const review = page.getByRole('button', { name: 'Review', exact: true });
   const cancel = () => page.getByRole('button', { name: 'Cancel' }).click();
   await expect(
@@ -401,6 +412,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
 
   await page.reload();
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Submitted For Review');
+  await tickChecklist(page);
   await review.click();
   const held = Promise.withResolvers<void>();
   await page.route('**/api/steps/review', async (route) => {

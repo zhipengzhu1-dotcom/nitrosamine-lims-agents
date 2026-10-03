@@ -81,6 +81,7 @@ async function versionsOf(company: Company, kind: ChecklistKind): Promise<Checkl
   const inForce = await checklistInForce(company, kind);
   return {
     kind,
+    statement: await statementInForce(company),
     inForce: inForce?.version ?? null,
     versions: versions.map(({ id, version, contentHash, approved }) => ({
       id,

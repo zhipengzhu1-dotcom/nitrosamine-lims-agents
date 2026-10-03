@@ -278,13 +278,9 @@ export async function startApi(name: string, options: ListenOptions = {}) {
   async function approveChecklist(version = 1): Promise<void> {
     const qa = seededAccount('quinn');
     const client = await signIn(qa);
-    const { inForce, versions } = ok(await client.call(routes.reviewChecklists, { kind: 'Test' }));
+    const { inForce, versions, statement } = ok(await client.call(routes.reviewChecklists, { kind: 'Test' }));
     if (inForce !== null && inForce >= version) return;
     const chosen = versions.find((v) => v.version === version) ?? assert.fail(`no Test checklist version ${version}`);
-    const statement = await superuser
-      .selectFrom('signatureStatement')
-      .select((eb) => eb.fn.max('version').as('version'))
-      .executeTakeFirstOrThrow();
     ok(
       await client.call(routes.approveChecklistVersion, {
         kind: 'Test',

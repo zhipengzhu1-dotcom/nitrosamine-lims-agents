@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
-import { expect, type Page, test as playwright } from '@playwright/test';
+import { expect, type Page, test as playwright, request } from '@playwright/test';
 import { type RouteReply, routes, stepRoute } from '@lims/domain';
-import { API_LOG, DEMO_PASSWORD } from '../playwright.config.ts';
+import { API_LOG, DEMO_PASSWORD, WEB_URL } from '../playwright.config.ts';
 
 export { expect, type Locator, type Page, type ViewportSize } from '@playwright/test';
 
@@ -95,5 +95,46 @@ export async function submittedTest(page: Page, description: string): Promise<st
     },
   });
   await page.request.post('/api/logout', { data: {} });
+  await checklistInForce();
   return testId;
+}
+
+/**
+ * QA signs version 1 of the Test Review Checklist Approved through the API, on a session of its own so the page's is
+ * untouched, unless a version is already in force. Another walk approving it first answers `state`, which is in force too.
+ */
+export async function checklistInForce(): Promise<void> {
+  const qa = await request.newContext({ baseURL: WEB_URL });
+  try {
+    const labs: RouteReply<typeof routes.labs> = await (await qa.get('/api/labs')).json();
+    const labId = labs.find((lab) => lab.code === 'RD')?.id;
+    const login = await qa.post('/api/login', { data: { username: 'quinn.qa', password: DEMO_PASSWORD, labId } });
+    expect(login.ok(), `sign in as quinn.qa: ${await login.text()}`).toBe(true);
+    const { inForce, versions, statement }: RouteReply<typeof routes.reviewChecklists> = await (
+      await qa.get('/api/review-checklists/Test')
+    ).json();
+    const first = versions.find((v) => v.version === 1);
+    if (inForce !== null || !first) return;
+    const approved = await qa.post('/api/review-checklists/approve', {
+      data: {
+        kind: 'Test',
+        version: 1,
+        username: 'quinn.qa',
+        password: DEMO_PASSWORD,
+        recordVersion: { version: 1, contentHash: first.contentHash },
+        statementVersion: statement.version,
+      },
+    });
+    expect(approved.ok() || approved.status() === 409, `approve: ${await approved.text()}`).toBe(true);
+  } finally {
+    await qa.dispose();
+  }
+}
+
+/** Ticks every item of the Test Review Checklist on the page and writes a comment wherever one is needed. */
+export async function tickChecklist(page: Page) {
+  const checklist = page.getByRole('region', { name: /Test Review Checklist/ });
+  await expect(checklist).toBeVisible();
+  for (const box of await checklist.getByRole('checkbox').all()) await box.check();
+  for (const comment of await checklist.getByRole('textbox').all()) await comment.fill('No flags raised (fictional).');
 }

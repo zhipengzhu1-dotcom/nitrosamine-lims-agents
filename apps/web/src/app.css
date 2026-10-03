@@ -1439,3 +1439,29 @@ a.btn {
 .export__done code {
   overflow-wrap: anywhere;
 }
+.checklist {
+  display: grid;
+  gap: 8px;
+  margin-block: 16px;
+}
+.checklist h2,
+.checklist h3 {
+  margin: 0;
+}
+.checklist__item {
+  display: grid;
+  gap: 4px;
+  padding-block: 4px;
+  border-top: 1px solid var(--line);
+}
+.checklist textarea {
+  font: inherit;
+  font-size: 16px;
+  min-height: 88px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+}

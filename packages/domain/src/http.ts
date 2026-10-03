@@ -391,9 +391,13 @@ const checklistDraft = Type.Object(
   closed,
 );
 export type ChecklistDraft = Static<typeof checklistDraft>;
-/** Every version of one checklist, the version in force (null until QA approves one), and each version's content hash. */
+/**
+ * Every version of one checklist, the version in force (null until QA approves one), each version's content hash, and
+ * the signature statement an Approved signing shows.
+ */
 const checklistVersions = Type.Object({
   kind: checklistKind,
+  statement: signatureStatement,
   inForce: nullable(Type.Integer({ minimum: 1 })),
   versions: Type.Array(
     Type.Object({

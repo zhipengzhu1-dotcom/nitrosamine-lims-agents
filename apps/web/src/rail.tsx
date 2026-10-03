@@ -154,6 +154,10 @@ export interface RailAction {
   fields: readonly Field[];
   signs: ({ meaning: Meaning; what: string[]; role: Role } & SigningView) | null;
   run: (input: Record<string, string>, credentials: TypedCredentials | null) => Promise<string>;
+  /** Why the action cannot be pressed yet, shown on the rail in place of its context; the button stays disabled. */
+  blocked?: string | null;
+  /** Runs on the press, before the sheet opens, and answers the action the sheet commits, as a Reviewed press saves its Test Review first. */
+  prepare?: () => Promise<RailAction>;
 }
 
 async function commitKeySlot(press: string) {
@@ -167,6 +171,7 @@ export function stepAction(
   what: string[],
   onDone: () => Promise<void>,
   signing: SigningView | null = null,
+  fixed: Record<string, string> = {},
 ): RailAction {
   const step = steps[name];
   const ui = stepUi[name];
@@ -178,7 +183,8 @@ export function stepAction(
       step.signs && signing
         ? { meaning: step.signs, what: ui.record ? [...what, ui.record] : what, role: step.role, ...signing }
         : null,
-    async run(input, credentials) {
+    async run(typed, credentials) {
+      const input = { ...typed, ...fixed };
       // Kept, even across a reload, sign-in or refusal, until the LIMS answers that it recorded the press: no other answer
       // proves the LIMS does not already hold it, and a new key would record it twice. A key the LIMS does not hold is
       // claimed by the next press as if new. The slot names the press by a digest, so no entries are kept in the browser.
@@ -421,6 +427,25 @@ function Rail({
   }
   const closed = () => setSheet((s) => (s?.closing ? null : s));
 
+  async function prepareThenOpen(a: RailAction) {
+    const prepare = a.prepare;
+    if (inFlight.current || !prepare) return;
+    inFlight.current = true;
+    setBusy(true);
+    onCommitting(true);
+    let prepared: RailAction | null = null;
+    try {
+      prepared = await prepare();
+    } catch (e) {
+      setNote({ text: unansweredText(e, false), tone: 'bad', n: ++count.current, action: a.label });
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+      if (mounted.current) onCommitting(false);
+    }
+    if (prepared) open(prepared);
+  }
+
   async function commit(a: RailAction) {
     if (inFlight.current || (a.signs && policy.secondFactor === undefined)) return;
     inFlight.current = true;
@@ -645,7 +670,7 @@ function Rail({
         </div>
         <div ref={statusLine} className="rail__context" role="status" tabIndex={-1}>
           <p key={note?.n} className={`note ${note ? `note--${note.tone}` : ''}`}>
-            {note?.text ?? action?.context ?? notice ?? 'Nothing for you to commit here.'}
+            {note?.text ?? action?.blocked ?? action?.context ?? notice ?? 'Nothing for you to commit here.'}
           </p>
         </div>
         {action && !opened && (
@@ -654,9 +679,11 @@ function Rail({
             type="button"
             className="rbtn rbtn--commit"
             data-instant={instant || undefined}
-            disabled={busy}
+            disabled={busy || Boolean(action.blocked)}
             aria-busy={busy}
-            onClick={() => (direct ? void commit(action) : open(action))}
+            onClick={() =>
+              action.prepare ? void prepareThenOpen(action) : direct ? void commit(action) : open(action)
+            }
           >
             {action.label}
           </button>

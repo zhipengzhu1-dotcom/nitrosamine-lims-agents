@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { DESKTOP, expect, PHONE, type Page, submittedTest, test } from './walk.ts';
+import { DESKTOP, expect, PHONE, type Page, submittedTest, test, tickChecklist } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function openASubmittedTestAsReviewer(page: Page) {
@@ -115,6 +115,7 @@ test('with the signing sheet open at the device, phone and desktop width, no vis
   page,
 }) => {
   await openASubmittedTestAsReviewer(page);
+  await tickChecklist(page);
   await page.getByRole('button', { name: 'Review', exact: true }).click();
   const sheet = page.locator('form.sheet');
   await expect(sheet.getByRole('heading', { name: 'What you are signing' })).toBeVisible();
