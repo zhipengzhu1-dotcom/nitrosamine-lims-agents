@@ -1,12 +1,12 @@
 import type { DB } from '@lims/db';
-import { type Authenticator, nextStep, recordKind, routes } from '@lims/domain';
+import { nextStep, recordKind, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 import { statementInForce } from './signing.ts';
 import { factsFor, latestVersion, signedVersions } from './steps.ts';
-import { onWallClock, signedAtLab, trailRoutes } from './trail.ts';
+import { onWallClock, signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
@@ -74,18 +74,9 @@ async function testView(scope: Scope, id: string) {
     signatures: withheld
       ? []
       : await signedVersions(scope)
+          .select(signatureReplyColumns)
           .select([
-            'signature.meaning',
-            'signature.printedName as signer',
-            'signature.username',
-            'signature.role',
-            sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
-            'signature.signedAt',
-            signedAtLab,
             'recordVersion.recordTable as record',
-            'recordVersion.version',
-            'recordVersion.canonicalForm',
-            sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
             sql<boolean>`exists (select from lims.record_version later
               where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
                 and later.record_id = record_version.record_id and later.version > record_version.version)`.as(
@@ -95,13 +86,7 @@ async function testView(scope: Scope, id: string) {
           .where('recordVersion.recordId', 'in', ids)
           .orderBy('signature.signedAt')
           .execute()
-          .then((rows) =>
-            rows.map(({ record, version, canonicalForm, contentHash, ...signature }) => ({
-              ...signature,
-              record: recordKind(record),
-              recordVersion: { version, canonicalForm, contentHash },
-            })),
-          ),
+          .then((rows) => rows.map(({ record, ...row }) => signatureReply(row, recordKind(record)))),
     withheld,
     next,
     statement: isCustomer ? null : await statementInForce(scope.company),

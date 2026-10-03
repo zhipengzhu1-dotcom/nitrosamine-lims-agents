@@ -1,7 +1,6 @@
 import { type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
-  type Authenticator,
   type IncidentStepBody,
   type IncidentStepInputs,
   type IncidentStepName,
@@ -18,7 +17,7 @@ import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
-import { signedAtLab } from './trail.ts';
+import { signatureReplyColumns, signatureReply } from './trail.ts';
 
 /** System Incidents are company records (map #1, lab-scope-incidents): Admin and QA of any Lab read and act on them. */
 function readableBy(actor: ActorContext): void {
@@ -102,29 +101,16 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
         .onRef('recordVersion.labId', '=', 'signature.labId')
         .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
     )
-    .select([
-      'signature.meaning',
-      'signature.printedName as signer',
-      'signature.username',
-      'signature.role',
-      sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
-      'signature.signedAt',
-      signedAtLab,
-      'recordVersion.version',
-      'recordVersion.canonicalForm',
-      sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
+    .select(signatureReplyColumns)
+    .select(
       sql<boolean>`record_version.content_hash <> lims.incident_content_hash(record_version.record_id)`.as('unsigned'),
-    ])
+    )
     .where('recordVersion.recordTable', '=', 'system_incident')
     .where('recordVersion.recordId', '=', row.id)
     .where('signature.meaning', '=', 'Acknowledged')
     .orderBy('signature.signedAt')
     .executeTakeFirst()
-    .then((signed) => {
-      if (!signed) return null;
-      const { version, canonicalForm, contentHash, ...signature } = signed;
-      return { ...signature, record: 'System Incident', recordVersion: { version, canonicalForm, contentHash } };
-    });
+    .then((signed) => (signed ? signatureReply(signed, 'System Incident') : null));
   const {
     id,
     impactAnswer,
