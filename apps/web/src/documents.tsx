@@ -18,9 +18,10 @@ import { Split } from './split.tsx';
 import { type Column, StackTable } from './stack.tsx';
 import { Signatures, unsignedNotice } from './tests.tsx';
 
-const documentUi: { [K in DocumentStepName]: { label: string; fields: readonly Field[] } } = {
+/** `awaits` names the step a version waits on when this step leaves its status as it was. */
+const documentUi: { [K in DocumentStepName]: { label: string; fields: readonly Field[]; awaits?: string } } = {
   signAuthored: { label: 'Sign Authored', fields: [] },
-  signReviewed: { label: 'Sign Reviewed', fields: [] },
+  signReviewed: { label: 'Sign Reviewed', fields: [], awaits: "QA's Approved" },
   signApproved: { label: 'Sign Approved', fields: [] },
   abandon: { label: 'Abandon', fields: [{ name: 'reason', label: 'Reason', kind: 'text' }] },
 };
@@ -38,7 +39,7 @@ function factsOf(view: DocumentView): DocumentFacts | null {
   };
 }
 
-/** The rail's action for the next step the person may take on the newest version; a signing carries its Record Version. */
+/** The rail's action for a step the person may take on the newest version; a signing carries its Record Version. */
 function documentAction(
   me: ActorContext,
   name: DocumentStepName,
@@ -78,8 +79,10 @@ function documentAction(
         ...(signature && { signature }),
       });
       await onDone();
-      const status = words(answer.versions[0]?.status ?? newest.status);
-      return `${step.signs ? `${step.signs} Signature` : ui.label} recorded in the Audit Trail. The version is now ${status}.`;
+      const status = answer.versions[0]?.status ?? newest.status;
+      const then =
+        status === newest.status && ui.awaits ? `stays ${words(status)} for ${ui.awaits}` : `is now ${words(status)}`;
+      return `${step.signs ? `${step.signs} Signature` : ui.label} recorded in the Audit Trail. The version ${then}.`;
     },
   };
 }
@@ -126,7 +129,7 @@ const documentColumns = (open: string | null): Column<DocumentRow>[] => [
 ];
 const besideHeads = new Set(['Number', 'Status']);
 
-/** One Document: its newest version with its Signatures, the versions before it, and the rail's next step. */
+/** One Document: its newest version with its Signatures, the versions before it, and the rail's open steps. */
 function DocumentRecord({
   me,
   id,
@@ -143,14 +146,17 @@ function DocumentRecord({
   const done = async () => {
     await Promise.all([reload(), afterStep()]);
   };
-  const next = view?.steps[0];
-  const action = view && next ? documentAction(me, next, view, done) : null;
+  // oxlint-disable-next-line react-perf/jsx-no-new-array-as-prop -- the rail is not memoized and each action is rebuilt per render, so a stable array would save nothing
+  const [action = null, ...secondary] = view
+    ? view.steps.flatMap((name) => documentAction(me, name, view, done) ?? [])
+    : [];
   const [newest, ...earlier] = view?.versions ?? [];
   const frame = (record: ReactNode) => (
     <Shell
       me={me}
       active="documents"
       action={action}
+      secondary={secondary}
       notice={newest ? unsignedNotice(newest.signatures) : undefined}
       railKey={id}
     >

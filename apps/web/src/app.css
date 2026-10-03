@@ -1142,6 +1142,11 @@ a.btn {
     order: 2;
     flex-basis: 100%;
   }
+  /* A secondary step shares the primary's row, so the rail grows by one row, not two. */
+  .rbtn--commit:has(+ .rbtn--commit),
+  .rbtn--commit + .rbtn--commit {
+    flex: 1 1 0;
+  }
 }
 
 @media (max-width: 640px) {

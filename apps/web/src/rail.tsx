@@ -273,13 +273,15 @@ type ModuleKey = Module['key'];
 
 /**
  * `notice` is what the rail says when the person has no step to take here, such as which Signatures are unsigned.
- * A new `railKey` starts the rail afresh, so a sheet or answer for one record never stays on for the next. The plane
- * takes no press while a commit waits for its answer, so the answer is shown beside the record it was taken on.
+ * `secondary` holds the other steps open beside `action`, each a quieter button after it. A new `railKey` starts the
+ * rail afresh, so a sheet or answer for one record never stays on for the next. The plane takes no press while a commit
+ * waits for its answer, so the answer is shown beside the record it was taken on.
  */
 export function Shell({
   me,
   active,
   action,
+  secondary = noActions,
   notice,
   railKey,
   children,
@@ -287,6 +289,7 @@ export function Shell({
   me: ActorContext;
   active: ModuleKey | null;
   action: RailAction | null;
+  secondary?: readonly RailAction[];
   notice?: string | undefined;
   railKey?: string;
   children: ReactNode;
@@ -310,10 +313,19 @@ export function Shell({
       <main className="plane" inert={committing}>
         {children}
       </main>
-      <Rail key={railKey} me={me} action={action} notice={notice} onCommitting={setCommitting} />
+      <Rail
+        key={railKey}
+        me={me}
+        action={action}
+        secondary={action ? secondary : noActions}
+        notice={notice}
+        onCommitting={setCommitting}
+      />
     </div>
   );
 }
+
+const noActions: readonly RailAction[] = [];
 
 export function TopBar({ lab, children }: { lab?: Lab; children?: ReactNode }) {
   return (
@@ -348,11 +360,13 @@ function unansweredText(e: unknown, signs: boolean): string {
 function Rail({
   me,
   action,
+  secondary,
   notice,
   onCommitting,
 }: {
   me: ActorContext;
   action: RailAction | null;
+  secondary: readonly RailAction[];
   notice?: string | undefined;
   onCommitting: (committing: boolean) => void;
 }) {
@@ -493,7 +507,8 @@ function Rail({
     }
   }
 
-  const direct = action && !action.fields.length && !action.signs;
+  /** A step with nothing to enter or sign commits on the press; any other opens its sheet. */
+  const press = (a: RailAction) => (a.fields.length || a.signs ? open(a) : void commit(a));
   const shown = sheet?.action;
   return (
     <>
@@ -676,11 +691,25 @@ function Rail({
             data-instant={instant || undefined}
             disabled={busy}
             aria-busy={busy}
-            onClick={() => (direct ? void commit(action) : open(action))}
+            onClick={() => press(action)}
           >
             {action.label}
           </button>
         )}
+        {!opened &&
+          secondary.map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              className="rbtn rbtn--quiet rbtn--commit"
+              data-instant={instant || undefined}
+              disabled={busy}
+              aria-busy={busy}
+              onClick={() => press(a)}
+            >
+              {a.label}
+            </button>
+          ))}
         <fieldset id="rail-session" className="rail__session" disabled={busy || locking}>
           {!me.workstation && (
             <button
