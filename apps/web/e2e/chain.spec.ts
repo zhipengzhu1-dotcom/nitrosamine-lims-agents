@@ -146,6 +146,49 @@ async function wholeOnScreenAtEverySize(page: Page, whole: Locator, commit: Loca
   await page.setViewportSize(projectSize);
 }
 
+type SheetState = 'open' | 'exiting' | 'gone';
+type ButtonState = 'absent' | 'hidden' | 'shown';
+/** The page at one DOM change while the sheet leaves: the sheet, the rail's commit button, and whether motion is reduced. */
+type LeavingState = { sheet: SheetState; button: ButtonState; reduced: boolean };
+
+/**
+ * Where the sheet stood when the rail's commit button first came back after `cancel`, read at each DOM change
+ * rather than on a clock. The states seen are attached to the test for a failure to explain itself.
+ */
+async function sheetWhenTheRailButtonIsBack(page: Page, cancel: () => Promise<void>): Promise<SheetState | undefined> {
+  const seen = await page.evaluateHandle(() => {
+    const states: LeavingState[] = [];
+    const sheetState = (): SheetState => {
+      const sheet = document.querySelector('form.sheet');
+      if (!sheet) return 'gone';
+      return sheet.matches('[data-closing]') ? 'exiting' : 'open';
+    };
+    const buttonState = (): ButtonState => {
+      const button = document.querySelector('footer.rail .rbtn--commit');
+      if (!button) return 'absent';
+      return button.checkVisibility({ visibilityProperty: true }) ? 'shown' : 'hidden';
+    };
+    const watcher = new MutationObserver(() => {
+      const sheet = sheetState();
+      states.push({
+        sheet,
+        button: buttonState(),
+        reduced: document.documentElement.matches('[data-reduce-motion]'),
+      });
+      if (sheet === 'gone') watcher.disconnect();
+    });
+    watcher.observe(document.body, { subtree: true, childList: true, attributes: true });
+    return states;
+  });
+  await cancel();
+  await expect(page.locator('form.sheet')).toHaveCount(0);
+  const states = await seen.jsonValue();
+  await test
+    .info()
+    .attach('states while the sheet leaves', { body: JSON.stringify(states), contentType: 'text/plain' });
+  return states.find((s) => s.button === 'shown')?.sheet;
+}
+
 const shownOnce = (page: Page, text: string) =>
   expect
     .poll(
@@ -193,7 +236,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   expect(await sheet.evaluate((form) => getComputedStyle(form).transform), 'no movement').toBe('none');
   await page.getByRole('button', { name: 'Cancel' }).click();
   expect(await sheet.count(), 'under reduced motion the sheet leaves at once').toBe(0);
-  await page.emulateMedia({ reducedMotion: null });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(page.locator('html'), 'motion is back on for the rest of the walk').not.toHaveAttribute(
+    'data-reduce-motion',
+  );
   await page.getByRole('button', { name: 'Submit' }).click();
   await typeWhileTheSheetIsStillSlidingIn(page, async () => {
     await page.getByLabel('Method').selectOption({ index: 1 });
@@ -285,9 +331,27 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await signIn(page, 'rui.reviewer');
   await openTheTest();
   const review = page.getByRole('button', { name: 'Review', exact: true });
+  const cancel = () => page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(
+    page.locator('html'),
+    'the order rule reads the sheet leaving with motion on; under reduced motion it leaves at once',
+  ).not.toHaveAttribute('data-reduce-motion');
+  await page.evaluate(() => {
+    const buttonWaitsForSheet = document.createElement('style');
+    buttonWaitsForSheet.id = 'button-waits-for-sheet';
+    buttonWaitsForSheet.textContent = '.frame:has(> .sheet) .rbtn--commit { visibility: hidden }';
+    document.head.append(buttonWaitsForSheet);
+  });
   await review.click();
-  await page.getByRole('button', { name: 'Cancel' }).click();
-  await expect(review, 'the rail button is back before the sheet has left').toBeVisible({ timeout: 100 });
+  expect(
+    await sheetWhenTheRailButtonIsBack(page, cancel),
+    'the order rule catches a rail button that waits for the sheet to leave',
+  ).toBe('gone');
+  await page.locator('#button-waits-for-sheet').evaluate((style) => style.remove());
+  await review.click();
+  expect(await sheetWhenTheRailButtonIsBack(page, cancel), 'the rail button is back before the sheet has left').toBe(
+    'exiting',
+  );
   await expect(review).toBeFocused();
   await review.click();
   await expect(sheet).toBeVisible();
