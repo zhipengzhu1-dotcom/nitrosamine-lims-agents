@@ -215,9 +215,12 @@ describe('the database writes a Record Version whenever a signable record change
       test: testAfterResult[1]?.content,
     });
 
-    await audited(superuser, { ...svc, reason: 'Remove the Result' }, (tx) =>
-      tx.deleteFrom('result').where('testId', '=', testId).execute(),
-    );
+    await audited(superuser, { ...svc, reason: 'Remove the Result' }, async (tx) => {
+      // The database refuses to remove a Result, so its trigger is off to show what a removal would version.
+      await sql`alter table lims.result disable trigger refuse_removal`.execute(tx);
+      await tx.deleteFrom('result').where('testId', '=', testId).execute();
+      await sql`alter table lims.result enable trigger refuse_removal`.execute(tx);
+    });
     assert.deepEqual(
       (await versions(app, 'test', testId)).map((v) => [v.version, v.content.value]),
       [
@@ -280,7 +283,7 @@ describe('the database writes a Record Version whenever a signable record change
         .execute(),
     );
     const slow = audited(superuser, { ...svc, reason: 'Change the Result slowly' }, async (tx) => {
-      await tx.updateTable('result').set({ value: '0.0310' }).where('testId', '=', testId).execute();
+      await tx.updateTable('result').set({ notebookRef: 'NB-RV-0001-002' }).where('testId', '=', testId).execute();
       await sql`select pg_sleep(0.4)`.execute(tx);
     });
     await sql`select pg_sleep(0.1)`.execute(app);
@@ -289,12 +292,12 @@ describe('the database writes a Record Version whenever a signable record change
     );
     await Promise.all([slow, quick]);
     assert.deepEqual(
-      (await versions(app, 'test', testId)).map((v) => [v.version, v.content.value, v.content.description]),
+      (await versions(app, 'test', testId)).map((v) => [v.version, v.content.notebookRef, v.content.description]),
       [
         [1, null, 'Tablets'],
-        [2, '0.0300', 'Tablets'],
-        [3, '0.0310', 'Tablets'],
-        [4, '0.0310', 'Coated tablets'],
+        [2, 'NB-RV-0001-001', 'Tablets'],
+        [3, 'NB-RV-0001-002', 'Tablets'],
+        [4, 'NB-RV-0001-002', 'Coated tablets'],
       ],
       'the second writer waited on the Lab chain lock the first one held, then saw its version',
     );

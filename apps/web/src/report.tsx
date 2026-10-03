@@ -1,4 +1,4 @@
-import { type ActorContext, routes } from '@lims/domain';
+import { type ActorContext, routes, unsignedMeanings } from '@lims/domain';
 import { useApi, useFictional } from './api.ts';
 import { Shell, Status } from './rail.tsx';
 import { Signatures, signingNotes, unsignedNotice } from './tests.tsx';
@@ -18,7 +18,7 @@ export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
           </button>
           <h1>
             Test Report <span className="record-number">{data.report.number}</span>
-            {data.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
+            {unsignedMeanings(data.signatures).length > 0 && <Status mark="Signatures unsigned" />}
           </h1>
           <p>{me.lab.name}</p>
           <dl className="facts">

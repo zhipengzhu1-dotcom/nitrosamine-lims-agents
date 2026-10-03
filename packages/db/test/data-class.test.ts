@@ -477,6 +477,7 @@ describe('no captured table escapes the real-data gate', () => {
       'lab',
       'membership',
       'person',
+      'picklist_reason',
       'reauthentication',
       'record_version',
       'release_log_entry',

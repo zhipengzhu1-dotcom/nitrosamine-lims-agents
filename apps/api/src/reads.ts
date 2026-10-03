@@ -1,12 +1,12 @@
 import type { DB } from '@lims/db';
-import { nextStep, recordKind, routes } from '@lims/domain';
+import { nextStep, openChangeSteps, recordKind, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
-import { labScope, type Scope } from './scope.ts';
+import { labScope, onWallClock, type Scope } from './scope.ts';
 import { statementInForce } from './signing.ts';
-import { factsFor, latestVersion, signedVersions } from './steps.ts';
-import { onWallClock, signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
+import { changeFactsFor, changesOf, factsFor, latestVersion, signedVersions } from './steps.ts';
+import { signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
@@ -43,10 +43,13 @@ async function testView(scope: Scope, id: string) {
     (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ??
     refuse('notFound', 'You can see no such Test.');
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
-  const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
   const isCustomer = scope.ctx.person.customerId !== null;
   // Released means a Test Report exists, the same fact the report route refuses on, so the two reads cannot disagree.
   const withheld = isCustomer && !report;
+  // A Customer sees a released Test's Approved Critical Data Changes and no others. An Approved Signature binds the
+  // change's own Record Version, so it is read by the change's id.
+  const changes = withheld ? [] : (await changesOf(scope, id)).filter((c) => !isCustomer || c.state === 'Approved');
+  const ids = [test.id, test.sampleId, ...(report ? [report.id] : []), ...changes.map((c) => c.id)];
   const latest = withheld ? null : await latestVersion(scope, 'test', id);
   const next = nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test));
   return {
@@ -90,6 +93,10 @@ async function testView(scope: Scope, id: string) {
     withheld,
     next,
     statement: isCustomer ? null : await statementInForce(scope.company),
+    changes,
+    changeNext: isCustomer
+      ? []
+      : openChangeSteps((await changeFactsFor(scope, scope.ctx, test)).facts, scope.ctx.roles),
   };
 }
 

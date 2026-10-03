@@ -1,6 +1,7 @@
 import type * as db from '@lims/db';
 import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
+import { type ChangeStepName, changeStepNames, reasonSteps } from './changes.ts';
 import { type DocumentStepName, documentStepNames } from './documents.ts';
 import type { EquipmentStepName } from './equipment.ts';
 import type { IncidentStepName } from './incidents.ts';
@@ -49,8 +50,8 @@ const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
  * A point in time: on the wire, and so in the web and the tests, an ISO 8601 string the database clock produced, in
- * UTC unless its name ends in `Lab` (`atLab`, `receivedAtLab`, `signedAtLab`): that one carries the offset of the
- * owning Lab's time zone in force when it was written, and the database renders it as text. For a UTC field the API hands Fastify the Date that Kysely returns, and Fastify
+ * UTC unless its name ends in `Lab` (`atLab`, `receivedAtLab`, `signedAtLab`, `proposedAtLab`, `decidedAtLab`): that
+ * one carries the offset of the owning Lab's time zone in force when it was written, and the database renders it as text. For a UTC field the API hands Fastify the Date that Kysely returns, and Fastify
  * writes it with toISOString.
  */
 export type Instant = string & { readonly [instantBrand]: true };
@@ -163,6 +164,9 @@ export const auditedTable = Type.Enum({
   signing_role: 'signing_role',
   reauthentication: 'reauthentication',
   chain_verification: 'chain_verification',
+  picklist_reason: 'picklist_reason',
+  critical_data_change: 'critical_data_change',
+  critical_data_change_decision: 'critical_data_change_decision',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;
 const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
@@ -341,6 +345,44 @@ const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' })
 /** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
 const username = Type.String({ pattern: '^[a-z][a-z0-9.-]{2,39}$' });
 const reportRef = Type.Object({ id: uuid, number: Type.String() });
+/** Where a Critical Data Change stands: Pending until its one decision, which approves, rejects or withdraws it. */
+export const changeState = Type.Enum({
+  Pending: 'Pending',
+  Approved: 'Approved',
+  Rejected: 'Rejected',
+  Withdrawn: 'Withdrawn',
+} as const);
+export type ChangeState = Static<typeof changeState>;
+/** A reason as its step's picklist offers it; `needsText` marks Other, which takes the person's own words. */
+const picklistReason = Type.Object({ id: uuid, label: Type.String(), needsText: Type.Boolean() });
+export type PicklistReason = Static<typeof picklistReason>;
+/**
+ * A proposed change to a saved Result value, with its decision once made. `recordVersion` is the change's own Record
+ * Version, which an Approved Signature binds.
+ */
+const criticalDataChange = Type.Object({
+  id: uuid,
+  state: changeState,
+  field: Type.String(),
+  analyte: Type.String(),
+  unit: Type.String(),
+  oldValue: decimal,
+  newValue: decimal,
+  reason: Type.String(),
+  reasonText: nullable(Type.String()),
+  proposedBy: Type.String(),
+  proposedAt: instant,
+  /** `proposedAt` on the wall clock of the zone its Lab was in then, ISO 8601 with that offset, as the database renders it. */
+  proposedAtLab: instant,
+  decidedBy: nullable(Type.String()),
+  decidedAt: nullable(instant),
+  /** `decidedAt` on the wall clock of the zone its Lab was in then, ISO 8601 with that offset, as the database renders it. */
+  decidedAtLab: nullable(instant),
+  decisionReason: nullable(Type.String()),
+  decisionReasonText: nullable(Type.String()),
+  recordVersion: recordVersionRef,
+});
+export type CriticalDataChange = Static<typeof criticalDataChange>;
 /** The signature statement in force: what a signer attests, as QA approved it, with the version a Signature records. */
 const signatureStatement = Type.Object({ version: Type.Integer({ minimum: 1 }), text: Type.String() });
 export type SignatureStatement = Static<typeof signatureStatement>;
@@ -359,6 +401,10 @@ const testView = Type.Object({
   withheld: Type.Boolean(),
   next: nullable(Type.Enum(stepNames)),
   statement: nullable(signatureStatement),
+  /** The Test's Critical Data Changes, oldest first; empty for a Customer before release. */
+  changes: Type.Array(criticalDataChange),
+  /** The Critical Data Change steps this person may take on the Test now. */
+  changeNext: Type.Array(Type.Enum(changeStepNames)),
 });
 /** `recordVersion` is the Test Report's latest, which the Released Signature's version is compared with. */
 const testReport = Type.Object({
@@ -721,7 +767,8 @@ export type StepTaken = Static<typeof stepTaken>;
  * has ended. `sessionLocked` answers every request on a locked session except lock, unlock, sign-out and a sign-in over it. `stale` asks the person to reload; `state` says the step, or a Lab switch to the Lab already in use, does not apply. `keyReused` is a Commit Key sent again
  * with a different step or input, or from another session. `recordChanged` is a signing on sight of a Record Version that is no
  * longer the record's latest: the screen must show the record again before it is signed. `signingRefused` is what the signing
- * function refuses once the step's transaction has begun, such as a signature statement no longer in force. `notFound` also covers an
+ * function refuses once the step's transaction has begun, such as a signature statement no longer in force. `changePending` is a
+ * Test signing, or a second proposal, while a Critical Data Change on the Result awaits its decision. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
  */
@@ -739,6 +786,7 @@ export const refusalKinds = [
   'stale',
   'recordChanged',
   'signingRefused',
+  'changePending',
   'realDataRefused',
   'keyReused',
   'notFound',
@@ -901,6 +949,7 @@ const stepInputs = {
     },
     closed,
   ),
+  signPerformedAgain: Type.Object({}, closed),
   review: Type.Object({}, closed),
   release: Type.Object({}, closed),
 } satisfies { [K in StepName]: TObject };
@@ -1087,7 +1136,30 @@ export const routes = {
     },
     equipment,
   ),
+  /** The reasons a Critical Data Change step offers, in picklist order, ending with Other. */
+  reasons: route(
+    'GET',
+    '/api/reasons/:step',
+    { params: Type.Object({ step: Type.Enum(reasonSteps) }) },
+    Type.Array(picklistReason),
+  ),
 } satisfies Record<string, Route>;
+
+const reasonChoice = { reasonId: uuid, reasonText: Type.Optional(reasonText) };
+const onChange = { testId: uuid, changeId: uuid };
+const changeStepBodies = {
+  proposeChange: Type.Object({ testId: uuid, newValue: decimal, ...reasonChoice }, closed),
+  approveChange: Type.Object({ ...onChange, signature: signingBody }, closed),
+  rejectChange: Type.Object({ ...onChange, ...reasonChoice }, closed),
+  withdrawChange: Type.Object({ ...onChange, ...reasonChoice }, closed),
+} satisfies { [K in ChangeStepName]: TObject };
+/** What each Critical Data Change step sends, as its route validates it. */
+export type ChangeStepBody<K extends ChangeStepName> = Static<(typeof changeStepBodies)[K]>;
+
+/** The route of one Critical Data Change step; it answers with the change it proposed or decided. */
+export function changeStepRoute<K extends ChangeStepName>(name: K) {
+  return route('POST', `/api/change-steps/${name}`, { body: changeStepBodies[name] }, Type.Object({ changeId: uuid }));
+}
 
 const incidentStepInputs = {
   answerImpact: Type.Object({ answer: impactAnswer }, closed),

@@ -106,7 +106,12 @@ const changeResult = (testId: string, value: string) =>
   audited(
     api.superuser,
     { actor: 'svc:test', role: 'system', reason: 'Change a signed Result from outside the chain' },
-    (tx) => tx.updateTable('result').set({ value }).where('testId', '=', testId).execute(),
+    async (tx) => {
+      // A superuser can switch off the Critical Data Change guard; the Signatures must still catch the change.
+      await sql`alter table lims.result disable trigger value_through_change`.execute(tx);
+      await tx.updateTable('result').set({ value }).where('testId', '=', testId).execute();
+      await sql`alter table lims.result enable trigger value_through_change`.execute(tx);
+    },
   );
 
 it('the chain walks a submitted Test to Reported with three Signatures and an audit entry for every step', async () => {
@@ -161,9 +166,10 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     review: rui,
     release: quinn,
   } satisfies {
-    [K in StepName]: Account;
+    // Performed is signed again only after an approved Critical Data Change, which this walk makes none of.
+    [K in Exclude<StepName, 'signPerformedAgain'>]: Account;
   };
-  for (const name of stepNames) {
+  for (const name of stepNames.filter((n) => n !== 'signPerformedAgain')) {
     const entries = auditTrail.filter((e) => e.reason === name);
     assert.ok(entries.length > 0, `an audit entry for ${name}`);
     for (const e of entries)

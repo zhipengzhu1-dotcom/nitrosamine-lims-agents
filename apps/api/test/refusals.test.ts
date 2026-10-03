@@ -64,6 +64,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   receive: step('receive', { commitKey: randomUUID(), testId, input: {} }),
   assign: step('assign', { commitKey: randomUUID(), testId, input: { assigneeId: randomUUID() } }),
   enterResult: step('enterResult', { commitKey: randomUUID(), testId, input: result, signature }),
+  signPerformedAgain: step('signPerformedAgain', { commitKey: randomUUID(), testId, input: {}, signature }),
   review: step('review', { commitKey: randomUUID(), testId, input: {}, signature }),
   release: step('release', { commitKey: randomUUID(), testId, input: {}, signature }),
   recordIdentityVerification: entry(routes.recordIdentityVerification, {

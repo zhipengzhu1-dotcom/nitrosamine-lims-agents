@@ -1,6 +1,7 @@
 import {
   type ActorContext,
   type ChainVerdict,
+  type ChangeState,
   decimalPattern,
   type DocumentStatus,
   type FitnessStatus,
@@ -38,7 +39,7 @@ export interface Field<N extends string = string> {
   options?: readonly string[];
   /** The records a `pick` field offers: the id it sends and the words it shows. */
   picks?: readonly { value: string; text: string }[];
-  /** A text field the person may leave empty. */
+  /** A text field the person may leave empty, such as a reason's own text, which the server takes only with Other. */
   optional?: true;
 }
 
@@ -66,6 +67,7 @@ export const stepUi: {
       { name: 'performedOn', label: 'Performed on', kind: 'date' },
     ],
   },
+  signPerformedAgain: { label: 'Sign Performed again', fields: [] },
   review: { label: 'Review', fields: [] },
   release: { label: 'Release', fields: [], record: 'The Test Report this release issues' },
 };
@@ -84,7 +86,7 @@ export interface SigningView {
   recordVersion: RecordVersionRef;
   statement: SignatureStatement;
 }
-export const stateOrder = Object.values(steps).map((s) => s.to);
+export const stateOrder = [...new Set(Object.values(steps).map((s) => s.to))];
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
 const unsignedLook = {
@@ -135,7 +137,18 @@ const markLook = {
       </>
     ),
   },
+  Pending: {
+    tone: 'bad',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M8 5v3.5l2.5 1.5" />
+      </>
+    ),
+  },
   Approved: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
+  Rejected: { tone: 'done', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
+  Withdrawn: { tone: 'done', glyph: <path d="M4 8h8" /> },
   Effective: closedLook,
   Superseded: { tone: 'plain', glyph: <path d="M3 8h9M9 5l3 3-3 3" /> },
   Retired: { tone: 'plain', glyph: <path d="M3 8h10" /> },
@@ -143,6 +156,7 @@ const markLook = {
 } as const satisfies Record<
   | ChainVerdict
   | IncidentState
+  | ChangeState
   | DocumentStatus
   | 'Unsigned'
   | 'Signatures unsigned'

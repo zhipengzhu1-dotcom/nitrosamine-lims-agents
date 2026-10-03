@@ -36,6 +36,7 @@ type CompanyTable =
   | 'signatureStatement'
   | 'systemIncident'
   | 'chainVerification'
+  | 'picklistReason'
   | 'releaseLogEntry'
   | 'serviceIdentity'
   | 'deployment';
@@ -155,6 +156,15 @@ export interface VerifyOptions {
 /** `at` rendered by the database as ISO 8601 UTC to the microsecond, so that no host clock formats it. */
 export const inUtc = (at: RawBuilder<unknown>) =>
   sql<Instant>`to_char(${at} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+/** `at` on `zone`'s wall clock, ISO 8601 to the microsecond with the zone's offset, rendered by the database so that no host clock formats it; null when `at` may be null. */
+export const onWallClock = <At>(at: RawBuilder<At>, zone: RawBuilder<unknown>) => sql<
+  null extends At ? Instant | null : Instant
+>`
+  to_char(${at} at time zone ${zone}, 'YYYY-MM-DD"T"HH24:MI:SS.US')
+    || case when (${at} at time zone ${zone}) < (${at} at time zone 'UTC') then '-' else '+' end
+    || to_char(greatest((${at} at time zone ${zone}) - (${at} at time zone 'UTC'),
+                        (${at} at time zone 'UTC') - (${at} at time zone ${zone})), 'HH24:MI')`;
 
 /** A chain as the database recomputed it, before QA reads it. */
 export type RecomputedChain = {
