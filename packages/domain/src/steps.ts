@@ -9,8 +9,11 @@ export interface StepFacts {
   assigneeTrained: boolean;
   /** Everyone who signed each meaning on any Record Version of the Test, and Approved on any of its Critical Data Changes. */
   signers: Partial<Record<Meaning, readonly PersonId[]>>;
-  /** The Signature Meanings given on the Test's latest Record Version: those that still cover the Test as it reads now. */
-  signedOnLatest: readonly Meaning[];
+  /**
+   * The Signature Meanings given on a Test Record Version the latest approved Critical Data Change wrote or a later one:
+   * those that cover the corrected Result. Null when no change on the Test was approved.
+   */
+  signedSinceCorrection: readonly Meaning[] | null;
   /** True while a Critical Data Change on the Test's Result is neither approved, rejected nor withdrawn. */
   pendingChange: boolean;
 }
@@ -44,16 +47,18 @@ export const steps = {
     signs: 'Performed',
     guard: (f) => (f.actor === f.assignee ? null : 'Only the assigned Analyst can enter the Result.'),
   },
-  // A new Record Version of the Test, such as an approved Critical Data Change makes, leaves the Performed Signature on
-  // the earlier one, so the assigned Analyst signs the Test as it reads now before anyone reviews or releases it.
+  // An approved Critical Data Change leaves the Performed Signature on the Record Version before it, so the assigned
+  // Analyst signs the corrected Result before anyone reviews or releases it.
   signPerformedAgain: {
     from: 'SubmittedForReview',
     to: 'SubmittedForReview',
     role: 'Analyst',
     signs: 'Performed',
     guard: (f) => {
-      if (f.actor !== f.assignee) return 'Only the assigned Analyst can sign the Test Performed again.';
-      return f.signedOnLatest.includes('Performed') ? 'The Test as it reads now is already signed Performed.' : null;
+      if (f.signedSinceCorrection === null)
+        return 'Performed is signed again only after an approved Critical Data Change.';
+      if (f.actor !== f.assignee) return 'Only the assigned Analyst can sign the corrected Result Performed.';
+      return f.signedSinceCorrection.includes('Performed') ? 'The corrected Result is already signed Performed.' : null;
     },
   },
   review: {
@@ -63,9 +68,9 @@ export const steps = {
     signs: 'Reviewed',
     guard: (f) => {
       if (f.signers.Performed?.includes(f.actor)) return 'The Analyst who performed the Test cannot review it.';
-      return f.signedOnLatest.includes('Performed')
-        ? null
-        : "The Test as it reads now needs the assigned Analyst's Performed Signature before review.";
+      return f.signedSinceCorrection?.includes('Performed') === false
+        ? "The corrected Result needs the assigned Analyst's Performed Signature before review."
+        : null;
     },
   },
   release: {
@@ -78,11 +83,11 @@ export const steps = {
         return 'QA cannot release a Test they performed or reviewed.';
       if (f.signers.Approved?.includes(f.actor))
         return 'QA cannot release a Test after approving a Critical Data Change on it.';
-      if (!f.signedOnLatest.includes('Performed'))
-        return "The Test as it reads now needs the assigned Analyst's Performed Signature before release.";
-      return f.signedOnLatest.includes('Reviewed')
-        ? null
-        : 'The Test as it reads now needs a Reviewed Signature before release.';
+      if (f.signedSinceCorrection?.includes('Performed') === false)
+        return "The corrected Result needs the assigned Analyst's Performed Signature before release.";
+      return f.signedSinceCorrection?.includes('Reviewed') === false
+        ? 'The corrected Result needs a Reviewed Signature before release.'
+        : null;
     },
   },
 } satisfies Record<string, Step>;

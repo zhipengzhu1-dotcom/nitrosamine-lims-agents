@@ -101,7 +101,7 @@ export async function factsFor(
 ): Promise<StepFacts> {
   const signatures = test
     ? await signedVersions(q)
-        .select(['signature.meaning', 'signature.personId', 'recordVersion.recordTable', superseded.as('superseded')])
+        .select(['signature.meaning', 'signature.personId', 'recordVersion.recordTable', 'recordVersion.version'])
         .where((eb) =>
           eb.or([
             eb.and([eb('recordVersion.recordTable', '=', 'test'), eb('recordVersion.recordId', '=', test.id)]),
@@ -122,7 +122,11 @@ export async function factsFor(
     : [];
   const signers: StepFacts['signers'] = {};
   for (const { meaning, personId } of signatures) signers[meaning] = [...(signers[meaning] ?? []), personId];
-  const signedOnLatest = signatures.filter((s) => s.recordTable === 'test' && !s.superseded).map((s) => s.meaning);
+  const correctedAfter = test ? await latestCorrection(q, test.id) : null;
+  const signedSinceCorrection =
+    correctedAfter === null
+      ? null
+      : signatures.filter((s) => s.recordTable === 'test' && s.version > correctedAfter).map((s) => s.meaning);
   const assignee = assigneeId ?? test?.assigneeId ?? null;
   const trained =
     assignee &&
@@ -144,9 +148,32 @@ export async function factsFor(
     assignee,
     assigneeTrained: Boolean(trained),
     signers,
-    signedOnLatest,
+    signedSinceCorrection,
     pendingChange: Boolean(test && (await pendingChangeOn(q, test.id))),
   };
+}
+
+/**
+ * The Test Record Version the latest approved Critical Data Change on the Test was proposed on, or null when none was
+ * approved. An approval is refused once the Test has a later version, so the version after this one is the corrected
+ * Result's.
+ */
+async function latestCorrection(q: LabQueries, testId: string): Promise<number | null> {
+  const { version } = await q
+    .from('criticalDataChange')
+    .innerJoin('criticalDataChangeDecision as d', (j) =>
+      j.onRef('d.labId', '=', 'criticalDataChange.labId').onRef('d.changeId', '=', 'criticalDataChange.id'),
+    )
+    .innerJoin('recordVersion', (j) =>
+      j
+        .onRef('recordVersion.labId', '=', 'criticalDataChange.labId')
+        .onRef('recordVersion.id', '=', 'criticalDataChange.proposedOnVersion'),
+    )
+    .select((eb) => eb.fn.max('recordVersion.version').as('version'))
+    .where('criticalDataChange.testId', '=', testId)
+    .where('d.outcome', '=', 'Approved')
+    .executeTakeFirstOrThrow();
+  return version;
 }
 
 /** The Test's Critical Data Change that has no decision yet, if any; the database allows one at a time. */
@@ -245,11 +272,6 @@ export async function changesOf(q: LabQueries, testId: string) {
     }),
   );
 }
-
-/** True for a Signature row of `signedVersions` once its record has a later Record Version than the one signed. */
-export const superseded = sql<boolean>`exists (select from lims.record_version later
-  where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
-    and later.record_id = record_version.record_id and later.version > record_version.version)`;
 
 /** Every Signature of the Lab joined to the Record Version it was given on. */
 export function signedVersions(q: LabQueries) {

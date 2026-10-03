@@ -544,7 +544,7 @@ describe('no Test step signs while a Critical Data Change on one of its Results 
   });
 });
 
-describe('a Test is reviewed and released only once Performed binds its latest Record Version, even past the registry', () => {
+describe('a corrected Result is reviewed and released only once it is signed Performed, even past the registry', () => {
   it('a Reviewed or Released Signature after an approval is refused until Performed is signed on the corrected Result', async () => {
     const test = await performedTest();
     await approve(await propose(test), test.testId);
@@ -572,7 +572,7 @@ describe('a Test is reviewed and released only once Performed binds its latest R
         [error.code, error.message],
         [
           'LA010',
-          `a Test and the Test Report built on it are signed ${meaning} only once a Performed Signature binds the Test's latest Record Version`,
+          `a Test and the Test Report built on it are signed ${meaning} only once Performed is signed on the corrected Result`,
         ],
       );
     }
@@ -1099,7 +1099,7 @@ describe('after an approval the assigned Analyst signs the corrected Result Perf
     assert.equal(ok(await as.dana.call(routes.test, { id: testId })).next, null, 'a Reviewer has no step yet');
     assert.equal(
       refusedOver(await signStep(as.dana, 'review', testId, dana), 'guard'),
-      "The Test as it reads now needs the assigned Analyst's Performed Signature before review.",
+      "The corrected Result needs the assigned Analyst's Performed Signature before review.",
     );
     assert.equal(ok(await as.ana.call(routes.test, { id: testId })).next, 'signPerformedAgain');
     ok(await signStep(as.ana, 'signPerformedAgain', testId, ana));
@@ -1130,18 +1130,48 @@ describe('after an approval the assigned Analyst signs the corrected Result Perf
     assert.deepEqual(unsignedMeanings(report.signatures), [], 'the Test Report names no Signature Meaning unsigned');
   });
 
-  it('signing Performed again is refused to another Analyst, and once Performed covers the Result as it reads now', async () => {
+  it('signing Performed again is refused with no approved change, to another Analyst, and once it is given', async () => {
     const { testId } = await performedTest();
     assert.equal(
       refusedOver(await signStep(as.ana, 'signPerformedAgain', testId, ana), 'guard'),
-      'The Test as it reads now is already signed Performed.',
+      'Performed is signed again only after an approved Critical Data Change.',
     );
     ok(await proposeOver(testId));
     ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
     assert.equal(
       refusedOver(await signStep(as.dana, 'signPerformedAgain', testId, dana), 'guard'),
-      'Only the assigned Analyst can sign the Test Performed again.',
+      'Only the assigned Analyst can sign the corrected Result Performed.',
     );
+    ok(await signStep(as.ana, 'signPerformedAgain', testId, ana));
+    assert.equal(
+      refusedOver(await signStep(as.ana, 'signPerformedAgain', testId, ana), 'guard'),
+      'The corrected Result is already signed Performed.',
+    );
+  });
+
+  it('a Reviewed Test re-versioned by a Customer rename, with no change on it, is released as before', async () => {
+    const { testId } = await performedTest();
+    ok(await signStep(as.rui, 'review', testId, rui));
+    const { customerId } = await api.db
+      .selectFrom('person')
+      .select('customerId')
+      .where('id', '=', cora.id)
+      .executeTakeFirstOrThrow();
+    await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Rename the Customer' }, (tx) =>
+      tx
+        .updateTable('customer')
+        .set({ name: `Northwind Generics renamed ${randomUUID()} (fictional)` })
+        .where('id', '=', customerId ?? assert.fail('Cora is a Customer User'))
+        .execute(),
+    );
+    const renamed = ok(await as.quinn.call(routes.test, { id: testId }));
+    assert.ok(
+      renamed.signatures.every((s) => s.unsigned),
+      'the rename leaves Performed and Reviewed on the earlier Record Version',
+    );
+    assert.equal(renamed.next, 'release');
+    ok(await signStep(as.quinn, 'release', testId, quinn));
+    assert.equal(ok(await as.quinn.call(routes.test, { id: testId })).test.state, 'Reported');
   });
 });
 

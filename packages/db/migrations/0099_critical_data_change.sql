@@ -402,14 +402,16 @@ end $$;
 create trigger test_signing_waits_for_change before insert on lims.signature
   for each row execute function lims.refuse_signing_while_change_pending();
 
--- A Test is reviewed and released only as it reads now (21 CFR 211.194(a)(7)): a new Record Version, such as an
--- approved Critical Data Change makes, leaves the Performed Signature on the earlier one, so a Reviewed or Released
--- Signature waits until Performed binds the Test's latest Record Version.
+-- A corrected Result is reviewed and released only once it is signed Performed (21 CFR 211.194(a)(7)): an approved
+-- Critical Data Change leaves the Performed Signature on the Record Version it was proposed on, so a Reviewed or
+-- Released Signature waits until Performed binds a later Test Record Version. An approval is refused once the Test has
+-- a version later than the proposal's, so every later version is the corrected Result's or follows it. A Test no change
+-- was approved on, such as one re-versioned only by a Customer or Method edit, signs as before.
 create function lims.refuse_signing_before_performed() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
-  signed_test uuid;
-  latest      uuid;
+  signed_test    uuid;
+  corrected_from integer;
 begin
   if new.meaning not in ('Reviewed', 'Released') then
     return new;
@@ -421,12 +423,19 @@ begin
   if signed_test is null then
     return new;
   end if;
-  select id into latest from record_version
-   where lab_id = new.lab_id and record_table = 'test' and record_id = signed_test
-   order by version desc limit 1;
+  select max(v.version) into corrected_from
+    from critical_data_change c
+    join critical_data_change_decision d on d.lab_id = c.lab_id and d.change_id = c.id and d.outcome = 'Approved'
+    join record_version v on v.lab_id = c.lab_id and v.id = c.proposed_on_version
+   where c.lab_id = new.lab_id and c.test_id = signed_test;
+  if corrected_from is null then
+    return new;
+  end if;
   if not exists (select from signature s
-                  where s.lab_id = new.lab_id and s.record_version_id = latest and s.meaning = 'Performed') then
-    raise exception 'a Test and the Test Report built on it are signed % only once a Performed Signature binds the Test''s latest Record Version',
+                   join record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
+                  where s.lab_id = new.lab_id and s.meaning = 'Performed' and v.record_table = 'test'
+                    and v.record_id = signed_test and v.version > corrected_from) then
+    raise exception 'a Test and the Test Report built on it are signed % only once Performed is signed on the corrected Result',
       new.meaning using errcode = 'LA010';
   end if;
   return new;

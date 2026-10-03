@@ -43,12 +43,12 @@ const allowed: StepFacts = {
   assignee: 'ana',
   assigneeTrained: true,
   signers: { Performed: ['pia'], Reviewed: ['rui'], Approved: ['rui'] },
-  signedOnLatest: ['Performed', 'Reviewed'],
+  signedSinceCorrection: null,
   pendingChange: false,
 };
 /** Facts that pass `name`'s guard: Performed is signed again only once an approved change left the Result unsigned. */
 const allowedFor = (name: StepName): StepFacts =>
-  name === 'signPerformedAgain' ? { ...allowed, signedOnLatest: [] } : allowed;
+  name === 'signPerformedAgain' ? { ...allowed, signedSinceCorrection: [] } : allowed;
 
 describe('a step from any state but its own is refused', () => {
   for (const name of stepNames) {
@@ -127,34 +127,40 @@ describe("a step whose guard fails is refused with the guard's reason", () => {
       refused: 'QA cannot release a Test after approving a Critical Data Change on it.',
     },
     {
+      name: 'signing Performed again on a Test with no approved Critical Data Change is refused',
+      step: 'signPerformedAgain',
+      facts: { signedSinceCorrection: null },
+      refused: 'Performed is signed again only after an approved Critical Data Change.',
+    },
+    {
       name: 'signing the corrected Result Performed by anyone but the assigned Analyst is refused',
       step: 'signPerformedAgain',
       facts: { assignee: 'wes' },
-      refused: 'Only the assigned Analyst can sign the Test Performed again.',
+      refused: 'Only the assigned Analyst can sign the corrected Result Performed.',
     },
     {
-      name: 'signing Performed again while a Performed Signature covers the Result as it reads now is refused',
+      name: 'signing Performed again once a Performed Signature covers the corrected Result is refused',
       step: 'signPerformedAgain',
-      facts: { signedOnLatest: ['Performed'] },
-      refused: 'The Test as it reads now is already signed Performed.',
+      facts: { signedSinceCorrection: ['Performed'] },
+      refused: 'The corrected Result is already signed Performed.',
     },
     {
       name: 'a review of a corrected Result the assigned Analyst has not signed Performed again is refused',
       step: 'review',
-      facts: { signedOnLatest: [] },
-      refused: "The Test as it reads now needs the assigned Analyst's Performed Signature before review.",
+      facts: { signedSinceCorrection: [] },
+      refused: "The corrected Result needs the assigned Analyst's Performed Signature before review.",
     },
     {
       name: 'a release of a corrected Result the assigned Analyst has not signed Performed again is refused',
       step: 'release',
-      facts: { signedOnLatest: ['Reviewed'] },
-      refused: "The Test as it reads now needs the assigned Analyst's Performed Signature before release.",
+      facts: { signedSinceCorrection: ['Reviewed'] },
+      refused: "The corrected Result needs the assigned Analyst's Performed Signature before release.",
     },
     {
       name: 'a release of a corrected Result no Reviewer has signed Reviewed again is refused',
       step: 'release',
-      facts: { signedOnLatest: ['Performed'] },
-      refused: 'The Test as it reads now needs a Reviewed Signature before release.',
+      facts: { signedSinceCorrection: ['Performed'] },
+      refused: 'The corrected Result needs a Reviewed Signature before release.',
     },
   ];
   for (const c of cases)
@@ -167,13 +173,17 @@ describe("a step whose guard fails is refused with the guard's reason", () => {
 });
 
 describe('after an approved change the assigned Analyst signs Performed again, then a Reviewer reviews', () => {
-  const corrected: StepFacts = { ...allowed, signers: { Performed: ['ana'], Approved: ['rui'] }, signedOnLatest: [] };
+  const corrected: StepFacts = {
+    ...allowed,
+    signers: { Performed: ['ana'], Approved: ['rui'] },
+    signedSinceCorrection: [],
+  };
   it('the next step for the assigned Analyst is to sign Performed again, and a Reviewer has none until then', () => {
     assert.equal(nextStep('SubmittedForReview', ['Analyst'], corrected), 'signPerformedAgain');
     assert.equal(nextStep('SubmittedForReview', ['Reviewer'], { ...corrected, actor: 'dee' }), null);
   });
   it('once Performed covers the corrected Result, review is next and signing Performed again is not', () => {
-    const resigned: StepFacts = { ...corrected, signedOnLatest: ['Performed'] };
+    const resigned: StepFacts = { ...corrected, signedSinceCorrection: ['Performed'] };
     assert.equal(nextStep('SubmittedForReview', ['Analyst'], resigned), null);
     assert.equal(nextStep('SubmittedForReview', ['Reviewer'], { ...resigned, actor: 'dee' }), 'review');
   });
