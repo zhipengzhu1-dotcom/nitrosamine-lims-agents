@@ -385,7 +385,7 @@ const breakInRange = Type.Object({
 });
 export type BreakInRange = Static<typeof breakInRange>;
 /**
- * Every break inside a chain-verify System Incident's range, recomputed at `recomputedAt`, and whether they are still
+ * Every break inside a chain verification System Incident's range, recomputed at `recomputedAt`, and whether they are still
  * the breaks the incident recorded; false means the chain changed inside the range after the incident was opened.
  */
 const incidentBreaks = Type.Object({
@@ -706,7 +706,7 @@ export const routes = {
   /** The System Incidents not yet Closed, newest first, for Admin and QA. */
   incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
   incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
-  /** Every break inside a chain-verify System Incident's range, as this Lab's chain or the company chain reads now. */
+  /** Every break inside a chain verification System Incident's range, as this Lab's chain or the company chain reads now. */
   incidentBreaks: route('GET', '/api/incidents/:reference/breaks', { params: byReference }, incidentBreaks),
 } satisfies Record<string, Route>;
 

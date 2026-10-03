@@ -907,6 +907,19 @@ it("QA lists every break inside a More System Incident's range with its entry, k
   );
 });
 
+it('a System Incident of one missing run no longer lists as recorded once the run grows at its start, though it still ends at the same entry', async () => {
+  const lab = await labOfItsOwn('GRW', 6);
+  const [gone, before] = [String(lab.last - 2n), String(lab.last - 3n)] as const;
+  await tamper([sql`delete from lims.audit_entry where chain = ${lab.labId} and seq = ${gone}`]);
+  const incident = (await lab.verify()).breaks[0]?.incident ?? assert.fail('the missing entry names a System Incident');
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: incident }));
+  assert.deepEqual([listed.asRecorded, listed.breaks], [true, [{ entry: gone, kind: 'Missing', through: gone }]]);
+
+  await tamper([sql`delete from lims.audit_entry where chain = ${lab.labId} and seq = ${before}`]);
+  const grown = ok(await lab.client.call(routes.incidentBreaks, { reference: incident }));
+  assert.deepEqual([grown.asRecorded, grown.breaks], [false, [{ entry: before, kind: 'Missing', through: gone }]]);
+});
+
 it("Listing a System Incident's breaks is refused for a role that cannot read it, from another Lab than the chain's, for an incident that records no chain break, and for one opened before the LIMS recorded a break's range", async () => {
   const lab = await labOfItsOwn('REF', 3);
   await lab.alter(String(lab.last));

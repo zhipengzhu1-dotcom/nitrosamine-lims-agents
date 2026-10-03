@@ -105,7 +105,7 @@ const digestOfBreaks = sql<Buffer>`sha256(string_agg(int8send(seq) || sha256(fin
 /** A break, or the breaks after the first ones taken together, as a verification records it. */
 export type RecordedBreak = { entry: string; kind: BreakKind; through: string; breaks: number; fingerprint: string };
 
-/** A chain-verify System Incident's break range and the fingerprint it recorded for the breaks inside it. */
+/** A chain verification System Incident's break range and the fingerprint it recorded for the breaks inside it. */
 export type BreakRange = { chain: string; first: string; last: string; fingerprint: Buffer };
 
 /** The one lab-scoped seam: every read and write after login goes through it, filtered to the context's Lab. */
@@ -154,11 +154,7 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
         ],
       };
     },
-    /**
-     * Recomputes every break that covers an entry of `range`, on this Lab's chain or the company chain only, and
-     * whether they are still the breaks it recorded: one break's own fingerprint, or the digest of all of theirs.
-     * Null for another Lab's chain.
-     */
+    /** Recomputes the breaks covering `range` on this Lab's or the company chain, and whether it recorded them; null for another Lab's. */
     breaksWithin: async ({ chain, first, last, fingerprint }: BreakRange) => {
       if (chain !== labId && chain !== 'company') return null;
       const { rows } = await sql<{ recomputedAt: Date; asRecorded: boolean; breaks: BreakInRange[] }>`
@@ -167,7 +163,8 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
           where b.through >= ${first}::bigint and b.seq <= ${last}::bigint
         )
         select now() as recomputed_at,
-          coalesce((select ${fingerprint} = ${digestOfBreaks} or (count(*) = 1 and bool_or(fingerprint = ${fingerprint}))
+          coalesce((select ${fingerprint} = ${digestOfBreaks} or (count(*) = 1 and bool_or(
+              fingerprint = ${fingerprint} and seq = ${first}::bigint and through = ${last}::bigint))
             from found), false) as as_recorded,
           coalesce((select json_agg(json_build_object('entry', seq::text, 'kind', kind, 'through', through::text)
             order by seq) from found), '[]') as breaks`.execute(db);

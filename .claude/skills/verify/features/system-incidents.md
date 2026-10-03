@@ -9,7 +9,7 @@ The LIMS opens a System Incident when it fails (the person is shown a reference)
 - `actions` records the Admin's immediate and corrective actions, once each.
 - `acknowledge` signs Acknowledged through the signing function once the answer and both actions are recorded, and moves the incident to Acknowledged.
 - `close` moves an Acknowledged incident to Closed; a close before any of the four is refused, naming what is missing.
-- `breaks-in-range` lists, on a chain-verify incident, every break inside its range as the chain reads now (`Entry`, `Kind`, `Last entry`) in the region `Breaks in this range`, and says whether they are still the breaks the incident recorded. An incident on another Lab's chain is refused there. A `More` incident needs more than 100 breaks on one chain: change entries behind the chain on the scratch database with `session_replication_role = replica`, then press `Verify chain`.
+- `breaks-in-range` lists, on a chain verification incident, every break inside its range as the chain reads now (`Entry`, `Kind`, `Last entry`) in the region `Breaks in this range`, and says whether they are still the breaks the incident recorded. An incident on another Lab's chain is refused there. A `More` incident needs more than 100 breaks on one chain: change entries behind the chain on the scratch database with `session_replication_role = replica`, then press `Verify chain`.
 
 ## How to get to it (user POV)
 

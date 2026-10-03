@@ -114,12 +114,11 @@ function Recorded({ record }: { record: Recording | null }) {
   );
 }
 
-/** The breaks a chain-verify incident records; one opened before the LIMS recorded ranges names only its first entry. */
-function breakRange({ firstFailure: first, lastFailure: last, breakCount: count }: SystemIncident): string {
-  if (!first) return '';
-  if (!last || !count) return `, first failing entry ${first}`;
+/** Which entries a chain verification incident's breaks cover; one opened before ranges were recorded names its first. */
+function coveredEntries(first: string, { lastFailure: last, breakCount: count }: SystemIncident): string {
+  if (!last || !count) return `first failing entry ${first}`;
   const breaks = count === 1 ? 'one break' : `${count} breaks`;
-  return last === first ? `, ${breaks} at entry ${first}` : `, ${breaks} from entry ${first} to entry ${last}`;
+  return last === first ? `${breaks} at entry ${first}` : `${breaks} from entry ${first} to entry ${last}`;
 }
 
 const breakColumns: Column<BreakInRange>[] = [
@@ -128,7 +127,7 @@ const breakColumns: Column<BreakInRange>[] = [
   { head: 'Last entry', cell: (b) => b.through },
 ];
 
-/** Every break inside a chain-verify incident's range as the chain reads now, and whether they are the ones it recorded. */
+/** Every break inside a chain verification incident's range as the chain reads now, and whether it recorded them. */
 function IncidentBreaks({ reference }: { reference: string }) {
   const { data, error } = useApi(routes.incidentBreaks, { reference });
   return (
@@ -137,7 +136,8 @@ function IncidentBreaks({ reference }: { reference: string }) {
       {error && <p className="note--bad">{error}</p>}
       {data && (
         <>
-          <p className={data.asRecorded ? 'muted' : 'note--bad'}>
+          <p>
+            <Status mark={data.asRecorded ? 'As recorded' : 'Changed since opened'} />{' '}
             {data.asRecorded
               ? `Recomputed ${time(data.recomputedAt)}. These are the breaks this System Incident recorded.`
               : `Recomputed ${time(data.recomputedAt)}. The chain has changed inside this range since this System Incident was opened; Verify chain records the change as a new System Incident.`}
@@ -204,7 +204,7 @@ function IncidentRecord({
             <dt>Chain</dt>
             <dd>
               {view.chain}
-              {breakRange(view)}
+              {view.firstFailure && `, ${coveredEntries(view.firstFailure, view)}`}
             </dd>
           </>
         )}
@@ -223,7 +223,7 @@ function IncidentRecord({
           {view.recordVersion.version} · <code className="hash">{view.recordVersion.contentHash}</code>
         </dd>
       </dl>
-      {view.chain && view.lastFailure && <IncidentBreaks reference={view.reference} />}
+      {view.chain && <IncidentBreaks reference={view.reference} />}
       <h2>Impact and actions</h2>
       <p className="muted">QA answers whether this could have affected results or records.</p>
       <dl className="facts">
