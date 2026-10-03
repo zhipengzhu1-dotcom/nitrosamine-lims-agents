@@ -576,7 +576,7 @@ function Rail({
                     ))}
                     {shown.fields.map((f) => (
                       <p key={f.name}>
-                        {f.label}: <b>{values[f.name] || '(not entered)'}</b>
+                        {f.label}: <b>{entered(f, values[f.name])}</b>
                       </p>
                     ))}
                   </section>
@@ -761,6 +761,10 @@ function SessionCountdown({ id }: { id?: string }) {
     </span>
   );
 }
+
+/** A field's entry as the signer reads it before signing: a pick by the words it showed, not the id it sends. */
+const entered = (field: Field, value: string | undefined) =>
+  (value && (field.picks?.find((p) => p.value === value)?.text ?? value)) || '(not entered)';
 
 function FieldInput({ field, value, onChange }: { field: Field; value: string; onChange: (v: string) => void }) {
   const change = (e: { target: { value: string } }) => onChange(e.target.value);

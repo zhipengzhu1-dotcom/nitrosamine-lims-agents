@@ -12,12 +12,14 @@ import {
   type LogbookEntry,
   openEquipmentSteps,
   routes,
+  type Signature,
 } from '@lims/domain';
 import { type ReactNode, useMemo, useState } from 'react';
 import { api, useApi, useFresh } from './api.ts';
 import { type Field, type RailAction, Shell, Status, words } from './rail.tsx';
 import { Split } from './split.tsx';
 import { type Column, StackTable } from './stack.tsx';
+import { signatureKey, Signatures } from './tests.tsx';
 import { time, When } from './time.tsx';
 
 type Values = Record<string, string>;
@@ -26,6 +28,8 @@ interface StepUi<K extends EquipmentStepName> {
   fields: (view: Equipment, choices: EquipmentChoices) => readonly Field[];
   input: (values: Values) => EquipmentStepInputs[K];
   done: string;
+  /** The record a signing step writes and binds, beside the Equipment, as the signature sheet names it. */
+  record?: string;
 }
 
 const optionalText = (name: string, label: string): Field => ({ name, label, kind: 'text', optional: true });
@@ -69,6 +73,7 @@ const equipmentUi: { [K in EquipmentStepName]: StepUi<K> } = {
         : { kind, note };
     },
     done: 'Performed Signature recorded in the Audit Trail. The Equipment Event is in the Logbook.',
+    record: 'The Equipment Event this signing records in the Logbook, of the Kind and with the note below',
   },
   move: {
     label: 'Move',
@@ -103,7 +108,7 @@ function equipmentAction(
   const ui = equipmentUi[name];
   const { signs } = equipmentSteps[name];
   const role = equipmentActingRole(name, me.roles);
-  const what = whatLines(view);
+  const what = ui.record ? [...whatLines(view), ui.record] : whatLines(view);
   return {
     label: ui.label,
     context: what[0] ?? '',
@@ -168,12 +173,30 @@ function registration(choices: EquipmentChoices, onDone: () => Promise<void>): R
   };
 }
 
+/** The Signature a Logbook line carries: its Meaning, the printed name as signed, username, role and time. */
+function SignedLine({ signature: s }: { signature: Signature | null }) {
+  if (!s) return null;
+  return (
+    <>
+      <br />
+      <small>
+        <span className="sig-line">
+          <span className="sig">{s.meaning}</span>
+          {s.unsigned && <Status mark="Unsigned" />}
+        </span>{' '}
+        by {s.signer} ({s.username}, {words(s.role)}), <When at={s.signedAt} atLab={s.signedAtLab} />
+      </small>
+    </>
+  );
+}
+
 /** One Logbook line in one element, so a stacked row's grid takes it as one cell and never splits a Status from its words. */
 function LogbookLine({ entry }: { entry: LogbookEntry }) {
   if (entry.entry === 'event')
     return (
       <span>
         <b>{words(entry.kind)}</b> {entry.note}
+        <SignedLine signature={entry.signature} />
       </span>
     );
   if (entry.entry === 'move')
@@ -186,11 +209,13 @@ function LogbookLine({ entry }: { entry: LogbookEntry }) {
     return (
       <span>
         <b>Registered</b> <Status fitness={entry.to} />
+        <SignedLine signature={entry.signature} />
       </span>
     );
   return (
     <span>
       <Status fitness={entry.from} /> to <Status fitness={entry.to} />
+      <SignedLine signature={entry.signature} />
     </span>
   );
 }
@@ -217,6 +242,7 @@ function EquipmentRecord({
 }) {
   const { data: view, error, reload } = useApi(routes.equipment, { id });
   const freshStatus = useFresh(view, (v) => [v.fitnessStatus]);
+  const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
   const open = view ? openEquipmentSteps(view.fitnessStatus, me.roles) : [];
   const [picked, setPicked] = useState<EquipmentStepName | null>(null);
   const chosen = picked && open.includes(picked) ? picked : open[0];
@@ -276,6 +302,8 @@ function EquipmentRecord({
           {view.recordVersion.version} · <code className="hash">{view.recordVersion.contentHash}</code>
         </dd>
       </dl>
+      <h2>Signatures</h2>
+      <Signatures rows={view.signatures} fresh={freshSignatures} />
       <h2>Logbook</h2>
       <StackTable columns={logbookColumns} rows={view.logbook} rowKey={(l) => JSON.stringify(l)} />
     </>,

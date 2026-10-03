@@ -3,7 +3,7 @@ import { it } from 'node:test';
 import { audited, type FitnessStatus } from '@lims/db';
 import { type Equipment, equipmentStepRoute, routes, type SigningBody } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, type Client, ok, onLabClock, refusedWith, startApi, toMillis } from './harness.ts';
 
 const api = await startApi('lims_api_equipment_test');
 const lena = api.person('lena');
@@ -382,4 +382,92 @@ it('a Performed signing keeps the Equipment as the signer saw it as a Record Ver
     .where('version', '=', equipment.recordVersion.version)
     .executeTakeFirst();
   assert.equal(kept?.contentHash, equipment.recordVersion.contentHash);
+});
+
+/** Renames a person through the Audit Trail after they signed, so a reply can be checked for the printed name as signed. */
+const rename = (account: Account, displayName: string) =>
+  audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Rename a signer after signing' }, (tx) =>
+    tx.updateTable('person').set({ displayName }).where('id', '=', account.id).execute(),
+  );
+
+it('the Equipment and the Logbook line that moved it to In use show the Approved Signature with the printed name as signed', async () => {
+  const signer = await api.addPerson('qa.manifest', ['QA']);
+  const equipment = await register();
+  ok(await approve(await api.login(signer), equipment, signer));
+  await rename(signer, 'Renamed After Approving');
+
+  const view = ok(await as.quinn.call(routes.equipment, { id: equipment.id }));
+  const [approved, ...others] = view.signatures;
+  assert.deepEqual(others, [], 'the Equipment carries one Signature');
+  assert.ok(approved, 'the Equipment carries its Approved Signature');
+  assert.deepEqual(
+    {
+      meaning: approved.meaning,
+      signer: approved.signer,
+      username: approved.username,
+      role: approved.role,
+      record: approved.record,
+      recordVersion: approved.recordVersion,
+      unsigned: approved.unsigned,
+    },
+    {
+      meaning: 'Approved',
+      signer: 'qa.manifest',
+      username: 'qa.manifest',
+      role: 'QA',
+      record: 'Equipment',
+      recordVersion: equipment.recordVersion,
+      unsigned: false,
+    },
+  );
+  assert.equal(toMillis(approved.signedAtLab), onLabClock(approved.signedAt));
+  const toInUse = view.logbook.find((line) => line.entry === 'status' && line.to === 'InUse');
+  assert.deepEqual(toInUse?.entry === 'status' && toInUse.signature, approved, 'the In use line binds that Signature');
+  const registered = view.logbook.find((line) => line.entry === 'status' && line.from === null);
+  assert.equal(registered?.entry === 'status' && registered.signature, null, 'the registration line is unsigned');
+});
+
+it('an Equipment Event line shows its Performed Signature with the printed name as signed, and a Suspect line none', async () => {
+  const signer = await api.addPerson('analyst.manifest', ['Analyst']);
+  const equipment = await inUse();
+  ok(
+    await (await api.login(signer)).call(equipmentStepRoute('recordEvent'), {
+      id: equipment.id,
+      input: { kind: 'Cleaning', note: 'Wiped the weighing pan.' },
+      signature: signing(equipment, signer),
+    }),
+  );
+  await rename(signer, 'Renamed After Performing');
+  ok(await as.samir.call(equipmentStepRoute('markSuspect'), { id: equipment.id, input: { reason: 'It drifts.' } }));
+
+  const view = ok(await as.quinn.call(routes.equipment, { id: equipment.id }));
+  const event = view.logbook.find((line) => line.entry === 'event' && line.kind === 'Cleaning');
+  const performed = event?.entry === 'event' ? event.signature : null;
+  assert.ok(performed, 'the Cleaning line carries its Performed Signature');
+  assert.deepEqual(
+    {
+      meaning: performed.meaning,
+      signer: performed.signer,
+      username: performed.username,
+      role: performed.role,
+      record: performed.record,
+      unsigned: performed.unsigned,
+    },
+    {
+      meaning: 'Performed',
+      signer: 'analyst.manifest',
+      username: 'analyst.manifest',
+      role: 'Analyst',
+      record: 'Equipment Event',
+      unsigned: false,
+    },
+  );
+  assert.equal(toMillis(performed.signedAtLab), onLabClock(performed.signedAt));
+  const suspect = view.logbook.find((line) => line.entry === 'event' && line.kind === 'Suspect');
+  assert.equal(suspect?.entry === 'event' && suspect.signature, null, 'a Suspect line is not signed');
+  assert.deepEqual(
+    view.signatures.map((s) => s.meaning),
+    ['Approved'],
+    'the Performed Signature binds the Event, not the Equipment',
+  );
 });

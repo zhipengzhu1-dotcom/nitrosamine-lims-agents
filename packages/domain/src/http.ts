@@ -536,7 +536,11 @@ const equipmentEventKind = Type.Enum({
 export type EquipmentEventKind = Static<typeof equipmentEventKind>;
 const roomRef = Type.Object({ id: Type.String(), name: Type.String() });
 export type RoomRef = Static<typeof roomRef>;
-/** One line of the Logbook, in the database's time order: an Equipment Event, a Fitness Status change, or a move. */
+/**
+ * One line of the Logbook, in the database's time order: an Equipment Event, a Fitness Status change, or a move. An
+ * Event carries its Performed Signature, null only on a Suspect; a change carries the Approved Signature given in the
+ * write that made it, null on a change no one signed.
+ */
 const logbookEntry = Type.Union([
   Type.Object({
     entry: Type.Literal('event'),
@@ -544,6 +548,7 @@ const logbookEntry = Type.Union([
     note: Type.String(),
     by: recorder,
     at: instant,
+    signature: nullable(signature),
   }),
   Type.Object({
     entry: Type.Literal('status'),
@@ -551,6 +556,7 @@ const logbookEntry = Type.Union([
     to: storedFitnessStatus,
     by: recorder,
     at: instant,
+    signature: nullable(signature),
   }),
   Type.Object({ entry: Type.Literal('move'), from: roomRef, to: roomRef, by: recorder, at: instant }),
 ]);
@@ -572,6 +578,8 @@ const equipment = Type.Object({
   /** The Record Version an Approved signing from this session binds: the Equipment as it is now. */
   recordVersion: recordVersionRef,
   statement: signatureStatement,
+  /** The Approved Signatures given on the Equipment, oldest first. */
+  signatures: Type.Array(signature),
   logbook: Type.Array(logbookEntry),
 });
 export type Equipment = Static<typeof equipment>;

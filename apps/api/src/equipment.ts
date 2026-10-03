@@ -1,6 +1,7 @@
 import { type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
+  type Authenticator,
   type EquipmentStepBody,
   type EquipmentStepInputs,
   type EquipmentStepName,
@@ -23,6 +24,8 @@ import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope, type WriteQueries } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
+import { signedVersions } from './steps.ts';
+import { signedAtLab } from './trail.ts';
 
 function readableBy(actor: ActorContext): void {
   if (!mayReadEquipment(actor.roles)) refuse('role', 'Equipment is read by the staff of its Lab.');
@@ -45,8 +48,50 @@ const byPerson = (username: string | null, displayName: string | null) => ({
   displayName: displayName ?? 'Unknown person',
 });
 
-/** A Logbook line as the API holds it, with its time as the database returned it. */
-type Line = LogbookEntry extends infer E ? (E extends { at: unknown } ? Omit<E, 'at'> & { at: Date } : never) : never;
+/**
+ * The Signatures given on the Equipment records of `table` among `ids`, oldest first, each with its own id and the id
+ * of the record it binds. A Signature is selected as the Test read selects one, and shows as unsigned once a later
+ * Record Version of its record exists.
+ */
+async function signaturesOn(scope: Scope, table: 'equipment' | 'equipment_event', ids: readonly string[]) {
+  if (!ids.length) return [];
+  const rows = await signedVersions(scope)
+    .select([
+      'signature.id',
+      'recordVersion.recordId',
+      'signature.meaning',
+      'signature.printedName as signer',
+      'signature.username',
+      'signature.role',
+      sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
+      'signature.signedAt',
+      signedAtLab,
+      'recordVersion.version',
+      'recordVersion.canonicalForm',
+      sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
+      sql<boolean>`exists (select from lims.record_version later
+        where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
+          and later.record_id = record_version.record_id and later.version > record_version.version)`.as('unsigned'),
+    ])
+    .where('recordVersion.recordTable', '=', table)
+    .where('recordVersion.recordId', 'in', ids)
+    .orderBy('signature.signedAt')
+    .execute();
+  const record = table === 'equipment' ? 'Equipment' : 'Equipment Event';
+  return rows.map(({ id, recordId, version, canonicalForm, contentHash, ...signature }) => ({
+    id,
+    recordId,
+    signature: { ...signature, record, recordVersion: { version, canonicalForm, contentHash } },
+  }));
+}
+type Signed = Awaited<ReturnType<typeof signaturesOn>>[number]['signature'];
+
+/** A Logbook line as the API holds it, with its times as the database returned them. */
+type Line = LogbookEntry extends infer E
+  ? E extends { at: unknown }
+    ? Omit<E, 'at' | 'signature'> & { at: Date } & ('signature' extends keyof E ? { signature: Signed | null } : object)
+    : never
+  : never;
 
 /** The Fitness Status a row of lims.equipment holds, which is never Expired: the database refuses it. */
 function stored(status: FitnessStatus): StoredFitnessStatus {
@@ -56,13 +101,21 @@ function stored(status: FitnessStatus): StoredFitnessStatus {
 
 /**
  * The Logbook: the Equipment Events, and the Fitness Status changes and Room moves the Audit Trail holds for it, in
- * the database's time order. It has no table of its own, so it can never disagree with the records it reads.
+ * the database's time order. It has no table of its own, so it can never disagree with the records it reads. An Event
+ * carries its Performed Signature, and a Fitness Status change the Approved Signature, among `approved`, given in the
+ * write that made it.
  */
-async function logbookOf(scope: Scope, id: string, rooms: Map<string, RoomRef>): Promise<Line[]> {
+async function logbookOf(
+  scope: Scope,
+  id: string,
+  rooms: Map<string, RoomRef>,
+  approved: Map<string, Signed>,
+): Promise<Line[]> {
   const events = await scope
     .from('equipmentEvent')
     .innerJoin('person', 'person.id', 'equipmentEvent.recordedBy')
     .select([
+      'equipmentEvent.id',
       'equipmentEvent.kind',
       'equipmentEvent.note',
       'equipmentEvent.recordedAt as at',
@@ -82,11 +135,20 @@ async function logbookOf(scope: Scope, id: string, rooms: Map<string, RoomRef>):
       sql<string | null>`audit_entry.new_row ->> 'room_id'`.as('toRoom'),
       'person.username',
       'person.displayName',
+      sql<string | null>`(select s.new_row ->> 'id' from lims.audit_entry s
+        where s.chain = audit_entry.chain and s.transaction_id = audit_entry.transaction_id
+          and s.table_name = 'signature' and s.new_row ->> 'meaning' = 'Approved')`.as('signatureId'),
     ])
     .where('auditEntry.tableName', '=', 'equipment')
     .where(sql<boolean>`audit_entry.new_row ->> 'id' = ${id}`)
     .orderBy('auditEntry.seq')
     .execute();
+  const signed = await signaturesOn(
+    scope,
+    'equipment_event',
+    events.map((e) => e.id),
+  );
+  const performed = new Map(signed.map((s) => [s.recordId, s.signature]));
   const room = (roomId: string): RoomRef => rooms.get(roomId) ?? { id: roomId, name: 'Unknown Room' };
   const entries: Line[] = events.map((e) => ({
     entry: 'event',
@@ -94,6 +156,7 @@ async function logbookOf(scope: Scope, id: string, rooms: Map<string, RoomRef>):
     note: e.note,
     by: byPerson(e.username, e.displayName),
     at: e.at,
+    signature: performed.get(e.id) ?? null,
   }));
   for (const c of changes) {
     const by = byPerson(c.username, c.displayName);
@@ -104,6 +167,7 @@ async function logbookOf(scope: Scope, id: string, rooms: Map<string, RoomRef>):
         to: stored(c.toStatus),
         by,
         at: c.at,
+        signature: c.signatureId === null ? null : (approved.get(c.signatureId) ?? null),
       });
     if (c.fromRoom && c.toRoom && c.fromRoom !== c.toRoom)
       entries.push({ entry: 'move', from: room(c.fromRoom), to: room(c.toRoom), by, at: c.at });
@@ -139,6 +203,7 @@ async function readEquipment(scope: Scope, db: Kysely<DB>, id: string) {
       .executeTakeFirst()) ?? refuse('notFound', 'No Equipment of this Lab has that id.');
   const rooms = new Map((await scope.from('room').select(['id', 'name']).execute()).map((r) => [r.id, r]));
   const { roomId, username, displayName, contentHash, version, fitnessStatus, ...facts } = row;
+  const signed = await signaturesOn(scope, 'equipment', [id]);
   return {
     ...facts,
     fitnessStatus: stored(fitnessStatus),
@@ -146,7 +211,8 @@ async function readEquipment(scope: Scope, db: Kysely<DB>, id: string) {
     responsiblePerson: { username, displayName },
     recordVersion: { version, canonicalForm: 1, contentHash },
     statement: await statementInForce(db),
-    logbook: await logbookOf(scope, id, rooms),
+    signatures: signed.map((s) => s.signature),
+    logbook: await logbookOf(scope, id, rooms, new Map(signed.map((s) => [s.id, s.signature]))),
   };
 }
 
