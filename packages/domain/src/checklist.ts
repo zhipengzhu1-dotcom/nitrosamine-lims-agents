@@ -48,6 +48,18 @@ export function itemKeyOf(text: string, taken: readonly string[]): string {
   }
 }
 
+export const checklistVersionStates = ['In force', 'Draft', 'Superseded'] as const;
+export type ChecklistVersionState = (typeof checklistVersionStates)[number];
+
+/**
+ * A checklist version's state: In force while it is the version in force, Draft while it is the newest version and
+ * above the version in force, so the one QA may approve, and otherwise Superseded (D14).
+ */
+export function versionStateOf(version: number, newest: number, inForce: number | null): ChecklistVersionState {
+  if (version === inForce) return 'In force';
+  return version === newest && version > (inForce ?? 0) ? 'Draft' : 'Superseded';
+}
+
 /** Refuses a QA approving a checklist version they drafted, so that a second QA has read every version put in force. */
 export function selfApprovalRefusal(
   kind: ChecklistKind,

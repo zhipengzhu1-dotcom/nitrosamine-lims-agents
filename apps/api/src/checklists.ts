@@ -13,6 +13,7 @@ import {
   selfApprovalRefusal,
   steps,
   unknownTick,
+  versionStateOf,
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
@@ -82,6 +83,7 @@ async function versionsOf(company: Company, kind: ChecklistKind): Promise<Checkl
       )
     : [];
   const inForce = await checklistInForce(company, kind);
+  const newest = versions.at(-1)?.version ?? 0;
   const sources = await company.selectFrom('evidenceSource').select('source').where('kind', '=', kind).execute();
   return {
     kind,
@@ -93,6 +95,7 @@ async function versionsOf(company: Company, kind: ChecklistKind): Promise<Checkl
       version,
       contentHash,
       approved,
+      state: versionStateOf(version, newest, inForce?.version ?? null),
       draftedBy: savedBy.startsWith('person:') ? savedBy.slice('person:'.length) : null,
       items: items.filter((i) => i.versionId === id).map((row) => itemOf(row)),
     })),

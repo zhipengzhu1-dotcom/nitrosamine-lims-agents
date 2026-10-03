@@ -364,6 +364,16 @@ it('a QA does not approve a Review Checklist version they drafted, and another Q
   assert.equal((await versions()).inForce, version, 'the second QA puts the version in force');
 });
 
+it('each version reads with its state: the version in force, the newest draft above it, and an older draft Superseded', async () => {
+  const older = await draftNext();
+  const newest = await draftNext();
+  const view = await versions();
+  const stateOf = (version: number | null) => view.versions.find((v) => v.version === version)?.state;
+  assert.equal(stateOf(view.inForce), 'In force');
+  assert.equal(stateOf(newest), 'Draft', 'the newest draft is the one QA may approve');
+  assert.equal(stateOf(older), 'Superseded', 'a draft below the newest is listed as Superseded');
+});
+
 it('a draft whose evidence the checklist kind cannot show, or whose keys repeat, is refused', async () => {
   assert.deepEqual(
     (await versions()).evidenceSources,

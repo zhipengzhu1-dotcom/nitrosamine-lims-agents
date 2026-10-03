@@ -1,7 +1,7 @@
 import type * as db from '@lims/db';
 import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
-import { checklistKinds, evidenceSources } from './checklist.ts';
+import { checklistKinds, checklistVersionStates, evidenceSources } from './checklist.ts';
 import type { EquipmentStepName } from './equipment.ts';
 import type { IncidentStepName } from './incidents.ts';
 import { type Step, type StepName, stepNames, steps } from './steps.ts';
@@ -408,6 +408,8 @@ const checklistVersions = Type.Object({
       version: Type.Integer({ minimum: 1 }),
       contentHash: sha256Hex,
       approved: Type.Boolean(),
+      /** In force, the Draft QA may approve, or Superseded, as the server decides it (D14). */
+      state: Type.Enum(checklistVersionStates),
       /** The user ID of the QA who drafted the version; null for the version the LIMS seeded. */
       draftedBy: nullable(Type.String()),
       items: Type.Array(checklistItem),

@@ -59,11 +59,6 @@ function itemsOf(rows: readonly DraftRow[]): ChecklistDraft['items'] {
   });
 }
 
-function versionMark(version: Version, inForce: number | null) {
-  if (version.version === inForce) return 'In force';
-  return version.approved || version.version < (inForce ?? 0) ? 'Superseded' : 'Draft';
-}
-
 /** QA's save of a new draft version, built from the rows on the page. */
 function draftAction(kind: ChecklistKind, next: number, rows: readonly DraftRow[], onDone: () => Promise<void>) {
   const blank = rows.findIndex((r) => !r.text.trim());
@@ -178,8 +173,8 @@ const fills = (sources: readonly EvidenceSource[], current: Fill): Fill[] => [
   ...(current !== 'tick' && current !== 'comment' && !sources.includes(current) ? [current] : []),
 ];
 
-function VersionCard({ version, inForce, fresh }: { version: Version; inForce: number | null; fresh: boolean }) {
-  const mark = versionMark(version, inForce);
+function VersionCard({ version, fresh }: { version: Version; fresh: boolean }) {
+  const mark = version.state;
   return (
     <article className="card checklist-version" aria-labelledby={`version-${version.version}`}>
       <h3 id={`version-${version.version}`}>
@@ -200,7 +195,7 @@ function VersionCard({ version, inForce, fresh }: { version: Version; inForce: n
 /** QA's Review Checklists: every version of one kind, the next version as a draft, and the newest draft to approve. */
 export function ChecklistsPage({ me, kind }: { me: ActorContext; kind: ChecklistKind }) {
   const { data: view, error, reload } = useApi(routes.reviewChecklists, { kind });
-  const fresh = useFresh(view, (v) => v.versions.map((x) => `${x.version}:${versionMark(x, v.inForce)}`));
+  const fresh = useFresh(view, (v) => v.versions.map((x) => `${x.version}:${x.state}`));
   const newest = view?.versions.at(-1);
   const [base, setBase] = useState<string | undefined>();
   const [rows, setRows] = useState<DraftRow[]>([]);
@@ -211,7 +206,7 @@ export function ChecklistsPage({ me, kind }: { me: ActorContext; kind: Checklist
     setRows(rowsOf(newest));
     setPicked('approve');
   }
-  const pending = newest && !newest.approved && newest.version > (view?.inForce ?? 0) ? newest : undefined;
+  const pending = view?.versions.find((v) => v.state === 'Draft');
   const step = pending ? picked : 'draft';
   const action =
     view &&
@@ -259,12 +254,7 @@ export function ChecklistsPage({ me, kind }: { me: ActorContext; kind: Checklist
             <span className="muted">{view.inForce ? `· version ${view.inForce} in force` : '· none in force'}</span>
           </h2>
           {view.versions.toReversed().map((v) => (
-            <VersionCard
-              key={v.id}
-              version={v}
-              inForce={view.inForce}
-              fresh={fresh.has(`${v.version}:${versionMark(v, view.inForce)}`)}
-            />
+            <VersionCard key={v.id} version={v} fresh={fresh.has(`${v.version}:${v.state}`)} />
           ))}
         </>
       )}

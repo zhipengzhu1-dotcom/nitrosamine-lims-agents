@@ -1,6 +1,7 @@
 import {
   type ActorContext,
   type ChainVerdict,
+  type ChecklistVersionState,
   decimalPattern,
   type FitnessStatus,
   labStaff,
@@ -141,9 +142,7 @@ const markLook = {
   | 'Signatures unsigned'
   | 'As recorded'
   | 'Changed since opened'
-  | 'In force'
-  | 'Draft'
-  | 'Superseded',
+  | ChecklistVersionState,
   unknown
 >;
 

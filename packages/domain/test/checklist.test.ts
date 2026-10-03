@@ -7,6 +7,7 @@ import {
   selfApprovalRefusal,
   type Ticks,
   unknownTick,
+  versionStateOf,
 } from '../src/index.ts';
 
 const items: ChecklistItem[] = [
@@ -83,6 +84,16 @@ describe('a Review Checklist version as QA drafts and approves it', () => {
 
   it('itemKeyOf: a long text gives a key of at most 64 letters', () =>
     assert.equal(itemKeyOf('word '.repeat(40), []).length, 64));
+
+  const states: [string, number, number, number | null, ReturnType<typeof versionStateOf>][] = [
+    ['the version in force is In force', 1, 1, 1, 'In force'],
+    ['the newest version above the version in force is the Draft QA may approve', 2, 2, 1, 'Draft'],
+    ['the newest version is a Draft while none is in force', 1, 1, null, 'Draft'],
+    ['an older draft below the newest version is Superseded', 2, 3, 1, 'Superseded'],
+    ['a version below the version in force is Superseded', 1, 2, 2, 'Superseded'],
+  ];
+  for (const [name, version, newest, inForce, expected] of states)
+    it(`versionStateOf: ${name}`, () => assert.equal(versionStateOf(version, newest, inForce), expected));
 
   it('selfApprovalRefusal: the QA who drafted a version is refused, naming it', () =>
     assert.equal(
