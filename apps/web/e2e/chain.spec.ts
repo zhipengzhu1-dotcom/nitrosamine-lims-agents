@@ -236,7 +236,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   expect(await sheet.evaluate((form) => getComputedStyle(form).transform), 'no movement').toBe('none');
   await page.getByRole('button', { name: 'Cancel' }).click();
   expect(await sheet.count(), 'under reduced motion the sheet leaves at once').toBe(0);
-  await page.emulateMedia({ reducedMotion: null });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(page.locator('html'), 'motion is back on for the rest of the walk').not.toHaveAttribute(
+    'data-reduce-motion',
+  );
   await page.getByRole('button', { name: 'Submit' }).click();
   await typeWhileTheSheetIsStillSlidingIn(page, async () => {
     await page.getByLabel('Method').selectOption({ index: 1 });
@@ -329,6 +332,10 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await openTheTest();
   const review = page.getByRole('button', { name: 'Review', exact: true });
   const cancel = () => page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(
+    page.locator('html'),
+    'the order rule reads the sheet leaving with motion on; under reduced motion it leaves at once',
+  ).not.toHaveAttribute('data-reduce-motion');
   await page.evaluate(() => {
     const buttonWaitsForSheet = document.createElement('style');
     buttonWaitsForSheet.id = 'button-waits-for-sheet';
