@@ -4,10 +4,10 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, onWallClock, type Scope } from './scope.ts';
-import { statementInForce } from './signing.ts';
-import { changeFactsFor, changesOf, factsFor, latestVersion, signedVersions } from './steps.ts';
+import { latestVersion, statementInForce } from './signing.ts';
+import { changeFactsFor, changesOf, factsFor, signedVersions } from './steps.ts';
 import { signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
-import { auditExportRoutes } from './audit-export.ts';
+import { testChecklist } from './checklists.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -43,13 +43,20 @@ async function testView(scope: Scope, id: string) {
     (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ??
     refuse('notFound', 'You can see no such Test.');
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
+  const reviews = await scope.from('testReview').select('id').where('testId', '=', id).execute();
   const isCustomer = scope.ctx.person.customerId !== null;
   // Released means a Test Report exists, the same fact the report route refuses on, so the two reads cannot disagree.
   const withheld = isCustomer && !report;
   // A Customer sees a released Test's Approved Critical Data Changes and no others. An Approved Signature binds the
   // change's own Record Version, so it is read by the change's id.
   const changes = withheld ? [] : (await changesOf(scope, id)).filter((c) => !isCustomer || c.state === 'Approved');
-  const ids = [test.id, test.sampleId, ...(report ? [report.id] : []), ...changes.map((c) => c.id)];
+  const ids = [
+    test.id,
+    test.sampleId,
+    ...(report ? [report.id] : []),
+    ...reviews.map((r) => r.id),
+    ...changes.map((c) => c.id),
+  ];
   const latest = withheld ? null : await latestVersion(scope, 'test', id);
   const next = nextStep(test.state, scope.ctx.roles, await factsFor(scope, scope.ctx, test));
   return {
@@ -93,6 +100,7 @@ async function testView(scope: Scope, id: string) {
     withheld,
     next,
     statement: isCustomer ? null : await statementInForce(scope.company),
+    checklist: await testChecklist(scope, test),
     changes,
     changeNext: isCustomer
       ? []
@@ -102,7 +110,6 @@ async function testView(scope: Scope, id: string) {
 
 export function readRoutes(app: App, db: Kysely<DB>, verifyReadLimitSeconds?: number): void {
   trailRoutes(app, db, verifyReadLimitSeconds);
-  auditExportRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => req.signedInView });
 
   app.route({

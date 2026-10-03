@@ -76,7 +76,7 @@ it('a refusal and a request that fails validation answer with their own status, 
   const refused = await post(as.cora, stepRoute('review').url, {
     commitKey: randomUUID(),
     testId,
-    input: {},
+    input: { review: randomUUID() },
     signature: {
       username: 'cora.customer',
       password: 'x',

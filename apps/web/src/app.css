@@ -1451,6 +1451,64 @@ a.btn {
 .export__done code {
   overflow-wrap: anywhere;
 }
+.checklist {
+  display: grid;
+  gap: 8px;
+  margin-block: 16px;
+}
+.checklist h2,
+.checklist h3 {
+  margin: 0;
+}
+.checklist__item {
+  display: grid;
+  gap: 4px;
+  padding-block: 4px;
+  border-top: 1px solid var(--line);
+}
+.checklist textarea {
+  font: 400 16px var(--font);
+  min-height: 88px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--sheet);
+  color: var(--ink);
+}
+
+.draft__items,
+.checklist-version__items {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding-left: 24px;
+}
+/* An item's text takes the width; its fill and its Remove sit beside it on a wide screen and below it on a phone. */
+.draft__item {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  padding-block: 4px;
+  border-top: 1px solid var(--line);
+}
+.draft__item label {
+  margin: 0;
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .draft__item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.checklist-version h3 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0;
+}
 
 .changes {
   list-style: none;

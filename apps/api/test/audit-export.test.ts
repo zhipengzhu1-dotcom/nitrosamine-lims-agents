@@ -22,7 +22,6 @@ import {
   ok,
   onLabClock,
   refusedWith,
-  signatureOf,
   startApi,
   toMillis,
 } from './harness.ts';
@@ -73,8 +72,13 @@ const result = {
 };
 
 async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
-  const signature = signer && (await signatureOf(client, testId, signer));
-  ok(await client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) }));
+  ok(
+    await client.call(stepRoute(name), {
+      commitKey: randomUUID(),
+      testId,
+      ...(await api.press(client, name, testId, input, signer)),
+    }),
+  );
 }
 
 async function submitted(

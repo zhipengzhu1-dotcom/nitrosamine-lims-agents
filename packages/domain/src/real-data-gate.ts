@@ -97,7 +97,7 @@ export const controls: Control[] = [
   { phase: 3, control: 'Picklist reasons', built: 'partly' },
   { phase: 3, control: 'Record Type Register', built: 'no' },
   { phase: 3, control: 'Calculation Versions', built: 'no' },
-  { phase: 3, control: 'Review Checklists', built: 'no' },
+  { phase: 3, control: 'Review Checklists', built: 'partly' },
   { phase: 3, control: 'Readable Audit Trail panel', built: 'yes' },
   { phase: 3, control: 'QA audit export', built: 'yes' },
   { phase: 4, control: 'Document vault', built: 'no' },

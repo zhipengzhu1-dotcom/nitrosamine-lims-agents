@@ -1,6 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, signOutFromRail, submittedTest, test, utcThenLabClock } from './walk.ts';
+import {
+  expect,
+  type Locator,
+  type Page,
+  signOutFromRail,
+  submittedTest,
+  test,
+  tickChecklist,
+  utcThenLabClock,
+} from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string, lab = /R&D Laboratory/) {
@@ -149,12 +158,16 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   await page.getByLabel('Order').selectOption('Oldest first');
   await search.fill('Reviewed');
   await expect(entries).toHaveCount(0);
+  await tickChecklist(page);
   await page.getByRole('button', { name: 'Review', exact: true }).click();
   await page.getByLabel(/User ID/).fill('rui.reviewer');
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
   await page.getByRole('button', { name: 'Sign as Reviewed' }).click();
   await expect(page.getByRole('status')).toContainText('now Reviewed');
-  await expect(entries, 'the Test state move and the Reviewed Signature arrive without a reload').toHaveCount(2);
+  await expect(
+    entries,
+    'the Test Review, its Record Version, the Test state move and the Reviewed Signature arrive without a reload',
+  ).toHaveCount(4);
   await expect(entries.last()).toContainText('Rui Tanaka (Reviewer) created the Signature Reviewed');
   await expect(entries.last()).toHaveClass(/entry--fresh/);
   await search.fill('');

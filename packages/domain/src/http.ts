@@ -2,6 +2,7 @@ import type * as db from '@lims/db';
 import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
 import { type ChangeStepName, changeStepNames, reasonSteps } from './changes.ts';
+import { checklistKinds, checklistVersionStates, evidenceSources } from './checklist.ts';
 import { type DocumentStepName, documentStepNames } from './documents.ts';
 import type { EquipmentStepName } from './equipment.ts';
 import type { IncidentStepName } from './incidents.ts';
@@ -164,6 +165,10 @@ export const auditedTable = Type.Enum({
   signing_role: 'signing_role',
   reauthentication: 'reauthentication',
   chain_verification: 'chain_verification',
+  evidence_source: 'evidence_source',
+  review_checklist_version: 'review_checklist_version',
+  review_checklist_item: 'review_checklist_item',
+  test_review: 'test_review',
   picklist_reason: 'picklist_reason',
   critical_data_change: 'critical_data_change',
   critical_data_change_decision: 'critical_data_change_decision',
@@ -392,6 +397,76 @@ export type SignatureStatement = Static<typeof signatureStatement>;
  * `withheld` is true while the Result, Signatures and Record Version are held back from a Customer until release, so their
  * absence never reads as none.
  */
+const checklistKind = Type.Enum(checklistKinds);
+const itemKey = Type.String({ pattern: '^[a-z][A-Za-z]*$', maxLength: 64 });
+const tickedItem = Type.Object(
+  { key: itemKey, text, ticked: Type.Literal(true), needsComment: Type.Boolean() },
+  closed,
+);
+const evidenceItem = Type.Object(
+  { key: itemKey, text, ticked: Type.Literal(false), evidence: Type.Enum(evidenceSources) },
+  closed,
+);
+const checklistItem = Type.Union([tickedItem, evidenceItem]);
+/** An evidence item carries the value the server computed for this Test, as label and value pairs; a ticked item is the Reviewer's to tick. */
+const checklistItemView = Type.Union([
+  tickedItem,
+  Type.Object({ ...evidenceItem.properties, value: Type.Record(Type.String(), Type.String()) }, closed),
+]);
+export type ChecklistItemView = Static<typeof checklistItemView>;
+/** The Test Review Checklist version in force as the Reviewer sees it, its hash, and its items in order. */
+const checklistView = Type.Object({
+  kind: checklistKind,
+  version: Type.Integer({ minimum: 1 }),
+  contentHash: sha256Hex,
+  items: Type.Array(checklistItemView),
+});
+export type ChecklistView = Static<typeof checklistView>;
+const ticks = Type.Record(itemKey, Type.Object({ comment: nullable(Type.String({ maxLength: 2000 })) }, closed));
+/** True for ticks as a Test Review stores them: each key's comment, a string or null. */
+export const isTicks = (value: unknown): value is Static<typeof ticks> => Value.Check(ticks, value);
+/** What a Reviewer saves: the checklist version they ticked and each tick with its comment. The API checks the keys against that version. */
+const reviewBody = Type.Object({ testId: uuid, checklistVersion: Type.Integer({ minimum: 1 }), ticks }, closed);
+export type ReviewBody = Static<typeof reviewBody>;
+/** The saved Test Review and its Record Version, which the Reviewed Signature is given on. */
+const reviewSaved = Type.Object({ review: uuid, recordVersion: recordVersionRef });
+export type ReviewSaved = Static<typeof reviewSaved>;
+/** A new checklist version as QA drafts it: every item, in order. */
+const checklistDraft = Type.Object(
+  { kind: checklistKind, items: Type.Array(checklistItem, { minItems: 1, maxItems: 50 }) },
+  closed,
+);
+export type ChecklistDraft = Static<typeof checklistDraft>;
+/**
+ * Every version of one checklist, the version in force (null until QA approves one), each version's content hash, and
+ * the signature statement an Approved signing shows.
+ */
+const checklistVersions = Type.Object({
+  kind: checklistKind,
+  statement: signatureStatement,
+  inForce: nullable(Type.Integer({ minimum: 1 })),
+  /** The evidence the LIMS computes for this kind of checklist, which a draft's evidence items may name. */
+  evidenceSources: Type.Array(Type.Enum(evidenceSources)),
+  versions: Type.Array(
+    Type.Object({
+      id: uuid,
+      version: Type.Integer({ minimum: 1 }),
+      contentHash: sha256Hex,
+      /** The Approved Signature that put the version in force, read from whichever Lab the approving QA signed in; null on a version never approved. */
+      approval: nullable(signature),
+      /** In force, the Draft QA may approve, or Superseded, as the server decides it (D14). */
+      state: Type.Enum(checklistVersionStates),
+      /** The user ID of the QA who drafted the version; null for the version the LIMS seeded. */
+      draftedBy: nullable(Type.String()),
+      items: Type.Array(checklistItem),
+    }),
+  ),
+});
+export type ChecklistVersions = Static<typeof checklistVersions>;
+/**
+ * `checklist` is the Test Review Checklist in force, shown to staff while the Test awaits review; null otherwise, and
+ * null while no version is approved.
+ */
 const testView = Type.Object({
   test: testRow,
   recordVersion: nullable(recordVersionRef),
@@ -401,6 +476,7 @@ const testView = Type.Object({
   withheld: Type.Boolean(),
   next: nullable(Type.Enum(stepNames)),
   statement: nullable(signatureStatement),
+  checklist: nullable(checklistView),
   /** The Test's Critical Data Changes, oldest first; empty for a Customer before release. */
   changes: Type.Array(criticalDataChange),
   /** The Critical Data Change steps this person may take on the Test now. */
@@ -768,7 +844,8 @@ export type StepTaken = Static<typeof stepTaken>;
  * with a different step or input, or from another session. `recordChanged` is a signing on sight of a Record Version that is no
  * longer the record's latest: the screen must show the record again before it is signed. `signingRefused` is what the signing
  * function refuses once the step's transaction has begun, such as a signature statement no longer in force. `changePending` is a
- * Test signing, or a second proposal, while a Critical Data Change on the Result awaits its decision. `notFound` also covers an
+ * Test signing, or a second proposal, while a Critical Data Change on the Result awaits its decision.
+ * `checklistIncomplete` is a Reviewed signing on a Test Review that leaves a ticked item unticked or a needed comment blank. `notFound` also covers an
  * unknown route. `failure` is not a refusal but an unexpected failure, listed so that every non-2xx body has the one
  * shape below.
  */
@@ -786,6 +863,7 @@ export const refusalKinds = [
   'stale',
   'recordChanged',
   'signingRefused',
+  'checklistIncomplete',
   'changePending',
   'realDataRefused',
   'keyReused',
@@ -950,7 +1028,7 @@ const stepInputs = {
     closed,
   ),
   signPerformedAgain: Type.Object({}, closed),
-  review: Type.Object({}, closed),
+  review: Type.Object({ review: uuid }, closed),
   release: Type.Object({}, closed),
 } satisfies { [K in StepName]: TObject };
 export type StepInput<K extends StepName> = Static<(typeof stepInputs)[K]>;
@@ -1091,6 +1169,25 @@ export const routes = {
   ),
   /** The System Incidents not yet Closed, newest first, for Admin and QA. */
   incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
+  reviewChecklists: route(
+    'GET',
+    '/api/review-checklists/:kind',
+    { params: Type.Object({ kind: checklistKind }) },
+    checklistVersions,
+  ),
+  draftChecklistVersion: route('POST', '/api/review-checklists', { body: checklistDraft }, checklistVersions),
+  approveChecklistVersion: route(
+    'POST',
+    '/api/review-checklists/approve',
+    {
+      body: Type.Object(
+        { kind: checklistKind, version: Type.Integer({ minimum: 1 }), ...signingBody.properties },
+        closed,
+      ),
+    },
+    checklistVersions,
+  ),
+  saveReview: route('POST', '/api/test-reviews', { body: reviewBody }, reviewSaved),
   incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
   /** The Lab's Documents, by number. */
   documents: route('GET', '/api/documents', {}, Type.Array(documentRow)),

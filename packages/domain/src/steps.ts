@@ -95,6 +95,9 @@ export const steps = {
 /** Who may take each action that is not a step on a Test; the API refuses and the web offers by this table. */
 export const actions = {
   generateAuditExport: { role: 'QA' },
+  draftReviewChecklist: { role: 'QA' },
+  approveReviewChecklist: { role: 'QA' },
+  saveTestReview: { role: 'Reviewer' },
 } as const satisfies Record<string, { role: Role }>;
 export type ActionName = keyof typeof actions;
 /** True when one of `roles` takes `action`. */

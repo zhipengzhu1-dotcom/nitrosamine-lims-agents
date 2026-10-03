@@ -22,8 +22,8 @@ import type { App } from './app.ts';
 import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope, type WriteQueries } from './scope.ts';
-import { proveReauthentication, signRecord, statementInForce } from './signing.ts';
-import { latestVersion, signedVersions } from './steps.ts';
+import { latestVersion, proveReauthentication, signRecord, statementInForce } from './signing.ts';
+import { signedVersions } from './steps.ts';
 import { signatureReply, signatureReplyColumns } from './trail.ts';
 
 function readableBy(actor: ActorContext): void {

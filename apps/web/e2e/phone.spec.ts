@@ -8,6 +8,7 @@ import {
   signOutFromRail,
   submittedTest,
   test,
+  tickChecklist,
 } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
@@ -129,6 +130,7 @@ test('with no sheet open, the Bench Rail takes at most 22% of the phone and its 
 
   await signIn(page, 'rui.reviewer');
   await page.getByRole('row', { name: description }).getByRole('link').click();
+  await tickChecklist(page);
   const review = page.getByRole('button', { name: 'Review', exact: true });
   const context = page.locator('.rail__context');
   await expect(context, 'the context line names the Test').toContainText('Test of');

@@ -144,7 +144,7 @@ async function signThrough(
   tx: Transaction<DB>,
   by: Account,
   meaning: Meaning,
-  recordTable: 'critical_data_change' | 'test' | 'test_report',
+  recordTable: 'critical_data_change' | 'test' | 'test_report' | 'test_review',
   recordId: string,
 ): Promise<string> {
   const { id: sessionId } = await tx
@@ -281,8 +281,7 @@ describe('only the assigned Analyst, acting as Analyst, proposes, on a Test in S
         await client.call(stepRoute(step), {
           commitKey: randomUUID(),
           testId: test.testId,
-          input: {},
-          signature: await signatureOf(client, test.testId, by),
+          ...(await api.press(client, step, test.testId, {}, by)),
         }),
       );
     await sign(as.rui, 'review', rui);
@@ -525,10 +524,12 @@ describe('a decision takes the Lab chain before it is written, so two decisions 
 });
 
 describe('no Test step signs while a Critical Data Change on one of its Results is pending, even past the registry', () => {
-  it('a Reviewed Signature on the Test is refused while a change is pending, and given once it is decided', async () => {
+  it('a Reviewed Signature on the Test Review is refused while a change is pending, and given once it is decided', async () => {
     const test = await performedTest();
     const changeId = await propose(test);
-    const review = () => acting(api.db, rui, 'Reviewer', (tx) => signThrough(tx, rui, 'Reviewed', 'test', test.testId));
+    const { input } = await api.reviewPress(as.rui, test.testId, rui);
+    const review = () =>
+      acting(api.db, rui, 'Reviewer', (tx) => signThrough(tx, rui, 'Reviewed', 'test_review', input.review));
     const error = await refusal(review());
     assert.deepEqual(
       [error.code, error.message],
@@ -577,8 +578,9 @@ describe('a corrected Result is reviewed and released only once it is signed Per
           .returning('id')
           .executeTakeFirstOrThrow(),
     );
+    const { input } = await api.reviewPress(as.dana, test.testId, dana);
     const review = () =>
-      acting(api.db, dana, 'Reviewer', (tx) => signThrough(tx, dana, 'Reviewed', 'test', test.testId));
+      acting(api.db, dana, 'Reviewer', (tx) => signThrough(tx, dana, 'Reviewed', 'test_review', input.review));
     const release = () =>
       acting(api.db, quinn, 'QA', (tx) => signThrough(tx, quinn, 'Released', 'test_report', reportId));
     for (const [meaning, sign] of [
@@ -918,11 +920,7 @@ describe('the bench proposes, approves, rejects and withdraws a Critical Data Ch
     const ruiView = ok(await as.rui.call(routes.test, { id: testId }));
     assert.deepEqual(ruiView.changeNext, ['approveChange', 'rejectChange']);
     assert.equal(ruiView.next, null);
-    const signature = await signatureOf(as.rui, testId, rui);
-    refusedOver(
-      await as.rui.call(stepRoute('review'), { commitKey: randomUUID(), testId, input: {}, signature }),
-      'changePending',
-    );
+    refusedOver(await signStep(as.rui, 'review', testId, rui), 'changePending');
     refusedOver(await proposeOver(testId, as.ana, '0.0320'), 'changePending');
   });
 
@@ -1054,19 +1052,14 @@ describe("a refusal only the database sees reaches the bench as the registry's o
   });
 });
 
-/** Takes a signing step on the Test as `by`, signing the Record Version the page shows now. */
+/** Takes a signing step on the Test as `by`, signing the Record Version the page shows now; a review first saves a full Test Review. */
 const signStep = async (
   client: Client,
   step: 'signPerformedAgain' | 'review' | 'release',
   testId: string,
   by: Account,
 ) =>
-  client.call(stepRoute(step), {
-    commitKey: randomUUID(),
-    testId,
-    input: {},
-    signature: await signatureOf(client, testId, by),
-  });
+  client.call(stepRoute(step), { commitKey: randomUUID(), testId, ...(await api.press(client, step, testId, {}, by)) });
 
 describe('an approval on a Reviewed Test sends it back for review before it is released', () => {
   it('the Test returns to SubmittedForReview, release waits for a new review, and someone else then releases', async () => {
@@ -1086,6 +1079,40 @@ describe('an approval on a Reviewed Test sends it back for review before it is r
     ok(await signStep(as.dana, 'review', testId, dana));
     ok(await signStep(as.quinn, 'release', testId, quinn));
     assert.equal(ok(await as.quinn.call(routes.test, { id: testId })).test.state, 'Reported');
+  });
+
+  it('a Test Review ticked before an approved change is not signed Reviewed, even on its newest Record Version after Performed is signed again', async () => {
+    const { testId } = await performedTest();
+    const { input } = await api.reviewPress(as.dana, testId, dana);
+    ok(await proposeOver(testId));
+    ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    ok(await signStep(as.ana, 'signPerformedAgain', testId, ana));
+    const newest = await api.db
+      .selectFrom('recordVersion')
+      .select(['version', sql<string>`encode(content_hash, 'hex')`.as('contentHash')])
+      .where('recordTable', '=', 'test_review')
+      .where('recordId', '=', input.review)
+      .orderBy('version', 'desc')
+      .executeTakeFirstOrThrow();
+    assert.ok(newest.version > 1, 'the approved change wrote a new Record Version of the Test Review');
+    const { statement } = ok(await as.dana.call(routes.test, { id: testId }));
+    const signature = {
+      username: dana.username,
+      password: dana.password,
+      recordVersion: newest,
+      statementVersion: statement?.version ?? assert.fail('a signer sees the signature statement'),
+    };
+    refusedOver(
+      await as.dana.call(stepRoute('review'), { commitKey: randomUUID(), testId, input, signature }),
+      'recordChanged',
+    );
+    const error = await refusal(
+      acting(api.db, dana, 'Reviewer', (tx) => signThrough(tx, dana, 'Reviewed', 'test_review', input.review)),
+    );
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA010', 'a Test Review is signed Reviewed only as it was saved: the Test changed after it was ticked'],
+    );
   });
 
   it('neither the Reviewer who approved the change nor one who reviewed an earlier Record Version releases', async () => {
@@ -1254,7 +1281,7 @@ describe('a Customer sees only the Approved Critical Data Changes of a released 
       ['Performed', 'Test'],
       ['Approved', 'Critical Data Change'],
       ['Performed', 'Test'],
-      ['Reviewed', 'Test'],
+      ['Reviewed', 'Test Review'],
       ['Released', 'Test Report'],
     ]);
   });

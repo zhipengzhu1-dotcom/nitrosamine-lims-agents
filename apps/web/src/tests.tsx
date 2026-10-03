@@ -7,12 +7,14 @@ import {
   steps,
   type TestRow,
   type TestState,
+  type Ticks,
   unsignedMeanings,
 } from '@lims/domain';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
 import { Changes, useChangeActions } from './changes.tsx';
-import { Shell, Status, stateOrder, stepAction, words } from './rail.tsx';
+import { ChecklistPanel, reviewAction } from './checklist.tsx';
+import { type RailAction, Shell, Status, stateOrder, stepAction, words } from './rail.tsx';
 import { Split } from './split.tsx';
 import { type Column, StackTable } from './stack.tsx';
 import { When } from './time.tsx';
@@ -109,7 +111,7 @@ export function Worklist({ me, open }: { me: ActorContext; open: string | null }
       )}
     </>
   );
-  if (open) return <TestPage me={me} id={open} list={list} afterStep={reload} />;
+  if (open) return <TestPage key={open} me={me} id={open} list={list} afterStep={reload} />;
   const action = me.roles.includes(steps.submit.role)
     ? stepAction('submit', null, ['A new Submission with one Sample and one Test'], reload)
     : null;
@@ -137,21 +139,28 @@ export function TestPage({
   const onTrailReload = useCallback((fn: () => Promise<void>) => setReloadTrail(() => fn), []);
   const freshState = useFresh(view, (v) => [v.test.state]);
   const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
+  // The ticks are the Reviewer's own entries until the Review press saves them, not a copy of server data.
+  const [ticks, setTicks] = useState<Ticks>({});
   const refresh = async () => {
     await Promise.all([reload(), reloadTrail(), afterStep?.()]);
   };
   const [changeAction, otherChangeAction] = useChangeActions(view, refresh);
   // oxlint-disable-next-line react-perf/jsx-no-new-array-as-prop -- the rail is not memoized and each action is rebuilt per render, so a stable array would save nothing
   const secondary = otherChangeAction ? [otherChangeAction] : [];
-  const action = view?.next
-    ? stepAction(
-        view.next,
-        id,
-        [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])],
-        refresh,
-        view.recordVersion && view.statement ? { recordVersion: view.recordVersion, statement: view.statement } : null,
-      )
-    : changeAction;
+  const action = view?.next ? actionFor(view.next) : changeAction;
+  function actionFor(next: NonNullable<NonNullable<typeof view>['next']>): RailAction | null {
+    if (!view) return null;
+    const what = [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])];
+    const signing =
+      view.recordVersion && view.statement ? { recordVersion: view.recordVersion, statement: view.statement } : null;
+    if (next !== 'review') return stepAction(next, id, what, refresh, signing);
+    if (!view.checklist)
+      return {
+        ...stepAction(next, id, what, refresh, signing),
+        blocked: 'No Test Review Checklist version is approved yet.',
+      };
+    return reviewAction(id, what, view.checklist, ticks, refresh, signing);
+  }
   const frame = (record: ReactNode) => (
     <Shell
       me={me}
@@ -218,6 +227,9 @@ export function TestPage({
         </dl>
       ) : (
         <p className="muted">No Result entered.</p>
+      )}
+      {view.checklist && view.next === 'review' && (
+        <ChecklistPanel checklist={view.checklist} ticks={ticks} onChange={setTicks} />
       )}
       {!view.withheld && result && (
         <>

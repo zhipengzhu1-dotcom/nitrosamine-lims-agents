@@ -5,7 +5,7 @@ import { audited } from '@lims/db';
 import { hashPassword } from '@lims/db/credentials';
 import { numberedKinds, routes, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, signatureOf, startApi } from './harness.ts';
+import { type Account, type Client, ok, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_numbers_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -109,8 +109,7 @@ it('a Test Report Draft is numbered RD-R with the year and six digits when it is
     client.call(stepRoute(name), {
       commitKey: randomUUID(),
       testId,
-      input,
-      ...(signer && { signature: await signatureOf(client, testId, signer) }),
+      ...(await api.press(client, name, testId, input, signer)),
     });
   ok(await step('receive', as.samir));
   ok(await step('assign', as.lena, { assigneeId: ana.id }));

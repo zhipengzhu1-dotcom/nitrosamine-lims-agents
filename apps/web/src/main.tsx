@@ -23,7 +23,7 @@ type Route =
   | { page: 'auditExport' }
   /**
    * A rail module; `open` names the record open beside it: the person whose Access Events the Staff module shows, the
-   * System Incident's reference, or the Equipment's id. `before` is the Access Event whose earlier ones the Staff module
+   * System Incident's reference, the Equipment's id, or the kind of Review Checklist. `before` is the Access Event whose earlier ones the Staff module
    * lists.
    */
   | { page: 'module'; module: Module; open: string | null; before: string | null };
@@ -41,7 +41,7 @@ function parse(hash: string): Route {
   if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
   if (!module) return { page: 'tests', open: null };
-  if (module.key === 'incidents' || module.key === 'documents' || module.key === 'equipment')
+  if (['incidents', 'documents', 'equipment', 'checklists'].includes(module.key))
     return { page: 'module', module, open: id || null, before: null };
   if (module.key === 'staff' && id && b === 'access-events')
     return { page: 'module', module, open: id, before: new URLSearchParams(query).get('before') || null };

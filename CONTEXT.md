@@ -223,8 +223,12 @@ A change to a chromatographic condition of a Run's procedure within the allowanc
 _Avoid_: Modification, SST adjustment
 
 **Review Checklist**:
-The QA-approved, versioned list of what a Reviewer confirms on a Run or a Test. Items the system proves are shown as evidence; the rest are ticked by the Reviewer, and each Reviewed signature keeps the checklist version it used.
+The QA-approved, versioned list of what a Reviewer confirms on a Run or a Test. An **evidence item** is one the system proves: the LIMS shows its value and it is never ticked. A **ticked item** is one the Reviewer ticks, with a comment where the item asks for one. A version is in force once QA signs it Approved, and only the highest approved version of a kind is in force.
 _Avoid_: Checklist (alone), review form
+
+**Test Review**:
+What a Reviewer ticked on the Test checklist in force, with each comment, saved before signing. The Reviewed Signature binds the Test Review, not the Test: its content names the Test's Record Version, the checklist version and the evidence values shown, so a change to the Test leaves the Reviewed Signature unsigned.
+_Avoid_: review form, checklist answers
 
 **Preparation**:
 One weighed and diluted solution made from a Sample for a Test.

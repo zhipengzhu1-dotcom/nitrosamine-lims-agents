@@ -11,7 +11,7 @@ const printed = execFileSync(process.execPath, [checkout, 'e2e-ports'], { encodi
 const [apiPort, webPort, decidedApiPort, decidedWebPort] = printed.split(' ');
 if (!apiPort || !webPort || !decidedApiPort || !decidedWebPort)
   throw new Error(`checkout.ts e2e-ports printed "${printed}", not two API and web port pairs`);
-const webURL = `http://localhost:${webPort}`;
+export const WEB_URL = `http://localhost:${webPort}`;
 /** A second LIMS under the decided login, with its own database, for the walks that need an authenticator code. */
 export const DECIDED_URL = `http://localhost:${decidedWebPort}`;
 const E2E_DB = 'lims_e2e';
@@ -25,7 +25,7 @@ export const API_LOG = fileURLToPath(new URL('api-log/api.log', import.meta.url)
 
 export default defineConfig({
   testDir: 'e2e',
-  use: { baseURL: webURL },
+  use: { baseURL: WEB_URL },
   projects: [
     { name: 'desktop', use: { viewport: { width: 1360, height: 900 } } },
     { name: 'iphone', use: devices['iPhone 16'] },
@@ -34,7 +34,7 @@ export default defineConfig({
   webServer: [
     {
       command: '../../scripts/dev.sh --scratch',
-      url: `${webURL}/api/me`,
+      url: `${WEB_URL}/api/me`,
       env: { LIMS_DB: E2E_DB, LIMS_LOG_FILE: API_LOG, PORT: apiPort, WEB_PORT: webPort, DEMO_PASSWORD },
       stdout: 'ignore',
     },

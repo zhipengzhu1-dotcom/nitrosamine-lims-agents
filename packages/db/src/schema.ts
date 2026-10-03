@@ -260,6 +260,12 @@ export interface EquipmentEvent {
   recordedBy: string;
 }
 
+export interface EvidenceSource {
+  dataClass: Generated<DataClass>;
+  kind: string;
+  source: string;
+}
+
 export interface IdentityVerification {
   checkedAt: Generated<Timestamp>;
   checkedBy: string;
@@ -379,6 +385,27 @@ export interface Result {
   testId: string;
   unit: string;
   value: string;
+}
+
+export interface ReviewChecklistItem {
+  dataClass: Generated<DataClass>;
+  evidence: string | null;
+  key: string;
+  kind: string;
+  needsComment: Generated<boolean>;
+  position: number;
+  text: string;
+  ticked: boolean;
+  versionId: string;
+}
+
+export interface ReviewChecklistVersion {
+  dataClass: Generated<DataClass>;
+  id: Generated<string>;
+  kind: string;
+  savedAt: Generated<Timestamp>;
+  savedBy: ColumnType<string, never, never>;
+  version: number;
 }
 
 export interface Room {
@@ -516,6 +543,18 @@ export interface TestReport {
   testId: string;
 }
 
+export interface TestReview {
+  checklistKind: Generated<string>;
+  checklistVersionId: string;
+  dataClass: Generated<DataClass>;
+  id: Generated<string>;
+  labId: string;
+  savedAt: Generated<Timestamp>;
+  savedBy: ColumnType<string, never, never>;
+  testId: string;
+  ticks: Json;
+}
+
 export interface TrainingRecord {
   dataClass: Generated<DataClass>;
   labId: string;
@@ -550,6 +589,7 @@ export interface DB {
   enrolmentGrant: EnrolmentGrant;
   equipment: Equipment;
   equipmentEvent: EquipmentEvent;
+  evidenceSource: EvidenceSource;
   identityVerification: IdentityVerification;
   incidentBreak: IncidentBreak;
   lab: Lab;
@@ -561,6 +601,8 @@ export interface DB {
   recordVersion: RecordVersion;
   releaseLogEntry: ReleaseLogEntry;
   result: Result;
+  reviewChecklistItem: ReviewChecklistItem;
+  reviewChecklistVersion: ReviewChecklistVersion;
   room: Room;
   sample: Sample;
   serviceIdentity: ServiceIdentity;
@@ -572,6 +614,7 @@ export interface DB {
   systemIncident: SystemIncident;
   test: Test;
   testReport: TestReport;
+  testReview: TestReview;
   trainingRecord: TrainingRecord;
   workstation: Workstation;
 }

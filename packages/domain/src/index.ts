@@ -12,3 +12,4 @@ export * from './sentence.ts';
 export * from './signatures.ts';
 export * from './real-data-gate.ts';
 export * from './password.ts';
+export * from './checklist.ts';

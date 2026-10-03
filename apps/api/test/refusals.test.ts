@@ -65,7 +65,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   assign: step('assign', { commitKey: randomUUID(), testId, input: { assigneeId: randomUUID() } }),
   enterResult: step('enterResult', { commitKey: randomUUID(), testId, input: result, signature }),
   signPerformedAgain: step('signPerformedAgain', { commitKey: randomUUID(), testId, input: {}, signature }),
-  review: step('review', { commitKey: randomUUID(), testId, input: {}, signature }),
+  review: step('review', { commitKey: randomUUID(), testId, input: { review: randomUUID() }, signature }),
   release: step('release', { commitKey: randomUUID(), testId, input: {}, signature }),
   recordIdentityVerification: entry(routes.recordIdentityVerification, {
     printedName: 'Nell Newcomer',
@@ -115,6 +115,12 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   }),
   lock: entry(routes.lock, {}),
   logout: entry(routes.logout, {}),
+  draftChecklistVersion: entry(routes.draftChecklistVersion, {
+    kind: 'Test',
+    items: [{ key: 'auditTrailReviewed', text: 'Audit trail reviewed', ticked: true, needsComment: false }],
+  }),
+  approveChecklistVersion: entry(routes.approveChecklistVersion, { kind: 'Test', version: 1, ...signature }),
+  saveReview: entry(routes.saveReview, { testId, checklistVersion: 1, ticks: {} }),
 };
 
 async function raw(
