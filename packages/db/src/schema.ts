@@ -149,6 +149,11 @@ export interface EnrolmentGrant {
   usedAt: Timestamp | null;
 }
 
+export interface EvidenceSource {
+  kind: string;
+  source: string;
+}
+
 export interface IdentityVerification {
   checkedAt: Generated<Timestamp>;
   checkedBy: string;
@@ -223,6 +228,25 @@ export interface Result {
   testId: string;
   unit: string;
   value: string;
+}
+
+export interface ReviewChecklistItem {
+  evidence: string | null;
+  key: string;
+  kind: string;
+  needsComment: Generated<boolean>;
+  position: number;
+  text: string;
+  ticked: boolean;
+  versionId: string;
+}
+
+export interface ReviewChecklistVersion {
+  id: Generated<string>;
+  kind: string;
+  savedAt: Generated<Timestamp>;
+  savedBy: ColumnType<string, never, never>;
+  version: number;
 }
 
 export interface Room {
@@ -343,6 +367,17 @@ export interface TestReport {
   testId: string;
 }
 
+export interface TestReview {
+  checklistKind: Generated<string>;
+  checklistVersionId: string;
+  id: Generated<string>;
+  labId: string;
+  savedAt: Generated<Timestamp>;
+  savedBy: ColumnType<string, never, never>;
+  testId: string;
+  ticks: Json;
+}
+
 export interface TrainingRecord {
   labId: string;
   methodId: string;
@@ -368,6 +403,7 @@ export interface DB {
   credentialLink: CredentialLink;
   customer: Customer;
   enrolmentGrant: EnrolmentGrant;
+  evidenceSource: EvidenceSource;
   identityVerification: IdentityVerification;
   lab: Lab;
   membership: Membership;
@@ -376,6 +412,8 @@ export interface DB {
   reauthentication: Reauthentication;
   recordVersion: RecordVersion;
   result: Result;
+  reviewChecklistItem: ReviewChecklistItem;
+  reviewChecklistVersion: ReviewChecklistVersion;
   room: Room;
   sample: Sample;
   session: Session;
@@ -386,6 +424,7 @@ export interface DB {
   systemIncident: SystemIncident;
   test: Test;
   testReport: TestReport;
+  testReview: TestReview;
   trainingRecord: TrainingRecord;
   workstation: Workstation;
 }

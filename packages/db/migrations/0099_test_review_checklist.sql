@@ -43,12 +43,14 @@ create table lims.test_review (
   lab_id               uuid        not null,
   id                   uuid        not null default gen_random_uuid(),
   test_id              uuid        not null,
-  checklist_version_id uuid        not null references lims.review_checklist_version,
+  checklist_version_id uuid        not null,
+  checklist_kind       text        not null default 'Test' check (checklist_kind = 'Test'),
   ticks                jsonb       not null check (jsonb_typeof(ticks) = 'object'),
   saved_at             timestamptz not null default now(),
   saved_by             text        not null,
   primary key (lab_id, id),
-  foreign key (lab_id, test_id) references lims.test (lab_id, id)
+  foreign key (lab_id, test_id) references lims.test (lab_id, id),
+  foreign key (checklist_version_id, checklist_kind) references lims.review_checklist_version (id, kind)
 );
 
 -- Who saved a version or a review is the session's actor, never a value the client sends.
@@ -65,15 +67,18 @@ end $$;
 create function lims.check_test_review_ticks() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 begin
+  if jsonb_typeof(new.ticks) is distinct from 'object' then
+    return new; -- test_review_ticks_check or the not null refuses it
+  end if;
   if exists (select from jsonb_each(new.ticks) t
               where not exists (select from review_checklist_item i
                                  where i.version_id = new.checklist_version_id and i.key = t.key and i.ticked)) then
     raise exception 'a Test Review ticks only the ticked items of its checklist version' using errcode = '23514';
   end if;
   if exists (select from jsonb_each(new.ticks) t
-              where jsonb_typeof(t.value) <> 'object'
-                 or (select array_agg(k) from jsonb_object_keys(t.value) k) <> array['comment']
-                 or jsonb_typeof(t.value -> 'comment') not in ('string', 'null')) then
+              where case when jsonb_typeof(t.value) <> 'object' then true
+                         else coalesce((select array_agg(k) from jsonb_object_keys(t.value) k), '{}') <> array['comment']
+                           or jsonb_typeof(t.value -> 'comment') not in ('string', 'null') end) then
     raise exception 'each tick of a Test Review holds only its comment, a string or null' using errcode = '23514';
   end if;
   return new;

@@ -57,6 +57,8 @@ const id = {
   otherLabRoom: randomUUID(),
   workstation: randomUUID(),
   lockedOut: randomUUID(),
+  checklistVersion: randomUUID(),
+  testReview: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -324,6 +326,22 @@ const fixture: [string, Row][] = [
       roles: '{Analyst}',
     },
   ],
+  ['lims.review_checklist_version', { id: id.checklistVersion, kind: 'Test', version: 90 }],
+  [
+    'lims.review_checklist_item',
+    {
+      version_id: id.checklistVersion,
+      kind: 'Test',
+      position: 1,
+      key: 'refusalItem',
+      text: 'Refusal item checked.',
+      ticked: true,
+    },
+  ],
+  [
+    'lims.test_review',
+    { lab_id: id.lab, id: id.testReview, test_id: id.test, checklist_version_id: id.checklistVersion, ticks: {} },
+  ],
 ];
 const labSwitch: Row = {
   kind: 'LabSwitch',
@@ -497,6 +515,33 @@ const tables = {
     row: { version: 2, statement: Buffer.from('A second statement (fictional).') },
     notNull: ['version', 'statement', 'approved_at'],
   },
+  'lims.evidence_source': {
+    noun: 'evidence source',
+    row: { source: 'refusalSource', kind: 'Run' },
+    notNull: ['source', 'kind'],
+  },
+  'lims.review_checklist_version': {
+    noun: 'Review Checklist version',
+    row: { kind: 'Test', version: 91 },
+    notNull: ['id', 'kind', 'version', 'saved_at'],
+  },
+  'lims.review_checklist_item': {
+    noun: 'Review Checklist item',
+    row: {
+      version_id: id.checklistVersion,
+      kind: 'Test',
+      position: 2,
+      key: 'secondItem',
+      text: 'Second item checked.',
+      ticked: true,
+    },
+    notNull: ['version_id', 'kind', 'position', 'key', 'text', 'ticked', 'needs_comment'],
+  },
+  'lims.test_review': {
+    noun: 'Test Review',
+    row: { lab_id: id.lab, test_id: id.test, checklist_version_id: id.checklistVersion, ticks: {} },
+    notNull: ['lab_id', 'id', 'test_id', 'checklist_version_id', 'checklist_kind', 'ticks', 'saved_at'],
+  },
   'lims.signing_role': {
     noun: 'signing role',
     row: { role: 'Reviewer', meaning: 'Performed' },
@@ -663,6 +708,8 @@ const auditedTables: Table[] = [
   'lims.enrolment_grant',
   'lims.room',
   'lims.workstation',
+  'lims.evidence_source',
+  'lims.review_checklist_item',
 ];
 
 const bare = (table: string) => table.slice(table.indexOf('.') + 1);
@@ -828,6 +875,10 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.signature': { id: id.signature },
     'lims.signature_statement': { version: 1 },
     'lims.signing_role': { role: 'Analyst', meaning: 'Performed' },
+    'lims.evidence_source': { source: 'runChecks' },
+    'lims.review_checklist_version': { id: id.checklistVersion },
+    'lims.review_checklist_item': { key: 'refusalItem' },
+    'lims.test_review': { id: id.testReview },
     'lims.reauthentication': { id: id.reauthentication },
     'lims.session': { id: id.session },
     'lims.system_incident': { id: id.systemIncident },
@@ -1022,6 +1073,18 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.commit_key',
       change: { key: id.commitKey, session_id: id.session },
       constraint: 'commit_key_pkey',
+    },
+    {
+      name: 'a second version of a Review Checklist with the same number is refused',
+      table: 'lims.review_checklist_version',
+      change: { version: 90 },
+      constraint: 'review_checklist_version_kind_version_key',
+    },
+    {
+      name: 'a second Review Checklist item at the same position of one version is refused',
+      table: 'lims.review_checklist_item',
+      change: { position: 1 },
+      constraint: 'review_checklist_item_version_id_position_key',
     },
   ]);
 });
@@ -1362,6 +1425,52 @@ describe('the database refuses a reference to a row that does not exist', () => 
       table: 'lims.access_event',
       change: { ...labSwitch, previous_session_id: missing },
       constraint: 'access_event_previous_session_fkey',
+    },
+    {
+      name: 'a Review Checklist item of a version that does not exist is refused',
+      table: 'lims.review_checklist_item',
+      change: { version_id: missing },
+      constraint: 'review_checklist_item_version_id_kind_fkey',
+    },
+    {
+      name: 'a Review Checklist item of another kind than its version is refused',
+      table: 'lims.review_checklist_item',
+      change: { kind: 'Run' },
+      constraint: 'review_checklist_item_version_id_kind_fkey',
+    },
+    {
+      name: 'an evidence item whose source does not exist is refused',
+      table: 'lims.review_checklist_item',
+      change: { ticked: false, evidence: 'noSuchSource' },
+      constraint: 'review_checklist_item_evidence_kind_fkey',
+    },
+    {
+      name: 'an evidence item whose source serves another kind of checklist is refused',
+      table: 'lims.review_checklist_item',
+      change: { ticked: false, evidence: 'runChecks' },
+      constraint: 'review_checklist_item_evidence_kind_fkey',
+    },
+    {
+      name: 'a Test Review of a Test that does not exist is refused',
+      table: 'lims.test_review',
+      change: { test_id: missing },
+      constraint: 'test_review_lab_id_test_id_fkey',
+    },
+    {
+      name: 'a Test Review on a checklist version that does not exist is refused',
+      table: 'lims.test_review',
+      change: { checklist_version_id: missing },
+      constraint: 'test_review_checklist_version_id_checklist_kind_fkey',
+    },
+    {
+      name: 'a Test Review on the Run checklist is refused',
+      table: 'lims.test_review',
+      change: {
+        checklist_version_id: literal(
+          `(select id from lims.review_checklist_version where kind = 'Run' and version = 1)`,
+        ),
+      },
+      constraint: 'test_review_checklist_version_id_checklist_kind_fkey',
     },
   ]);
 
@@ -2004,6 +2113,85 @@ describe('the database refuses a value outside its allowed set', () => {
       [-1, -2147483648],
       'person_failed_logins_check',
     ),
+    ...each(
+      'an evidence source for no kind of checklist is refused',
+      'lims.evidence_source',
+      'kind',
+      ['Hold', ''],
+      'evidence_source_kind_check',
+    ),
+    ...each(
+      'an evidence source whose name is not a key is refused',
+      'lims.evidence_source',
+      'source',
+      ['Run checks', 'RunChecks', ''],
+      'evidence_source_source_check',
+    ),
+    ...each(
+      'a Review Checklist of no known kind is refused',
+      'lims.review_checklist_version',
+      'kind',
+      ['Hold', 'test'],
+      'review_checklist_version_kind_check',
+    ),
+    ...each(
+      'a Review Checklist version numbered below 1 is refused',
+      'lims.review_checklist_version',
+      'version',
+      [0, -1],
+      'review_checklist_version_version_check',
+    ),
+    ...each(
+      'a Review Checklist item at a position below 1 is refused',
+      'lims.review_checklist_item',
+      'position',
+      [0, -1],
+      'review_checklist_item_position_check',
+    ),
+    ...each(
+      'a Review Checklist item whose key is not a key is refused',
+      'lims.review_checklist_item',
+      'key',
+      ['Second item', 'SecondItem', ''],
+      'review_checklist_item_key_check',
+    ),
+    ...each(
+      'a Review Checklist item with no text is refused',
+      'lims.review_checklist_item',
+      'text',
+      ['', '   '],
+      'review_checklist_item_text_check',
+    ),
+    {
+      name: 'a Review Checklist item the reviewer does not tick and the server does not show is refused',
+      table: 'lims.review_checklist_item',
+      change: { ticked: false },
+      constraint: 'review_checklist_item_ticked_or_evidence',
+    },
+    {
+      name: 'a ticked Review Checklist item that also names an evidence source is refused',
+      table: 'lims.review_checklist_item',
+      change: { evidence: 'performedSignature' },
+      constraint: 'review_checklist_item_ticked_or_evidence',
+    },
+    {
+      name: 'an evidence item that asks for a comment is refused, because the reviewer never ticks it',
+      table: 'lims.review_checklist_item',
+      change: { ticked: false, evidence: 'performedSignature', needs_comment: true },
+      constraint: 'review_checklist_item_comment_on_ticked',
+    },
+    {
+      name: 'a Test Review whose ticks are not an object of keys is refused',
+      table: 'lims.test_review',
+      change: { ticks: JSON.stringify(['refusalItem']) },
+      constraint: 'test_review_ticks_check',
+    },
+    {
+      name: 'a Test Review of any checklist but the Test checklist is refused',
+      table: 'lims.test_review',
+      change: { checklist_kind: 'Run' },
+      constraint: 'test_review_checklist_kind_check',
+    },
   ]);
 });
 
@@ -2140,6 +2328,91 @@ describe('an audited write without an actor, a role and a reason is refused', ()
       assert.match(error.where ?? '', /^PL\/pgSQL function capture\(\)/);
     });
   }
+});
+
+describe('a Review Checklist version and a Test Review record who saved them, and a Test Review ticks only what its checklist asks', () => {
+  const saved: Table[] = ['lims.review_checklist_version', 'lims.test_review'];
+  for (const table of saved) {
+    const noun = tables[table].noun;
+    covered.add(`${table}.stamp_saver`);
+    it(`a ${noun} saved with no actor is refused before anything else`, async () => {
+      const error = await refusalOfRow(table, {}, false);
+      assert.deepEqual([error.code, error.message], ['LA001', `a ${bare(table)} is saved only by a named actor`]);
+    });
+    it(`a ${noun} records its actor as who saved it, whatever the insert says`, async () => {
+      await client.query('begin');
+      try {
+        await client.query(AUDIT_CONTEXT);
+        const [statement, values] = insert(table, { ...tables[table].row, saved_by: 'person:forged.saver' });
+        const { rows } = await client.query<Row>(`${statement} returning saved_by`, values);
+        assert.deepEqual(rows, [{ saved_by: 'person:refusal.admin' }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+    covered.add(`${table}.${bare(table)}_saved_by_not_null`);
+    it(`a ${noun} with no saver is refused even with the stamping trigger bypassed`, async () => {
+      const error = await refusalWithTriggersOff(...insert(table, { ...tables[table].row, saved_by: null }));
+      assert.deepEqual([error.code, error.column], ['23502', 'saved_by'], error.message);
+    });
+    covered.add(`${table}.capture`);
+    it(`a new ${noun} by a named actor without a role and a reason is refused`, async () => {
+      await client.query('begin');
+      const error = await client
+        .query(`select set_config('lims.actor', 'person:refusal.admin', true)`)
+        .then(() => client.query(...insert(table, tables[table].row)))
+        .then(
+          () => assert.fail(`the database accepted a ${noun} with no role and reason`),
+          (e: unknown) => (e instanceof pg.DatabaseError ? e : assert.fail(String(e))),
+        )
+        .finally(() => client.query('rollback'));
+      assert.deepEqual([error.code, error.message], ['LA001', 'an audited write needs an actor, a role and a reason']);
+      assert.match(error.where ?? '', /^PL\/pgSQL function capture\(\)/);
+    });
+  }
+
+  covered.add('lims.test_review.test_review_ticks');
+  const ticks: [string, Row][] = [
+    ['a key that is no item of its checklist version', { madeUp: { comment: null } }],
+    ['the key of an item of another version', { auditTrailReviewed: { comment: null } }],
+  ];
+  for (const [what, value] of ticks) {
+    it(`a Test Review that ticks ${what} is refused`, async () => {
+      const error = await refusalOfRow('lims.test_review', { ticks: value });
+      assert.deepEqual(
+        [error.code, error.message],
+        ['23514', 'a Test Review ticks only the ticked items of its checklist version'],
+      );
+    });
+  }
+  const shapes: [string, unknown][] = [
+    ['a bare value', true],
+    ['a field beside its comment', { comment: null, ok: true }],
+    ['a comment that is not a string', { comment: 1 }],
+    ['no comment', {}],
+  ];
+  for (const [what, value] of shapes) {
+    it(`a Test Review whose tick holds ${what} is refused`, async () => {
+      const error = await refusalOfRow('lims.test_review', { ticks: { refusalItem: value } });
+      assert.deepEqual(
+        [error.code, error.message],
+        ['23514', 'each tick of a Test Review holds only its comment, a string or null'],
+      );
+    });
+  }
+  it('a Test Review that ticks an item of its version, with or without a comment, is accepted', async () => {
+    for (const comment of [null, 'Checked against the notebook.']) {
+      await client.query('begin');
+      try {
+        await client.query(AUDIT_CONTEXT);
+        await client.query(
+          ...insert('lims.test_review', { ...tables['lims.test_review'].row, ticks: { refusalItem: { comment } } }),
+        );
+      } finally {
+        await client.query('rollback');
+      }
+    }
+  });
 });
 
 describe('a Signature, a Record Version, a signature statement, a re-authentication record, an Access Event, an Audit Trail entry, a Commit Key, a System Incident or an Audit Export is never changed or removed, even by the superuser', () => {
@@ -2355,6 +2628,47 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       trigger: 'refuse_truncate',
       statement: 'truncate lims.enrolment_grant',
     },
+    ...(
+      [
+        [
+          'lims.evidence_source',
+          'an evidence source',
+          'the evidence sources',
+          `kind = 'Test'`,
+          'lims.review_checklist_item',
+        ],
+        [
+          'lims.review_checklist_version',
+          'a Review Checklist version',
+          'the Review Checklist versions',
+          'version = version + 100',
+          'lims.review_checklist_item, lims.test_review',
+        ],
+        [
+          'lims.review_checklist_item',
+          'a Review Checklist item',
+          'the Review Checklist items',
+          `text = 'Changed.'`,
+          '',
+        ],
+        ['lims.test_review', 'a Test Review', 'the Test Reviews', `ticks = '{}'`, ''],
+      ] as const
+    ).flatMap(([table, one, many, change, referrers]) => [
+      {
+        name: `updating ${one} is refused`,
+        table,
+        trigger: 'refuse_change',
+        statement: `update ${table} set ${change}`,
+      },
+      { name: `deleting ${one} is refused`, table, trigger: 'refuse_change', statement: `delete from ${table}` },
+      {
+        // Postgres refuses to truncate a foreign-key target on its own, so the rows that name it are named with it.
+        name: `truncating ${many} is refused`,
+        table,
+        trigger: 'refuse_truncate',
+        statement: `truncate ${[table, referrers].filter(Boolean).join(', ')}`,
+      },
+    ]),
   ];
   for (const c of cases) {
     covered.add(`${c.table}.${c.trigger}`);
@@ -3381,6 +3695,191 @@ describe('a Signature is written only by the signing function, which refuses eve
     ];
     for (const c of incidentCases) it(c.name, async () => assert.equal(await refused(...c.statements), c.message));
   });
+
+  describe('Reviewed binds a complete Test Review on the Test checklist in force, saved by its signer, and Approved puts a newer checklist version in force once', () => {
+    let v1 = '';
+    const [v2, review, approval, secondApproval, reviewing] = [
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+      randomUUID(),
+    ];
+    before(async () => {
+      ({ id: v1 } =
+        (
+          await client.query<{ id: string }>(
+            `select id from lims.review_checklist_version where kind = 'Test' and version = 1`,
+          )
+        ).rows[0] ?? assert.fail('the migration seeds version 1 of the Test checklist'));
+    });
+    // One transaction here plays several requests, so it declares the company chain beside the Lab's up front.
+    const holdsQaAndReviewer = [
+      asService,
+      `select lims.lock_chains('company', '${id.lab}')`,
+      ...['QA', 'Reviewer'].map(
+        (role) => `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', '${role}')`,
+      ),
+    ];
+    const proof = (reauthentication: string, meaning: string) =>
+      `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
+       values ('${id.lab}', '${reauthentication}', '${id.session}', '${id.person}', '${meaning}', 'Password')`;
+    const signChecklist = (version: string, reauthentication: string, meaning = 'Approved') =>
+      sign({
+        reauthentication,
+        table: 'review_checklist_version',
+        recordId: version,
+        seen: versionOf(version, 1),
+        hash: hashOf(version, 1),
+        meaning,
+      });
+    const approve = (version: string, reauthentication = approval) => [
+      asPerson('QA'),
+      proof(reauthentication, 'Approved'),
+      `select lims.version_review_checklist('${reauthentication}', '${version}')`,
+      signChecklist(version, reauthentication),
+    ];
+    /** Version 2 of the Test checklist, a copy of version 1, saved by QA and not yet approved. */
+    const draftV2 = () => [
+      asPerson('QA'),
+      `insert into lims.review_checklist_version (id, kind, version) values ('${v2}', 'Test', 2);
+       insert into lims.review_checklist_item (version_id, kind, position, key, text, ticked, needs_comment, evidence)
+       select '${v2}', kind, position, key, text, ticked, needs_comment, evidence
+         from lims.review_checklist_item where version_id = '${v1}'`,
+    ];
+    /** Every ticked item of `version` ticked, with a comment where the item asks for one, except `left`. */
+    const ticksOf = (version: string, left = '', comment = 'Checked against the notebook.') =>
+      `(select jsonb_object_agg(key, jsonb_build_object('comment', case when needs_comment then '${comment}' end))
+          from lims.review_checklist_item where version_id = '${version}' and ticked and key <> '${left}')`;
+    const save = (ticks: string, version = v1) =>
+      `insert into lims.test_review (lab_id, id, test_id, checklist_version_id, ticks)
+       values ('${id.lab}', '${review}', '${id.test}', '${version}', ${ticks})`;
+    const signReview = (meaning = 'Reviewed', role = 'Reviewer') => [
+      asPerson(role),
+      proof(reviewing, meaning),
+      sign({
+        reauthentication: reviewing,
+        table: 'test_review',
+        recordId: review,
+        seen: versionOf(review, 1),
+        hash: hashOf(review, 1),
+        meaning,
+      }),
+    ];
+    const reviewed = () => [...holdsQaAndReviewer, ...approve(v1), asPerson('Reviewer'), save(ticksOf(v1))];
+    const textOf = async (key: string) =>
+      (
+        await client.query<{ text: string }>(
+          'select text from lims.review_checklist_item where version_id = $1 and key = $2',
+          [v1, key],
+        )
+      ).rows[0]?.text ?? assert.fail(`version 1 of the Test checklist has no item ${key}`);
+
+    covered.add('lims.test_review.version_record');
+    it('QA approves version 1, and the Reviewer signs Reviewed over the Record Version of the complete Test Review they saved, which names the checklist version and the Test', async () => {
+      await client.query('begin');
+      try {
+        for (const statement of [...reviewed(), ...signReview()]) await client.query(statement);
+        const { rows } = await client.query<Row>(
+          `select s.meaning, v.version, convert_from(v.content, 'UTF8')::jsonb -> 'checklist' ->> 'version' as checklist,
+                  convert_from(v.content, 'UTF8')::jsonb -> 'test' ->> 'id' = $2 as names_the_test,
+                  lims.review_checklist_in_force('Test') = $3 as in_force
+             from lims.signature s join lims.record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
+            where v.record_table = 'test_review' and v.record_id = $1`,
+          [review, id.test, v1],
+        );
+        assert.deepEqual(rows, [
+          { meaning: 'Reviewed', version: 1, checklist: '1', names_the_test: true, in_force: true },
+        ]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    covered.add('lims.signature.review_signing');
+    const onlyReviews = 'Reviewed is the Signature Meaning of a Test Review, and a Test Review is signed only Reviewed';
+    const reviewCases: { name: string; statements: () => string[]; message: () => Promise<string> | string }[] = [
+      {
+        name: 'signing Reviewed on the Test itself, not on a Test Review, is refused',
+        statements: () => [
+          ...holdsQaAndReviewer,
+          asPerson('Reviewer'),
+          proof(reviewing, 'Reviewed'),
+          sign({ reauthentication: reviewing, meaning: 'Reviewed' }),
+        ],
+        message: () => onlyReviews,
+      },
+      {
+        name: 'signing a Test Review with any Meaning but Reviewed is refused',
+        statements: () => [...reviewed(), ...signReview('Performed', 'Analyst')],
+        message: () => onlyReviews,
+      },
+      {
+        name: 'signing a Review Checklist version with any Meaning but Approved is refused',
+        statements: () => [
+          asPerson('Analyst'),
+          `select lims.save_record_version('${id.lab}', 'review_checklist_version', '${v1}')`,
+          proof(approval, 'Performed'),
+          signChecklist(v1, approval, 'Performed'),
+        ],
+        message: () => 'a Review Checklist version is signed only Approved',
+      },
+      {
+        name: 'signing Reviewed while no Test checklist version is in force is refused',
+        statements: () => [...holdsQaAndReviewer, asPerson('Reviewer'), save(ticksOf(v1)), ...signReview()],
+        message: () => 'the Test Review was ticked on a Test Review Checklist version no longer in force',
+      },
+      {
+        name: 'signing Reviewed on a Test Review ticked on a version that a newer approved version replaced is refused',
+        statements: () => [...reviewed(), ...draftV2(), ...approve(v2, secondApproval), ...signReview()],
+        message: () => 'the Test Review was ticked on a Test Review Checklist version no longer in force',
+      },
+      {
+        name: 'signing Reviewed on a Test Review with a ticked item left unticked is refused, naming the item',
+        statements: () => [
+          ...holdsQaAndReviewer,
+          ...approve(v1),
+          asPerson('Reviewer'),
+          save(ticksOf(v1, 'auditTrailReviewed')),
+          ...signReview(),
+        ],
+        message: async () => `the Test Review is not complete: ${await textOf('auditTrailReviewed')}`,
+      },
+      {
+        name: 'signing Reviewed on a Test Review whose item that asks for a comment has a blank one is refused, naming the item',
+        statements: () => [
+          ...holdsQaAndReviewer,
+          ...approve(v1),
+          asPerson('Reviewer'),
+          save(ticksOf(v1, '', '   ')),
+          ...signReview(),
+        ],
+        message: async () => `the Test Review is not complete: ${await textOf('flagsAcknowledged')}`,
+      },
+      {
+        name: 'signing Reviewed on a Test Review that another person saved is refused',
+        statements: () => [...holdsQaAndReviewer, ...approve(v1), actingAs('QA'), save(ticksOf(v1)), ...signReview()],
+        message: () => 'a Reviewed Signature binds a Test Review the signer saved',
+      },
+      {
+        name: 'a second Approved signing on one Review Checklist version is refused',
+        statements: () => [
+          ...holdsQaAndReviewer,
+          ...approve(v1),
+          proof(secondApproval, 'Approved'),
+          signChecklist(v1, secondApproval),
+        ],
+        message: () => 'a Review Checklist version is signed Approved once',
+      },
+      {
+        name: 'approving a Review Checklist version older than the one in force is refused',
+        statements: () => [...holdsQaAndReviewer, ...draftV2(), ...approve(v2), ...approve(v1, secondApproval)],
+        message: () => 'version 2 of the Test Review Checklist is in force, so version 1 cannot be approved',
+      },
+    ];
+    for (const c of reviewCases)
+      it(c.name, async () => assert.equal(await refused(...c.statements()), await c.message()));
+  });
 });
 
 describe('a session is locked and unlocked only by lims.lock_session and lims.unlock_session', () => {
@@ -3784,6 +4283,8 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
       'unreachable: generated from statement, which is not null',
     ],
     ['lims.reauthentication.reauthentication_facts_key', 'unreachable: (lab_id, id) is already the key'],
+    ['lims.evidence_source.evidence_source_source_kind_key', 'unreachable: source is already the key'],
+    ['lims.review_checklist_version.review_checklist_version_id_kind_key', 'unreachable: id is already the key'],
     ['lims.person.staff_account_through_identity_verification', 'staff-accounts.test.ts'],
     ['lims.membership.staff_role_needs_identity_verification', 'staff-accounts.test.ts'],
     [
