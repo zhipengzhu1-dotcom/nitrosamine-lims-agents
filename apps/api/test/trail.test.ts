@@ -1299,6 +1299,47 @@ it('after a Chain Verification, a consistent rewrite of the Lab chain behind it 
   );
 });
 
+it('when a rewrite of more than 100 entries reaches the entry a Chain Verification names, Verify chain opens the More System Incident holding both the changed entry and the contradicted Chain Verification, and listing it reads both as recorded', async () => {
+  const lab = await labOfItsOwn('TIE', 150);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  const named = String(lab.last);
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq <= ${named}`,
+  ]);
+  const broken = await lab.verify();
+  assert.equal(broken.breaks.length, 101, 'the first 100 breaks one by one and the rest as one More');
+  const more = broken.breaks[100] ?? assert.fail('the breaks after the first 100');
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: more.incident }));
+  assert.equal(listed.asRecorded, true, 'the More incident reads its breaks as recorded');
+  assert.deepEqual(
+    listed.breaks.filter((b) => b.entry === named).map((b) => [b.kind, b.matches]),
+    [
+      ['Changed', true],
+      ['Contradicted', true],
+    ],
+    'both breaks at the named entry are stored on the More incident',
+  );
+});
+
+it("listing a contradicted Chain Verification's System Incident opened before the LIMS stored its breaks reads its own break as recorded, not the changed entry's", async () => {
+  const lab = await labOfItsOwn('OLD', 4);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  const named = String(lab.last);
+  await lab.alter(named);
+  const legacy = 'NC000003';
+  await tamper([
+    sql`insert into lims.system_incident
+          (kind, reference, requested_by, chain, first_failure, last_failure, break_count, fingerprint)
+        select 'ChainVerifyFailure', ${legacy}, ${quinn.id}, ${lab.labId}, b.seq, b.through, 1, b.fingerprint
+        from lims.chain_breaks(${lab.labId}) as b where b.kind = 'Contradicted'`,
+  ]);
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: legacy }));
+  assert.deepEqual(
+    [listed.asRecorded, listed.recorded, listed.breaks.map((b) => [b.entry, b.kind]), listed.opened],
+    [true, null, [[named, 'Contradicted']], []],
+  );
+});
+
 it('when the entry a Chain Verification names is changed, Verify chain opens one System Incident for the changed entry and one for the contradicted Chain Verification, each storing its own break, and listing either opens none', async () => {
   const lab = await labOfItsOwn('SAM', 4);
   assert.equal((await lab.verify()).verdict, 'Intact');

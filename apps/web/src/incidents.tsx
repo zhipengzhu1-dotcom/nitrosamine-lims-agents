@@ -201,13 +201,13 @@ function IncidentBreaks({ reference, changed }: { reference: string; changed: ()
             <StackTable
               columns={data.recorded && !data.asRecorded ? markedColumns('Recorded') : breakColumns}
               rows={data.breaks}
-              rowKey={(b) => b.entry}
+              rowKey={(b) => `${b.entry}:${b.kind}`}
             />
           )}
           {data.recorded && !data.asRecorded && (
             <section className="recorded-breaks" aria-labelledby="incident-breaks-recorded">
               <h3 id="incident-breaks-recorded">As this System Incident recorded them</h3>
-              <StackTable columns={markedColumns('Now')} rows={data.recorded} rowKey={(b) => b.entry} />
+              <StackTable columns={markedColumns('Now')} rows={data.recorded} rowKey={(b) => `${b.entry}:${b.kind}`} />
             </section>
           )}
         </>

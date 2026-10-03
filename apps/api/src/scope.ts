@@ -108,8 +108,12 @@ export type WriteQueries = ReturnType<typeof inWrite>;
  */
 const BREAKS_ONE_BY_ONE = 100;
 
-/** What a `More` break records in place of its breaks' fingerprints: one digest of every break, in entry order. */
-const digestOfBreaks = sql<Buffer>`sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq))`;
+/**
+ * What a `More` break records in place of its breaks' fingerprints: one digest of every break, in entry order, then
+ * kind, because a changed entry and the Chain Verification it contradicts are two breaks at one entry.
+ */
+const digestOfBreaks = sql<Buffer>`
+  sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq, kind))`;
 
 /** One break as a verification read it, with its fingerprint in hex. */
 export type CoveredBreak = { entry: string; kind: BreakInRange['kind']; through: string; fingerprint: string };
@@ -187,7 +191,7 @@ async function recompute(tx: Kysely<DB>, chain: string, everyEntry: boolean): Pr
       from found where n <= ${BREAKS_ONE_BY_ONE}
       union all
       select min(seq), 'More', max(through), count(*)::int, ${digestOfBreaks},
-        json_agg(${coveredBreak('found')} order by seq)
+        json_agg(${coveredBreak('found')} order by seq, kind)
       from found where n > ${BREAKS_ONE_BY_ONE} having count(*) > 0
     )
     select ${inUtc(sql`now()`)} as at,
@@ -258,7 +262,8 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
      * Recomputes the breaks covering `range` on this Lab's or the company chain, each beside the breaks the incident
      * stored, whether they are the breaks it recorded, and the other System Incidents that record them as they read
      * now, which is a lookup of what is already recorded and opens none; null for another Lab's chain. A contradicted
-     * Chain Verification is a break of its own kind at the entry it names, so only an incident that stored one reads it.
+     * Chain Verification is a break of its own kind at the entry it names, so only an incident that stored one reads it,
+     * or one that stored none and records that break by its fingerprint, which then reads no other kind.
      */
     breaksWithin: async ({ id, chain, first, last, fingerprint }: BreakRange) => {
       if (chain !== labId && chain !== 'company') return null;
@@ -274,22 +279,29 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
       }>`
         with kept as (
           select k.seq, k.kind, k.through, k.fingerprint from lims.incident_break as k where k.incident_id = ${id}
-        ), found as (
+        ), broken as (
           select b.seq, b.kind, b.through, b.fingerprint from lims.chain_breaks(${chain}) as b
           where b.through >= ${first}::bigint and b.seq <= ${last}::bigint
-            and case when b.kind = 'Contradicted' then exists (select from kept where kind = 'Contradicted')
-                     else not exists (select from kept) or exists (select from kept where kind <> 'Contradicted') end
+        ), reads as (
+          select coalesce(bool_or(kind = 'Contradicted'), exists (
+                   select from broken where kind = 'Contradicted' and fingerprint = ${fingerprint})) as contradicted,
+                 coalesce(bool_or(kind <> 'Contradicted'), not exists (
+                   select from broken where kind = 'Contradicted' and fingerprint = ${fingerprint})) as others
+          from kept
+        ), found as (
+          select b.* from broken as b, reads as r
+          where case when b.kind = 'Contradicted' then r.contradicted else r.others end
         )
         select now() as recomputed_at,
           coalesce((select ${fingerprint} = ${digestOfBreaks} or (count(*) = 1 and bool_or(
               fingerprint = ${fingerprint} and seq = ${first}::bigint and through = ${last}::bigint))
             from found), false) as as_recorded,
           coalesce((select json_agg(json_build_object('entry', f.seq::text, 'kind', f.kind, 'through', f.through::text,
-              'matches', exists (select from kept as k where ${sameBreak('k', 'f')})) order by f.seq)
+              'matches', exists (select from kept as k where ${sameBreak('k', 'f')})) order by f.seq, f.kind)
             from found as f), '[]') as breaks,
           case when exists (select from kept) then
             (select json_agg(json_build_object('entry', k.seq::text, 'kind', k.kind, 'through', k.through::text,
-                'matches', exists (select from found as f where ${sameBreak('f', 'k')})) order by k.seq)
+                'matches', exists (select from found as f where ${sameBreak('f', 'k')})) order by k.seq, k.kind)
               from kept as k)
           end as recorded,
           coalesce((select json_agg(i.reference order by i.reference) from lims.system_incident as i

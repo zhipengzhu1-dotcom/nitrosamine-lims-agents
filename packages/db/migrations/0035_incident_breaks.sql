@@ -8,14 +8,16 @@ set local role lims_owner;
 -- would then be copied into each of the incident's entries, inside the time the verification has to write them. The
 -- rows are written once, in one statement of the transaction that opens the incident, and never change; the
 -- incident's fingerprint and its content hash (below) bind them, which is why the Audit Trail does not capture them.
--- An incident opened before this migration has none.
+-- An incident opened before this migration has none. One entry can hold two breaks of different kinds: when the entry
+-- a Chain Verification names is changed, the entry is Changed and the Chain Verification is Contradicted at it. So
+-- kind is part of the key, and every digest and list of the breaks orders them by entry, then kind.
 create table lims.incident_break (
   incident_id uuid   not null references lims.system_incident,
   seq         bigint not null,
   kind        text   not null check (kind in ('Changed', 'Missing', 'HeadMoved', 'Contradicted')),
   through     bigint not null constraint incident_break_through_check check (through >= seq),
   fingerprint bytea  not null,
-  primary key (incident_id, seq)
+  primary key (incident_id, seq, kind)
 );
 
 create trigger refuse_change before update or delete on lims.incident_break
@@ -58,7 +60,7 @@ create trigger breaks_written_once after insert on lims.incident_break
 -- Checked when the opening transaction commits, because the foreign key makes the incident come before its breaks: a
 -- chain-verify System Incident's breaks give its count, its first and last entry, and its fingerprint (the digest
 -- Verify chain records for a More incident: sha256 over each break's entry and the sha256 of its fingerprint, in
--- entry order, or the one break's own).
+-- entry order, then kind, or the one break's own).
 create function lims.check_incident_breaks() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 begin
@@ -70,7 +72,7 @@ begin
        from incident_break b
        where b.incident_id = new.id
        having count(*) = new.break_count and min(b.seq) = new.first_failure and max(b.through) = new.last_failure
-         and (sha256(string_agg(int8send(b.seq) || sha256(b.fingerprint), ''::bytea order by b.seq)) = new.fingerprint
+         and (sha256(string_agg(int8send(b.seq) || sha256(b.fingerprint), ''::bytea order by b.seq, b.kind)) = new.fingerprint
            or (count(*) = 1 and bool_and(b.fingerprint = new.fingerprint)))
      ) then
     raise exception 'a chain-verify System Incident records every break it covers, which give its count, range and fingerprint'
@@ -83,8 +85,8 @@ create constraint trigger check_incident_breaks after insert on lims.system_inci
   deferrable initially deferred for each row execute function lims.check_incident_breaks();
 
 -- Canonical form 1 of a System Incident now binds its breaks: a digest over each break's entry, last entry, kind and
--- fingerprint, in entry order, so that a bypassed change to a break unsigns the Acknowledged Signature. An incident
--- with no break rows renders as before, so the content signed before this migration keeps its hash.
+-- fingerprint, in entry order, then kind, so that a bypassed change to a break unsigns the Acknowledged Signature. An
+-- incident with no break rows renders as before, so the content signed before this migration keeps its hash.
 create or replace function lims.incident_content(i lims.system_incident) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
@@ -120,7 +122,7 @@ language sql stable as $$
   || jsonb_strip_nulls(jsonb_build_object('breaksDigest', (
        select encode(sha256(string_agg(
                 sha256(int8send(b.seq) || int8send(b.through) || sha256(convert_to(b.kind, 'UTF8')) || sha256(b.fingerprint)),
-                ''::bytea order by b.seq)), 'hex')
+                ''::bytea order by b.seq, b.kind)), 'hex')
        from lims.incident_break b where b.incident_id = i.id)))
 $$;
 
