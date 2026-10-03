@@ -245,6 +245,14 @@ async function commitKeySlot(press: string) {
   return `commitKey:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
+/** A refusal that the record or the statement moved on reads the page again, so the next press shows what is current. */
+export const readAgainIfMoved =
+  (onDone: () => Promise<void>) =>
+  async (e: unknown): Promise<never> => {
+    if (e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) await onDone();
+    throw e;
+  };
+
 export function stepAction(
   name: StepName,
   testId: string | null,
@@ -283,11 +291,7 @@ export function stepAction(
               statementVersion: signing.statement.version,
             },
           }),
-      }).catch(async (e: unknown) => {
-        // The record or the statement moved on: the page reads it again, so the next sheet shows what is current.
-        if (e instanceof Refused && (e.kind === 'recordChanged' || e.kind === 'signingRefused')) await onDone();
-        throw e;
-      });
+      }).catch(readAgainIfMoved(onDone));
       sessionStorage.removeItem(slot);
       await onDone();
       return `${step.signs ? `${step.signs} Signature` : ui.label} recorded in the Audit Trail. The Test is now ${words(step.to)}.`;

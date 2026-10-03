@@ -1,7 +1,7 @@
 import { type ChecklistView, checklistRefusal, routes, type Ticks } from '@lims/domain';
 import { Fragment } from 'react';
 import { api } from './api.ts';
-import { type RailAction, type SigningView, stepAction } from './rail.tsx';
+import { type RailAction, readAgainIfMoved, type SigningView, stepAction } from './rail.tsx';
 
 /** The ticks of the items this version still holds, so a tick of a superseded version is never sent. */
 const ticksOn = (checklist: ChecklistView, ticks: Ticks): Ticks =>
@@ -80,7 +80,9 @@ export function reviewAction(
     ...stepAction('review', testId, what, onDone, signing),
     blocked: checklistRefusal(checklist.items, sent),
     async prepare() {
-      const saved = await api(routes.saveReview, { testId, checklistVersion: checklist.version, ticks: sent });
+      const saved = await api(routes.saveReview, { testId, checklistVersion: checklist.version, ticks: sent }).catch(
+        readAgainIfMoved(onDone),
+      );
       // The press is blocked until every item is ticked, so the sheet names the count and each comment, and stays short
       // enough to show whole on a phone held sideways.
       const ticked = checklist.items.filter((i) => i.ticked);
