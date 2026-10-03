@@ -511,7 +511,7 @@ const incidentRow = Type.Object({
 });
 export type IncidentRow = Static<typeof incidentRow>;
 /** The kind of a controlled Document, which its number names with a short code. */
-const documentType = Type.Enum({
+const documentTypeNames = {
   QualityManual: 'QualityManual',
   Policy: 'Policy',
   SOP: 'SOP',
@@ -522,8 +522,10 @@ const documentType = Type.Enum({
   Form: 'Form',
   Worksheet: 'Worksheet',
   ExternalDocument: 'ExternalDocument',
-} as const satisfies { [K in db.DocumentType]: K });
+} as const satisfies { [K in db.DocumentType]: K };
+const documentType = Type.Enum(documentTypeNames);
 export type DocumentType = Static<typeof documentType>;
+export const documentTypes: readonly DocumentType[] = Object.values(documentTypeNames);
 /** Where a Document version stands, from Draft through its three Signatures to Effective, and on to Superseded. */
 const documentStatus = Type.Enum({
   Draft: 'Draft',

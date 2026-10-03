@@ -518,6 +518,10 @@ th {
 .raw h2 {
   margin-top: 0;
 }
+.document-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .raw pre {
   font: 12px / 1.4 var(--mono);
   white-space: pre-wrap;

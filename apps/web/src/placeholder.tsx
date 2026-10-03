@@ -1,5 +1,6 @@
 import type { ActorContext } from '@lims/domain';
 import { AccessEventsPage } from './access-events.tsx';
+import { DocumentsPage } from './documents.tsx';
 import { IncidentsPage } from './incidents.tsx';
 import { type Module, Shell } from './rail.tsx';
 import { StaffPage } from './staff.tsx';
@@ -22,6 +23,7 @@ export function Placeholder({
 }) {
   if (module.key === 'workstations') return <WorkstationsPage me={me} />;
   if (module.key === 'incidents') return <IncidentsPage me={me} open={open} />;
+  if (module.key === 'documents') return <DocumentsPage me={me} open={open} />;
   if (module.key === 'staff')
     return open ? <AccessEventsPage me={me} id={open} before={before} /> : <StaffPage me={me} />;
   return (

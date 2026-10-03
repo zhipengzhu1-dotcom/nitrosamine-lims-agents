@@ -2,6 +2,7 @@ import {
   type ActorContext,
   type ChainVerdict,
   decimalPattern,
+  type DocumentStatus,
   mayTake,
   type IncidentState,
   type Lab,
@@ -89,6 +90,15 @@ const unsignedLook = {
     </>
   ),
 } as const;
+const closedLook = {
+  tone: 'done',
+  glyph: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M5.5 8.2l1.8 1.8 3.2-3.5" />
+    </>
+  ),
+} as const;
 const markLook = {
   Intact: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
   Broken: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
@@ -104,20 +114,30 @@ const markLook = {
       </>
     ),
   },
-  Closed: {
-    tone: 'done',
+  Closed: closedLook,
+  Draft: { tone: 'plain', glyph: <path d="M3 13l1-3.5 6.5-6.5 2.5 2.5-6.5 6.5z" /> },
+  InReview: {
+    tone: 'plain',
     glyph: (
       <>
         <circle cx="8" cy="8" r="6" />
-        <path d="M5.5 8.2l1.8 1.8 3.2-3.5" />
+        <path d="M8 5v3.5l2.5 1.5" />
       </>
     ),
   },
-} as const satisfies Record<ChainVerdict | IncidentState | 'Unsigned' | 'Signatures unsigned', unknown>;
+  Approved: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
+  Effective: closedLook,
+  Superseded: { tone: 'plain', glyph: <path d="M3 8h9M9 5l3 3-3 3" /> },
+  Retired: { tone: 'plain', glyph: <path d="M3 8h10" /> },
+  Abandoned: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
+} as const satisfies Record<
+  ChainVerdict | IncidentState | DocumentStatus | 'Unsigned' | 'Signatures unsigned',
+  unknown
+>;
 
 /**
- * A Test state with its track, or a mark with its glyph: a chain verdict, a System Incident's state, an unsigned
- * Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
+ * A Test state with its track, or a mark with its glyph: a chain verdict, a System Incident's state, a Document
+ * version's status, an unsigned Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
  * the word and glyph are final, and an accent plays around them.
  */
 export function Status(
@@ -127,7 +147,7 @@ export function Status(
     const { tone, glyph } = markLook[props.mark];
     return (
       <span className={`status status--${tone} ${props.fresh ? 'status--fresh' : ''}`}>
-        {props.mark}
+        {words(props.mark)}
         <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
           {glyph}
         </svg>
