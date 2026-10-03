@@ -85,10 +85,8 @@ const fixture: [string, Row][] = [
       username: 'refusal.locked',
       display_name: 'Locked Person',
       password_hash: 'not-a-real-hash',
-      locked_at: '2026-10-01T12:00:00Z',
     },
   ],
-  ['lims.access_event', { kind: 'Lockout', subject_id: id.lockedOut, source_address: '192.0.2.1', roles: '{}' }],
   ['lims.method', { id: id.method, code: 'RF-MTH-0001', version: '1', title: 'NDMA by LC-MS/MS (fictional)' }],
   [
     'lims.submission',
@@ -704,6 +702,18 @@ before(async () => {
     await client.query(...insert(table, row));
     await client.query('commit');
   }
+  await client.query('begin');
+  await client.query(AUDIT_CONTEXT);
+  await client.query('update lims.person set locked_at = clock_timestamp() where id = $1', [id.lockedOut]);
+  await client.query(
+    ...insert('lims.access_event', {
+      kind: 'Lockout',
+      subject_id: id.lockedOut,
+      source_address: '192.0.2.1',
+      roles: '{}',
+    }),
+  );
+  await client.query('commit');
 });
 
 after(() => client.end());
@@ -3242,6 +3252,24 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
       rows.map((row) => row.privilege),
       ['INSERT lab_id', 'INSERT person_id', 'INSERT token_hash', 'INSERT workstation_id'],
     );
+  });
+});
+
+describe('a person is inserted without a lockout, so the database stamps every lockout', () => {
+  covered.add('lims.person.insert_unlocked');
+  // A Customer User, the one person the app role may insert without an Identity Verification.
+  const bornLockedOut = `insert into lims.person (username, display_name, customer_id, locked_at)
+    select 'refusal.born-locked-out', 'Born Locked Out', id, clock_timestamp() from lims.customer
+     where name = 'Refusal Customer (fictional)'`;
+  it('a person inserted already locked out is refused, for the app role and for the superuser', async () => {
+    for (const asRole of ['set local role lims_app; ', '']) {
+      const error = await refusalOf(`${asRole}${bornLockedOut}`);
+      assert.deepEqual(
+        [error.code, error.message],
+        ['23514', 'a person is inserted without a lockout; a lockout lands only on a person already recorded'],
+        asRole || 'as the superuser',
+      );
+    }
   });
 });
 
