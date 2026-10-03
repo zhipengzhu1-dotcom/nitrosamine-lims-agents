@@ -21,8 +21,11 @@ type Route =
   | { page: 'authenticator'; grant: string | null }
   | { page: 'trail'; table: AuditedTable; id: string }
   | { page: 'auditExport' }
-  /** A rail module; `open` names the record open beside it: the person whose Access Events the Staff module shows, or the System Incident's reference. */
-  | { page: 'module'; module: Module; open: string | null };
+  /**
+   * A rail module; `open` names the record open beside it: the person whose Access Events the Staff module shows, or the
+   * System Incident's reference. `before` is the Access Event whose earlier ones the Staff module lists.
+   */
+  | { page: 'module'; module: Module; open: string | null; before: string | null };
 
 function parse(hash: string): Route {
   const [path, query] = hash.split('?');
@@ -37,8 +40,10 @@ function parse(hash: string): Route {
   if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
   if (!module) return { page: 'tests', open: null };
-  if (module.key === 'incidents') return { page: 'module', module, open: id || null };
-  return { page: 'module', module, open: module.key === 'staff' && id && b === 'access-events' ? id : null };
+  if (module.key === 'incidents') return { page: 'module', module, open: id || null, before: null };
+  if (module.key === 'staff' && id && b === 'access-events')
+    return { page: 'module', module, open: id, before: new URLSearchParams(query).get('before') || null };
+  return { page: 'module', module, open: null, before: null };
 }
 
 function useRoute(): Route {
@@ -105,7 +110,15 @@ function page(route: Exclude<Route, { page: 'welcome' | 'authenticator' }>, me: 
     case 'auditExport':
       return <AuditExportPage me={me} />;
     case 'module':
-      return <Placeholder key={`${route.module.key}/${route.open}`} me={me} module={route.module} open={route.open} />;
+      return (
+        <Placeholder
+          key={`${route.module.key}/${route.open}/${route.before}`}
+          me={me}
+          module={route.module}
+          open={route.open}
+          before={route.before}
+        />
+      );
   }
 }
 
