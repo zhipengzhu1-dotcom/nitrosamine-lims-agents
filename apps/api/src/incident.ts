@@ -141,11 +141,11 @@ export async function openChainIncidents(
   if (breaks.length === 0) return [];
   const column = <K extends keyof RecordedBreak>(key: K) => breaks.map((b) => b[key]);
   const references = breaks.map(() => referenceOf(randomBytes(8)));
-  const covered = breaks.flatMap((b) => b.covered.map((c) => ({ ...c, of: b.entry })));
+  const covered = breaks.flatMap((b) => b.covered.map((c) => ({ ...c, of: b.entry, ofFingerprint: b.fingerprint })));
   const coveredColumn = <K extends keyof (typeof covered)[number]>(key: K) => covered.map((c) => c[key]);
   const { opened, found } = await audited(db, INCIDENT_SERVICE, async (tx) => {
     await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
-    const { rows: opened } = await sql<{ id: string; reference: string; entry: string }>`
+    const { rows: opened } = await sql<{ id: string; reference: string; entry: string; fingerprint: string }>`
       insert into lims.system_incident
         (kind, reference, requested_by, session_lab_id, chain, first_failure, last_failure, break_count, fingerprint)
       select 'ChainVerifyFailure', t.reference, ${requester.person.id}, ${requester.lab.id}, ${chain}, t.entry,
@@ -153,14 +153,16 @@ export async function openChainIncidents(
       from unnest(${references}::text[], ${column('entry')}::bigint[], ${column('through')}::bigint[],
         ${column('breaks')}::int[], ${column('fingerprint')}::text[]) as t(reference, entry, through, breaks, fingerprint)
       on conflict (chain, first_failure, fingerprint) do nothing
-      returning id, reference, first_failure::text as entry`.execute(tx);
+      returning id, reference, first_failure::text as entry, encode(fingerprint, 'hex') as fingerprint`.execute(tx);
     await sql`
       insert into lims.incident_break (incident_id, seq, kind, through, fingerprint)
       select o.id, c.seq, c.kind, c.through, decode(c.fingerprint, 'hex')
-      from unnest(${opened.map((o) => o.id)}::uuid[], ${opened.map((o) => o.entry)}::bigint[]) as o(id, entry)
-      join unnest(${coveredColumn('of')}::bigint[], ${coveredColumn('entry')}::bigint[], ${coveredColumn('kind')}::text[],
-        ${coveredColumn('through')}::bigint[], ${coveredColumn('fingerprint')}::text[]) as c(of, seq, kind, through, fingerprint)
-        on c.of = o.entry`.execute(tx);
+      from unnest(${opened.map((o) => o.id)}::uuid[], ${opened.map((o) => o.entry)}::bigint[],
+        ${opened.map((o) => o.fingerprint)}::text[]) as o(id, entry, fingerprint)
+      join unnest(${coveredColumn('of')}::bigint[], ${coveredColumn('ofFingerprint')}::text[],
+        ${coveredColumn('entry')}::bigint[], ${coveredColumn('kind')}::text[], ${coveredColumn('through')}::bigint[],
+        ${coveredColumn('fingerprint')}::text[]) as c(of, of_fingerprint, seq, kind, through, fingerprint)
+        on c.of = o.entry and c.of_fingerprint = o.fingerprint`.execute(tx);
     const { rows: found } = await sql<{ key: string; reference: string; state: IncidentState }>`
       select i.first_failure::text || ':' || encode(i.fingerprint, 'hex') as key, i.reference, i.state
       from lims.system_incident i

@@ -1299,6 +1299,44 @@ it('after a Chain Verification, a consistent rewrite of the Lab chain behind it 
   );
 });
 
+it('when the entry a Chain Verification names is changed, Verify chain opens one System Incident for the changed entry and one for the contradicted Chain Verification, each storing its own break, and listing either opens none', async () => {
+  const lab = await labOfItsOwn('SAM', 4);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  const named = String(lab.last);
+  await lab.alter(named);
+  const broken = await lab.verify();
+  assert.deepEqual(
+    broken.breaks.map((b) => b.entry),
+    [named, named],
+    'the changed entry and the Chain Verification that names it are two breaks at the one entry',
+  );
+  const incidents = broken.breaks.map((b) => b.incident);
+  assert.equal(new Set(incidents).size, 2, 'each break has its own System Incident');
+  const stored = await api.db
+    .selectFrom('incidentBreak')
+    .innerJoin('systemIncident', 'systemIncident.id', 'incidentBreak.incidentId')
+    .select(['systemIncident.reference', 'incidentBreak.kind', sql<string>`incident_break.seq::text`.as('seq')])
+    .where('systemIncident.reference', 'in', incidents)
+    .orderBy('incidentBreak.kind')
+    .execute();
+  assert.deepEqual(
+    stored.map((s) => [s.kind, s.seq]),
+    [
+      ['Changed', named],
+      ['Contradicted', named],
+    ],
+  );
+  assert.equal(new Set(stored.map((s) => s.reference)).size, 2, 'each System Incident stores only its own break');
+  for (const { reference, kind } of stored) {
+    const listed = ok(await lab.client.call(routes.incidentBreaks, { reference }));
+    assert.deepEqual(
+      [listed.asRecorded, listed.breaks.map((l) => [l.entry, l.kind, l.matches]), listed.incidents, listed.opened],
+      [true, [[named, kind, true]], [], []],
+      `listing the ${kind} incident reads its own break as recorded and opens none`,
+    );
+  }
+});
+
 it("Verify chain refuses, naming the chain and the read limit, when a chain's recompute does not finish within it, and opens the System Incident the refusal names", async () => {
   const slow = await startApi('lims_api_trail_slow_test', { verifyReadLimitSeconds: 0.3 });
   const qa = await slow.login(await slow.addPerson('slow.qa', ['QA']));

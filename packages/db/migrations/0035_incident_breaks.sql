@@ -12,7 +12,7 @@ set local role lims_owner;
 create table lims.incident_break (
   incident_id uuid   not null references lims.system_incident,
   seq         bigint not null,
-  kind        text   not null check (kind in ('Changed', 'Missing', 'HeadMoved')),
+  kind        text   not null check (kind in ('Changed', 'Missing', 'HeadMoved', 'Contradicted')),
   through     bigint not null constraint incident_break_through_check check (through >= seq),
   fingerprint bytea  not null,
   primary key (incident_id, seq)

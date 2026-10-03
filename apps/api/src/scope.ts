@@ -257,7 +257,8 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     /**
      * Recomputes the breaks covering `range` on this Lab's or the company chain, each beside the breaks the incident
      * stored, whether they are the breaks it recorded, and the other System Incidents that record them as they read
-     * now, which is a lookup of what is already recorded and opens none; null for another Lab's chain.
+     * now, which is a lookup of what is already recorded and opens none; null for another Lab's chain. A contradicted
+     * Chain Verification is a break of its own kind at the entry it names, so only an incident that stored one reads it.
      */
     breaksWithin: async ({ id, chain, first, last, fingerprint }: BreakRange) => {
       if (chain !== labId && chain !== 'company') return null;
@@ -271,11 +272,13 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
         recorded: ListedBreak[] | null;
         incidents: string[];
       }>`
-        with found as (
+        with kept as (
+          select k.seq, k.kind, k.through, k.fingerprint from lims.incident_break as k where k.incident_id = ${id}
+        ), found as (
           select b.seq, b.kind, b.through, b.fingerprint from lims.chain_breaks(${chain}) as b
           where b.through >= ${first}::bigint and b.seq <= ${last}::bigint
-        ), kept as (
-          select k.seq, k.kind, k.through, k.fingerprint from lims.incident_break as k where k.incident_id = ${id}
+            and case when b.kind = 'Contradicted' then exists (select from kept where kind = 'Contradicted')
+                     else not exists (select from kept) or exists (select from kept where kind <> 'Contradicted') end
         )
         select now() as recomputed_at,
           coalesce((select ${fingerprint} = ${digestOfBreaks} or (count(*) = 1 and bool_or(
