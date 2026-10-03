@@ -26,6 +26,7 @@ const [cora, samir, lena, ana, rui, quinn] = [
 ];
 const dana = await api.addPerson('dana.analyst-reviewer', ['Analyst', 'Reviewer'], { trained: true });
 const rhea = await api.addPerson('rhea.reviewer-qa', ['Reviewer', 'QA']);
+const pat = await api.addPerson('pat.operator', ['PlatformOperator']);
 const as = {
   cora: await api.login(cora),
   samir: await api.login(samir),
@@ -35,6 +36,7 @@ const as = {
   quinn: await api.login(quinn),
   dana: await api.login(dana),
   rhea: await api.login(rhea),
+  pat: await api.login(pat),
 };
 
 const saved = '0.0300';
@@ -461,6 +463,22 @@ describe('a Critical Data Change is signed only Approved, by a Reviewer acting a
     );
     assert.deepEqual([onChange.code, onChange.message], ['LA010', 'a Critical Data Change is signed only Approved']);
   });
+
+  for (const [role, person] of [
+    ['QA', quinn],
+    ['PlatformOperator', pat],
+  ] as const)
+    it(`an Approved Signature on a change given in the ${role} role is refused`, async () => {
+      const test = await performedTest();
+      const changeId = await propose(test);
+      const error = await refusal(
+        acting(api.db, person, role, (tx) => signThrough(tx, person, 'Approved', 'critical_data_change', changeId)),
+      );
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA010', `a Critical Data Change is signed Approved in the Reviewer role, not ${role}`],
+      );
+    });
 
   it('an approval written by its Reviewer acting in another role is refused', async () => {
     const test = await performedTest();

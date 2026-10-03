@@ -360,9 +360,9 @@ end $$;
 create trigger version_record after insert on lims.critical_data_change
   for each row execute function lims.version_critical_data_change();
 
--- A Critical Data Change is signed only Approved, and a Test or the Test Report built on it is never signed Approved.
--- Other records may take Approved in later tickets. lims.sign checks the signer, the proof and the version shown; this
--- checks which meaning a change, a Test and a Test Report may bind.
+-- A Critical Data Change is signed only Approved, in the Reviewer role, and a Test or the Test Report built on it is
+-- never signed Approved. Other records may take Approved in later tickets. lims.sign checks the signer, the proof and
+-- the version shown; this checks which meaning, and for a change which role, a change, a Test and a Test Report bind.
 create function lims.check_change_signing() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 declare
@@ -375,6 +375,9 @@ begin
   if signed.record_table = 'critical_data_change' and new.meaning <> 'Approved' then
     raise exception 'a Critical Data Change is signed only Approved' using errcode = 'LA010';
   end if;
+  if signed.record_table = 'critical_data_change' and new.role <> 'Reviewer' then
+    raise exception 'a Critical Data Change is signed Approved in the Reviewer role, not %', new.role using errcode = 'LA010';
+  end if;
   if signed.record_table in ('test', 'test_report') and new.meaning = 'Approved' then
     raise exception 'a Test and the Test Report built on it are never signed Approved' using errcode = 'LA010';
   end if;
@@ -385,7 +388,7 @@ create trigger change_signing before insert on lims.signature
   for each row execute function lims.check_change_signing();
 
 -- 0039's approval rule, with a Critical Data Change among the records signed Approved: its Approved is a Reviewer's, as
--- decide_critical_data_change holds. The Release Log, Equipment and Document version rules are 0039's, unchanged.
+-- check_change_signing holds. The Release Log, Equipment and Document version rules are 0039's, unchanged.
 create or replace function lims.apply_release_log_entry() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
