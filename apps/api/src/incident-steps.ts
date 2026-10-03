@@ -321,8 +321,9 @@ export function incidentRoutes(app: App, db: Kysely<DB>, credentials: Credential
           'role',
           `System Incident ${reference} records breaks in another Lab's chain. Switch to that Lab to list them.`,
         );
-      // Recording a change is a verification, which is QA's: any other reader is told what is recorded already.
-      if (listed.asRecorded || !req.actor.roles.includes('QA')) return { ...listed, opened: [] };
+      // A read that detects an unrecorded change records it, whoever reads: the opening is the LIMS recording what it
+      // found (EU Annex 11 §13), not a QA step.
+      if (listed.asRecorded) return { ...listed, opened: [] };
       const verified = (await scope.verifyAuditTrail()).chains.find((c) => c.chainId === chain);
       const found = verified ? await openChainIncidents(db, req.log, req.actor, chain, verified.breaks) : [];
       const inRange = found.filter(

@@ -631,9 +631,9 @@ async function labOfItsOwn(code: string, entries: number) {
     await audited(api.superuser, owner, (tx) =>
       tx.insertInto('membership').values({ labId, personId: person.id, role }).execute(),
     );
-    return api.login(person, labId);
+    return { id: person.id, client: await api.login(person, labId) };
   };
-  const client = await signIn('QA');
+  const { client } = await signIn('QA');
   await audited(api.superuser, owner, async (tx) => {
     for (let n = 0; n < entries; n++)
       await tx
@@ -1091,7 +1091,7 @@ it('Verify chain on a chain with about 2,000 changed entries opens 100 System In
   assert.ok((stored?.entryBytes ?? Infinity) < 2048, `its opening entry stays small: ${stored?.entryBytes} bytes`);
 });
 
-it("an Admin reading a System Incident whose range has changed is told which System Incidents record the breaks now and opens none, and QA's read of the same incident opens the one that records the change", async () => {
+it("an Admin reading a System Incident whose range has changed records the change as QA's read does: one new System Incident, requested by the Admin, named on the read, with one alarm; QA's read and Verify chain after it open none again", async () => {
   const lab = await labOfItsOwn('ADM', 6);
   const entry = String(lab.last);
   await lab.alter(entry);
@@ -1102,25 +1102,32 @@ it("an Admin reading a System Incident whose range has changed is told which Sys
   const admin = await lab.signIn('Admin');
   const before = (await chainIncidents(lab.labId)).length;
 
-  const byAdmin = ok(await admin.call(routes.incidentBreaks, { reference: incident }));
+  const byAdmin = ok(await admin.client.call(routes.incidentBreaks, { reference: incident }));
   assert.deepEqual(
-    [byAdmin.asRecorded, byAdmin.breaks, byAdmin.incidents, byAdmin.opened],
-    [false, [{ entry, kind: 'Changed', through: entry, matches: false }], [], []],
-    'the Admin sees the change and that nothing records it yet',
+    [byAdmin.asRecorded, byAdmin.breaks],
+    [false, [{ entry, kind: 'Changed', through: entry, matches: false }]],
+    'the Admin sees the change',
   );
-  assert.equal((await chainIncidents(lab.labId)).length, before, "the Admin's read opens no System Incident");
+  assert.equal(byAdmin.opened.length, 1, "the Admin's read opens one System Incident");
+  const opened = byAdmin.opened[0] ?? assert.fail('the read names the incident it opened');
+  assert.deepEqual(byAdmin.incidents, byAdmin.opened, 'which records the break as it reads now');
+  assert.equal((await chainIncidents(lab.labId)).length, before + 1);
+  assert.equal(alarmsFor(byAdmin.opened).length, 1, 'and raises the alarm');
+  assert.partialDeepStrictEqual(ok(await admin.client.call(routes.incident, { reference: opened })), {
+    kind: 'ChainVerifyFailure',
+    requestedBy: admin.id,
+  });
 
   const byQa = ok(await lab.client.call(routes.incidentBreaks, { reference: incident }));
-  assert.equal(byQa.opened.length, 1, "QA's read opens one");
-  assert.deepEqual(byQa.incidents, byQa.opened, 'which records the break as it reads now');
-  assert.equal(alarmsFor(byQa.opened).length, 1, 'and raises the alarm');
-
-  const again = ok(await admin.call(routes.incidentBreaks, { reference: incident }));
+  assert.deepEqual([byQa.incidents, byQa.opened], [byAdmin.opened, []], "QA's read names it and opens none");
+  const verified = await lab.verify();
   assert.deepEqual(
-    [again.incidents, again.opened],
-    [byQa.opened, []],
-    'the Admin is then told which incident records it',
+    verified.breaks.map((b) => b.incident),
+    byAdmin.opened,
+    'Verify chain finds the incident the Admin opened',
   );
+  assert.equal((await chainIncidents(lab.labId)).length, before + 1, 'and opens none again');
+  assert.equal(alarmsFor(byAdmin.opened).length, 1, 'nor raises the alarm again');
 });
 
 it("QA's read of a changed System Incident names every System Incident it opened, inside the range or not, and Verify chain after it opens none again", async () => {

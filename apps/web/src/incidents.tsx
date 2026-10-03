@@ -146,8 +146,8 @@ function IncidentLinks({ references }: { references: string[] }) {
 
 /**
  * What the recomputed breaks say against the ones the incident recorded, which incidents record the breaks as they
- * read now, and which of them this read opened. A read that opens none and finds none recorded was not QA's, whose
- * read would have recorded the change, so it says that Verify chain does.
+ * read now, and which of them this read opened. Any reader's read of a changed range records the change, as Verify
+ * chain does, so the page says the same to an Admin as to QA.
  */
 function BreaksVerdict({ data }: { data: Breaks }) {
   const recordedBefore = useMemo(() => data.incidents.filter((reference) => !data.opened.includes(reference)), [data]);
@@ -171,7 +171,6 @@ function BreaksVerdict({ data }: { data: Breaks }) {
           This read opened <IncidentLinks references={data.opened} />.
         </>
       )}
-      {recordedBefore.length === 0 && data.opened.length === 0 && <> Verify chain, by QA, records the change.</>}
     </>
   );
 }
@@ -179,7 +178,7 @@ function BreaksVerdict({ data }: { data: Breaks }) {
 /**
  * Every break inside a chain verification incident's range as the chain reads now, and whether it recorded them;
  * once they differ, the breaks it stored when it opened, each marked by whether it reads the same now. A changed
- * range names the System Incidents that record it, which a read of QA's may have just opened, so `changed` reloads
+ * range names the System Incidents that record it, which this read may have just opened, so `changed` reloads
  * the list beside the record to hold them. It reloads on every changed range, not only when `opened` names one,
  * because a read that ran twice (the dev server's StrictMode sends each read twice) shows the second answer, whose
  * `opened` is empty although the first opened the incident.
