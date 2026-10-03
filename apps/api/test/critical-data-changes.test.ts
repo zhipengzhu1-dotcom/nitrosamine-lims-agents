@@ -1019,20 +1019,32 @@ describe('an approval on a Reviewed Test sends it back for review before it is r
   });
 });
 
-describe('a Customer sees no Critical Data Change on a Test', () => {
-  it('a Customer reading a released Test whose value was changed sees neither the change nor its Approved Signature', async () => {
+describe('a Customer sees only the Approved Critical Data Changes of a released Test', () => {
+  it('a Customer sees an approved change and its Approved Signature, and never a rejected, withdrawn or pending one', async () => {
     const { testId } = await performedTest();
-    ok(await proposeOver(testId));
+    const { changeId: rejected } = ok(await proposeOver(testId, as.ana, '0.0320'));
+    ok(await as.rui.call(changeStepRoute('rejectChange'), { testId, changeId: rejected, reasonId: reason.rawData }));
+    const { changeId: withdrawn } = ok(await proposeOver(testId, as.ana, '0.0330'));
+    ok(await as.ana.call(changeStepRoute('withdrawChange'), { testId, changeId: withdrawn, reasonId: reason.inError }));
+    const { changeId: approved } = ok(await proposeOver(testId));
+    const pendingView = ok(await as.cora.call(routes.test, { id: testId }));
+    assert.deepEqual([pendingView.withheld, pendingView.changes], [true, []]);
     ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
     ok(await signStep(as.rui, 'review', testId, rui));
     ok(await signStep(as.quinn, 'release', testId, quinn));
     const view = ok(await as.cora.call(routes.test, { id: testId }));
     assert.equal(view.withheld, false);
-    assert.deepEqual(view.changes, []);
-    assert.deepEqual(view.changeNext, []);
     assert.deepEqual(
-      view.signatures.map((s) => s.meaning),
-      ['Performed', 'Reviewed', 'Released'],
+      view.changes.map((c) => [c.id, c.state, c.oldValue, c.newValue]),
+      [[approved, 'Approved', saved, '0.0310']],
     );
+    assert.deepEqual(view.changeNext, []);
+    const signed = view.signatures.map((s) => [s.meaning, s.record]);
+    assert.deepEqual(signed, [
+      ['Performed', 'Test'],
+      ['Approved', 'Critical Data Change'],
+      ['Reviewed', 'Test'],
+      ['Released', 'Test Report'],
+    ]);
   });
 });
