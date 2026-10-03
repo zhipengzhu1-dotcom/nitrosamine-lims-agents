@@ -146,6 +146,34 @@ async function wholeOnScreenAtEverySize(page: Page, whole: Locator, commit: Loca
   await page.setViewportSize(projectSize);
 }
 
+type SheetState = 'open' | 'exiting' | 'gone';
+
+/** Where the sheet stood when the rail's commit button first came back after `cancel`, read at each DOM change rather than on a clock. */
+async function sheetWhenTheRailButtonIsBack(page: Page, cancel: () => Promise<void>): Promise<SheetState | undefined> {
+  const seen = await page.evaluateHandle(() => {
+    const states: { sheet: SheetState; back: boolean }[] = [];
+    const sheetState = (): SheetState => {
+      const sheet = document.querySelector('form.sheet');
+      if (!sheet) return 'gone';
+      return sheet.matches('[data-closing]') ? 'exiting' : 'open';
+    };
+    const watcher = new MutationObserver(() => {
+      const sheet = sheetState();
+      states.push({
+        sheet,
+        back:
+          document.querySelector('footer.rail .rbtn--commit')?.checkVisibility({ visibilityProperty: true }) ?? false,
+      });
+      if (sheet === 'gone') watcher.disconnect();
+    });
+    watcher.observe(document.body, { subtree: true, childList: true, attributes: true });
+    return states;
+  });
+  await cancel();
+  await expect(page.locator('form.sheet')).toHaveCount(0);
+  return (await seen.jsonValue()).find((s) => s.back)?.sheet;
+}
+
 const shownOnce = (page: Page, text: string) =>
   expect
     .poll(
@@ -285,9 +313,23 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await signIn(page, 'rui.reviewer');
   await openTheTest();
   const review = page.getByRole('button', { name: 'Review', exact: true });
+  const cancel = () => page.getByRole('button', { name: 'Cancel' }).click();
+  await page.evaluate(() => {
+    const lateButton = document.createElement('style');
+    lateButton.id = 'late-button';
+    lateButton.textContent = '.frame:has(> .sheet) .rbtn--commit { visibility: hidden }';
+    document.head.append(lateButton);
+  });
   await review.click();
-  await page.getByRole('button', { name: 'Cancel' }).click();
-  await expect(review, 'the rail button is back before the sheet has left').toBeVisible({ timeout: 100 });
+  expect(
+    await sheetWhenTheRailButtonIsBack(page, cancel),
+    'the order check catches a rail button that waits for the sheet to leave',
+  ).toBe('gone');
+  await page.locator('#late-button').evaluate((lateButton) => lateButton.remove());
+  await review.click();
+  expect(await sheetWhenTheRailButtonIsBack(page, cancel), 'the rail button is back before the sheet has left').toBe(
+    'exiting',
+  );
   await expect(review).toBeFocused();
   await review.click();
   await expect(sheet).toBeVisible();
