@@ -88,18 +88,31 @@ language sql stable as $$
     'recordedAt', to_char(v.recorded_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
 $$;
 
--- Equipment is registered Quarantined by a Responsible Person of its Lab, and its identity never changes. Its Fitness
--- Status moves to In use only from Quarantined or Suspended, in the transaction of QA's Approved Signature over it as
--- it was; to Suspended only from In use; to Retired only by the Lab Manager; and Retired Equipment never changes.
--- Moving In use Equipment to another Room suspends it.
+-- Whether a person does the Lab's work: holds one of its staff roles, as `labStaff` in @lims/domain lists them.
+create function lims.staff_of(p_lab_id uuid, p_person_id uuid) returns boolean
+language sql stable as $$
+  select exists (select from lims.membership m where m.lab_id = p_lab_id and m.person_id = p_person_id
+                    and m.role in ('SampleCustodian', 'Analyst', 'Reviewer', 'QA', 'LabManager'))
+$$;
+
+-- Equipment is registered Quarantined by the Lab Manager with a Responsible Person on its Lab's staff, and its identity
+-- never changes. Its Fitness Status moves to In use only from Quarantined or Suspended, in the transaction of QA's
+-- Approved Signature over it as it was, and that write changes nothing else; to Suspended only from In use; to Retired
+-- only by the Lab Manager; and Retired Equipment never changes. Only the Lab Manager moves Equipment to another Room,
+-- and a Room move or a software or firmware version change suspends In use Equipment.
 create function lims.keep_equipment() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
+declare
+  acting_as text := current_setting('lims.role', true);
 begin
-  if (tg_op = 'INSERT' or new.responsible_person_id <> old.responsible_person_id) and not exists (select from membership m where m.lab_id = new.lab_id and m.person_id = new.responsible_person_id
-                                             and m.role <> 'Customer') then
+  if (tg_op = 'INSERT' or new.responsible_person_id <> old.responsible_person_id)
+     and not staff_of(new.lab_id, new.responsible_person_id) then
     raise exception 'the Responsible Person of Equipment is a member of its Lab''s staff' using errcode = 'LA014';
   end if;
   if tg_op = 'INSERT' then
+    if acting_as is distinct from 'LabManager' then
+      raise exception 'Equipment is registered only by the Lab Manager' using errcode = 'LA014';
+    end if;
     if new.fitness_status <> 'Quarantined' then
       raise exception 'Equipment is registered Quarantined, not %', new.fitness_status using errcode = 'LA014';
     end if;
@@ -113,7 +126,12 @@ begin
      is distinct from (old.lab_id, old.id, old.kind, old.manufacturer, old.model, old.serial, old.registered_at) then
     raise exception 'the identity of Equipment never changes' using errcode = 'LA002';
   end if;
-  if new.room_id <> old.room_id and old.fitness_status = 'InUse' and new.fitness_status = 'InUse' then
+  if new.room_id <> old.room_id and acting_as is distinct from 'LabManager' then
+    raise exception 'Equipment is moved only by the Lab Manager' using errcode = 'LA014';
+  end if;
+  if (new.room_id, new.software_version, new.firmware_version)
+     is distinct from (old.room_id, old.software_version, old.firmware_version)
+     and old.fitness_status = 'InUse' and new.fitness_status = 'InUse' then
     new.fitness_status := 'Suspended';
   end if;
   if new.fitness_status <> old.fitness_status then
@@ -121,6 +139,11 @@ begin
       if old.fitness_status not in ('Quarantined', 'Suspended') then
         raise exception 'Equipment moves to In use only from Quarantined or Suspended, not %', old.fitness_status
           using errcode = 'LA014';
+      end if;
+      if (new.name, new.asset_number, new.software_version, new.firmware_version, new.room_id, new.responsible_person_id)
+         is distinct from
+         (old.name, old.asset_number, old.software_version, old.firmware_version, old.room_id, old.responsible_person_id) then
+        raise exception 'Equipment moves to In use as QA saw it; nothing else changes in that write' using errcode = 'LA014';
       end if;
       if not exists (select from signature s
                       join record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
@@ -144,8 +167,11 @@ end $$;
 create trigger keep_equipment before insert or update on lims.equipment
   for each row execute function lims.keep_equipment();
 
--- An Equipment Event is recorded by the person acting, at the database's instant, never on Retired Equipment, and
--- an Event after which the Equipment must be checked again suspends In use Equipment.
+-- An Equipment Event is recorded by the person acting, a member of the Lab's staff, at the database's instant, never
+-- on Retired Equipment, and an Event after which the Equipment must be checked again suspends In use Equipment. The
+-- Fitness Status is read without a row lock on purpose: every signed Event takes the Lab's Audit Trail chain at its
+-- re-authentication record before it reads, and a status change takes it in the same statement as the row, so the
+-- two serialize on the chain; a row lock here would wait behind a status change that waits behind this chain, a deadlock.
 create function lims.record_equipment_event() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 declare
@@ -155,6 +181,10 @@ begin
   select id into new.recorded_by from person where 'person:' || username = actor;
   if new.recorded_by is null then
     raise exception 'an Equipment Event is recorded by a person, not %', coalesce(nullif(actor, ''), 'no actor')
+      using errcode = 'LA015';
+  end if;
+  if not staff_of(new.lab_id, new.recorded_by) then
+    raise exception 'an Equipment Event is recorded by a member of its Lab''s staff, not %', substr(actor, 8)
       using errcode = 'LA015';
   end if;
   new.recorded_at := clock_timestamp();
@@ -190,7 +220,8 @@ create constraint trigger require_event_signing after insert on lims.equipment_e
 
 -- What an Approved or a Performed signing may bind on Equipment: Approved on Equipment that is Quarantined or
 -- Suspended, over it as it is now; Performed once on an Equipment Event other than Suspect. It binds one direction
--- only, so Approved and Performed stay free for the other records that use them.
+-- only, so Approved and Performed stay free for the other records that use them; and the Lab Manager, whom
+-- lims.signing_role gives Performed for the Logbook alone, signs Performed nothing but an Equipment Event.
 create function lims.check_equipment_signing() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 declare
@@ -198,6 +229,9 @@ declare
   e      equipment;
 begin
   select * into signed from record_version where lab_id = new.lab_id and id = new.record_version_id;
+  if new.role = 'LabManager' and new.meaning = 'Performed' and signed.record_table <> 'equipment_event' then
+    raise exception 'the Lab Manager signs Performed only an Equipment Event' using errcode = 'LA010';
+  end if;
   if signed.record_table = 'equipment' then
     if new.meaning <> 'Approved' then
       raise exception 'Equipment is signed only Approved' using errcode = 'LA010';
@@ -267,9 +301,9 @@ begin
 end $$;
 
 -- Writes the current content of Equipment or of an Equipment Event as a Record Version in the signing's Lab, when it
--- differs from the latest one, and returns the latest version's id: what the Approved or Performed signing binds. The
--- re-authentication record this transaction wrote names the Lab and the meaning, so a version is never written for a
--- signing that is not under way.
+-- differs from the latest one, and returns the latest version's id: what the Approved or Performed signing binds, or
+-- the Equipment the Performed signer was shown while the Event was recorded on it. The re-authentication record this
+-- transaction wrote names the Lab and the meaning, so a version is never written for a signing that is not under way.
 create function lims.version_equipment_record(p_reauthentication_id uuid, p_table text, p_record_id uuid) returns uuid
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -280,8 +314,9 @@ begin
   select * into proof from reauthentication where id = p_reauthentication_id;
   select xmin into proof_xmin from reauthentication where id = p_reauthentication_id;
   if proof.id is null or not written_here(proof_xmin)
-     or (p_table, proof.meaning::text) not in (('equipment', 'Approved'), ('equipment_event', 'Performed')) then
-    raise exception 'Equipment is versioned only for its Approved signing, and an Equipment Event only for its Performed signing, re-authenticated in this transaction'
+     or (p_table, proof.meaning::text) not in (('equipment', 'Approved'), ('equipment', 'Performed'),
+                                               ('equipment_event', 'Performed')) then
+    raise exception 'Equipment is versioned only for its Approved signing or for the Performed signing of an Event on it, and an Equipment Event only for its Performed signing, re-authenticated in this transaction'
       using errcode = 'LA010';
   end if;
   perform save_record_version(proof.lab_id, p_table, p_record_id);
@@ -307,14 +342,145 @@ create trigger refuse_change before update or delete on lims.equipment_event
 create trigger refuse_truncate before truncate on lims.equipment_event
   for each statement execute function lims.refuse_change();
 
-revoke execute on function lims.event_suspends(lims.equipment_event_kind), lims.equipment_content(lims.equipment),
-  lims.equipment_content_hash(lims.equipment), lims.equipment_event_content(lims.equipment_event),
-  lims.version_equipment_record(uuid, text, uuid) from public;
-grant execute on function lims.event_suspends(lims.equipment_event_kind), lims.equipment_content(lims.equipment),
-  lims.equipment_content_hash(lims.equipment), lims.equipment_event_content(lims.equipment_event),
-  lims.version_equipment_record(uuid, text, uuid) to lims_app;
+-- lims.sign as 0017 defines it, with one clause added to the records a signing may create on sight of another: an
+-- Equipment Event this transaction recorded, signed Performed on sight of its Equipment, as a Test Report is signed on
+-- sight of its Test. The Performed signer is shown the Equipment, so the "shown record" check binds what they saw.
+create or replace function lims.sign(p_reauthentication_id uuid, p_session_id uuid, p_record_table text, p_record_id uuid,
+                          p_seen_version uuid, p_seen_hash bytea, p_statement_version integer, p_meaning lims.meaning,
+                          p_app_release text)
+returns uuid
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  actor        text := current_setting('lims.actor', true);
+  acting_as    text := current_setting('lims.role', true);
+  signer       person;
+  proof        reauthentication;
+  held         membership;
+  seen         record_version;
+  signed       record_version;
+  shown        signature_statement;
+  proof_xmin   xid;
+  signature_id uuid := gen_random_uuid();
+begin
+  if num_nulls(p_reauthentication_id, p_session_id, p_record_table, p_record_id, p_seen_version, p_seen_hash,
+               p_statement_version, p_meaning, p_app_release) > 0 then
+    raise exception 'a signing names its re-authentication record, session, record, shown version and hash, statement version, meaning and release'
+      using errcode = 'LA010';
+  end if;
+  if actor is null or actor not like 'person:%' then
+    raise exception 'only a person signs; % is a service identity', coalesce(actor, 'no actor') using errcode = 'LA010';
+  end if;
+  select * into signer from person where username = substr(actor, 8);
+  if signer.id is null then
+    raise exception 'the signer % is not a known person', actor using errcode = 'LA010';
+  end if;
+  if signer.locked_at is not null then
+    raise exception 'the signer''s account is locked' using errcode = 'LA010';
+  end if;
+  if signer.password_hash is null then
+    raise exception 'the signer has no credential of their own to re-enter' using errcode = 'LA010';
+  end if;
+
+  select * into proof from reauthentication where id = p_reauthentication_id;
+  select xmin into proof_xmin from reauthentication where id = p_reauthentication_id;
+  if proof.id is null then
+    raise exception 'no re-authentication record: the signer has not re-entered their credentials' using errcode = 'LA010';
+  end if;
+  if not written_here(proof_xmin) then
+    raise exception 'the re-authentication record was written by an earlier transaction' using errcode = 'LA010';
+  end if;
+  if proof.person_id <> signer.id then
+    raise exception 'the re-authentication record is another person''s' using errcode = 'LA010';
+  end if;
+  if proof.session_id <> p_session_id then
+    raise exception 'the re-authentication record was given on another session' using errcode = 'LA010';
+  end if;
+  if proof.meaning <> p_meaning then
+    raise exception 'the re-authentication record was given to sign %, not %', proof.meaning, p_meaning using errcode = 'LA010';
+  end if;
+  if exists (select from signature where reauthentication_id = proof.id) then
+    raise exception 'the re-authentication record is already used by a Signature' using errcode = 'LA010';
+  end if;
+  if not exists (select from session where lab_id = proof.lab_id and id = proof.session_id and ended_at is null) then
+    raise exception 'the re-authentication record''s session has ended' using errcode = 'LA010';
+  end if;
+  select * into held from membership
+    where lab_id = proof.lab_id and person_id = signer.id and role::text = acting_as;
+  if held.role is null then
+    raise exception 'the signer does not hold the role % in this Lab', coalesce(acting_as, 'none') using errcode = 'LA010';
+  end if;
+  if not exists (select from signing_role where role = held.role and meaning = p_meaning) then
+    raise exception 'the role % does not give the Signature Meaning %', held.role, p_meaning using errcode = 'LA010';
+  end if;
+
+  select * into seen from record_version where lab_id = proof.lab_id and id = p_seen_version;
+  if seen.id is null then
+    raise exception 'the Record Version shown is not one of this Lab''s' using errcode = 'LA010';
+  end if;
+  if seen.content_hash <> p_seen_hash then
+    raise exception 'the hash shown is not the hash of Record Version %', seen.version using errcode = 'LA010';
+  end if;
+  if exists (select from record_version v
+              where v.lab_id = seen.lab_id and v.record_table = seen.record_table and v.record_id = seen.record_id
+                and v.version > seen.version and not written_here(v.xmin)) then
+    raise exception 'the record changed after the signer saw it; it must be read again before signing' using errcode = 'LA010';
+  end if;
+  select * into signed from record_version
+    where lab_id = proof.lab_id and record_table = p_record_table and record_id = p_record_id
+    order by version desc limit 1;
+  if signed.id is null then
+    raise exception 'there is no Record Version of % % to sign', p_record_table, p_record_id using errcode = 'LA010';
+  end if;
+  if (signed.record_table, signed.record_id) <> (seen.record_table, seen.record_id) then
+    if exists (select from record_version v
+                where v.lab_id = signed.lab_id and v.record_table = signed.record_table and v.record_id = signed.record_id
+                  and not written_here(v.xmin)) then
+      raise exception 'the % signed is not the record shown, nor one this signing created', p_record_table using errcode = 'LA010';
+    end if;
+    if signed.record_table = 'equipment_event' then
+      if not exists (select from equipment_event v
+                      where v.lab_id = signed.lab_id and v.id = signed.record_id
+                        and seen.record_table = 'equipment' and v.equipment_id = seen.record_id) then
+        raise exception 'the Equipment Event signed is not recorded on the Equipment shown' using errcode = 'LA010';
+      end if;
+    elsif not exists (select from test_report r
+                    where r.lab_id = signed.lab_id and r.id = signed.record_id and signed.record_table = 'test_report'
+                      and seen.record_table = 'test' and r.test_id = seen.record_id) then
+      raise exception 'the % signed is not built on the Test shown',
+        case p_record_table when 'test_report' then 'Test Report' else p_record_table end using errcode = 'LA010';
+    end if;
+  end if;
+
+  select * into shown from signature_statement order by version desc limit 1;
+  if shown.version <> p_statement_version then
+    raise exception 'the signature statement changed to version % after the signer saw version %; it must be read again before signing',
+      shown.version, p_statement_version using errcode = 'LA010';
+  end if;
+
+  perform set_this_transaction('lims.signing', proof.id::text);
+  insert into signature (lab_id, id, person_id, printed_name, username, role, meaning, record_version_id, content_hash,
+                         canonical_form, statement_version, statement_hash, authenticator, session_id, app_release,
+                         reauthentication_id)
+  values (proof.lab_id, signature_id, signer.id, signer.display_name, signer.username, held.role, p_meaning, signed.id,
+          signed.content_hash, signed.canonical_form, shown.version, shown.statement_hash, proof.authenticator,
+          proof.session_id, p_app_release, proof.id);
+  perform set_this_transaction('lims.signing', '');
+  return signature_id;
+end $$;
+
+-- The Logbook reads the Audit Trail entries of one piece of Equipment in order (apps/api/src/equipment.ts, logbookOf).
+create index audit_entry_equipment_logbook_idx on lims.audit_entry ((new_row ->> 'id'), seq)
+  where table_name = 'equipment';
+
+revoke execute on function lims.staff_of(uuid, uuid), lims.event_suspends(lims.equipment_event_kind),
+  lims.equipment_content(lims.equipment), lims.equipment_content_hash(lims.equipment),
+  lims.equipment_event_content(lims.equipment_event), lims.version_equipment_record(uuid, text, uuid) from public;
+grant execute on function lims.staff_of(uuid, uuid), lims.event_suspends(lims.equipment_event_kind),
+  lims.equipment_content(lims.equipment), lims.equipment_content_hash(lims.equipment),
+  lims.equipment_event_content(lims.equipment_event), lims.version_equipment_record(uuid, text, uuid) to lims_app;
 -- keep_equipment runs as the writer and asks whether the Approved Signature was written in this transaction.
 grant execute on function lims.written_here(xid) to lims_app;
 grant select, insert on lims.equipment, lims.equipment_event to lims_app;
-grant update (name, asset_number, software_version, firmware_version, room_id, responsible_person_id, fitness_status)
-  on lims.equipment to lims_app;
+-- The steps write the versions, the Room and the Fitness Status; the name, asset number and Responsible Person have
+-- no step yet, so the app role cannot change them.
+grant update (software_version, firmware_version, room_id, fitness_status) on lims.equipment to lims_app;
