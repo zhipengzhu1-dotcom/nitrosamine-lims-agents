@@ -95,11 +95,14 @@ async function deployment(name: string, { peopleBefore0028 = false } = {}) {
   /** Records an entry as the service, in its own transaction, and returns its id. */
   async function record(entry: Record<string, unknown>): Promise<string> {
     const columns = Object.keys(entry);
-    const row = await asService([
+    await owner.query('begin');
+    await owner.query(AS_SERVICE('svc:test'));
+    const { rows } = await owner.query<{ id: string }>(
       `insert into lims.release_log_entry (${columns.join(', ')}) values (${columns.map((_, i) => `$${i + 1}`).join(', ')}) returning id`,
       Object.values(entry),
-    ]);
-    return String(row?.id ?? assert.fail('the entry was recorded'));
+    );
+    await owner.query('commit');
+    return rows[0]?.id ?? assert.fail('the entry was recorded');
   }
   /** Records an entry declaring `name` to write `scope`, with the identity, in one transaction. */
   async function declare(name: string, scope = '{customer:INSERT}'): Promise<string> {
@@ -109,7 +112,10 @@ async function deployment(name: string, { peopleBefore0028 = false } = {}) {
         `insert into lims.release_log_entry (id, kind, title, summary) values ($1, 'ConfigurationChange', 'Identity', 'Declares an identity')`,
         [entry],
       ],
-      [`insert into lims.service_identity (name, scope, created_by_entry_id) values ($1, $2, $3)`, [name, scope, entry]],
+      [
+        `insert into lims.service_identity (name, scope, created_by_entry_id) values ($1, $2, $3)`,
+        [name, scope, entry],
+      ],
     );
     return entry;
   }
@@ -287,7 +293,10 @@ describe('the real data class is set by an approved Release Log entry once every
         }),
       );
       const error = await d.approve(await d.record(REAL));
-      assert.deepEqual([error?.code, error?.message], ['LA011', 'these demo exceptions still stand: TwoRole, Anchoring']);
+      assert.deepEqual(
+        [error?.code, error?.message],
+        ['LA011', 'these demo exceptions still stand: TwoRole, Anchoring'],
+      );
       assert.equal(await d.dataClass(), 'fictional');
     }));
 
@@ -306,7 +315,9 @@ describe('the real data class is set by an approved Release Log entry once every
         'select data_class, set_by_entry_id from lims.deployment',
       );
       assert.deepEqual(rows, [{ data_class: 'real', set_by_entry_id: real }]);
-      const later = await d.asService([`insert into lims.customer (name) values ('Real Customer') returning data_class`]);
+      const later = await d.asService([
+        `insert into lims.customer (name) values ('Real Customer') returning data_class`,
+      ]);
       assert.equal(later?.data_class, 'real', 'a record created from now on carries the real class');
     }));
 

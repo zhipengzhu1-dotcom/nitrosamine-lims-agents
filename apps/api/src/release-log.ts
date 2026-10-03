@@ -166,7 +166,8 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
       if (declared.setsDataClass === 'real') await gateReal(scope, login, declared.fileVaultPersonalKey ?? false);
       if (
         declared.setsDataClass === 'fictional' &&
-        (await scope.company.selectFrom('deployment').select('dataClass').executeTakeFirstOrThrow()).dataClass === 'real'
+        (await scope.company.selectFrom('deployment').select('dataClass').executeTakeFirstOrThrow()).dataClass ===
+          'real'
       )
         refuse('state', 'The deployment holds real data, so no entry sets it back to the fictional data class.');
       const id = await scope.write(reason, role, async (q) => {

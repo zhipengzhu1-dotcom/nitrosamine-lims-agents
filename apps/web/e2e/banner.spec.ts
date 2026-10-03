@@ -60,6 +60,13 @@ test('a deployment whose data class cannot be read keeps the banner', async ({ p
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
   // Two frames after the failed answer, so the banner asserted is the one the failure leaves, not the one shown while
   // the class was still loading.
-  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await page.evaluate(
+    () =>
+      new Promise<void>((done) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => done());
+        });
+      }),
+  );
   await expect(banner(page)).toBeVisible();
 });
