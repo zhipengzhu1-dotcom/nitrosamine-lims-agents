@@ -4012,15 +4012,38 @@ describe('a person is inserted without a lockout, so the database stamps every l
   const bornLockedOut = `insert into lims.person (username, display_name, customer_id, locked_at)
     select 'refusal.born-locked-out', 'Born Locked Out', id, clock_timestamp() from lims.customer
      where name = 'Refusal Customer (fictional)'`;
-  it('a person inserted already locked out is refused, for the app role and for the superuser', async () => {
-    for (const asRole of ['set local role lims_app; ', '']) {
-      const error = await refusalOf(`${asRole}${bornLockedOut}`);
-      assert.deepEqual(
-        [error.code, error.message],
-        ['23514', 'a person is inserted without a lockout; a lockout lands only on a person already recorded'],
-        asRole || 'as the superuser',
-      );
+  it('a person inserted already locked out is refused for the superuser', async () => {
+    const error = await refusalOf(bornLockedOut);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', 'a person is inserted without a lockout; a lockout lands only on a person already recorded'],
+    );
+  });
+
+  it('the app role holds no insert on a lockout, so a person inserted already locked out is refused before the trigger', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('set local role lims_app');
+      const { rowCount } = await client.query(`insert into lims.person (username, display_name, customer_id)
+        select 'refusal.born-locked-out', 'Born Locked Out', id from lims.customer
+         where name = 'Refusal Customer (fictional)'`);
+      assert.equal(rowCount, 1, 'the app role inserts the same Customer User without a lockout');
+    } finally {
+      await client.query('rollback');
     }
+    const error = await refusalOf(`set local role lims_app; ${bornLockedOut}`);
+    assert.equal(error.code, '42501', error.message);
+    const { rows } = await client.query<{ column: string }>(
+      `select attname as column from pg_attribute
+        where attrelid = 'lims.person'::regclass and attnum > 0 and not attisdropped
+          and has_column_privilege('lims_app', attrelid, attnum, 'INSERT')
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.column),
+      ['customer_id', 'display_name', 'identity_verification_id', 'password_hash', 'username'],
+    );
   });
 });
 
