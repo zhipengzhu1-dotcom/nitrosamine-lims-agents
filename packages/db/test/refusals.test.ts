@@ -3921,7 +3921,7 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
   };
 
   /**
-   * A Signature with `meaning` over a new Record Version of the record as it is now, or of other content when `stale`.
+   * A Signature with `meaning` over a new Record Version of the record as it is now, or of `content` when given.
    * With `past`, it is written past the triggers, as lims.sign would leave it; without, it meets every trigger on
    * lims.signature.
    */
@@ -3930,7 +3930,7 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
     recordId: string,
     meaning: string,
     past: boolean,
-    stale = false,
+    content?: string,
   ) => {
     if (past) await client.query('set local session_replication_role = replica');
     const reauthentication = randomUUID();
@@ -3943,7 +3943,7 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
                            where lab_id = $1 and record_table = $2 and record_id = $3), 0) + 1,
                 1,
                 convert_to((case
-                  when $8 then '{"id":"stale"}'::jsonb
+                  when $8::text is not null then $8::jsonb
                   when $2::text = 'equipment' then (select lims.equipment_content(e) from lims.equipment e where e.id = $3)
                   else (select lims.equipment_event_content(v) from lims.equipment_event v where v.id = $3)
                 end)::text, 'UTF8')
@@ -3955,7 +3955,7 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
               (select statement_hash from lims.signature_statement where version = 1), 'Password', $6, 'test', $7,
               (select time_zone from lims.lab where lab_id = $1)
          from version`,
-      [id.lab, table, recordId, id.person, meaning, id.session, reauthentication, stale],
+      [id.lab, table, recordId, id.person, meaning, id.session, reauthentication, content ?? null],
     );
     if (past) await client.query('set local session_replication_role = origin');
   };
@@ -4308,7 +4308,19 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
     ],
     [
       'Equipment signed Approved over content that is not its current content is refused',
-      async () => signOver('equipment', id.equipment, 'Approved', false, true),
+      async () => signOver('equipment', id.equipment, 'Approved', false, '{"id":"stale"}'),
+      'the Approved Signature binds the Equipment as it is now; it must be read again before signing',
+    ],
+    [
+      'Equipment signed Approved over its content before an Event was recorded on it is refused',
+      async () => {
+        const { rows } = await client.query<{ content: string }>(
+          'select lims.equipment_content(e)::text as content from lims.equipment e where id = $1',
+          [id.equipment],
+        );
+        await recordEvent(id.equipment, 'Suspect');
+        await signOver('equipment', id.equipment, 'Approved', false, rows[0]?.content);
+      },
       'the Approved Signature binds the Equipment as it is now; it must be read again before signing',
     ],
     [

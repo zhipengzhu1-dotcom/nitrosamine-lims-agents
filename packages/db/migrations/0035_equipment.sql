@@ -52,11 +52,16 @@ language sql immutable as $$
   select p_kind in ('Maintenance', 'Repair', 'SoftwareChange', 'FirmwareChange', 'Suspect')
 $$;
 
--- Canonical form 1 of Equipment: its identity, where it is, who answers for it and its Fitness Status, so the
--- Approved Signature binds the Equipment as QA released it.
+-- Canonical form 1 of Equipment: its identity, where it is, who answers for it, its Fitness Status and its Logbook,
+-- so the Approved Signature binds the Equipment as QA released it, after the Events QA saw and no other. Events are
+-- never changed or deleted, so their count changes with every Event recorded, whatever its time; the latest one's id
+-- names the last Event the signer saw.
 create function lims.equipment_content(e lims.equipment) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
+    'eventCount', (select count(*) from lims.equipment_event v where v.lab_id = e.lab_id and v.equipment_id = e.id),
+    'lastEventId', (select v.id from lims.equipment_event v where v.lab_id = e.lab_id and v.equipment_id = e.id
+                     order by v.recorded_at desc, v.id desc limit 1),
     'id', e.id,
     'kind', e.kind,
     'name', e.name,

@@ -295,6 +295,47 @@ it('a Suspect and a retire sent at once on In use Equipment both answer: the Sus
   assert.equal(ok(await as.lena.call(routes.equipment, { id: equipment.id })).fitnessStatus, 'Suspended');
 });
 
+const recorders: [string, (equipment: Equipment) => Promise<void>][] = [
+  [
+    'a Suspect',
+    async (equipment) => {
+      ok(
+        await as.samir.call(equipmentStepRoute('markSuspect'), {
+          id: equipment.id,
+          input: { reason: 'Reads 0.3 mg high.' },
+        }),
+      );
+    },
+  ],
+  [
+    'a signed Cleaning',
+    async (equipment) => {
+      const shown = ok(await as.ana.call(routes.equipment, { id: equipment.id }));
+      ok(
+        await as.ana.call(equipmentStepRoute('recordEvent'), {
+          id: equipment.id,
+          input: { kind: 'Cleaning', note: 'Wiped the pan.' },
+          signature: signing(shown, ana),
+        }),
+      );
+    },
+  ],
+];
+
+for (const [event, record] of recorders)
+  it(`QA's Approved over Quarantined Equipment loaded before ${event} was recorded on it is refused, and the Equipment stays Quarantined`, async () => {
+    const equipment = await register();
+    await record(equipment);
+    const refused = await approve(as.quinn, equipment, quinn);
+    assert.equal(
+      refusedWith(refused, 'recordChanged'),
+      'The Equipment changed since this screen loaded it. Read it again before signing.',
+    );
+    const after = ok(await as.quinn.call(routes.equipment, { id: equipment.id }));
+    assert.equal(after.fitnessStatus, 'Quarantined');
+    assert.notEqual(after.recordVersion.contentHash, equipment.recordVersion.contentHash);
+  });
+
 /** The version of the Equipment that its latest Approved Signature binds. */
 async function boundVersion(equipmentId: string): Promise<number> {
   const bound = await api.superuser
