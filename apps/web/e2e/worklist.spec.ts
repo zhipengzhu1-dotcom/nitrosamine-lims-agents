@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { type RouteReply, routes } from '@lims/domain';
-import { expect, type Locator, type Page, signInByApi, submittedTest, test } from './walk.ts';
+import { expect, type Locator, type Page, signInByApi, testThrough, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function requestedTest(page: Page, description: string) {
@@ -44,7 +44,7 @@ test('a Lab Manager filters the Worklist by Test state, searches by Sample numbe
   const inReview = `Metformin HCl 500 mg tablets, lot NW-0051 (fictional, ${tag})`;
   const requested = `Metformin HCl 500 mg tablets, lot NW-0052 (fictional, ${tag})`;
   await page.goto('/');
-  const testId = await submittedTest(page, inReview);
+  const testId = await testThrough(page, inReview, 'enterResult');
   await requestedTest(page, requested);
   const sampleNumber = await sampleNumberOf(page, testId);
 

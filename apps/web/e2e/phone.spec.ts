@@ -6,7 +6,7 @@ import {
   PHONE,
   type Page,
   signOutFromRail,
-  submittedTest,
+  testThrough,
   test,
 } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
@@ -118,7 +118,7 @@ test('with no sheet open, the Bench Rail takes at most 22% of the phone and its 
 }) => {
   const description = `Valsartan 160 mg tablets (fictional, ${test.info().project.name} ${randomUUID()})`;
   await page.goto('/');
-  await submittedTest(page, description);
+  await testThrough(page, description, 'enterResult');
   await signInAsCustomer(page);
   await laidOutAtLeast(page.getByRole('button', { name: 'Submit' }), 56);
   await railWithinShare(page, 'the Worklist, with the Submit commit button');

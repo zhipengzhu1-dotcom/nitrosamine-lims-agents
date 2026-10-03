@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, signOutFromRail, test, utcThenLabClock } from './walk.ts';
+import { expect, type Locator, type Page, signOutFromRail, test, testThrough, utcThenLabClock } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE, SHOTS } from '../playwright.config.ts';
 
 const shot = async (page: Page, name: string) => {
@@ -204,28 +204,56 @@ const shownOnce = (page: Page, text: string) =>
     )
     .toBe(1);
 
-test('the whole chain through the UI, ending in a Test Report with three Signatures', async ({ page }) => {
-  const description = `Metformin HCl 500 mg tablets, lot NW-0042 (fictional, ${test.info().project.name} ${randomUUID()})`;
-  const openTheTest = async () => {
-    const link = page.getByRole('row', { name: description }).getByRole('link');
-    await atLeast(link, 44, 44);
-    await link.click();
-  };
+const described = () =>
+  `Metformin HCl 500 mg tablets, lot NW-0042 (fictional, ${test.info().project.name} ${randomUUID()})`;
+
+async function openTheTest(page: Page, description: string) {
+  const link = page.getByRole('row', { name: description }).getByRole('link');
+  await atLeast(link, 44, 44);
+  await link.click();
+}
+
+const signingSheet = (page: Page) => {
   const sheet = page.locator('form.sheet');
-  const whatYouAreSigning = sheet
-    .locator('section')
-    .filter({ has: page.getByRole('heading', { name: 'What you are signing' }) });
-  const signButton = sheet.getByRole('button', { name: /^Sign as / });
-  const commitKeys: string[] = [];
+  return {
+    sheet,
+    whatYouAreSigning: sheet
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'What you are signing' }) }),
+    signButton: sheet.getByRole('button', { name: /^Sign as / }),
+  };
+};
+
+/** The Commit Keys of every step the page sends, in order, and the set each step sent. */
+function watchCommitKeys(page: Page) {
+  const keys: string[] = [];
   const keysOfStep = new Map<string, Set<string>>();
   page.on('request', (request) => {
     if (request.method() !== 'POST' || !request.url().includes('/api/steps/')) return;
     const { commitKey } = request.postDataJSON();
-    commitKeys.push(commitKey);
+    keys.push(commitKey);
     const step = new URL(request.url()).pathname;
     keysOfStep.set(step, (keysOfStep.get(step) ?? new Set()).add(commitKey));
   });
+  return {
+    keys,
+    eachPressSentOneFreshKey() {
+      for (const [step, sent] of keysOfStep)
+        expect(sent.size, `${step} resends its Commit Key after a refusal or no answer`).toBe(1);
+      const presses = new Set(keys);
+      expect(presses.size, 'each step sent a fresh Commit Key').toBe(keysOfStep.size);
+      for (const key of presses)
+        expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    },
+  };
+}
 
+test('a Customer submits a Test, the Sample Custodian receives it and the Lab Manager assigns it, each through the UI', async ({
+  page,
+}) => {
+  const description = described();
+  const { sheet } = signingSheet(page);
+  const commitKeys = watchCommitKeys(page);
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
   await shot(page, 'sign-in');
@@ -256,14 +284,14 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await signOutFromRail(page);
 
   await signIn(page, 'samir.custodian');
-  await openTheTest();
+  await openTheTest(page, description);
   await page.getByRole('button', { name: 'Receive' }).click();
   await railSays(page, 'now Ready');
   await signOutFromRail(page);
 
   await signIn(page, 'lena.manager');
   await shot(page, 'worklist');
-  await openTheTest();
+  await openTheTest(page, description);
   const assign = page.getByRole('button', { name: 'Assign' });
   await atLeast(assign, 44, 56);
   await assign.click();
@@ -272,9 +300,19 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await assign.click();
   await railSays(page, 'now Assigned');
   await signOutFromRail(page);
+  commitKeys.eachPressSentOneFreshKey();
+});
 
+test('the Analyst enters the Result and signs Performed on the signature sheet, past a refused password', async ({
+  page,
+}) => {
+  const description = described();
+  const { whatYouAreSigning, signButton } = signingSheet(page);
+  const commitKeys = watchCommitKeys(page);
+  await testThrough(page, description, 'assign');
+  await page.goto('/');
   await signIn(page, 'ana.analyst');
-  await openTheTest();
+  await openTheTest(page, description);
   await page.getByRole('button', { name: 'Enter Result' }).click();
   const result = {
     Analyte: 'NDMA',
@@ -327,9 +365,19 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   heldPerformed.resolve();
   await railSays(page, 'Performed Signature recorded in the Audit Trail. The Test is now Submitted For Review.');
   await signOutFromRail(page);
+  commitKeys.eachPressSentOneFreshKey();
+});
 
+test('the Reviewer signs Reviewed past a refusal and an ended session, and the Customer sees nothing released yet', async ({
+  page,
+}) => {
+  const description = described();
+  const { sheet, whatYouAreSigning, signButton } = signingSheet(page);
+  const commitKeys = watchCommitKeys(page);
+  await testThrough(page, description, 'enterResult');
+  await page.goto('/');
   await signIn(page, 'rui.reviewer');
-  await openTheTest();
+  await openTheTest(page, description);
   const review = page.getByRole('button', { name: 'Review', exact: true });
   const cancel = () => page.getByRole('button', { name: 'Cancel' }).click();
   await expect(
@@ -421,15 +469,25 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await signOutFromRail(page);
 
   await signIn(page, 'cora.customer');
-  await openTheTest();
+  await openTheTest(page, description);
   await expect(page.getByRole('heading', { level: 1 })).toContainText('Reviewed');
   await expect(page.getByText('The Result is not released yet.')).toBeVisible();
   await expect(page.getByText('The Signatures are not released yet.')).toBeVisible();
   await expect(page.getByText(/No Result entered|No Signatures yet/), 'never that none exists').toHaveCount(0);
   await signOutFromRail(page);
+  commitKeys.eachPressSentOneFreshKey();
+});
 
+test('QA releases past a dropped reply, ending in a Test Report with three Signatures that a changed Result unsigns', async ({
+  page,
+}) => {
+  const description = described();
+  const { whatYouAreSigning, signButton } = signingSheet(page);
+  const commitKeys = watchCommitKeys(page);
+  await testThrough(page, description, 'review');
+  await page.goto('/');
   await signIn(page, 'quinn.qa');
-  await openTheTest();
+  await openTheTest(page, description);
   await page.getByRole('button', { name: 'Release' }).click();
   await typeWhileTheSheetIsStillSlidingIn(page, () => page.getByLabel(/Password/).fill(DEMO_PASSWORD));
   await wholeOnScreenAtEverySize(page, whatYouAreSigning, signButton);
@@ -452,14 +510,8 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     /^Lab chain Intact verified through entry \d+ (Every entry recomputed\.|Recomputed from entry \d+; entries through \d+ were verified .* by .*\.)$/,
     /^Company chain Intact verified through entry \d+ (Every entry recomputed\.|Recomputed from entry \d+; entries through \d+ were verified .* by .*\.)$/,
   ]);
-  const [releaseKey, retryKey] = commitKeys.slice(-2);
+  const [releaseKey, retryKey] = commitKeys.keys.slice(-2);
   expect(retryKey, 'the press whose reply was dropped is resent with its Commit Key').toBe(releaseKey);
-  for (const [step, keys] of keysOfStep)
-    expect(keys.size, `${step} resends its Commit Key after a refusal or no answer`).toBe(1);
-  const presses = new Set(commitKeys);
-  expect(presses.size, 'each step sent a fresh Commit Key').toBe(keysOfStep.size);
-  for (const key of presses)
-    expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   const reportLink = page.locator('.facts').getByRole('link', { name: /^RD-R-\d{4}-\d{6}$/ });
   await atLeast(reportLink, 44, 44);
   await reportLink.click();
@@ -529,6 +581,7 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
   await shot(page, 'test-unsigned');
   await page.getByRole('button', { name: 'Verify chain' }).click();
   await expect(page.locator('.chains li')).toHaveText([/^Lab chain Intact /, /^Company chain Intact /]);
+  commitKeys.eachPressSentOneFreshKey();
 });
 
 test('a wrong password and an unknown user ID show the same failure message', async ({ page }) => {

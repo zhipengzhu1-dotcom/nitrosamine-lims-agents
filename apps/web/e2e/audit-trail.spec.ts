@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { expect, type Locator, type Page, signOutFromRail, submittedTest, test, utcThenLabClock } from './walk.ts';
+import { expect, type Locator, type Page, signOutFromRail, testThrough, test, utcThenLabClock } from './walk.ts';
 import { DEMO_PASSWORD, E2E_DATABASE } from '../playwright.config.ts';
 
 async function signIn(page: Page, username: string, lab = /R&D Laboratory/) {
@@ -23,7 +23,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
 }) => {
   const description = `Metformin HCl 500 mg tablets, lot NW-0043 (fictional, ${test.info().project.name} ${randomUUID()})`;
   await page.goto('/');
-  const testId = await submittedTest(page, description);
+  const testId = await testThrough(page, description, 'enterResult');
   const openTheTest = async () => {
     await page.getByRole('row', { name: description }).getByRole('link').click();
     await expect(page.getByRole('heading', { level: 1 })).toContainText('Submitted For Review');

@@ -52,8 +52,15 @@ export async function signInByApi(page: Page, username: string) {
   expect(res.ok(), `sign in as ${username}: ${res.status()} ${await res.text()}`).toBe(true);
 }
 
-/** A new R&D Test, submitted, received, assigned to Ana Ferreira and signed Performed through the API, so a walk starts at Submitted For Review. Leaves the page signed out. */
-export async function submittedTest(page: Page, description: string): Promise<string> {
+/** The steps an API-made Test takes, in order; a walk names the last one it wants done. */
+type SeededStep = 'assign' | 'enterResult' | 'review';
+const SEEDED: readonly SeededStep[] = ['assign', 'enterResult', 'review'];
+
+/**
+ * A new R&D Test taken through the API, step by step, up to and including `last`: submitted by Cora, received by Samir,
+ * assigned by Lena to Ana Ferreira, signed Performed by Ana, signed Reviewed by Rui. Leaves the page signed out.
+ */
+export async function testThrough(page: Page, description: string, last: SeededStep): Promise<string> {
   const step = async (name: string, body: object): Promise<RouteReply<ReturnType<typeof stepRoute<'submit'>>>> => {
     const res = await page.request.post(`/api/steps/${name}`, { data: { commitKey: randomUUID(), ...body } });
     expect(res.ok(), `${name}: ${await res.text()}`).toBe(true);
@@ -61,6 +68,20 @@ export async function submittedTest(page: Page, description: string): Promise<st
   };
   const lookups = async (): Promise<RouteReply<typeof routes.lookups>> =>
     (await page.request.get('/api/lookups')).json();
+  const signature = async (username: string) => {
+    const { recordVersion, statement }: RouteReply<typeof routes.test> = await (
+      await page.request.get(`/api/tests/${testId}`)
+    ).json();
+    if (!recordVersion || !statement)
+      throw new Error('the Test shows no Record Version or signature statement to sign');
+    return {
+      username,
+      password: DEMO_PASSWORD,
+      recordVersion: { version: recordVersion.version, contentHash: recordVersion.contentHash },
+      statementVersion: statement.version,
+    };
+  };
+  const through = (name: SeededStep) => SEEDED.indexOf(name) <= SEEDED.indexOf(last);
   await signInByApi(page, 'cora.customer');
   const [method] = (await lookups()).methods;
   if (!method) throw new Error('the lookups offer no Method to submit a Test under');
@@ -72,28 +93,25 @@ export async function submittedTest(page: Page, description: string): Promise<st
   const ana = analysts.find((a) => a.displayName === 'Ana Ferreira');
   if (!ana) throw new Error('the lookups offer no Analyst named Ana Ferreira');
   await step('assign', { testId, input: { assigneeId: ana.id } });
-  await signInByApi(page, 'ana.analyst');
-  const { recordVersion, statement }: RouteReply<typeof routes.test> = await (
-    await page.request.get(`/api/tests/${testId}`)
-  ).json();
-  if (!recordVersion || !statement) throw new Error('the Assigned Test shows no Record Version or signature statement');
-  await step('enterResult', {
-    testId,
-    input: {
-      analyte: 'NDMA',
-      value: '0.0300',
-      unit: 'ppm',
-      injectionSequenceRef: 'SEQ-2026-0042',
-      notebookRef: 'RD-NB-0007-012',
-      performedOn: '2026-09-30',
-    },
-    signature: {
-      username: 'ana.analyst',
-      password: DEMO_PASSWORD,
-      recordVersion: { version: recordVersion.version, contentHash: recordVersion.contentHash },
-      statementVersion: statement.version,
-    },
-  });
+  if (through('enterResult')) {
+    await signInByApi(page, 'ana.analyst');
+    await step('enterResult', {
+      testId,
+      input: {
+        analyte: 'NDMA',
+        value: '0.0300',
+        unit: 'ppm',
+        injectionSequenceRef: 'SEQ-2026-0042',
+        notebookRef: 'RD-NB-0007-012',
+        performedOn: '2026-09-30',
+      },
+      signature: await signature('ana.analyst'),
+    });
+  }
+  if (through('review')) {
+    await signInByApi(page, 'rui.reviewer');
+    await step('review', { testId, input: {}, signature: await signature('rui.reviewer') });
+  }
   await page.request.post('/api/logout', { data: {} });
   return testId;
 }

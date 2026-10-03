@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { DESKTOP, expect, PHONE, type Page, submittedTest, test } from './walk.ts';
+import { DESKTOP, expect, PHONE, type Page, testThrough, test } from './walk.ts';
 import { DEMO_PASSWORD } from '../playwright.config.ts';
 
 async function openASubmittedTestAsReviewer(page: Page) {
   const description = `Metformin HCl 500 mg tablets, lot NW-0044 (fictional, ${test.info().project.name} ${randomUUID()})`;
   await page.goto('/');
-  await submittedTest(page, description);
+  await testThrough(page, description, 'enterResult');
   await page.reload();
   await page.getByRole('radio', { name: /R&D Laboratory/ }).check();
   await page.getByLabel('Username').fill('rui.reviewer');
