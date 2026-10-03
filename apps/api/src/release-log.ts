@@ -31,6 +31,10 @@ function listed(q: LabQueries) {
     'title',
     'summary',
     'release',
+    'imageDigests',
+    'ciRun',
+    sql<'Passed' | 'Failed' | null>`ci_result`.as('ciResult'),
+    sql<'Passed' | 'Warned' | 'Failed' | null>`zap_baseline_result`.as('zapBaselineResult'),
     'setsDataClass',
     'fileVaultPersonalKey',
     ...exceptionColumns,
@@ -139,6 +143,14 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
         refuse('role', 'A Release Log entry is recorded by the Platform Operator or QA.');
       if (declared.kind === 'Release' && declared.release === undefined)
         refuse('guard', 'A Release entry names its release.');
+      const evidence = [declared.imageDigests, declared.ciRun, declared.ciResult, declared.zapBaselineResult];
+      if (declared.kind === 'Release' && evidence.some((e) => e === undefined))
+        refuse(
+          'guard',
+          'A Release entry carries its image digests, its CI run and result, and its ZAP baseline result.',
+        );
+      if (declared.kind !== 'Release' && evidence.some((e) => e !== undefined))
+        refuse('guard', 'Only a Release entry carries image digests, a CI run or a ZAP baseline result.');
       if (declared.setsDataClass !== undefined && declared.fileVaultPersonalKey === undefined)
         refuse('guard', 'An entry setting the data class records whether the host holds a personal FileVault key.');
       if ((declared.statementVersion === undefined) !== (statement === undefined))

@@ -512,6 +512,10 @@ export type ReleaseLogKind = (typeof releaseLogKinds)[number];
 export const demoExceptions = ['TwoRole', 'Anchoring', 'FileVault', 'PlaintextAtCloudflare', 'DemoLogin'] as const;
 export type DemoException = (typeof demoExceptions)[number];
 const demoException = Type.Enum(demoExceptions);
+export const ciResults = ['Passed', 'Failed'] as const;
+export const zapBaselineResults = ['Passed', 'Warned', 'Failed'] as const;
+/** An image and the sha256 digest a Release ships it at, as `name@sha256:<64 hex>`. */
+const imageDigest = Type.String({ pattern: '^[^@\\s]+@sha256:[0-9a-f]{64}$', maxLength: 400 });
 /** A Service Identity's name and the `table:OP` pairs it may write, as the Release Log entry that declared it reads. */
 const serviceIdentity = Type.Object({ name: Type.String(), scope: Type.Array(Type.String()) });
 /** A Release Log entry as recorded, with its Service Identities, whether it is approved, and the Record Version a signer sees. */
@@ -521,6 +525,10 @@ const releaseLogEntry = Type.Object({
   title: Type.String(),
   summary: Type.String(),
   release: nullable(Type.String()),
+  imageDigests: nullable(Type.Array(Type.String())),
+  ciRun: nullable(Type.String()),
+  ciResult: nullable(Type.Enum(ciResults)),
+  zapBaselineResult: nullable(Type.Enum(zapBaselineResults)),
   setsDataClass: nullable(dataClass),
   fileVaultPersonalKey: nullable(Type.Boolean()),
   recordsExceptions: Type.Array(demoException),
@@ -541,13 +549,17 @@ const serviceIdentityDeclaration = Type.Object(
   },
   closed,
 );
-/** What an operator or QA records: the entry's declarations, its Service Identities and the reason. The database binds the pairs (a Release needs its release, a data class its FileVault fact, a statement its version). */
+/** What an operator or QA records: the entry's declarations, its Service Identities and the reason. The database binds the pairs (a Release needs its release and its validation evidence, a data class its FileVault fact, a statement its version). */
 const releaseLogEntryDraft = Type.Object(
   {
     kind: Type.Enum(releaseLogKinds),
     title: text,
     summary: Type.String({ minLength: 1, maxLength: 4000 }),
     release: Type.Optional(text),
+    imageDigests: Type.Optional(Type.Array(imageDigest, { minItems: 1, maxItems: 50 })),
+    ciRun: Type.Optional(text),
+    ciResult: Type.Optional(Type.Enum(ciResults)),
+    zapBaselineResult: Type.Optional(Type.Enum(zapBaselineResults)),
     setsDataClass: Type.Optional(dataClass),
     fileVaultPersonalKey: Type.Optional(Type.Boolean()),
     recordsExceptions: Type.Optional(Type.Array(demoException)),

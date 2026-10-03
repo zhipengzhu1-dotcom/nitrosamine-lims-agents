@@ -55,6 +55,15 @@ const id = {
   probeEntry: randomUUID(),
   operatorSession: randomUUID(),
 };
+/** A Release entry's validation evidence, fictional: each probe of it spoils one field. */
+const RELEASE_EVIDENCE: Row = {
+  kind: 'Release',
+  release: '2026.10.3',
+  image_digests: `{lims-api@sha256:${'0'.repeat(64)}}`,
+  ci_run: 'https://ci.example.invalid/runs/1',
+  ci_result: 'Passed',
+  zap_baseline_result: 'Passed',
+};
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
 const deviceToken = Buffer.alloc(32, 2);
@@ -2923,6 +2932,54 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
       constraint: 'release_log_entry_kind_release_check',
     },
     {
+      name: 'a Release entry without its image digests, CI run and result and ZAP baseline result is refused',
+      table: 'lims.release_log_entry',
+      change: { kind: 'Release', release: '2026.10.3' },
+      constraint: 'release_log_entry_release_evidence_check',
+    },
+    {
+      name: 'a Release Log entry that is not a Release yet carries release evidence is refused',
+      table: 'lims.release_log_entry',
+      change: { ci_run: 'https://ci.example.invalid/runs/1', ci_result: 'Passed' },
+      constraint: 'release_log_entry_release_evidence_check',
+    },
+    {
+      name: 'a Release entry with no image digest is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, image_digests: '{}' },
+      constraint: 'release_log_entry_image_digests_check',
+    },
+    {
+      name: 'a Release entry with an image without its sha256 digest is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, image_digests: '{postgres:18-alpine}' },
+      constraint: 'release_log_entry_image_digests_check',
+    },
+    {
+      name: 'a Release entry with a NULL image digest element is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, image_digests: '{NULL}' },
+      constraint: 'release_log_entry_image_digests_check',
+    },
+    {
+      name: 'a Release entry with an empty CI run is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, ci_run: '' },
+      constraint: 'release_log_entry_ci_run_check',
+    },
+    {
+      name: 'a Release entry with a CI result that is neither Passed nor Failed is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, ci_result: 'Green' },
+      constraint: 'release_log_entry_ci_result_check',
+    },
+    {
+      name: 'a Release entry with a ZAP baseline result that is not Passed, Warned or Failed is refused',
+      table: 'lims.release_log_entry',
+      change: { ...RELEASE_EVIDENCE, zap_baseline_result: 'Clean' },
+      constraint: 'release_log_entry_zap_baseline_result_check',
+    },
+    {
       name: 'a Release Log entry with a signature statement version below 1 is refused',
       table: 'lims.release_log_entry',
       change: { statement_version: 0, statement: Buffer.from('A statement') },
@@ -2967,6 +3024,12 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
       name: 'a service identity whose scope is not a table and INSERT, UPDATE or DELETE is refused',
       table: 'lims.service_identity',
       change: { scope: ['customer:INSERT', 'customer:insert'] },
+      constraint: 'service_identity_scope_pair_check',
+    },
+    {
+      name: 'a service identity whose scope holds a NULL element is refused',
+      table: 'lims.service_identity',
+      change: { scope: ['customer:INSERT', null] },
       constraint: 'service_identity_scope_pair_check',
     },
     {
@@ -3034,7 +3097,7 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
         stamp(id.probeEntry),
         `update lims.deployment set data_class = 'real', set_by_entry_id = '${id.probeEntry}'`,
       ),
-      'the database holds records created under fictional: audit_export, customer, method, result, sample, submission, system_incident, test, test_report, training_record',
+      'the database holds records created under fictional: audit_export, customer, method, result, room, sample, submission, system_incident, test, test_report, training_record, workstation',
     );
   });
 

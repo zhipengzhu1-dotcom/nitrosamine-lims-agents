@@ -207,9 +207,12 @@ export interface RecordVersion {
 }
 
 export interface ReleaseLogEntry {
+  ciResult: string | null;
+  ciRun: string | null;
   dataClass: Generated<DataClass>;
   fileVaultPersonalKey: boolean | null;
   id: Generated<string>;
+  imageDigests: string[] | null;
   kind: ReleaseLogKind;
   lapsesExceptions: Generated<ArrayType<DemoException>>;
   recordedAt: Generated<Timestamp>;
@@ -220,6 +223,7 @@ export interface ReleaseLogEntry {
   statementVersion: number | null;
   summary: string;
   title: string;
+  zapBaselineResult: string | null;
 }
 
 export interface Result {

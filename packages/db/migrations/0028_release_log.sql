@@ -8,12 +8,24 @@ create type lims.data_class as enum ('fictional', 'real');
 create type lims.release_log_kind as enum ('Release', 'ConfigurationChange', 'HostMove');
 create type lims.demo_exception as enum ('TwoRole', 'Anchoring', 'FileVault', 'PlaintextAtCloudflare', 'DemoLogin');
 
+-- True when every element of a list of images names its image and sha256 digest, as `name@sha256:<64 hex>`.
+create function lims.image_digest_refs(p_refs text[]) returns boolean
+language sql immutable as $$
+  select coalesce(bool_and(x is not null and x ~ '^[^@[:space:]]+@sha256:[0-9a-f]{64}$'), true) from unnest(p_refs) x
+$$;
+
+-- A Release carries its validation evidence (ADR 0002): the digests of the images it ships, the CI run that tested
+-- them and its result, and the ZAP baseline scan's result. The Approved Signature covers them through the content.
 create table lims.release_log_entry (
   id                      uuid                   primary key default gen_random_uuid(),
   kind                    lims.release_log_kind  not null,
   title                   text                   not null check (title <> ''),
   summary                 text                   not null check (summary <> ''),
   release                 text                   check (release <> ''),
+  image_digests           text[]                 check (cardinality(image_digests) > 0 and lims.image_digest_refs(image_digests)),
+  ci_run                  text                   check (ci_run <> ''),
+  ci_result               text                   check (ci_result in ('Passed', 'Failed')),
+  zap_baseline_result     text                   check (zap_baseline_result in ('Passed', 'Warned', 'Failed')),
   sets_data_class         lims.data_class,
   file_vault_personal_key boolean,
   records_exceptions      lims.demo_exception[]  not null default '{}',
@@ -22,6 +34,8 @@ create table lims.release_log_entry (
   statement               bytea,
   recorded_at             timestamptz            not null default clock_timestamp(),
   constraint release_log_entry_kind_release_check check (kind <> 'Release' or release is not null),
+  constraint release_log_entry_release_evidence_check check (
+    num_nulls(image_digests, ci_run, ci_result, zap_baseline_result) = case when kind = 'Release' then 0 else 4 end),
   constraint release_log_entry_statement_pair_check check ((statement_version is null) = (statement is null)),
   constraint release_log_entry_file_vault_check check (sets_data_class is null or file_vault_personal_key is not null),
   -- QA approves a statement entry alone, so it may carry no effect the Platform Operator approves.
@@ -34,7 +48,7 @@ create table lims.release_log_entry (
 -- True when every element of a scope is one 'table:OP' pair.
 create function lims.scope_pairs(p_scope text[]) returns boolean
 language sql immutable as $$
-  select coalesce(bool_and(x ~ '^[a-z_]+:(INSERT|UPDATE|DELETE)$'), true) from unnest(p_scope) x
+  select coalesce(bool_and(x is not null and x ~ '^[a-z_]+:(INSERT|UPDATE|DELETE)$'), true) from unnest(p_scope) x
 $$;
 
 -- A service identity acts only inside the record types and actions its entry declares, as 'table:OP' pairs.
@@ -374,6 +388,10 @@ language sql stable as $$
     'title', e.title,
     'summary', e.summary,
     'release', e.release,
+    'imageDigests', to_jsonb(e.image_digests),
+    'ciRun', e.ci_run,
+    'ciResult', e.ci_result,
+    'zapBaselineResult', e.zap_baseline_result,
     'setsDataClass', e.sets_data_class,
     'fileVaultPersonalKey', e.file_vault_personal_key,
     'recordsExceptions', to_jsonb(e.records_exceptions),
@@ -504,13 +522,14 @@ begin
 end $$;
 
 grant select on lims.release_log_entry, lims.service_identity, lims.deployment to lims_app;
-grant insert (kind, title, summary, release, sets_data_class, file_vault_personal_key, records_exceptions,
+grant insert (kind, title, summary, release, image_digests, ci_run, ci_result, zap_baseline_result, sets_data_class, file_vault_personal_key, records_exceptions,
               lapses_exceptions, statement_version, statement) on lims.release_log_entry to lims_app;
 grant insert (name, scope, created_by_entry_id) on lims.service_identity to lims_app;
 grant update (retired_by_entry_id) on lims.service_identity to lims_app;
 grant execute on function lims.current_data_class(), lims.fictional_records(), lims.fictional_accounts(uuid),
   lims.admins_with_another_role(), lims.release_log_entry_approved(uuid),
-  lims.open_demo_exceptions(), lims.declare_data_class_change(), lims.scope_pairs(text[]) to lims_app;
+  lims.open_demo_exceptions(), lims.declare_data_class_change(), lims.scope_pairs(text[]),
+  lims.image_digest_refs(text[]) to lims_app;
 
 -- lims.sign, with a company record's Record Version (no Lab) signable from any Lab the signer acts in.
 create or replace function lims.sign(p_reauthentication_id uuid, p_session_id uuid, p_record_table text, p_record_id uuid,

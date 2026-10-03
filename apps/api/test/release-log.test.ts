@@ -10,6 +10,14 @@ const quinn = api.person('quinn');
 const operator = await api.login(ada);
 const qa = await api.login(quinn);
 
+/** A Release's validation evidence, fictional. */
+const evidence = {
+  imageDigests: [`lims-api@sha256:${'a'.repeat(64)}`, `lims-web@sha256:${'b'.repeat(64)}`],
+  ciRun: 'https://ci.example.invalid/runs/2026-10-2',
+  ciResult: 'Passed',
+  zapBaselineResult: 'Warned',
+} satisfies Partial<ReleaseLogEntryDraft>;
+
 let recorded = 0;
 function draft(overrides: Partial<ReleaseLogEntryDraft> = {}): ReleaseLogEntryDraft {
   recorded += 1;
@@ -101,7 +109,7 @@ describe('reading the Release Log', () => {
 describe('recording a Release Log entry', () => {
   it('an operator records an entry of each kind, unapproved, with one Record Version and no Lab', async () => {
     const entries = [
-      await record(operator, { kind: 'Release', release: '2026.10.2', title: 'Release 2026.10.2' }),
+      await record(operator, { kind: 'Release', release: '2026.10.2', title: 'Release 2026.10.2', ...evidence }),
       await record(operator, { kind: 'ConfigurationChange' }),
       await record(operator, { kind: 'HostMove', title: 'Move to the VPS' }),
     ];
@@ -111,6 +119,21 @@ describe('recording a Release Log entry', () => {
       assert.deepEqual(await versionsOf(entry.id), [{ version: 1, labId: null }]);
     }
     assert.equal(entries[0]?.release, '2026.10.2');
+    assert.deepEqual(
+      [entries[0]?.imageDigests, entries[0]?.ciRun, entries[0]?.ciResult, entries[0]?.zapBaselineResult],
+      [evidence.imageDigests, evidence.ciRun, evidence.ciResult, evidence.zapBaselineResult],
+    );
+    const { content } = await api.superuser
+      .selectFrom('recordVersion')
+      .select(sql<Record<string, unknown>>`convert_from(content, 'UTF8')::jsonb`.as('content'))
+      .where('recordTable', '=', 'release_log_entry')
+      .where('recordId', '=', entries[0]?.id ?? '')
+      .executeTakeFirstOrThrow();
+    assert.deepEqual(
+      [content.imageDigests, content.ciRun, content.ciResult, content.zapBaselineResult],
+      [evidence.imageDigests, evidence.ciRun, evidence.ciResult, evidence.zapBaselineResult],
+      'the Record Version the Approved Signature covers holds the evidence',
+    );
     for (const entry of entries) assert.equal(ok(await approve(operator, entry, ada)).approved, true, entry.kind);
   });
 
@@ -143,10 +166,28 @@ describe('recording a Release Log entry', () => {
     assert.match(refusedWith(await customer.call(routes.recordReleaseLogEntry, draft()), 'role'), /staff/);
   });
 
-  it('refuses a Release without its release, a data class without the FileVault fact, and a statement without its version', async () => {
+  it('refuses a Release without its release or its validation evidence, evidence on another kind, a data class without the FileVault fact, and a statement without its version', async () => {
     assert.match(
-      refusedWith(await operator.call(routes.recordReleaseLogEntry, draft({ kind: 'Release' })), 'guard'),
+      refusedWith(await operator.call(routes.recordReleaseLogEntry, draft({ kind: 'Release', ...evidence })), 'guard'),
       /release/,
+    );
+    for (const missing of ['imageDigests', 'ciRun', 'ciResult', 'zapBaselineResult'] as const) {
+      const { [missing]: _, ...partial } = evidence;
+      assert.equal(
+        refusedWith(
+          await operator.call(
+            routes.recordReleaseLogEntry,
+            draft({ kind: 'Release', release: '2026.10.4', ...partial }),
+          ),
+          'guard',
+        ),
+        'A Release entry carries its image digests, its CI run and result, and its ZAP baseline result.',
+        missing,
+      );
+    }
+    assert.equal(
+      refusedWith(await operator.call(routes.recordReleaseLogEntry, draft({ ciRun: evidence.ciRun })), 'guard'),
+      'Only a Release entry carries image digests, a CI run or a ZAP baseline result.',
     );
     assert.match(
       refusedWith(await operator.call(routes.recordReleaseLogEntry, draft({ setsDataClass: 'fictional' })), 'guard'),

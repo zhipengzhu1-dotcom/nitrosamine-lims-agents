@@ -320,7 +320,10 @@ describe('the real data class is set by an approved Release Log entry once every
       const error = await d.approve(await d.record(REAL));
       assert.deepEqual(
         [error?.code, error?.message],
-        ['LA011', 'the database holds accounts created under fictional for someone other than the signer: membership, person'],
+        [
+          'LA011',
+          'the database holds accounts created under fictional for someone other than the signer: membership, person',
+        ],
       );
       assert.equal(await d.dataClass(), 'fictional');
     }));
@@ -329,7 +332,10 @@ describe('the real data class is set by an approved Release Log entry once every
     inDeployment('lims_dc_room', async (d) => {
       await d.asService([`insert into lims.room (lab_id, name) values ($1, 'Fictional Room')`, [d.lab]]);
       const error = await d.approve(await d.record(REAL));
-      assert.deepEqual([error?.code, error?.message], ['LA011', 'the database holds records created under fictional: room']);
+      assert.deepEqual(
+        [error?.code, error?.message],
+        ['LA011', 'the database holds records created under fictional: room'],
+      );
       assert.equal(await d.dataClass(), 'fictional');
     }));
 

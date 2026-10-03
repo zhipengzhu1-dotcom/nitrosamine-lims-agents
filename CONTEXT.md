@@ -545,7 +545,7 @@ What an Electronic Signature attests: Performed, Verified, Reviewed, Approved, R
 _Avoid_: Signature type, status
 
 **Release Log**:
-The company record of every release, configuration change and host move of the LIMS: an entry names what changed and what it declares (Service Identities it creates or retires, a demo exception it records or lapses, a Signature Statement version it brings into force, the Data Class it sets), and takes effect only in the transaction where the Platform Operator, or QA for a Signature Statement, signs it Approved. An entry is never changed or removed.
+The company record of every release, configuration change and host move of the LIMS: an entry names what changed and what it declares (Service Identities it creates or retires, a demo exception it records or lapses, a Signature Statement version it brings into force, the Data Class it sets), and takes effect only in the transaction where the Platform Operator, or QA for a Signature Statement, signs it Approved. A Release also carries its validation evidence, which the Approved Signature covers: the digest of each image it ships, the CI run that tested them with its result, and the ZAP baseline result. An entry is never changed or removed.
 _Avoid_: Changelog, release notes, deployment log
 
 **Service Identity**:
