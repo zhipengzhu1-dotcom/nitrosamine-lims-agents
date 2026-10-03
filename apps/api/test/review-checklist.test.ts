@@ -210,6 +210,22 @@ it('saving the same ticks again returns the Test Review already saved, so a rese
   assert.notEqual(recommented.review, first.review, 'changed ticks save a new Test Review');
 });
 
+it('identical saves pressed at once save one Test Review, and every answer names it', async () => {
+  await api.approveChecklist();
+  const testId = await awaitingReview();
+  const checklist = await checklistOf(testId);
+  const body = { testId, checklistVersion: checklist.version, ticks: fullTicks(checklist) };
+  const answers = await Promise.all(Array.from({ length: 6 }, () => as.rui.call(routes.saveReview, body)));
+  const named = [...new Set(answers.map((answer) => ok(answer).review))];
+  const reviews = await api.superuser.selectFrom('testReview').select('id').where('testId', '=', testId).execute();
+  assert.equal(named.length, 1, 'every answer names the same Test Review');
+  assert.deepEqual(
+    reviews.map((r) => r.id),
+    named,
+    'one Test Review is saved',
+  );
+});
+
 it('Reviewed on a Test Review that leaves a ticked item unticked is refused, naming the item, and signs nothing', async () => {
   await api.approveChecklist();
   const testId = await awaitingReview();
