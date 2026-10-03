@@ -469,7 +469,7 @@ Where one version of a Document stands: Draft, In Review, Approved, Effective, S
 _Avoid_: Stage, lifecycle state
 
 **Effective Date**:
-The date QA sets at approval on which a version replaces the previous one, which then becomes Superseded.
+The date, written by the author on the Draft, on which a version replaces the previous one, which then becomes Superseded. The Authored, Reviewed and Approved Signatures all cover it, so it changes only while the version is a Draft, and a version whose Effective Date has passed is not Approved.
 _Avoid_: Release date, issue date
 
 **Distribution**:

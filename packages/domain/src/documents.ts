@@ -2,6 +2,9 @@ import type { DocumentStatus, DocumentStepInputs, Meaning, Role } from './http.t
 import type { Sentence } from './sentence.ts';
 import type { Refusal } from './steps.ts';
 
+/** A role or status as the glossary spells it, as a refusal shows it at the bench: LabManager reads Lab Manager. */
+const term = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
+
 /** The roles that write and sign Authored on a Document; every business role of a Lab's staff. */
 export const documentAuthors: readonly Role[] = ['LabManager', 'Analyst', 'Reviewer', 'QA'];
 export const mayAuthorDocuments = (roles: readonly Role[]): boolean =>
@@ -99,13 +102,13 @@ export function documentRefusal<K extends DocumentStepName>(
 ): Refusal | null {
   const step: DocumentStep<K> = documentSteps[name];
   if (!step.roles.some((role) => actor.roles.includes(role)))
-    return { kind: 'role', message: `The ${name} step is taken by the ${step.roles.join(', ')} role.` };
+    return { kind: 'role', message: `The ${name} step is taken by the ${step.roles.map(term).join(', ')} role.` };
   const failed = step.guard?.(facts, actor, input);
   if (failed) return { kind: 'guard', message: failed };
   if (!step.from.includes(facts.status))
     return {
       kind: 'state',
-      message: `The ${name} step needs a Document version in ${step.from.join(' or ')} status, not ${facts.status}.`,
+      message: `The ${name} step needs a Document version in ${step.from.map(term).join(' or ')} status, not ${term(facts.status)}.`,
     };
   return null;
 }

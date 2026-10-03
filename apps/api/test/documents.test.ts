@@ -110,7 +110,7 @@ it('a Draft becomes Effective today through Authored by its author, Reviewed by 
 it('an Effective Date after the Lab’s today leaves the version Approved, and a Draft dated before it is refused', async () => {
   assert.equal(
     refusedWith(await draft(as.lena, 'Back-dated (fictional)', '2020-01-01'), 'guard'),
-    `The Effective Date is ${today}, the Lab's today, or later.`,
+    `An Effective Date before the Lab's today, ${today}, is refused. Choose today or later.`,
   );
   const { id } = ok(await draft(as.lena, 'Receiving samples (fictional)', later));
   ok(await step(as.lena, lena, 'signAuthored', id));
@@ -172,6 +172,32 @@ it('the author does not review, a reviewer does not approve, and Approved waits 
   );
 });
 
+it('Approved is refused to a person who is not QA, to a QA who wrote the version, and to an Admin', async () => {
+  const qiana = await api.addPerson('qiana.author', ['QA']);
+  const qianaClient = await api.login(qiana);
+  const ada = api.person('ada');
+  const adaClient = await api.login(ada);
+  const { id } = ok(await draft(qianaClient));
+  ok(await step(qianaClient, qiana, 'signAuthored', id));
+  assert.equal(
+    refusedWith(await step(adaClient, ada, 'signReviewed', id), 'role'),
+    'The signReviewed step is taken by the Reviewer role.',
+  );
+  ok(await step(as.rui, rui, 'signReviewed', id));
+  assert.equal(
+    refusedWith(await step(as.ana, api.person('ana'), 'signApproved', id), 'role'),
+    'The signApproved step is taken by the QA role.',
+  );
+  assert.equal(
+    refusedWith(await step(qianaClient, qiana, 'signApproved', id), 'guard'),
+    'A Document version is Approved by someone who neither authored nor reviewed it.',
+  );
+  assert.equal(
+    refusedWith(await step(adaClient, ada, 'signApproved', id), 'role'),
+    'The signApproved step is taken by the QA role.',
+  );
+});
+
 it('the author Abandons a Draft with a reason and it keeps its number; someone else may not', async () => {
   const { id, number } = ok(await draft(as.lena));
   assert.equal(
@@ -183,8 +209,9 @@ it('the author Abandons a Draft with a reason and it keeps its number; someone e
     [abandoned.number, abandoned.versions[0]?.status, abandoned.versions[0]?.abandonReason],
     [number, 'Abandoned', 'Replaced by a Form.'],
   );
-  const later = ok(await draft(as.lena));
-  assert.notEqual(later.number, number);
+  const next = ok(await draft(as.lena));
+  const following = (n: string) => Number(n.slice(-4));
+  assert.equal(following(next.number), following(number) + 1);
 });
 
 it('a Customer neither reads nor writes the Document vault', async () => {

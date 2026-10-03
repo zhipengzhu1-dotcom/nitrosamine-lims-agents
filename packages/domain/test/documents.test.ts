@@ -34,14 +34,14 @@ describe('the Document step registry', () => {
       'signAuthored',
       draft,
       ada,
-      'The signAuthored step is taken by the LabManager, Analyst, Reviewer, QA role.',
+      'The signAuthored step is taken by the Lab Manager, Analyst, Reviewer, QA role.',
     ],
     [
       'Authored is signed on a Draft only',
       'signAuthored',
       inReview,
       lena,
-      'The signAuthored step needs a Document version in Draft status, not InReview.',
+      'The signAuthored step needs a Document version in Draft status, not In Review.',
     ],
     ['a Reviewer signs Reviewed in review', 'signReviewed', inReview, rui, null],
     [
@@ -88,7 +88,7 @@ describe('the Document step registry', () => {
       'abandon',
       { ...reviewed, status: 'Effective' },
       lena,
-      'The abandon step needs a Document version in Draft or InReview or Approved status, not Effective.',
+      'The abandon step needs a Document version in Draft or In Review or Approved status, not Effective.',
     ],
   ];
   for (const [name, step, facts, actor, message] of cases) {
