@@ -44,6 +44,22 @@ async function openEquipment(page: Page, name: string) {
   ).toBeGreaterThanOrEqual(44);
 }
 
+/**
+ * Every Status in the Logbook keeps its word and glyph together on one line, on a phone's stacked rows too: the row's
+ * grid must take the whole line as one cell, or the glyph is squeezed into a column of its own.
+ */
+async function logbookStatusesHold(page: Page) {
+  const statuses = logbook(page).locator('.status');
+  expect(await statuses.count(), 'the Logbook shows a Status').toBeGreaterThan(0);
+  for (const status of await statuses.all()) {
+    await expect(status).toBeVisible();
+    const line = await status.boundingBox();
+    expect(line?.height, 'the Status word and glyph sit on one line').toBeLessThan(28);
+    const glyph = await status.locator('.glyph').boundingBox();
+    expect(glyph?.width, 'the glyph keeps its width').toBeGreaterThanOrEqual(12);
+  }
+}
+
 /** Before a shot: let the sheet finish sliding in and bring the part the shot is about into view. */
 async function settle(page: Page, show: string) {
   const open = sheet(page);
@@ -87,6 +103,7 @@ test('the Lab Manager registers a balance, QA approves it for use, and the Logbo
   await expect(logbook(page).first()).toContainText('Registered');
   await expect(logbook(page).first()).toContainText('Lena Varga (lena.manager)');
   await expect(page.locator('.rbtn--commit'), 'only QA approves Equipment for use').not.toHaveText(/Approve/);
+  await logbookStatusesHold(page);
   await shot('quarantined', 'h2:text-is("Logbook") + table');
   await signOutFromRail(page);
 
@@ -106,6 +123,7 @@ test('the Lab Manager registers a balance, QA approves it for use, and the Logbo
   await expect(logbook(page)).toHaveCount(2);
   await expect(logbook(page).nth(1)).toContainText('Quarantined to In use');
   await expect(logbook(page).nth(1)).toContainText('Quinn Adeyemi (quinn.qa)');
+  await logbookStatusesHold(page);
   await shot('in-use', 'h2:text-is("Logbook") + table');
 
   expect(

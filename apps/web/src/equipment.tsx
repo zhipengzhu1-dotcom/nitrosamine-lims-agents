@@ -168,29 +168,30 @@ function registration(choices: EquipmentChoices, onDone: () => Promise<void>): R
   };
 }
 
+/** One Logbook line in one element, so a stacked row's grid takes it as one cell and never splits a Status from its words. */
 function LogbookLine({ entry }: { entry: LogbookEntry }) {
   if (entry.entry === 'event')
     return (
-      <>
+      <span>
         <b>{words(entry.kind)}</b> {entry.note}
-      </>
+      </span>
     );
   if (entry.entry === 'move')
     return (
-      <>
+      <span>
         <b>Moved</b> from {entry.from.name} to {entry.to.name}
-      </>
+      </span>
     );
   if (entry.from === null)
     return (
-      <>
+      <span>
         <b>Registered</b> <Status fitness={entry.to} />
-      </>
+      </span>
     );
   return (
-    <>
+    <span>
       <Status fitness={entry.from} /> to <Status fitness={entry.to} />
-    </>
+    </span>
   );
 }
 
