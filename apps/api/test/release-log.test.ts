@@ -297,7 +297,6 @@ describe('recording a Release Log entry', () => {
 describe('approving a Release Log entry', () => {
   it('the operator approves a system entry by re-entering their credentials; it is then signed once, and the Release Log shows who signed, as what and when', async () => {
     const entry = await record(operator);
-    const before = Date.now();
     const approved = ok(await approve(operator, entry, ada));
     assert.equal(approved.id, entry.id);
     const { signedAt, ...approval } = approved.approval ?? assert.fail('the entry is approved');
@@ -309,7 +308,15 @@ describe('approving a Release Log entry', () => {
       authenticator: 'Password',
     });
     assert.match(signedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, 'the time is ISO 8601 UTC');
-    assert.ok(Date.parse(signedAt) >= before - 60_000, signedAt);
+    const { stored } = await api.superuser
+      .selectFrom('signature')
+      .innerJoin('recordVersion', 'recordVersion.id', 'signature.recordVersionId')
+      .select(
+        sql<string>`to_char(signature.signed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as('stored'),
+      )
+      .where('recordVersion.recordId', '=', entry.id)
+      .executeTakeFirstOrThrow();
+    assert.equal(signedAt, stored, 'the time is the Signature as stored');
     const signatures = await api.superuser
       .selectFrom('signature')
       .innerJoin('recordVersion', 'recordVersion.id', 'signature.recordVersionId')

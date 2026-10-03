@@ -405,7 +405,7 @@ it('granting a Membership locks the person before the deployment, the order a cl
   /** True while some backend waits on a lock to insert a Membership. */
   const grantWaiting = async () =>
     (
-      await sql<{ waiting: boolean }>`select exists (select from pg_stat_activity
+      await sql<{ waiting: boolean }>`select pg_sleep(0.01), exists (select from pg_stat_activity
                                         where wait_event_type = 'Lock' and query ilike '%insert into%membership%') as waiting`.execute(
         api.superuser,
       )
@@ -418,8 +418,8 @@ it('granting a Membership locks the person before the deployment, the order a cl
       role: 'Analyst',
       reason: 'New starter',
     });
-    const until = Date.now() + 10_000;
-    while (!(await grantWaiting())) if (Date.now() > until) assert.fail('the grant never waited on the deployment');
+    let tries = 0;
+    while (!(await grantWaiting())) if ((tries += 1) > 1000) assert.fail('the grant never waited on the deployment');
     const probe = await api.superuser
       .connection()
       .execute((c) => sql`select from lims.person where id = ${person.id} for no key update nowait`.execute(c))
