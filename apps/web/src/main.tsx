@@ -42,7 +42,7 @@ function parse(hash: string): Route {
   if (!module) return { page: 'tests', open: null };
   if (module.key === 'incidents') return { page: 'module', module, open: id || null, before: null };
   if (module.key === 'staff' && id && b === 'access-events')
-    return { page: 'module', module, open: id, before: new URLSearchParams(query).get('before') };
+    return { page: 'module', module, open: id, before: new URLSearchParams(query).get('before') || null };
   return { page: 'module', module, open: null, before: null };
 }
 

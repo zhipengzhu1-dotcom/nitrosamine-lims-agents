@@ -124,27 +124,25 @@ async function accessEventsOf(
 ) {
   const scope = adminScope(db, actor);
   const person = await onePerson(scope, actor.lab.id, personId);
-  let listed = scope
-    .accessEvents()
-    .select([
-      'id',
-      'kind',
-      'at',
-      'workstationId',
-      sql<string | null>`host(source_address)`.as('sourceAddress'),
-      'failureReason',
-    ])
-    .where('subjectId', '=', personId);
+  const theirs = scope.accessEvents().where('subjectId', '=', personId);
+  let page = theirs.select([
+    'id',
+    'kind',
+    'at',
+    'workstationId',
+    sql<string | null>`host(source_address)`.as('sourceAddress'),
+    'failureReason',
+  ]);
   if (before !== null) {
-    const theirs = await listed.where('id', '=', before).executeTakeFirst();
-    if (!theirs) refuse('notFound', 'This person has no such Access Event in this Lab.');
-    listed = listed.where((eb) => {
-      // The database compares the cursor's instant, which a JavaScript Date would cut to milliseconds.
-      const at = scope.accessEvents().select('at').where('id', '=', before);
-      return eb.or([eb('at', '<', at), eb.and([eb('at', '=', at), eb('id', '>', before)])]);
-    });
+    const cursor = theirs.where('id', '=', before);
+    if (!(await cursor.select('id').executeTakeFirst()))
+      refuse('notFound', 'This person has no such Access Event in this Lab.');
+    // The database reads the cursor's instant, which a JavaScript Date would cut to milliseconds. The `<=` bound repeats
+    // the `or` so that an index on `at` can start its scan at the cursor.
+    const at = cursor.select('at');
+    page = page.where((eb) => eb.and([eb('at', '<=', at), eb.or([eb('at', '<', at), eb('id', '>', before)])]));
   }
-  const rows = await listed
+  const rows = await page
     .orderBy('at', 'desc')
     .orderBy('id')
     .limit(LISTED_ACCESS_EVENTS + 1)

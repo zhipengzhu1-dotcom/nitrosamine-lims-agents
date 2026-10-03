@@ -197,6 +197,9 @@ test('the Admin opens a locked-out person’s Access Events, sees under the Lock
   expect((await newest.boundingBox())?.height, 'a gloved finger can press it').toBeGreaterThanOrEqual(44);
   await newest.click();
   await expect(earlier).toBeVisible();
+  await page.goto(`/#/staff/${person.id}/access-events?before=`);
+  await expect(earlier, 'an empty before opens the newest page').toBeVisible();
+  await expect(newest).toHaveCount(0);
   await lou.dispose();
   await stranger.dispose();
 });

@@ -394,11 +394,10 @@ it("the Admin reaches every one of a person's Access Events, the newest 100 firs
     },
     'the Access Event older than the newest 100 is listed last',
   );
-  const listed = [...newest.events, ...before.events].map((e) => e.id);
   assert.deepEqual(
-    [...listed].sort(),
-    [oldest, ...tied].map((e) => e.id).sort(),
-    'every Access Event is listed once, none skipped where they share an instant',
+    [...newest.events, ...before.events].map((e) => e.id),
+    [...tied.map((e) => e.id).sort(), oldest.id],
+    'every Access Event is listed once, newest first and by ID where they share an instant',
   );
 });
 
@@ -411,6 +410,10 @@ it("the Admin reads earlier Access Events only before one of the person's own Ac
   assert.ok(othersEvent);
   refusedWith(await ada.call(routes.earlierAccessEvents, { id: person.id, before: othersEvent.id }), 'notFound');
   refusedWith(await ada.call(routes.earlierAccessEvents, { id: person.id, before: randomUUID() }), 'notFound');
+  refusedWith(
+    await ada.call(routes.earlierAccessEvents, { id: api.person('cora').id, before: othersEvent.id }),
+    'notFound',
+  );
   await audited(api.superuser, SYSTEM, (tx) =>
     tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
   );
