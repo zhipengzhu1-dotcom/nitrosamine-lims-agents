@@ -219,6 +219,7 @@ describe('the database writes a Record Version whenever a signable record change
       // The database refuses to remove a Result, so its trigger is off to show what a removal would version.
       await sql`alter table lims.result disable trigger refuse_removal`.execute(tx);
       await tx.deleteFrom('result').where('testId', '=', testId).execute();
+      await sql`alter table lims.result enable trigger refuse_removal`.execute(tx);
     });
     assert.deepEqual(
       (await versions(app, 'test', testId)).map((v) => [v.version, v.content.value]),
