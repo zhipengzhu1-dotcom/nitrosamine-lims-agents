@@ -54,9 +54,12 @@ test('a deployment whose data class is real shows no banner', async ({ page }) =
 test('a deployment whose data class cannot be read keeps the banner', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'the class is read the same way on every browser');
   await page.route('**/api/deployment', (route) => route.fulfill({ status: 500, json: { reference: 'probe' } }));
-  const answered = page.waitForResponse('**/api/deployment');
+  const finished = page.waitForEvent('requestfinished', (request) => request.url().endsWith('/api/deployment'));
   await page.goto('/');
-  await answered;
+  await finished;
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  // Two frames after the failed answer, so the banner asserted is the one the failure leaves, not the one shown while
+  // the class was still loading.
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   await expect(banner(page)).toBeVisible();
 });
