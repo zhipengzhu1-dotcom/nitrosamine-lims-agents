@@ -100,25 +100,39 @@ const statusWords: { [S in FitnessStatus]: string } = {
   Retired: 'Retired',
 };
 
-/** Why `name` may not be taken on Equipment in `status` by someone holding `roles`, or null when it may: the role first, then the status. */
-export function equipmentRefusal(
+/** Whether `name` may be taken, and in which role; or why not: the role first, then the status. */
+export type EquipmentAccess = { refused: Refusal; role: null } | { refused: null; role: Role };
+
+/** Whether someone holding `roles` may take `name` on Equipment in `status`, and the role they act in when they may. */
+export function equipmentAccess(
   name: EquipmentStepName,
   status: StoredFitnessStatus,
   roles: readonly Role[],
-): Refusal | null {
+): EquipmentAccess {
   const step = equipmentSteps[name];
-  if (equipmentActingRole(name, roles) === null)
+  const role = equipmentActingRole(name, roles);
+  if (role === null)
     return {
-      kind: 'role',
-      message: `Only ${step.roles.map((role) => roleWords[role]).join(' or ')} may take the step of ${stepWords[name]}.`,
+      refused: {
+        kind: 'role',
+        message: `Only ${step.roles.map((r) => roleWords[r]).join(' or ')} may take the step of ${stepWords[name]}.`,
+      },
+      role,
     };
   if (!step.from.includes(status))
     return {
-      kind: 'state',
-      message: `The step of ${stepWords[name]} is not open on ${statusWords[status]} Equipment.`,
+      refused: {
+        kind: 'state',
+        message: `The step of ${stepWords[name]} is not open on ${statusWords[status]} Equipment.`,
+      },
+      role: null,
     };
-  return null;
+  return { refused: null, role };
 }
+
+/** Why `name` may not be taken on Equipment in `status` by someone holding `roles`, or null when it may. */
+export const equipmentRefusal = (name: EquipmentStepName, status: StoredFitnessStatus, roles: readonly Role[]) =>
+  equipmentAccess(name, status, roles).refused;
 
 /** The steps someone holding `roles` may take on Equipment in `status` now, in registry order; the web offers these. */
 export function openEquipmentSteps(status: StoredFitnessStatus, roles: readonly Role[]): EquipmentStepName[] {

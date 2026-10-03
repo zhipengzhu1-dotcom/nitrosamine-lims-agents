@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
+import { audited, type FitnessStatus } from '@lims/db';
 import { type Equipment, equipmentStepRoute, routes, type SigningBody } from '@lims/domain';
+import { sql } from 'kysely';
 import { type Account, type Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_equipment_test');
@@ -211,4 +213,110 @@ it('the Logbook lists Events, Fitness Status changes and moves in time order', a
   // ISO 8601 UTC instants of one format sort as strings.
   const times = moved.logbook.map((line) => String(line.at));
   assert.deepEqual(times, [...times].sort());
+});
+
+/**
+ * Runs `press` after the Lab Manager, in another session, moved the Equipment to `status` but before that commits, so
+ * the press reads the Equipment as the screen showed it, waits on the change (its row, or the Lab's chain) and writes
+ * against the Equipment as it then is.
+ */
+async function movedUnder<T>(equipmentId: string, status: FitnessStatus, press: () => Promise<T>): Promise<T> {
+  const as = {
+    actor: `person:${lena.username}`,
+    role: 'LabManager',
+    reason: 'Change Equipment under a press',
+  } as const;
+  const { answer } = await audited(api.superuser, as, async (tx) => {
+    await tx.updateTable('equipment').set({ fitnessStatus: status }).where('id', '=', equipmentId).execute();
+    const answer = press();
+    // A press left behind by a failed wait must not surface as an unhandled rejection.
+    answer.catch(() => {});
+    await api.untilWaitingOnLocks(1);
+    return { answer };
+  });
+  return answer;
+}
+
+const stale = 'The Equipment has moved on since this screen loaded it. Reload it.';
+
+it('a move pressed on Equipment that is retired before the write lands is refused as stale, and the Logbook keeps no move', async () => {
+  const equipment = await inUse();
+  const answer = await movedUnder(equipment.id, 'Retired', () =>
+    as.lena.call(equipmentStepRoute('move'), { id: equipment.id, input: { roomId: prepRoom.id } }),
+  );
+  assert.equal(refusedWith(answer, 'stale'), stale);
+  const after = ok(await as.lena.call(routes.equipment, { id: equipment.id }));
+  assert.deepEqual([after.fitnessStatus, after.room.id], ['Retired', lcmsRoom.id]);
+  assert.ok(!after.logbook.some((line) => line.entry === 'move'), 'the Logbook holds no move');
+});
+
+it('a retire pressed on Equipment that is suspended before the write lands is refused as stale, and the Equipment stays Suspended', async () => {
+  const equipment = await inUse();
+  const answer = await movedUnder(equipment.id, 'Suspended', () =>
+    as.lena.call(equipmentStepRoute('retire'), { id: equipment.id, input: {} }),
+  );
+  assert.equal(refusedWith(answer, 'stale'), stale);
+  assert.equal(ok(await as.lena.call(routes.equipment, { id: equipment.id })).fitnessStatus, 'Suspended');
+});
+
+it('a Note pressed on Equipment that is retired before the write lands is refused as stale, and the Logbook keeps no Note', async () => {
+  const equipment = await inUse();
+  const answer = await movedUnder(equipment.id, 'Retired', () =>
+    as.ana.call(equipmentStepRoute('recordEvent'), {
+      id: equipment.id,
+      input: { kind: 'Note', note: 'Pan looks clean.' },
+      signature: signing(equipment, ana),
+    }),
+  );
+  assert.equal(refusedWith(answer, 'stale'), stale);
+  const after = ok(await as.lena.call(routes.equipment, { id: equipment.id }));
+  assert.ok(!after.logbook.some((line) => line.entry === 'event'), 'the Logbook holds no Event');
+});
+
+/** The version of the Equipment that its latest Approved Signature binds. */
+async function boundVersion(equipmentId: string): Promise<number> {
+  const bound = await api.superuser
+    .selectFrom('signature')
+    .innerJoin('recordVersion', 'recordVersion.id', 'signature.recordVersionId')
+    .select('recordVersion.version')
+    .where('recordVersion.recordTable', '=', 'equipment')
+    .where('recordVersion.recordId', '=', equipmentId)
+    .orderBy('recordVersion.version', 'desc')
+    .executeTakeFirstOrThrow();
+  return bound.version;
+}
+
+/** Moves In use Equipment to the other Room, then has QA approve it on the version shown, which its Signature must bind. */
+const moveAndApprove = async (equipment: Equipment, round: number): Promise<Equipment> => {
+  const roomId = equipment.room.id === lcmsRoom.id ? prepRoom.id : lcmsRoom.id;
+  const moved = ok(await as.lena.call(equipmentStepRoute('move'), { id: equipment.id, input: { roomId } }));
+  const shown = ok(await as.quinn.call(routes.equipment, { id: equipment.id })).recordVersion;
+  assert.deepEqual(shown, moved.recordVersion, `round ${round}: the step's reply shows what a reload shows`);
+  const approved = ok(await approve(as.quinn, moved, quinn));
+  assert.equal(await boundVersion(approved.id), shown.version, `round ${round}`);
+  return approved;
+};
+
+it('the Record Version shown is the one the next Approved signing binds, even when a move returns the Equipment to an earlier state', async () => {
+  let equipment = await inUse();
+  for (let round = 1; round <= 6; round++) equipment = await moveAndApprove(equipment, round);
+});
+
+it('a Performed signing keeps the Equipment as the signer saw it as a Record Version', async () => {
+  const equipment = await inUse();
+  ok(
+    await as.ana.call(equipmentStepRoute('recordEvent'), {
+      id: equipment.id,
+      input: { kind: 'Cleaning', note: 'Wiped the pan.' },
+      signature: signing(equipment, ana),
+    }),
+  );
+  const kept = await api.superuser
+    .selectFrom('recordVersion')
+    .select(sql<string>`encode(content_hash, 'hex')`.as('contentHash'))
+    .where('recordTable', '=', 'equipment')
+    .where('recordId', '=', equipment.id)
+    .where('version', '=', equipment.recordVersion.version)
+    .executeTakeFirst();
+  assert.equal(kept?.contentHash, equipment.recordVersion.contentHash);
 });

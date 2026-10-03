@@ -4,8 +4,7 @@ import {
   type EquipmentStepBody,
   type EquipmentStepInputs,
   type EquipmentStepName,
-  equipmentActingRole,
-  equipmentRefusal,
+  equipmentAccess,
   equipmentRegistrar,
   equipmentStepNames,
   equipmentStepRoute,
@@ -18,7 +17,7 @@ import {
   routes,
   type StoredFitnessStatus,
 } from '@lims/domain';
-import { type Kysely, sql } from 'kysely';
+import { type Kysely, sql, type Updateable } from 'kysely';
 import type { App } from './app.ts';
 import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
@@ -29,13 +28,16 @@ function readableBy(actor: ActorContext): void {
   if (!mayReadEquipment(actor.roles)) refuse('role', 'Equipment is read by the staff of its Lab.');
 }
 
-/** The version an Approved signing binds: the one that already holds the Equipment's content, else the next. */
+/**
+ * The version a signing from this screen binds: the latest Record Version when it holds the Equipment's content, else
+ * the next one, as lims.save_record_version decides. An earlier version with the same content is not it.
+ */
 const versionOf = (labId: string) => sql<number>`coalesce(
-  (select v.version from lims.record_version v
+  (select case when v.content_hash = lims.equipment_content_hash(equipment) then v.version else v.version + 1 end
+     from lims.record_version v
     where v.lab_id = ${labId} and v.record_table = 'equipment' and v.record_id = equipment.id
-      and v.content_hash = lims.equipment_content_hash(equipment)),
-  (select coalesce(max(v.version), 0) + 1 from lims.record_version v
-    where v.lab_id = ${labId} and v.record_table = 'equipment' and v.record_id = equipment.id))`;
+    order by v.version desc limit 1),
+  1)`;
 
 /** A person named by an Audit Trail actor (`person:<username>`) or by id, as the Logbook shows them. */
 const byPerson = (username: string | null, displayName: string | null) => ({
@@ -148,26 +150,47 @@ async function readEquipment(scope: Scope, db: Kysely<DB>, id: string) {
   };
 }
 
+const movedOnMessage = 'The Equipment has moved on since this screen loaded it. Reload it.';
+
 /** The database's refusal of a Fitness Status move (LA014) means another session changed the Equipment first. */
 function movedOn(error: unknown): never {
-  if (postgresFault(error)?.sqlstate === 'LA014' && error instanceof Error)
-    refuse('stale', 'The Equipment has moved on since this screen loaded it. Reload it.');
+  if (postgresFault(error)?.sqlstate === 'LA014' && error instanceof Error) refuse('stale', movedOnMessage);
   throw new Error('the Equipment step failed in the database', { cause: error });
 }
 
-/** Writes the Record Version a signing binds and returns it with its hash, as lims.sign is shown it. */
-async function versionForSigning(q: WriteQueries, proof: string, table: 'equipment' | 'equipment_event', id: string) {
+/** The columns a step writes on Equipment; the database grants the app role no other. */
+type EquipmentChange = Partial<
+  Pick<Updateable<DB['equipment']>, 'fitnessStatus' | 'roomId' | 'softwareVersion' | 'firmwareVersion'>
+>;
+
+/**
+ * Writes `change` to the Equipment as the step read it: a row whose Fitness Status moved on since the screen loaded it
+ * is left alone and the step is refused as stale, because the step was decided on the status shown.
+ */
+async function changeEquipment(q: WriteQueries, { id, status }: Target, change: EquipmentChange): Promise<void> {
+  const { numUpdatedRows } = await q
+    .update('equipment')
+    .set(change)
+    .where('id', '=', id)
+    .where('fitnessStatus', '=', status)
+    .executeTakeFirstOrThrow()
+    .catch(movedOn);
+  if (!numUpdatedRows) refuse('stale', movedOnMessage);
+}
+
+/** Writes the Record Version of the record as it is now, for the signing `proof` names, and returns its id. */
+async function versionForSigning(
+  q: WriteQueries,
+  proof: string,
+  table: 'equipment' | 'equipment_event',
+  id: string,
+): Promise<string> {
   const { rows } = await sql<{ id: string }>`select lims.version_equipment_record(${proof}, ${table}, ${id}) as id`
     .execute(q.company)
     .catch(signingRefused);
   const [latest] = rows;
   if (!latest) throw new Error('lims.version_equipment_record returned no version');
-  // A second statement, because the version the function writes is not visible to the statement that calls it.
-  return q
-    .from('recordVersion')
-    .select(['id', sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash')])
-    .where('id', '=', latest.id)
-    .executeTakeFirstOrThrow();
+  return latest.id;
 }
 
 /** The Equipment a step acts on, as the step read it, and the person taking the step. */
@@ -185,49 +208,29 @@ type Effect<K extends EquipmentStepName> = (
 
 /** What each step writes. A step that records an Equipment Event returns its id, so a Performed signing can bind it. */
 const effects: { [K in EquipmentStepName]: Effect<K> } = {
-  approve: async (q, { id, status }) => {
-    const moved = await q
-      .update('equipment')
-      .set({ fitnessStatus: 'InUse' })
-      .where('id', '=', id)
-      .where('fitnessStatus', '=', status)
-      .executeTakeFirstOrThrow()
-      .catch(movedOn);
-    if (!moved.numUpdatedRows) refuse('stale', 'The Equipment has moved on since this screen loaded it. Reload it.');
+  approve: async (q, target) => {
+    await changeEquipment(q, target, { fitnessStatus: 'InUse' });
     return null;
   },
   markSuspect: async (q, target, input) => recordEvent(q, target, 'Suspect', input.reason),
   recordEvent: async (q, target, input) => {
-    const event = await recordEvent(q, target, input.kind, input.note);
+    // The version now installed is written first, on the status shown; the Event then records it on the suspended row.
     if ('version' in input)
-      await q
-        .update('equipment')
-        .set(input.kind === 'SoftwareChange' ? { softwareVersion: input.version } : { firmwareVersion: input.version })
-        .where('id', '=', target.id)
-        .executeTakeFirstOrThrow()
-        .catch(movedOn);
-    return event;
+      await changeEquipment(
+        q,
+        target,
+        input.kind === 'SoftwareChange' ? { softwareVersion: input.version } : { firmwareVersion: input.version },
+      );
+    return recordEvent(q, target, input.kind, input.note);
   },
-  move: async (q, { id, status }, input) => {
+  move: async (q, target, input) => {
     const known = await q.from('room').select('id').where('id', '=', input.roomId).executeTakeFirst();
     if (!known) refuse('notFound', 'No Room of this Lab has that id.');
-    await q
-      .update('equipment')
-      .set({ roomId: input.roomId })
-      .where('id', '=', id)
-      .where('fitnessStatus', '=', status)
-      .executeTakeFirstOrThrow()
-      .catch(movedOn);
+    await changeEquipment(q, target, { roomId: input.roomId });
     return null;
   },
-  retire: async (q, { id, status }) => {
-    await q
-      .update('equipment')
-      .set({ fitnessStatus: 'Retired' })
-      .where('id', '=', id)
-      .where('fitnessStatus', '=', status)
-      .executeTakeFirstOrThrow()
-      .catch(movedOn);
+  retire: async (q, target) => {
+    await changeEquipment(q, target, { fitnessStatus: 'Retired' });
     return null;
   },
 };
@@ -261,9 +264,9 @@ function registerEquipmentStep<K extends EquipmentStepName>(
     readableBy(actor);
     const scope = labScope(db, actor);
     const view = await readEquipment(scope, db, body.id);
-    const refused = equipmentRefusal(name, view.fitnessStatus, actor.roles);
-    if (refused) refuse(refused.kind, refused.message);
-    const role = equipmentActingRole(name, actor.roles) ?? refuse('role', 'Equipment is read by the staff of its Lab.');
+    const access = equipmentAccess(name, view.fitnessStatus, actor.roles);
+    if (access.refused) refuse(access.refused.kind, access.refused.message);
+    const { role } = access;
     const signs = step.signs;
     const signature =
       signs === null ? null : (body.signature ?? refuse('malformed', "This step needs the signer's credentials."));
@@ -295,38 +298,34 @@ function registerEquipmentStep<K extends EquipmentStepName>(
       name,
       role,
       async (q) => {
-        const proof =
-          signs && signature && reauthenticated
-            ? await proveReauthentication(q, actor, sessionId, signs, reauthenticated)
-            : null;
-        if (proof && signs === 'Approved' && signature) {
-          const latest = await versionForSigning(q, proof, 'equipment', body.id);
-          await signRecord(q, {
-            proof,
-            sessionId,
-            meaning: signs,
-            table: 'equipment',
-            recordId: body.id,
-            seen: { id: latest.id, contentHash: signature.recordVersion.contentHash },
-            statementVersion: signature.statementVersion,
-            release,
-          });
-        }
         const target = { id: body.id, status: view.fitnessStatus, personId: actor.person.id };
-        const eventId = await effects[name](q, target, body.input);
-        if (proof && signs === 'Performed' && signature && eventId) {
-          // The Event is written by this press, so the version the signer is shown is the one written for it here.
-          const latest = await versionForSigning(q, proof, 'equipment_event', eventId);
-          await signRecord(q, {
+        if (!(signs && signature && reauthenticated)) {
+          await effects[name](q, target, body.input);
+          return;
+        }
+        const proof = await proveReauthentication(q, actor, sessionId, signs, reauthenticated);
+        // The signer was shown the Equipment, so its version as shown is what either signing binds as seen; it is
+        // written before the step changes the row.
+        const seen = {
+          id: await versionForSigning(q, proof, 'equipment', body.id),
+          contentHash: signature.recordVersion.contentHash,
+        };
+        const sign = (table: 'equipment' | 'equipment_event', recordId: string) =>
+          signRecord(q, {
             proof,
             sessionId,
             meaning: signs,
-            table: 'equipment_event',
-            recordId: eventId,
-            seen: latest,
+            table,
+            recordId,
+            seen,
             statementVersion: signature.statementVersion,
             release,
           });
+        if (signs === 'Approved') await sign('equipment', body.id);
+        const eventId = await effects[name](q, target, body.input);
+        if (signs === 'Performed' && eventId) {
+          await versionForSigning(q, proof, 'equipment_event', eventId);
+          await sign('equipment_event', eventId);
         }
       },
       reauthenticated,

@@ -70,7 +70,7 @@ const fixtureContent = Buffer.from('{"id":"fixture"}');
 /** Signature statement 1's hash, read from the migrated database before the fixtures are written. */
 let statementHash: Buffer = zeros;
 
-const fixture: [string, Row][] = [
+const fixture: [Table, Row][] = [
   ['lims.customer', { id: id.customer, name: 'Refusal Customer (fictional)' }],
   [
     'lims.person',
