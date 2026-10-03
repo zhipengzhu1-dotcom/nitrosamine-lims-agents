@@ -89,9 +89,13 @@ const unsignedLook = {
     </>
   ),
 } as const;
+const intactLook = { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> } as const;
+const brokenLook = { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> } as const;
 const markLook = {
-  Intact: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
-  Broken: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
+  Intact: intactLook,
+  Broken: brokenLook,
+  'As recorded': intactLook,
+  'Changed since opened': brokenLook,
   Unsigned: unsignedLook,
   'Signatures unsigned': unsignedLook,
   Open: unsignedLook,
@@ -113,11 +117,14 @@ const markLook = {
       </>
     ),
   },
-} as const satisfies Record<ChainVerdict | IncidentState | 'Unsigned' | 'Signatures unsigned', unknown>;
+} as const satisfies Record<
+  ChainVerdict | IncidentState | 'Unsigned' | 'Signatures unsigned' | 'As recorded' | 'Changed since opened',
+  unknown
+>;
 
 /**
- * A Test state with its track, or a mark with its glyph: a chain verdict, a System Incident's state, an unsigned
- * Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
+ * A Test state with its track, or a mark with its glyph: a chain verdict, a System Incident's state, whether the breaks
+ * in its range are still the ones it recorded, an unsigned Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
  * the word and glyph are final, and an accent plays around them.
  */
 export function Status(
