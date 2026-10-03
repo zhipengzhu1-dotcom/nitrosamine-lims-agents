@@ -63,6 +63,7 @@ create table lims.critical_data_change_decision (
   unique (lab_id, change_id),
   constraint decision_signed_only_if_approved_check check ((outcome = 'Approved') = (signature_id is not null)),
   constraint decision_reason_unless_approved_check check ((outcome = 'Approved') = (reason_id is null)),
+  constraint decision_text_unless_approved_check check (outcome <> 'Approved' or reason_text is null),
   foreign key (lab_id, change_id, test_id) references lims.critical_data_change (lab_id, id, test_id),
   foreign key (lab_id, signature_id) references lims.signature
 );
@@ -181,6 +182,12 @@ begin
     raise exception 'a Critical Data Change is rejected by a Reviewer, who could approve it' using errcode = 'LA017';
   end if;
   if new.outcome = 'Approved' then
+    if not exists (
+      select from membership m
+       where m.lab_id = new.lab_id and m.person_id = new.decided_by and m.role = 'Reviewer'
+         and current_setting('lims.role', true) = 'Reviewer') then
+      raise exception 'a Critical Data Change is approved by a Reviewer, acting as Reviewer' using errcode = 'LA017';
+    end if;
     select s.person_id, s.meaning, s.xmin as signed_xmin, v.record_table, v.record_id, v.version into signed
       from signature s join record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
       where s.lab_id = new.lab_id and s.id = new.signature_id;
@@ -338,6 +345,27 @@ end $$;
 
 create trigger version_record after insert on lims.critical_data_change
   for each row execute function lims.version_critical_data_change();
+
+-- Approved is the Signature Meaning of a Critical Data Change and of nothing else, and a Critical Data Change is signed
+-- only Approved. lims.sign checks the signer, the proof and the version shown; this checks what an Approved signing binds.
+create function lims.check_change_signing() returns trigger
+language plpgsql set search_path = lims, pg_temp as $$
+declare
+  signed record_version;
+begin
+  select * into signed from record_version where lab_id = new.lab_id and id = new.record_version_id;
+  if signed.id is null then
+    return new; -- signature_record_version_fkey refuses it
+  end if;
+  if (new.meaning = 'Approved') <> (signed.record_table = 'critical_data_change') then
+    raise exception 'Approved is the Signature Meaning of a Critical Data Change, and a Critical Data Change is signed only Approved'
+      using errcode = 'LA010';
+  end if;
+  return new;
+end $$;
+
+create trigger change_signing before insert on lims.signature
+  for each row execute function lims.check_change_signing();
 
 -- No Test step signs while a Critical Data Change on one of the Test's Results is pending: neither the Test nor the
 -- Test Report built on it. Holds the Lab's chain before the check, as a proposal does, so of a proposal and a signing at

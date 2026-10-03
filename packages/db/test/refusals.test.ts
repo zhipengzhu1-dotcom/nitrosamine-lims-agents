@@ -3879,6 +3879,8 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
     ['lims.critical_data_change_decision.decide', 'critical-data-changes.test.ts'],
     ['lims.critical_data_change_decision.decision_reason_unless_approved_check', 'critical-data-changes.test.ts'],
     ['lims.critical_data_change_decision.decision_signed_only_if_approved_check', 'critical-data-changes.test.ts'],
+    ['lims.critical_data_change_decision.decision_text_unless_approved_check', 'critical-data-changes.test.ts'],
+    ['lims.signature.change_signing', 'critical-data-changes.test.ts'],
     ['lims.critical_data_change_decision.refuse_change', 'critical-data-changes.test.ts'],
     ['lims.critical_data_change_decision.refuse_truncate', 'critical-data-changes.test.ts'],
     ['lims.picklist_reason.capture', 'critical-data-changes.test.ts'],

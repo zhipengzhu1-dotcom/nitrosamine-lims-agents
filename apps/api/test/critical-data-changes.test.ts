@@ -416,6 +416,40 @@ describe('a Critical Data Change is decided once: withdrawn by its proposer, app
   });
 });
 
+describe('Approved is the Signature Meaning of a Critical Data Change, given by a Reviewer acting as Reviewer', () => {
+  const onlyChanges =
+    'Approved is the Signature Meaning of a Critical Data Change, and a Critical Data Change is signed only Approved';
+
+  it('an Approved Signature on a Test, and a Reviewed Signature on a Critical Data Change, are refused', async () => {
+    const test = await performedTest();
+    const onTest = await refusal(
+      acting(api.db, rui, 'Reviewer', (tx) => signThrough(tx, rui, 'Approved', 'test', test.testId)),
+    );
+    assert.deepEqual([onTest.code, onTest.message], ['LA010', onlyChanges]);
+    const changeId = await propose(test);
+    const onChange = await refusal(
+      acting(api.db, rui, 'Reviewer', (tx) => signThrough(tx, rui, 'Reviewed', 'critical_data_change', changeId)),
+    );
+    assert.deepEqual([onChange.code, onChange.message], ['LA010', onlyChanges]);
+  });
+
+  it('an approval written by its Reviewer acting in another role is refused', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    await refusedWith(
+      acting(api.db, rhea, 'Reviewer', async (tx) => {
+        const signatureId = await signThrough(tx, rhea, 'Approved', 'critical_data_change', changeId);
+        await sql`select set_config('lims.role', 'QA', true)`.execute(tx);
+        await tx
+          .insertInto('criticalDataChangeDecision')
+          .values({ labId: api.labId, changeId, testId: test.testId, outcome: 'Approved', signatureId })
+          .execute();
+      }),
+      'a Critical Data Change is approved by a Reviewer, acting as Reviewer',
+    );
+  });
+});
+
 describe('a decision takes the Lab chain before it is written, so two decisions at once take turns', () => {
   it('a withdrawal that starts while a rejection holds the chain waits, then meets the decision already made', async () => {
     const test = await performedTest();
@@ -580,6 +614,14 @@ describe('the database refuses a malformed picklist reason, proposal or decision
     .select('proposedOnVersion')
     .where('id', '=', pendingId)
     .executeTakeFirstOrThrow();
+  const approved = await performedTest();
+  const approvedId = await propose(approved);
+  await approve(approvedId, approved.testId);
+  const { signatureId: approval } = await api.db
+    .selectFrom('criticalDataChangeDecision')
+    .select('signatureId')
+    .where('changeId', '=', approvedId)
+    .executeTakeFirstOrThrow();
   const nowhere = randomUUID();
 
   const base = {
@@ -686,6 +728,12 @@ describe('the database refuses a malformed picklist reason, proposal or decision
     ['critical_data_change_decision', { reasonText: ' ' }, '23514', 'critical_data_change_decision_reason_text_check'],
     ['critical_data_change_decision', { signatureId: nowhere }, '23514', 'decision_signed_only_if_approved_check'],
     ['critical_data_change_decision', { reasonId: null }, '23514', 'decision_reason_unless_approved_check'],
+    [
+      'critical_data_change_decision',
+      { outcome: 'Approved', reasonId: null, signatureId: approval, reasonText: 'Checked against the raw data' },
+      '23514',
+      'decision_text_unless_approved_check',
+    ],
     [
       'critical_data_change_decision',
       { changeId: nowhere },
