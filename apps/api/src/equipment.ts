@@ -22,24 +22,13 @@ import type { App } from './app.ts';
 import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope, type WriteQueries } from './scope.ts';
-import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
-import { signedVersions } from './steps.ts';
+import { proveReauthentication, signRecord, statementInForce } from './signing.ts';
+import { latestVersion, signedVersions } from './steps.ts';
 import { signatureReply, signatureReplyColumns } from './trail.ts';
 
 function readableBy(actor: ActorContext): void {
   if (!mayReadEquipment(actor.roles)) refuse('role', 'Equipment is read by the staff of its Lab.');
 }
-
-/**
- * The version a signing from this screen binds: the latest Record Version when it holds the Equipment's content, else
- * the next one, as lims.save_record_version decides. An earlier version with the same content is not it.
- */
-const versionOf = (labId: string) => sql<number>`coalesce(
-  (select case when v.content_hash = lims.equipment_content_hash(equipment) then v.version else v.version + 1 end
-     from lims.record_version v
-    where v.lab_id = ${labId} and v.record_table = 'equipment' and v.record_id = equipment.id
-    order by v.version desc limit 1),
-  1)`;
 
 /** A person named by an Audit Trail actor (`person:<username>`) or by id, as the Logbook shows them. */
 const byPerson = (username: string | null, displayName: string | null) => ({
@@ -50,7 +39,10 @@ const byPerson = (username: string | null, displayName: string | null) => ({
 /**
  * The Signatures given on the Equipment records of `table` among `ids`, oldest first, each with its own id and the id
  * of the record it binds. A Signature reads as every other read shows one (`signatureReplyColumns`), and shows as
- * unsigned once a later Record Version of its record exists.
+ * unsigned once a later Record Version of its record exists that another transaction wrote: QA's Approved moves the
+ * Equipment to In use in its own transaction, and that version does not unsign it. Whether two rows were written in
+ * one transaction is read from the transaction ID the Audit Trail stamped on each, which survives a restore and never
+ * repeats, as a row's xmin does not.
  */
 async function signaturesOn(scope: Scope, table: 'equipment' | 'equipment_event', ids: readonly string[]) {
   if (!ids.length) return [];
@@ -61,7 +53,14 @@ async function signaturesOn(scope: Scope, table: 'equipment' | 'equipment_event'
       'recordVersion.recordId',
       sql<boolean>`exists (select from lims.record_version later
         where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
-          and later.record_id = record_version.record_id and later.version > record_version.version)`.as('unsigned'),
+          and later.record_id = record_version.record_id and later.version > record_version.version
+          and not exists (select from lims.audit_entry versioned
+                            join lims.audit_entry signed
+                              on signed.chain = versioned.chain and signed.transaction_id = versioned.transaction_id
+                           where versioned.table_name = 'record_version' and versioned.op = 'INSERT'
+                             and versioned.new_row ->> 'id' = later.id::text
+                             and signed.table_name = 'signature' and signed.op = 'INSERT'
+                             and signed.new_row ->> 'id' = signature.id::text))`.as('unsigned'),
     ])
     .where('recordVersion.recordTable', '=', table)
     .where('recordVersion.recordId', 'in', ids)
@@ -161,7 +160,7 @@ async function logbookOf(
   return entries.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
 
-/** The Equipment as its Lab's staff see it, with the Record Version an Approved signing from this session binds. */
+/** The Equipment as its Lab's staff see it, with its latest Record Version, which a signing from this screen binds. */
 async function readEquipment(scope: Scope, db: Kysely<DB>, id: string) {
   const row =
     (await scope
@@ -182,20 +181,19 @@ async function readEquipment(scope: Scope, db: Kysely<DB>, id: string) {
         'equipment.registeredAt',
         'person.username',
         'person.displayName',
-        sql<string>`encode(lims.equipment_content_hash(equipment), 'hex')`.as('contentHash'),
-        versionOf(scope.ctx.lab.id).as('version'),
       ])
       .where('equipment.id', '=', id)
       .executeTakeFirst()) ?? refuse('notFound', 'No Equipment of this Lab has that id.');
   const rooms = new Map((await scope.from('room').select(['id', 'name']).execute()).map((r) => [r.id, r]));
-  const { roomId, username, displayName, contentHash, version, fitnessStatus, ...facts } = row;
+  const { roomId, username, displayName, fitnessStatus, ...facts } = row;
+  const { version, canonicalForm, contentHash } = await latestVersion(scope, 'equipment', id);
   const signed = await signaturesOn(scope, 'equipment', [id]);
   return {
     ...facts,
     fitnessStatus: stored(fitnessStatus),
     room: rooms.get(roomId) ?? { id: roomId, name: 'Unknown Room' },
     responsiblePerson: { username, displayName },
-    recordVersion: { version, canonicalForm: 1, contentHash },
+    recordVersion: { version, canonicalForm, contentHash },
     statement: await statementInForce(db),
     signatures: signed.map((s) => s.signature),
     logbook: await logbookOf(scope, id, rooms, new Map(signed.map((s) => [s.id, s.signature]))),
@@ -228,21 +226,6 @@ async function changeEquipment(q: WriteQueries, { id, status }: Target, change: 
     .executeTakeFirstOrThrow()
     .catch(movedOn);
   if (!numUpdatedRows) refuse('stale', movedOnMessage);
-}
-
-/** Writes the Record Version of the record as it is now, for the signing `proof` names, and returns its id. */
-async function versionForSigning(
-  q: WriteQueries,
-  proof: string,
-  table: 'equipment' | 'equipment_event',
-  id: string,
-): Promise<string> {
-  const { rows } = await sql<{ id: string }>`select lims.version_equipment_record(${proof}, ${table}, ${id}) as id`
-    .execute(q.company)
-    .catch(signingRefused);
-  const [latest] = rows;
-  if (!latest) throw new Error('lims.version_equipment_record returned no version');
-  return latest.id;
 }
 
 /** The Equipment a step acts on, as the step read it, and the person taking the step. */
@@ -322,10 +305,13 @@ function registerEquipmentStep<K extends EquipmentStepName>(
     const signs = step.signs;
     const signature =
       signs === null ? null : (body.signature ?? refuse('malformed', "This step needs the signer's credentials."));
-    if (signature) {
+    // The signer was shown the Equipment, so the version shown is what either signing binds as seen; lims.sign refuses
+    // it if another transaction versions the Equipment after this read.
+    const latest = signature && (await latestVersion(scope, 'equipment', body.id));
+    if (signature && latest) {
       if (
-        signature.recordVersion.version !== view.recordVersion.version ||
-        signature.recordVersion.contentHash !== view.recordVersion.contentHash
+        signature.recordVersion.version !== latest.version ||
+        signature.recordVersion.contentHash !== latest.contentHash
       )
         refuse('recordChanged', 'The Equipment changed since this screen loaded it. Read it again before signing.');
       if (view.statement.version !== signature.statementVersion)
@@ -351,7 +337,7 @@ function registerEquipmentStep<K extends EquipmentStepName>(
       role,
       async (q) => {
         const target = { id: body.id, status: view.fitnessStatus, personId: actor.person.id };
-        if (!(signs && signature && reauthenticated)) {
+        if (!(signs && signature && latest && reauthenticated)) {
           // Every Equipment write holds the Lab's chain before its row: a signed step through its re-authentication
           // record, an Event through its trigger, and an unsigned step here, so no two of them lock in opposite orders.
           await sql`select lims.lock_chains(${actor.lab.id})`.execute(q.company);
@@ -359,12 +345,7 @@ function registerEquipmentStep<K extends EquipmentStepName>(
           return;
         }
         const proof = await proveReauthentication(q, actor, sessionId, signs, reauthenticated);
-        // The signer was shown the Equipment, so its version as shown is what either signing binds as seen; it is
-        // written before the step changes the row.
-        const seen = {
-          id: await versionForSigning(q, proof, 'equipment', body.id),
-          contentHash: signature.recordVersion.contentHash,
-        };
+        const seen = { id: latest.id, contentHash: latest.contentHash };
         const sign = (table: 'equipment' | 'equipment_event', recordId: string) =>
           signRecord(q, {
             proof,
@@ -378,10 +359,7 @@ function registerEquipmentStep<K extends EquipmentStepName>(
           });
         if (signs === 'Approved') await sign('equipment', body.id);
         const eventId = await effects[name](q, target, body.input);
-        if (signs === 'Performed' && eventId) {
-          await versionForSigning(q, proof, 'equipment_event', eventId);
-          await sign('equipment_event', eventId);
-        }
+        if (signs === 'Performed' && eventId) await sign('equipment_event', eventId);
       },
       reauthenticated,
     );

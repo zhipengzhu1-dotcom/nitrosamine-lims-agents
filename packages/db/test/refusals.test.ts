@@ -3173,19 +3173,18 @@ describe('a Signature is written only by the signing function, which refuses eve
 
   it('an Equipment Event this transaction recorded is signed Performed on sight of its Equipment', async () => {
     const event = randomUUID();
+    // Version 2 is the Equipment as the fixture left it: registered, then a Suspect recorded on it.
     assert.equal(
       await attempt(
         asPerson(),
-        `select lims.save_record_version('${id.lab}', 'equipment', '${id.equipment}')`,
         reauthenticate(),
         `insert into lims.equipment_event (lab_id, id, equipment_id, kind, note)
          values ('${id.lab}', '${event}', '${id.equipment}', 'Cleaning', 'Wiped the pan (fictional).')`,
-        `select lims.save_record_version('${id.lab}', 'equipment_event', '${event}')`,
         sign({
           table: 'equipment_event',
           recordId: event,
-          seen: versionOf(id.equipment, 1),
-          hash: hashOf(id.equipment, 1),
+          seen: versionOf(id.equipment, 2),
+          hash: hashOf(id.equipment, 2),
         }),
       ),
       null,
@@ -3211,7 +3210,6 @@ describe('a Signature is written only by the signing function, which refuses eve
         reauthenticate(),
         `insert into lims.equipment_event (lab_id, id, equipment_id, kind, note)
          values ('${id.lab}', '${probeEvent}', '${id.equipment}', 'Cleaning', 'Wiped the pan (fictional).')`,
-        `select lims.save_record_version('${id.lab}', 'equipment_event', '${probeEvent}')`,
         sign({ table: 'equipment_event', recordId: probeEvent }),
       ],
       message: 'the Equipment Event signed is not recorded on the Equipment shown',
@@ -4439,6 +4437,8 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
     ['lims.submission.version_record', 'record-version.test.ts'],
     ['lims.method.version_record', 'record-version.test.ts'],
     ['lims.customer.version_record', 'record-version.test.ts'],
+    ['lims.equipment.version_record', 'apps/api/test/equipment.test.ts'],
+    ['lims.equipment_event.version_record', 'apps/api/test/equipment.test.ts'],
     [
       'lims.equipment.equipment_lab_id_not_null',
       'unreachable: keep_equipment refuses a Responsible Person outside the Lab first',

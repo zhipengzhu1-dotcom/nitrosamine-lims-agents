@@ -328,34 +328,26 @@ begin
     values (p_lab_id, p_table, p_record_id, coalesce(latest.version, 0) + 1, 1, bytes);
 end $$;
 
--- Writes the current content of Equipment or of an Equipment Event as a Record Version in the signing's Lab, when it
--- differs from the latest one, and returns the latest version's id: what the Approved or Performed signing binds, or
--- the Equipment the Performed signer was shown while the Event was recorded on it. The re-authentication record this
--- transaction wrote names the Lab and the meaning, so a version is never written for a signing that is not under way.
-create function lims.version_equipment_record(p_reauthentication_id uuid, p_table text, p_record_id uuid) returns uuid
+-- Equipment gets a new Record Version on every change to its canonical content, as a Test does (0009): when its row
+-- is inserted or updated, and when an Event is recorded on it, which gets its own version too. save_record_version
+-- writes none when the content is unchanged. The trigger is named after capture, so it fires after capture has taken
+-- the Lab chain, which every Equipment writer already holds before its row; the version takes no lock in a new order.
+create function lims.version_equipment() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
-declare
-  proof      reauthentication;
-  proof_xmin xid;
-  latest     uuid;
 begin
-  select * into proof from reauthentication where id = p_reauthentication_id;
-  select xmin into proof_xmin from reauthentication where id = p_reauthentication_id;
-  if proof.id is null or not written_here(proof_xmin)
-     or (p_table, proof.meaning::text) not in (('equipment', 'Approved'), ('equipment', 'Performed'),
-                                               ('equipment_event', 'Performed')) then
-    raise exception 'Equipment is versioned only for its Approved signing or for the Performed signing of an Event on it, and an Equipment Event only for its Performed signing, re-authenticated in this transaction'
-      using errcode = 'LA010';
+  if tg_table_name = 'equipment' then
+    perform save_record_version(new.lab_id, 'equipment', new.id);
+  else
+    perform save_record_version(new.lab_id, 'equipment_event', new.id);
+    perform save_record_version(new.lab_id, 'equipment', new.equipment_id);
   end if;
-  perform save_record_version(proof.lab_id, p_table, p_record_id);
-  select id into latest from record_version
-    where lab_id = proof.lab_id and record_table = p_table and record_id = p_record_id
-    order by version desc limit 1;
-  if latest is null then
-    raise exception 'there is no % % to version', p_table, p_record_id using errcode = 'LA014';
-  end if;
-  return latest;
+  return null;
 end $$;
+
+create trigger version_record after insert or update on lims.equipment
+  for each row execute function lims.version_equipment();
+create trigger version_record after insert on lims.equipment_event
+  for each row execute function lims.version_equipment();
 
 create trigger capture after insert or update or delete on lims.equipment
   for each row execute function lims.capture();
@@ -499,15 +491,19 @@ end $$;
 -- The Logbook reads the Audit Trail entries of one piece of Equipment in order (apps/api/src/equipment.ts, logbookOf).
 create index audit_entry_equipment_logbook_idx on lims.audit_entry ((new_row ->> 'id'), seq)
   where table_name = 'equipment';
+-- An Equipment Signature reads the transaction that wrote it and each later Record Version from their Audit Trail
+-- entries, to tell whether those versions unsign it (apps/api/src/equipment.ts, signaturesOn).
+create index audit_entry_written_with_idx on lims.audit_entry ((new_row ->> 'id'))
+  where op = 'INSERT' and table_name in ('record_version', 'signature');
 
 revoke execute on function lims.staff_of(uuid, uuid), lims.acting_lab_manager(uuid, text),
   lims.event_suspends(lims.equipment_event_kind),
   lims.equipment_content(lims.equipment), lims.equipment_content_hash(lims.equipment),
-  lims.equipment_event_content(lims.equipment_event), lims.version_equipment_record(uuid, text, uuid) from public;
+  lims.equipment_event_content(lims.equipment_event) from public;
 grant execute on function lims.staff_of(uuid, uuid), lims.acting_lab_manager(uuid, text),
   lims.event_suspends(lims.equipment_event_kind),
   lims.equipment_content(lims.equipment), lims.equipment_content_hash(lims.equipment),
-  lims.equipment_event_content(lims.equipment_event), lims.version_equipment_record(uuid, text, uuid) to lims_app;
+  lims.equipment_event_content(lims.equipment_event) to lims_app;
 -- keep_equipment runs as the writer and asks whether the Approved Signature was written in this transaction.
 grant execute on function lims.written_here(xid) to lims_app;
 grant select, insert on lims.equipment, lims.equipment_event to lims_app;
