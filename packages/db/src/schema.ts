@@ -241,6 +241,7 @@ export interface Sample {
   labId: string;
   number: string;
   receivedAt: Timestamp | null;
+  receivedTimeZone: ColumnType<string | null, never, never>;
   submissionId: string;
 }
 
@@ -271,6 +272,7 @@ export interface Signature {
   role: Role;
   sessionId: string | null;
   signedAt: Generated<Timestamp>;
+  signedTimeZone: ColumnType<string, never, never>;
   statementHash: Buffer | null;
   statementVersion: number | null;
   username: ColumnType<string, never, never>;
