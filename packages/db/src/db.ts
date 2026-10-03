@@ -8,6 +8,8 @@ export { type DbConfig, dbConfig, dbServer } from './config.ts';
 export type {
   AccessEventKind,
   AuditExportFormat,
+  DocumentStatus,
+  DocumentType,
   ImpactAnswer,
   IncidentKind,
   IncidentState,

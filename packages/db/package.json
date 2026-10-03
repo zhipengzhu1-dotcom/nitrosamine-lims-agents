@@ -10,7 +10,7 @@
   },
   "scripts": {
     "migrate": "node src/migrate.ts",
-    "types": "url=$(node src/migrate.ts --print-url) && kysely-codegen --camel-case --dialect postgres --url \"$url\" --default-schema lims --exclude-pattern '{public.*,lims.audit_chain,lims.counter}' --overrides '{\"columns\":{\"signature.printed_name\":\"ColumnType<string, never, never>\",\"signature.username\":\"ColumnType<string, never, never>\",\"signature.signed_time_zone\":\"ColumnType<string, never, never>\",\"sample.received_time_zone\":\"ColumnType<string | null, never, never>\"}}' --out-file src/schema.ts",
+    "types": "url=$(node src/migrate.ts --print-url) && kysely-codegen --camel-case --dialect postgres --url \"$url\" --default-schema lims --exclude-pattern '{public.*,lims.audit_chain,lims.counter}' --overrides '{\"columns\":{\"signature.printed_name\":\"ColumnType<string, never, never>\",\"signature.username\":\"ColumnType<string, never, never>\",\"signature.signed_time_zone\":\"ColumnType<string, never, never>\",\"sample.received_time_zone\":\"ColumnType<string | null, never, never>\",\"document.number\":\"ColumnType<string, never, never>\"}}' --out-file src/schema.ts",
     "seed": "node src/seed.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc -p ."

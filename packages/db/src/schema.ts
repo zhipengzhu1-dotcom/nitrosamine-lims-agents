@@ -17,6 +17,10 @@ export type ArrayTypeImpl<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type AuditExportFormat = "CSV" | "JSON";
 
+export type DocumentStatus = "Abandoned" | "Approved" | "Draft" | "Effective" | "InReview" | "Retired" | "Superseded";
+
+export type DocumentType = "ExternalDocument" | "Form" | "Method" | "MethodProtocol" | "MethodReport" | "Policy" | "QualityManual" | "SOP" | "WorkInstruction" | "Worksheet";
+
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
@@ -137,6 +141,28 @@ export interface CredentialLink {
 export interface Customer {
   id: Generated<string>;
   name: string;
+}
+
+export interface Document {
+  createdAt: Generated<Timestamp>;
+  documentType: DocumentType;
+  id: Generated<string>;
+  labId: string;
+  number: ColumnType<string, never, never>;
+}
+
+export interface DocumentVersion {
+  abandonReason: string | null;
+  authorId: string;
+  body: string;
+  documentId: string;
+  effectiveDate: Timestamp | null;
+  id: Generated<string>;
+  labId: string;
+  savedAt: Generated<Timestamp>;
+  status: Generated<DocumentStatus>;
+  title: string;
+  version: number;
 }
 
 export interface EnrolmentGrant {
@@ -367,6 +393,8 @@ export interface DB {
   commitKey: CommitKey;
   credentialLink: CredentialLink;
   customer: Customer;
+  document: Document;
+  documentVersion: DocumentVersion;
   enrolmentGrant: EnrolmentGrant;
   identityVerification: IdentityVerification;
   lab: Lab;
