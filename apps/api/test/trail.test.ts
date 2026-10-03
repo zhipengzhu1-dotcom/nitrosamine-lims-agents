@@ -585,6 +585,7 @@ it('after an entry is altered by the database owner, Verify chain names it as th
 });
 
 it("after the company chain's head is moved off the entry that records its latest Chain Verification, two QAs verifying at once open one System Incident for each of its two breaks, that Chain Verification and the entry after the last, and the entries written since, their own among them, open no other", async () => {
+  ok(await as.quinn.call(routes.verifyAuditTrail));
   const last = await lastEntryOf('company');
   const { through: verified } = await api.db
     .selectFrom('chainVerification')

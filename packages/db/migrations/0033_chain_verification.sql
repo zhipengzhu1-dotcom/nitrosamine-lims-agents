@@ -95,7 +95,7 @@ language sql stable security definer set search_path = lims, pg_temp as $$
           and not exists (select from system_incident i
                           where i.kind = 'ChainVerifyFailure' and i.chain = p_chain and i.first_failure <= c.through)
           and chain_verification_holds(c)
-        order by c.through desc, c.verified_at desc
+        order by c.through desc, c.verified_at desc, c.id desc
         limit 1) as c
   where (select count(*) from audit_entry e where e.chain = p_chain and e.seq between 1 and c.through) = c.through
 $$;
@@ -114,7 +114,7 @@ language sql stable security definer set search_path = lims, pg_temp as $$
                 || coalesce((select e.hash from audit_entry e where e.chain = p_chain and e.seq = c.through), ''::bytea))
   from chain_verification c
   where c.chain = p_chain and c.through > p_from and not chain_verification_holds(c)
-  order by c.through desc, c.verified_at desc
+  order by c.through desc, c.verified_at desc, c.id desc
   limit 1
 $$;
 
@@ -159,7 +159,7 @@ begin
 end $$;
 
 -- Every break a routine verification finds: the walk from the chain's latest Chain Verification, or from its first
--- entry when it has none, and every Chain Verification the Audit Trail no longer matches, in entry order.
+-- entry when it has none, and the latest Chain Verification after it that the Audit Trail no longer matches, in entry order.
 create function lims.chain_breaks(p_chain text) returns table (seq bigint, kind text, through bigint, fingerprint bytea)
 language sql stable security definer set search_path = lims, pg_temp as $$
   select b.seq, b.kind, b.through, b.fingerprint
