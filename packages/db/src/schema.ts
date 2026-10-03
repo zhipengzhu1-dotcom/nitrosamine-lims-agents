@@ -21,6 +21,8 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
+export type ImpactAnswer = "No" | "Yes";
+
 export type IncidentKind = "ChainVerifyFailure" | "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure" | "UnraisableLogLine";
 
 export type IncidentState = "Acknowledged" | "Closed" | "Open";
@@ -268,10 +270,19 @@ export interface SystemIncident {
   breakCount: number | null;
   chain: string | null;
   constraintName: string | null;
+  correctiveAction: string | null;
+  correctiveActionAt: Timestamp | null;
+  correctiveActionBy: string | null;
   errorClass: string | null;
   fingerprint: Buffer | null;
   firstFailure: Int8 | null;
   id: Generated<string>;
+  immediateAction: string | null;
+  immediateActionAt: Timestamp | null;
+  immediateActionBy: string | null;
+  impactAnswer: ImpactAnswer | null;
+  impactAnsweredAt: Timestamp | null;
+  impactAnsweredBy: string | null;
   kind: IncidentKind;
   lastFailure: Int8 | null;
   loggedAt: Timestamp | null;

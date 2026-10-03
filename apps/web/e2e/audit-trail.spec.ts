@@ -263,8 +263,7 @@ function closeQcIncidentAt(entry: string) {
     '../../scripts/pg.sh',
     ['psql', '-q', '-v', 'ON_ERROR_STOP=1', '-v', `entry=${entry}`, '--single-transaction', '-d', E2E_DATABASE],
     {
-      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
-                     set_config('lims.reason', 'Close a System Incident (e2e)', true);
+      input: `set local session_replication_role = replica;
               update lims.system_incident set state = 'Closed'
                where chain = (select lab_id::text from lims.lab where code = 'QC') and first_failure = :entry;`,
       stdio: ['pipe', 'ignore', 'inherit'],
