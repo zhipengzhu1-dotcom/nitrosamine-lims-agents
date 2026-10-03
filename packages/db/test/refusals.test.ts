@@ -3624,22 +3624,28 @@ describe('a person is inserted without a lockout, so the database stamps every l
   });
 
   it('the app role holds no insert on a lockout, so a person inserted already locked out is refused before the trigger', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('set local role lims_app');
+      const { rowCount } = await client.query(`insert into lims.person (username, display_name, customer_id)
+        select 'refusal.born-locked-out', 'Born Locked Out', id from lims.customer
+         where name = 'Refusal Customer (fictional)'`);
+      assert.equal(rowCount, 1, 'the app role inserts the same Customer User without a lockout');
+    } finally {
+      await client.query('rollback');
+    }
     const error = await refusalOf(`set local role lims_app; ${bornLockedOut}`);
     assert.equal(error.code, '42501', error.message);
-    const { rows } = await client.query<{ privilege: string }>(
-      `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
-        where grantee = 'lims_app' and table_schema = 'lims' and table_name = 'person' and privilege_type = 'INSERT'
+    const { rows } = await client.query<{ column: string }>(
+      `select attname as column from pg_attribute
+        where attrelid = 'lims.person'::regclass and attnum > 0 and not attisdropped
+          and has_column_privilege('lims_app', attrelid, attnum, 'INSERT')
         order by 1`,
     );
     assert.deepEqual(
-      rows.map((row) => row.privilege),
-      [
-        'INSERT customer_id',
-        'INSERT display_name',
-        'INSERT identity_verification_id',
-        'INSERT password_hash',
-        'INSERT username',
-      ],
+      rows.map((row) => row.column),
+      ['customer_id', 'display_name', 'identity_verification_id', 'password_hash', 'username'],
     );
   });
 });
