@@ -4,8 +4,23 @@ import { expect, type Page, signInByApi, submittedTest, test } from './walk.ts';
 
 const railSays = (page: Page, text: string | RegExp) => expect(page.getByRole('status')).toContainText(text);
 const sheet = (page: Page) => page.locator('form.sheet');
-const shot = (page: Page, name: string) =>
-  page.screenshot({ path: test.info().outputPath(`${test.info().project.name}-${name}.png`) });
+/** Shoots once every finite, running, time-based animation and transition has finished, so no opening or closing sheet is caught mid-move; a scroll-driven animation never finishes. */
+async function shot(page: Page, name: string) {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter(
+          (a) =>
+            a.timeline === document.timeline &&
+            a.playState === 'running' &&
+            a.effect?.getComputedTiming().endTime !== Number.POSITIVE_INFINITY,
+        )
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  );
+  await page.screenshot({ path: test.info().outputPath(`${test.info().project.name}-${name}.png`) });
+}
 
 async function openTest(page: Page, username: string, testId: string) {
   await signInByApi(page, username);
@@ -41,9 +56,11 @@ test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs
   await page.getByRole('button', { name: 'Approve change' }).click();
   await expect(page.getByRole('heading', { name: 'Sign Approved' })).toBeVisible();
   await expect(sheet(page)).toContainText('Result value: 0.0300 → 0.0310 ppm');
+  await shot(page, 'approve-sheet');
   await page.getByLabel(/User ID/).fill('rui.reviewer');
   await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
-  await shot(page, 'approve-sheet');
+  await page.getByLabel(/Password/).scrollIntoViewIfNeeded();
+  await shot(page, 'approve-sign');
   await page.getByRole('button', { name: 'Sign as Approved' }).click();
   await railSays(page, 'Approved Signature recorded. The Result holds the new value.');
   await expect(changes).toContainText('Approved');
@@ -89,7 +106,6 @@ test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs
   await sheet(page)
     .getByRole('combobox', { name: 'Reason', exact: true })
     .selectOption('Not supported by the raw data');
-  await sheet(page).evaluate((form) => Promise.all(form.getAnimations({ subtree: true }).map((a) => a.finished)));
   await shot(page, 'reject-sheet');
   await sheet(page).getByRole('button', { name: 'Reject change' }).click();
   await railSays(page, 'The Critical Data Change is rejected. The Result is unchanged.');
