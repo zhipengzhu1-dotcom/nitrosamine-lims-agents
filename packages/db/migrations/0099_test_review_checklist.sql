@@ -84,6 +84,22 @@ begin
   return new;
 end $$;
 
+-- A version's items are saved with it, so neither an approved version nor another QA's draft gains one later.
+create function lims.check_item_in_its_draft() returns trigger
+language plpgsql set search_path = lims, pg_temp as $$
+declare
+  version_xmin xid;
+begin
+  select xmin into version_xmin from review_checklist_version where id = new.version_id;
+  if version_xmin is not null and not written_here(version_xmin) then
+    raise exception 'a Review Checklist version never changes: an item joins it only in the transaction that saved it'
+      using errcode = 'LA002';
+  end if;
+  return new; -- with no version, review_checklist_item_version_id_kind_fkey refuses it
+end $$;
+
+create trigger item_in_its_draft before insert on lims.review_checklist_item
+  for each row execute function lims.check_item_in_its_draft();
 create trigger stamp_saver before insert on lims.review_checklist_version
   for each row execute function lims.stamp_saver();
 create trigger stamp_saver before insert on lims.test_review
@@ -331,9 +347,10 @@ end $$;
 create trigger review_signing before insert on lims.signature
   for each row execute function lims.check_review_signing();
 
-revoke execute on function lims.stamp_saver(), lims.check_test_review_ticks(), lims.review_checklist_content(uuid),
-  lims.review_checklist_content_hash(uuid), lims.review_checklist_in_force(text), lims.review_evidence(uuid, uuid, text),
-  lims.test_review_content(uuid, uuid), lims.version_review_checklist(uuid, uuid), lims.check_review_signing() from public;
+revoke execute on function lims.stamp_saver(), lims.check_test_review_ticks(), lims.check_item_in_its_draft(),
+  lims.review_checklist_content(uuid), lims.review_checklist_content_hash(uuid), lims.review_checklist_in_force(text),
+  lims.review_evidence(uuid, uuid, text), lims.test_review_content(uuid, uuid), lims.version_review_checklist(uuid, uuid),
+  lims.check_review_signing() from public;
 grant execute on function lims.review_checklist_content(uuid), lims.review_checklist_content_hash(uuid),
   lims.review_checklist_in_force(text), lims.review_evidence(uuid, uuid, text), lims.test_review_content(uuid, uuid),
   lims.version_review_checklist(uuid, uuid) to lims_app;

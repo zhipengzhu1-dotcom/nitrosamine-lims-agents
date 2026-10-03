@@ -60,6 +60,7 @@ const id = {
   workstation: randomUUID(),
   lockedOut: randomUUID(),
   checklistVersion: randomUUID(),
+  draftChecklistVersion: randomUUID(),
   testReview: randomUUID(),
   equipment: randomUUID(),
   equipmentEvent: randomUUID(),
@@ -345,17 +346,19 @@ const fixture: (Fixture | Fixture[])[] = [
       roles: '{Analyst}',
     },
   ],
-  ['lims.review_checklist_version', { id: id.checklistVersion, kind: 'Test', version: 90 }],
   [
-    'lims.review_checklist_item',
-    {
-      version_id: id.checklistVersion,
-      kind: 'Test',
-      position: 1,
-      key: 'refusalItem',
-      text: 'Refusal item checked.',
-      ticked: true,
-    },
+    ['lims.review_checklist_version', { id: id.checklistVersion, kind: 'Test', version: 90 }],
+    [
+      'lims.review_checklist_item',
+      {
+        version_id: id.checklistVersion,
+        kind: 'Test',
+        position: 1,
+        key: 'refusalItem',
+        text: 'Refusal item checked.',
+        ticked: true,
+      },
+    ],
   ],
   [
     'lims.test_review',
@@ -565,7 +568,7 @@ const tables = {
   'lims.review_checklist_item': {
     noun: 'Review Checklist item',
     row: {
-      version_id: id.checklistVersion,
+      version_id: id.draftChecklistVersion,
       kind: 'Test',
       position: 2,
       key: 'secondItem',
@@ -799,14 +802,45 @@ const asRole = (role: string) => `select set_config('lims.role', '${role}', true
 const actingAs = (role: 'QA' | 'Admin') =>
   `select set_config('lims.actor', 'person:${role === 'QA' ? 'refusal.other' : 'refusal.admin'}', true), set_config('lims.role', '${role}', true)`;
 
+const auditSettings = ['lims.actor', 'lims.role', 'lims.reason'];
+
+/** The draft a probe item joins, saved under the audit context, which is then put back as the probe left it. */
+async function draftChecklistVersion() {
+  const { rows } = await client.query<{ held: string[] }>(
+    "select array(select coalesce(current_setting(s, true), '') from unnest($1::text[]) s) as held",
+    [auditSettings],
+  );
+  await client.query(AUDIT_CONTEXT);
+  await client.query(
+    ...insert('lims.review_checklist_version', { id: id.draftChecklistVersion, kind: 'Test', version: 92 }),
+  );
+  await client.query(
+    ...insert('lims.review_checklist_item', {
+      version_id: id.draftChecklistVersion,
+      kind: 'Test',
+      position: 1,
+      key: 'refusalItem',
+      text: 'Refusal item checked.',
+      ticked: true,
+    }),
+  );
+  await client.query('select set_config(s, h, true) from unnest($1::text[], $2::text[]) as t (s, h)', [
+    auditSettings,
+    rows[0]?.held,
+  ]);
+}
+
 /**
  * What a probe row needs in its transaction before it is written: the stamp lims.sign leaves, so that a Signature
- * reaches the constraints behind the sign_only trigger, or the chain-verify System Incident a break is opened with,
- * so that a break reaches the constraints behind the breaks_written_once trigger.
+ * reaches the constraints behind the sign_only trigger, the chain-verify System Incident a break is opened with,
+ * so that a break reaches the constraints behind the breaks_written_once trigger, or the draft Review Checklist
+ * version, with its first item, that an item is added to, so that an item reaches the constraints behind the
+ * item_in_its_draft trigger.
  */
 const staged = (row: Row) => {
   if (typeof row.reauthentication_id === 'string')
     return client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', row.reauthentication_id]);
+  if (row.version_id === id.draftChecklistVersion) return draftChecklistVersion();
   if (row.incident_id === id.openingIncident)
     return client.query(
       ...insert('lims.system_incident', {
@@ -4267,6 +4301,21 @@ describe('a Signature is written only by the signing function, which refuses eve
     ];
     for (const c of reviewCases)
       it(c.name, async () => assert.equal(await refused(...c.statements()), await c.message()));
+
+    covered.add('lims.review_checklist_item.item_in_its_draft');
+    const addedLater =
+      'a Review Checklist version never changes: an item joins it only in the transaction that saved it';
+    const addItem = (version: string) =>
+      `insert into lims.review_checklist_item (version_id, kind, position, key, text, ticked)
+       values ('${version}', 'Test', 99, 'addedLater', 'Added after the version was saved.', true)`;
+    it('an item added to a Review Checklist version after QA approved it is refused, so the version in force keeps the content QA signed', async () => {
+      const error = await attempt(...holdsQaAndReviewer, ...approve(v1), addItem(v1));
+      assert.deepEqual([error?.code, error?.message], ['LA002', addedLater]);
+    });
+    it("an item another QA adds to a draft saved in an earlier transaction is refused, so the draft's content is its drafter's", async () => {
+      const error = await refusalOf(addItem(id.checklistVersion), [], true, {}, actingAs('QA'));
+      assert.deepEqual([error.code, error.message], ['LA002', addedLater]);
+    });
   });
 });
 
