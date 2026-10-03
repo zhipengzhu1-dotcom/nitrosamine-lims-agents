@@ -299,6 +299,7 @@ describe('Lock and Switch user', () => {
     });
     const servedWhileLocked = new Set<Route>([
       routes.labs,
+      routes.deployment,
       routes.loginPolicy,
       routes.login,
       routes.session,

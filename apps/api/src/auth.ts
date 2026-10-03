@@ -8,6 +8,7 @@ import {
   type Authenticator,
   DECIDED_PASSWORD,
   DEMO_PASSWORD,
+  type LoginConfiguration,
   type PasswordRule,
   passwordRefusal,
   routes,
@@ -63,8 +64,21 @@ export const LOGIN = {
     acceptsUnpepperedHash: true,
     password: DEMO_PASSWORD,
   },
-} as const satisfies Record<string, LoginPolicy>;
+} as const satisfies Record<LoginConfiguration, LoginPolicy>;
 export type Login = keyof typeof LOGIN;
+
+/** The login configuration a policy runs: `decided` only while every value is the decided one, else `demo`. */
+export function loginOf(policy: LoginPolicy): Login {
+  const decided = LOGIN.decided;
+  return policy.idleMs === decided.idleMs &&
+    policy.absoluteMs === decided.absoluteMs &&
+    policy.lockoutAfter === decided.lockoutAfter &&
+    policy.secondFactor === decided.secondFactor &&
+    policy.acceptsUnpepperedHash === decided.acceptsUnpepperedHash &&
+    policy.password === decided.password
+    ? 'decided'
+    : 'demo';
+}
 
 /** What proves a person: the login policy, the pepper every new password hash takes, and the key that seals TOTP secrets. */
 export interface Credentials {
@@ -382,20 +396,31 @@ export type { Reauthenticated };
  * before the write, which it then refuses as accountLocked and records as a failed authentication, or wholly after it.
  * The checked code is spent next, in the same transaction, so a refused write leaves it unspent, and a code another
  * request spent first refuses the write as badCredentials with nothing of it written, recorded afterwards as a code
- * already used. The transaction is stamped with the person re-authenticated, which lims.unlock_session requires.
+ * already used. The transaction is stamped with the person re-authenticated, which lims.unlock_session requires. With
+ * `declaresDataClassChange`, the transaction first declares that it changes the data class, which takes no lock, so
+ * the database locks the deployment row for the change before the transaction's first chain.
  */
 export async function auditedAfterReauthentication<R>(
   db: Kysely<DB>,
   ctx: AuditContext,
   reauthenticated: Reauthenticated | undefined,
   write: (tx: Transaction<DB>) => Promise<R>,
+  declaresDataClassChange = false,
 ): Promise<R> {
-  if (!reauthenticated) return audited(db, ctx, write);
+  const declare = async (tx: Transaction<DB>) => {
+    if (declaresDataClassChange) await sql`select lims.declare_data_class_change()`.execute(tx);
+  };
+  if (!reauthenticated)
+    return audited(db, ctx, async (tx) => {
+      await declare(tx);
+      return write(tx);
+    });
   const failedAuthentication = { ...ctx, reason: 'Failed authentication' };
   const done = await auditedUnlessCodeSpent(
     db,
     ctx,
     async (tx) => {
+      await declare(tx);
       if (await resetFailuresUnlessLocked(tx, reauthenticated.personId)) return null;
       await spendCodeOrThrow(tx, reauthenticated.personId, reauthenticated.code);
       await sql`select lims.set_this_transaction('lims.reauthenticated', ${reauthenticated.personId})`.execute(tx);

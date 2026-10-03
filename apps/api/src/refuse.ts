@@ -20,6 +20,7 @@ const STATUS: { readonly [K in RefusalKind]: number } = {
   stale: 409,
   recordChanged: 409,
   signingRefused: 409,
+  realDataRefused: 409,
   keyReused: 422,
   accountLocked: 423,
   failure: 500,

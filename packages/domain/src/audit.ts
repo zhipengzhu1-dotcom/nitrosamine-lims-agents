@@ -245,7 +245,7 @@ function referenceOf(field: FieldSpec, row: RowSnapshot): AuditedTable | null {
 export const actorUsername = (actor: string): string | null =>
   actor.startsWith('person:') ? actor.slice('person:'.length) : null;
 
-const UNLISTED = new Set(['id', 'lab_id']);
+const UNLISTED = new Set(['id', 'lab_id', 'data_class']);
 
 /** One row of an audited record as it stood at one instant. */
 export interface RowImage {

@@ -123,7 +123,7 @@ it('starting the API with an unwritten System Incident on its log volume writes 
 });
 
 it('a line whose reference already has a System Incident is skipped, and starting the API again writes no duplicate', async () => {
-  await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Open a System Incident' }, (tx) =>
+  await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Open a System Incident' }, (tx) =>
     tx
       .insertInto('systemIncident')
       .values({
@@ -251,7 +251,7 @@ it('a line the check cannot read, or whose values the database refuses, is writt
 });
 
 it('a line whose reference a different System Incident already holds is written as an UnraisableLogLine System Incident', async () => {
-  await audited(api.db, { actor: 'svc:test', role: 'system', reason: 'Open a System Incident' }, (tx) =>
+  await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Open a System Incident' }, (tx) =>
     tx
       .insertInto('systemIncident')
       .values({ kind: 'UnexpectedFailure', reference: 'FX00000D', step: 'review', errorClass: 'TypeError' })

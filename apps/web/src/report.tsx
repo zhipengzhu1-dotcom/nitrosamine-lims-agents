@@ -1,17 +1,18 @@
 import { type ActorContext, routes } from '@lims/domain';
-import { useApi } from './api.ts';
+import { useApi, useFictional } from './api.ts';
 import { Shell, Status } from './rail.tsx';
 import { Signatures, signingNotes, unsignedNotice } from './tests.tsx';
 import { When } from './time.tsx';
 
 export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
   const { data, error } = useApi(routes.report, { id });
+  const fictional = useFictional();
   return (
     <Shell me={me} active="tests" action={null} notice={data && unsignedNotice(data.signatures)}>
       {error && <p className="note--bad">{error}</p>}
       {data && (
         <article className="report">
-          <p className="fict">Fictional data only. Not a real Test Report.</p>
+          {fictional && <p className="fict">Fictional data only. Not a real Test Report.</p>}
           <button type="button" className="btn print-hide" onClick={() => window.print()}>
             Print
           </button>

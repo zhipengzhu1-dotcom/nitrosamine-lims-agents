@@ -216,7 +216,7 @@ it('the failed Lab switch that reaches the limit locks the account, writes a Loc
   const person = await inBothLabs('choice.lockout');
   const client = new Client(api.base);
   ok(await signIn(person, api.labId, client));
-  await audited(api.db, SYSTEM, (tx) =>
+  await audited(api.superuser, SYSTEM, (tx) =>
     tx
       .updateTable('person')
       .set({ failedLogins: HARNESS_LOGIN.lockoutAfter - 1 })

@@ -135,6 +135,11 @@ export const signIn = (credentials: RouteInput<typeof routes.login>[0]) =>
 /** Reads who is signed in, if anyone, and starts the session's countdown. */
 export const resume = () => startSession(() => api(routes.me));
 
+/** True unless the deployment answers that its data class is real, so the banner stays while the answer is loading or missing. */
+export function useFictional(): boolean {
+  return useApi(routes.deployment).data?.dataClass !== 'real';
+}
+
 /** Whole seconds until the session ends, or null when no one is signed in. */
 export const useSecondsLeft = () =>
   useSyncExternalStore(
