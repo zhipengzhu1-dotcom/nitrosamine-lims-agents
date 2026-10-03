@@ -128,7 +128,8 @@ async function accessEventsOf(scope: Scope, personId: string, limits: SessionLim
       'failureReason',
       sql<boolean>`access_event.kind = 'Lockout' and exists (
         select from lims.audit_entry a
-         where a.table_name = 'person' and (a.new_row ->> 'id')::uuid = access_event.subject_id
+         where a.chain = 'company' and a.table_name = 'person' and a.op = 'UPDATE'
+           and a.new_row ->> 'id' = access_event.subject_id::text
            and (a.new_row ->> 'locked_at')::timestamptz = access_event.at)`.as('atLockInstant'),
     ])
     .where('subjectId', '=', personId)
