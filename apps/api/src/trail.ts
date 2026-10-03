@@ -275,6 +275,8 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'test':
     case 'result':
     case 'test_report':
+    case 'document':
+    case 'document_version':
     case 'record_version':
     case 'signature':
     case 'audit_export':

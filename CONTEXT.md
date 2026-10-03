@@ -465,11 +465,11 @@ A Lab's approved account of validating, verifying or transferring in one Method 
 _Avoid_: Validation report (alone), qualification report
 
 **Document Status**:
-Where one version of a Document stands: Draft, In Review, Approved, Effective, Superseded or Retired. A Draft, or an Approved version before its Effective Date, that goes no further is Abandoned. A Draft is signed Authored, then Reviewed by at least one authorised person who is not the author, then Approved by QA, who neither wrote nor reviewed it. Only one version of a Document is Effective at a time.
+Where one version of a Document stands: Draft, In Review, Approved, Effective, Superseded or Retired. A version that goes no further while it is a Draft, In Review, or Approved before its Effective Date is Abandoned, by its author or QA, with a reason. A Draft is signed Authored, then Reviewed by at least one authorised person who is not the author, then Approved by QA, who neither wrote nor reviewed it. Until Authorisations are recorded ([#116](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/116)), a person is authorised to sign Reviewed by holding the Reviewer role. Only one version of a Document is Effective at a time.
 _Avoid_: Stage, lifecycle state
 
 **Effective Date**:
-The date QA sets at approval on which a version replaces the previous one, which then becomes Superseded.
+The date, written by the author on the Draft, on which a version replaces the previous one, which then becomes Superseded. The Authored, Reviewed and Approved Signatures all cover it, so it changes only while the version is a Draft, and a version whose Effective Date has passed is not Approved.
 _Avoid_: Release date, issue date
 
 **Distribution**:

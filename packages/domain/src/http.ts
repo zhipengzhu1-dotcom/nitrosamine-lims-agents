@@ -1,6 +1,7 @@
 import type * as db from '@lims/db';
 import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
+import { type DocumentStepName, documentStepNames } from './documents.ts';
 import type { EquipmentStepName } from './equipment.ts';
 import type { IncidentStepName } from './incidents.ts';
 import { type Step, type StepName, stepNames, steps } from './steps.ts';
@@ -153,6 +154,8 @@ export const auditedTable = Type.Enum({
   test: 'test',
   result: 'result',
   test_report: 'test_report',
+  document: 'document',
+  document_version: 'document_version',
   record_version: 'record_version',
   signature: 'signature',
   audit_export: 'audit_export',
@@ -549,6 +552,72 @@ const incidentRow = Type.Object({
   chain: systemIncident.properties.chain,
 });
 export type IncidentRow = Static<typeof incidentRow>;
+/** The kind of a controlled Document, which its number names with a short code. */
+const documentTypeNames = {
+  QualityManual: 'QualityManual',
+  Policy: 'Policy',
+  SOP: 'SOP',
+  WorkInstruction: 'WorkInstruction',
+  Method: 'Method',
+  MethodProtocol: 'MethodProtocol',
+  MethodReport: 'MethodReport',
+  Form: 'Form',
+  Worksheet: 'Worksheet',
+  ExternalDocument: 'ExternalDocument',
+} as const satisfies { [K in db.DocumentType]: K };
+const documentType = Type.Enum(documentTypeNames);
+export type DocumentType = Static<typeof documentType>;
+export const documentTypes: readonly DocumentType[] = Object.values(documentTypeNames);
+/** Where a Document version stands, from Draft through its three Signatures to Effective, and on to Superseded. */
+const documentStatus = Type.Enum({
+  Draft: 'Draft',
+  InReview: 'InReview',
+  Approved: 'Approved',
+  Effective: 'Effective',
+  Superseded: 'Superseded',
+  Retired: 'Retired',
+  Abandoned: 'Abandoned',
+} as const satisfies { [K in db.DocumentStatus]: K });
+export type DocumentStatus = Static<typeof documentStatus>;
+const documentVersion = Type.Object({
+  id: uuid,
+  version: Type.Integer({ minimum: 1 }),
+  status: documentStatus,
+  title: Type.String(),
+  body: Type.String(),
+  author: recorder,
+  /** The Lab day it takes effect, written on the Draft and covered by every Signature. */
+  effectiveDate: calendarDate,
+  abandonReason: nullable(Type.String()),
+  /** Its Signatures in the order given, each with the Record Version it was given on. */
+  signatures: Type.Array(signature),
+});
+export type DocumentVersion = Static<typeof documentVersion>;
+/** A Document of the vault with every version, newest first. */
+const documentView = Type.Object({
+  id: uuid,
+  number: Type.String(),
+  documentType: documentType,
+  versions: Type.Array(documentVersion),
+  /** The latest Record Version of the newest version, which a signing on sight of this screen binds. */
+  recordVersion: nullable(recordVersionRef),
+  statement: signatureStatement,
+  /** The steps the person asking may take on the newest version now, from the step registry. */
+  steps: Type.Array(Type.Enum(documentStepNames)),
+});
+export type DocumentView = Static<typeof documentView>;
+/** One line of the vault: a Document's number and its newest version. */
+const documentRow = Type.Object({
+  id: uuid,
+  number: Type.String(),
+  documentType: documentType,
+  version: Type.Integer({ minimum: 1 }),
+  title: Type.String(),
+  status: documentStatus,
+});
+export type DocumentRow = Static<typeof documentRow>;
+const documentTitle = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
+const documentBody = Type.String({ minLength: 1, maxLength: 20000, pattern: '\\S' });
 
 const fitnessStatus = Type.Enum({
   Quarantined: 'Quarantined',
@@ -974,6 +1043,21 @@ export const routes = {
   /** The System Incidents not yet Closed, newest first, for Admin and QA. */
   incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
   incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
+  /** The Lab's Documents, by number. */
+  documents: route('GET', '/api/documents', {}, Type.Array(documentRow)),
+  document: route('GET', '/api/documents/:id', { params: Type.Object({ id: uuid }) }, documentView),
+  /** A new Document, numbered by the database, with its first version as a Draft by the person asking. */
+  createDocument: route(
+    'POST',
+    '/api/documents',
+    {
+      body: Type.Object(
+        { documentType: documentType, title: documentTitle, body: documentBody, effectiveDate: calendarDate },
+        closed,
+      ),
+    },
+    documentView,
+  ),
   /** Every break inside a chain verification System Incident's range, as this Lab's chain or the company chain reads now. */
   incidentBreaks: route('GET', '/api/incidents/:reference/breaks', { params: byReference }, incidentBreaks),
   /** The Lab's Equipment, by name, for its staff. */
@@ -1028,6 +1112,29 @@ export function incidentStepRoute<K extends IncidentStepName>(name: K) {
     closed,
   );
   return route('POST', `/api/incident-steps/${name}`, { body }, systemIncident);
+}
+
+const documentStepInputs = {
+  signAuthored: Type.Object({}, closed),
+  signReviewed: Type.Object({}, closed),
+  signApproved: Type.Object({}, closed),
+  abandon: Type.Object({ reason: reasonText }, closed),
+} satisfies { [K in DocumentStepName]: TObject };
+/** What each Document step takes, as its route validates it. */
+export type DocumentStepInputs = { [K in DocumentStepName]: Static<(typeof documentStepInputs)[K]> };
+export interface DocumentStepBody<K extends DocumentStepName> {
+  documentId: string;
+  input: DocumentStepInputs[K];
+  signature?: SigningBody;
+}
+
+/** The route of one step on a Document's newest version: the body names the Document, the input, and a signature when the step signs. */
+export function documentStepRoute<K extends DocumentStepName>(name: K) {
+  const body = Type.Object(
+    { documentId: uuid, input: documentStepInputs[name], signature: Type.Optional(signingBody) },
+    closed,
+  );
+  return route('POST', `/api/document-steps/${name}`, { body }, documentView);
 }
 
 const equipmentStepInputs = {

@@ -521,6 +521,10 @@ th {
 .raw h2 {
   margin-top: 0;
 }
+.document-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .raw pre {
   font: 12px / 1.4 var(--mono);
   white-space: pre-wrap;
@@ -1140,6 +1144,11 @@ a.btn {
   .rbtn--commit {
     order: 2;
     flex-basis: 100%;
+  }
+  /* A secondary step shares the primary's row, so the rail grows by one row, not two. */
+  .rbtn--commit:has(+ .rbtn--commit),
+  .rbtn--commit + .rbtn--commit {
+    flex: 1 1 0;
   }
 }
 

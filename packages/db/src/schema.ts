@@ -21,6 +21,10 @@ export type DataClass = "fictional" | "real";
 
 export type DemoException = "Anchoring" | "DemoLogin" | "FileVault" | "PlaintextAtCloudflare" | "TwoRole";
 
+export type DocumentStatus = "Abandoned" | "Approved" | "Draft" | "Effective" | "InReview" | "Retired" | "Superseded";
+
+export type DocumentType = "ExternalDocument" | "Form" | "Method" | "MethodProtocol" | "MethodReport" | "Policy" | "QualityManual" | "SOP" | "WorkInstruction" | "Worksheet";
+
 export type EquipmentEventKind = "Cleaning" | "FirmwareChange" | "Maintenance" | "Note" | "Repair" | "SoftwareChange" | "Suspect";
 
 export type FitnessStatus = "Expired" | "InUse" | "Quarantined" | "Retired" | "Suspended";
@@ -158,6 +162,30 @@ export interface Deployment {
   dataClass: Generated<DataClass>;
   setByEntryId: string | null;
   single: Generated<boolean>;
+}
+
+export interface Document {
+  createdAt: Generated<Timestamp>;
+  dataClass: Generated<DataClass>;
+  documentType: DocumentType;
+  id: Generated<string>;
+  labId: string;
+  number: ColumnType<string, never, never>;
+}
+
+export interface DocumentVersion {
+  abandonReason: string | null;
+  authorId: string;
+  body: string;
+  dataClass: Generated<DataClass>;
+  documentId: string;
+  effectiveDate: Timestamp;
+  id: Generated<string>;
+  labId: string;
+  savedAt: Generated<Timestamp>;
+  status: Generated<DocumentStatus>;
+  title: string;
+  version: number;
 }
 
 export interface EnrolmentGrant {
@@ -474,6 +502,8 @@ export interface DB {
   credentialLink: CredentialLink;
   customer: Customer;
   deployment: Deployment;
+  document: Document;
+  documentVersion: DocumentVersion;
   enrolmentGrant: EnrolmentGrant;
   equipment: Equipment;
   equipmentEvent: EquipmentEvent;
