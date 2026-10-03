@@ -1447,6 +1447,18 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { kind: 'SignInFailed', failure_reason: 'WrongUserId' },
       constraint: 'access_event_failure_kind_check',
     },
+    {
+      name: 'a failed unlock Access Event without a failure reason is refused',
+      table: 'lims.access_event',
+      change: { kind: 'UnlockFailed', failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_unlock_failure_check',
+    },
+    ...['NoCredential', 'NoLab', 'NoMembership', 'NotInWorkstationLab'].map((reason) => ({
+      name: `a failed unlock Access Event with the ${reason} reason, which no password, code or Lockout gives, is refused`,
+      table: 'lims.access_event' as const,
+      change: { kind: 'UnlockFailed', failure_reason: reason, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_kind_check',
+    })),
     ...each(
       'a Lab code that is not two to four capital letters is refused',
       'lims.lab',
@@ -1707,7 +1719,11 @@ describe('the database refuses a value outside its allowed set', () => {
     ...(['SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'] as const).map((kind) => ({
       name: `an Access Event of kind ${kind} without a session is refused`,
       table: 'lims.access_event' as const,
-      change: { kind, failure_reason: null, ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }) },
+      change: {
+        kind,
+        failure_reason: kind === 'UnlockFailed' ? 'WrongPassword' : null,
+        ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }),
+      },
       constraint: 'access_event_session_kind_check',
     })),
     ...(['IdleExpiry', 'AbsoluteExpiry'] as const).flatMap((kind) => [
@@ -1914,6 +1930,46 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint: 'enrolment_grant_second_person_check',
     },
   ]);
+});
+
+describe('a failed unlock records why, as a failed sign-in does', () => {
+  it('a failed unlock Access Event with each reason a password, a code or a Lockout gives is accepted', async () => {
+    const reasons = [
+      'WrongPassword',
+      'WrongPasswordOnLockedAccount',
+      'AccountLocked',
+      'WrongCode',
+      'NoAuthenticator',
+      'CodeAlreadyUsed',
+    ];
+    for (const reason of reasons) {
+      const row = {
+        ...tables['lims.access_event'].row,
+        kind: 'UnlockFailed',
+        failure_reason: reason,
+        session_lab_id: id.lab,
+        session_id: id.session,
+      };
+      await client.query('begin');
+      try {
+        await client.query(AUDIT_CONTEXT);
+        await client.query(...insert('lims.access_event', row));
+      } finally {
+        await client.query('rollback');
+      }
+    }
+  });
+
+  it('every Access Event rule binds the rows written before it, except the reason that failed unlocks before #245 lack', async () => {
+    const { rows } = await client.query<{ name: string }>(
+      `select conname as name from pg_constraint
+        where conrelid = 'lims.access_event'::regclass and not convalidated order by conname`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.name),
+      ['access_event_unlock_failure_check'],
+    );
+  });
 });
 
 describe('a counter holds at most six digits and is never empty', () => {
