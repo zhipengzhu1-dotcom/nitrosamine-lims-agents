@@ -19,7 +19,8 @@ import type { App } from './app.ts';
 import { PDF_COLUMNS, textPdf } from './pdf.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { chainVerifications, imagesFor, type RecomputedChain, rawEntries, storedInstantsIn } from './trail.ts';
+import type { RecomputedChain } from './scope.ts';
+import { chainsOf, chainVerifications, imagesFor, rawEntries, storedInstantsIn } from './trail.ts';
 
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
 
@@ -280,7 +281,7 @@ async function exportData(
   );
   const [images, verified, lab] = await Promise.all([
     imagesFor(scope, entries),
-    scope.verifyAuditTrail(),
+    scope.verifyAuditTrail().then(chainsOf),
     scope.company
       .selectFrom('lab')
       .select(['code', 'name', 'timeZone'])

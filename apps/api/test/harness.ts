@@ -141,6 +141,7 @@ interface ListenOptions {
   log?: LogSink;
   login?: AppOptions['login'];
   sweepEveryMs?: number | null;
+  verifyReadLimit?: string;
   logVolume?: AppOptions['logVolume'];
   trustedProxies?: string[];
 }
@@ -153,6 +154,7 @@ async function listen(
     log,
     login = 'decided',
     sweepEveryMs = null,
+    verifyReadLimit,
     logVolume = null,
     trustedProxies = ['127.0.0.1'],
   }: ListenOptions = {},
@@ -166,6 +168,7 @@ async function listen(
     login,
     release: TEST_RELEASE,
     sweepEveryMs,
+    verifyReadLimit,
     trustedProxies,
   });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });
@@ -182,7 +185,7 @@ async function listen(
  * A fresh migrated and seeded database, named after `name` and this checkout, behind a listening API with the decided
  * login and no sweep of its own, that keeps its log lines, torn down after the file's tests.
  */
-export async function startApi(name: string) {
+export async function startApi(name: string, options: ListenOptions = {}) {
   const database = checkoutDatabase(name);
   const admin = createDb(databaseUrl(server, 'postgres'));
   await sql`drop database if exists ${sql.id(database)} with (force)`.execute(admin);
@@ -191,7 +194,7 @@ export async function startApi(name: string) {
   const db = createDb(databaseUrl(server, database, 'lims_app'));
   const superuser = createDb(databaseUrl(server, database)).withSchema('lims');
   const seeded = await seed(db);
-  const { app, base, log, logLines } = await listen(db);
+  const { app, base, log, logLines } = await listen(db, options);
   after(async () => {
     await db.destroy();
     await superuser.destroy();

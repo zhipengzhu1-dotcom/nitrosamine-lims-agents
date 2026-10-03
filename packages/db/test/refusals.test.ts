@@ -43,6 +43,7 @@ const id = {
   admin: randomUUID(),
   operator: randomUUID(),
   verified: randomUUID(),
+  chainVerification: randomUUID(),
   identityVerification: randomUUID(),
   credentialLink: randomUUID(),
   room: randomUUID(),
@@ -272,6 +273,17 @@ const fixture: [string, Row][] = [
       session_lab_id: id.lab,
       session_id: id.session,
       roles: '{Analyst}',
+    },
+  ],
+  [
+    'lims.chain_verification',
+    {
+      id: id.chainVerification,
+      chain: 'company',
+      through: 1,
+      head: Buffer.alloc(32, 9),
+      recomputed_from: 1,
+      verified_by: id.person,
     },
   ],
   [
@@ -542,6 +554,11 @@ const tables = {
     },
     notNull: ['id', 'kind', 'roles', 'at'],
   },
+  'lims.chain_verification': {
+    noun: 'Chain Verification',
+    row: { chain: 'company', through: 1, head: Buffer.alloc(32, 9), recomputed_from: 1, verified_by: id.person },
+    notNull: ['id', 'chain', 'through', 'head', 'recomputed_from', 'verified_by', 'verified_at'],
+  },
   'lims.audit_export': {
     noun: 'Audit Export',
     row: {
@@ -617,6 +634,7 @@ const auditedTables: Table[] = [
   'lims.system_incident',
   'lims.access_event',
   'lims.audit_export',
+  'lims.chain_verification',
   'lims.identity_verification',
   'lims.credential_link',
   'lims.room',
@@ -752,6 +770,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
     'lims.audit_export': { id: id.auditExport },
+    'lims.chain_verification': { id: id.chainVerification },
     'lims.room': { id: id.room },
     'lims.workstation': { id: id.workstation },
     'lims.audit_chain': { chain: 'company' },
@@ -995,6 +1014,12 @@ describe('the database refuses a reference to a row that does not exist', () => 
     },
     noLab('lims.membership', 'Lab membership'),
     noLab('lims.audit_export', 'Audit Export'),
+    {
+      name: 'a Chain Verification by a person who does not exist is refused',
+      table: 'lims.chain_verification',
+      change: { verified_by: missing },
+      constraint: 'chain_verification_verified_by_fkey',
+    },
     {
       name: 'an Audit Export for a Customer that does not exist is refused',
       table: 'lims.audit_export',
@@ -1265,6 +1290,33 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint,
     }));
   refusesEach('23514', [
+    ...each(
+      'a Chain Verification of a chain the Audit Trail does not name is refused',
+      'lims.chain_verification',
+      'chain',
+      ['Company', 'lab', 'not-a-uuid'],
+      'chain_verification_chain_check',
+    ),
+    {
+      name: 'a Chain Verification through no entry is refused',
+      table: 'lims.chain_verification',
+      change: { through: 0 },
+      constraint: 'chain_verification_through_check',
+    },
+    ...each(
+      'a Chain Verification whose hash is not 32 bytes is refused',
+      'lims.chain_verification',
+      'head',
+      [Buffer.alloc(31), Buffer.alloc(33)],
+      'chain_verification_head_check',
+    ),
+    ...each(
+      'a Chain Verification that recomputed from before its first entry or after the entry past the one it verified through is refused',
+      'lims.chain_verification',
+      'recomputed_from',
+      [0, 3],
+      'chain_verification_recomputed_from_check',
+    ),
     {
       name: 'an Audit Export requested under any role but QA is refused',
       table: 'lims.audit_export',
@@ -1866,6 +1918,24 @@ describe('an audited write without an actor, a role and a reason is refused', ()
 
 describe('a Signature, a Record Version, a signature statement, a re-authentication record, an Access Event, an Audit Trail entry, a Commit Key, a System Incident or an Audit Export is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table; trigger: string; statement: string }[] = [
+    {
+      name: 'updating a Chain Verification is refused',
+      table: 'lims.chain_verification',
+      trigger: 'refuse_change',
+      statement: 'update lims.chain_verification set through = through + 1',
+    },
+    {
+      name: 'deleting a Chain Verification is refused',
+      table: 'lims.chain_verification',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.chain_verification',
+    },
+    {
+      name: 'truncating the Chain Verifications is refused',
+      table: 'lims.chain_verification',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.chain_verification',
+    },
     {
       name: 'updating an Audit Export is refused',
       table: 'lims.audit_export',

@@ -179,6 +179,19 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
       approved_at: { label: 'Approved at', shows: 'instant' },
     },
   },
+  chain_verification: {
+    kind: 'Chain Verification',
+    chain: 'company',
+    label: (row) => `${row.chain === 'company' ? 'company' : 'Lab'} chain through entry ${text(row.through)}`,
+    fields: {
+      chain: { label: 'Chain' },
+      through: { label: 'Verified through entry' },
+      head: { label: 'Hash of that entry', shows: 'hex' },
+      recomputed_from: { label: 'Recomputed from entry' },
+      verified_by: { label: 'Verified by', ref: 'person' },
+      verified_at: { label: 'Verified at', shows: 'instant' },
+    },
+  },
   reauthentication: {
     kind: 'Re-authentication',
     chain: 'lab',
@@ -427,11 +440,20 @@ export const breakLine = (b: ChainBreak) => `${b.failure}, recorded as System In
 /** A break as one line of text: `breakLine` and the System Incident's state now. */
 export const breakReport = (b: ChainBreak) => `${breakLine(b)} (${b.incidentState})`;
 
+export type Resumed = Pick<ChainVerification, 'recomputedFrom' | 'verifiedBefore'>;
+
+export const fromTheFirstEntry: Resumed = { recomputedFrom: '1', verifiedBefore: null };
+
 /**
  * How QA reads a recomputed chain: intact through its last entry, or through the entry before its first break, with
- * every break and the System Incident that records each, which `breakReport` reads out.
+ * every break and the System Incident that records each, which `breakReport` reads out, and where the recompute began.
  */
-export function chainVerification(chain: ChainKind, lastEntry: string, found: ChainBreakFound[]): ChainVerification {
+export function chainVerification(
+  chain: ChainKind,
+  lastEntry: string,
+  found: ChainBreakFound[],
+  resumed: Resumed = fromTheFirstEntry,
+): ChainVerification {
   const breaks = found.map(({ entry, kind, through, breaks: count, incident, incidentState }) => ({
     entry,
     failure: failureOf({ entry, kind, through, breaks: count }),
@@ -447,6 +469,7 @@ export function chainVerification(chain: ChainKind, lastEntry: string, found: Ch
       intactThrough: lastEntry,
       breaks,
       report: `verified through entry ${lastEntry}`,
+      ...resumed,
     };
   const intactThrough = String(BigInt(first.entry) - 1n);
   return {
@@ -456,5 +479,6 @@ export function chainVerification(chain: ChainKind, lastEntry: string, found: Ch
     intactThrough,
     breaks,
     report: `intact through entry ${intactThrough}`,
+    ...resumed,
   };
 }

@@ -55,6 +55,8 @@ export interface AppOptions {
   release: string;
   /** How often to run the expiry sweep, or null for an API whose caller runs it. */
   sweepEveryMs: number | null;
+  /** How long one chain's recompute may run before Verify chain refuses, as a PostgreSQL interval; the scope's default when absent. */
+  verifyReadLimit?: string | undefined;
 }
 
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
@@ -70,7 +72,7 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   app.setNotFoundHandler(() => refuse('notFound', 'The LIMS has no such route.'));
   if (options.logVolume) checkLogVolume(app, db, options.logVolume);
   loginRoutes(app, db, options.accessEventKey, options.secureCookie, limits);
-  sessionRoutes(app, db, limits, options.release);
+  sessionRoutes(app, db, limits, options.release, options.verifyReadLimit);
   if (options.sweepEveryMs !== null) scheduleExpirySweep(app, db, limits, options.sweepEveryMs);
   return app;
 }

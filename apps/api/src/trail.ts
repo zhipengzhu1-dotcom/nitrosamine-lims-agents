@@ -3,6 +3,8 @@ import {
   type ActorContext,
   actorUsername,
   type AuditedTable,
+  type AuditTrailVerification,
+  type ChainKind,
   auditedRecords,
   auditOp,
   type ChainVerification,
@@ -30,12 +32,19 @@ import {
   type SqlBool,
   sql,
 } from 'kysely';
-import type { FastifyBaseLogger } from 'fastify';
+import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { Value } from 'typebox/value';
 import type { App } from './app.ts';
 import { openChainIncidents } from './incident.ts';
 import { refuse } from './refuse.ts';
-import { labScope, type Scope } from './scope.ts';
+import {
+  labScope,
+  type RecomputedChain,
+  type Scope,
+  VERIFY_READ_LIMIT_SECONDS,
+  type VerifiedChains,
+  type VerifyOptions,
+} from './scope.ts';
 
 function snapshot(row: Json | null): RowSnapshot | null {
   if (row === null) return null;
@@ -206,6 +215,15 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'signature_statement':
     case 'signing_role':
       return true;
+    case 'chain_verification':
+      return Boolean(
+        await scope.company
+          .selectFrom('chainVerification')
+          .select('id')
+          .where('id', '=', id)
+          .where('chain', 'in', [scope.ctx.lab.id ?? 'company', 'company'])
+          .executeTakeFirst(),
+      );
     case 'person':
       return Boolean(await scope.from('membership').select('personId').where('personId', '=', id).executeTakeFirst());
     case 'customer':
@@ -231,7 +249,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
   }
 }
 
-export function trailRoutes(app: App, db: Kysely<DB>): void {
+export function trailRoutes(app: App, db: Kysely<DB>, readLimit?: string): void {
   app.route({
     ...routes.testTrail,
     handler: async (req) => {
@@ -280,18 +298,45 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
     },
   });
 
-  app.route({
-    ...routes.verifyAuditTrail,
-    handler: async (req) => {
-      if (!req.actor.roles.includes('QA')) refuse('role', 'Verifying the Audit Trail is a QA action.');
-      const { at, chains } = await labScope(db, req.actor).verifyAuditTrail();
-      return { at, chains: await chainVerifications(db, req.log, req.actor, chains) };
-    },
-  });
+  app.route({ ...routes.verifyAuditTrail, handler: (req) => verify(db, req, { everyEntry: false, readLimit }) });
+  app.route({ ...routes.recomputeAuditTrail, handler: (req) => verify(db, req, { everyEntry: true, readLimit }) });
 }
 
-/** A chain as the database recomputed it, before QA reads it. */
-export type RecomputedChain = Awaited<ReturnType<Scope['verifyAuditTrail']>>['chains'][number];
+async function verify(db: Kysely<DB>, req: FastifyRequest, options: VerifyOptions): Promise<AuditTrailVerification> {
+  if (!req.actor.roles.includes('QA')) refuse('role', 'Verifying the Audit Trail is a QA action.');
+  const scope = labScope(db, req.actor);
+  const { at, chains: recomputed } = chainsOf(await scope.verifyAuditTrail(options));
+  const chains = await chainVerifications(db, req.log, req.actor, recomputed);
+  const intact = recomputed.filter(
+    (c) => chains.some((v) => v.chain === c.chain && v.verdict === 'Intact') && c.lastEntry !== '0',
+  );
+  if (intact.length > 0)
+    await scope.write('Verify chain', 'QA', (q) =>
+      q.company
+        .insertInto('chainVerification')
+        .values(
+          intact.map((c) => ({
+            chain: c.chainId,
+            through: c.lastEntry,
+            head: Buffer.from(c.head, 'hex'),
+            recomputedFrom: c.recomputedFrom,
+            verifiedBy: req.actor.person.id,
+          })),
+        )
+        .execute(),
+    );
+  return { at, chains };
+}
+
+/** The recomputed chains, or the refusal that names the chain whose recompute did not finish within the read limit. */
+export function chainsOf(verified: VerifiedChains): Exclude<VerifiedChains, { timedOut: ChainKind }> {
+  if ('timedOut' in verified)
+    refuse(
+      'state',
+      `Verifying the ${verified.timedOut === 'lab' ? 'Lab' : 'company'} chain did not finish within ${VERIFY_READ_LIMIT_SECONDS} seconds. Try again when the LIMS is less busy.`,
+    );
+  return verified;
+}
 
 /**
  * Reads each recomputed chain as QA sees it; each break opens its System Incident, or answers the one that records it
@@ -304,7 +349,12 @@ export async function chainVerifications(
   chains: RecomputedChain[],
 ): Promise<ChainVerification[]> {
   const verified = [];
-  for (const { chain, chainId, lastEntry, breaks } of chains)
-    verified.push(chainVerification(chain, lastEntry, await openChainIncidents(db, log, requester, chainId, breaks)));
+  for (const { chain, chainId, lastEntry, breaks, recomputedFrom, verifiedBefore } of chains)
+    verified.push(
+      chainVerification(chain, lastEntry, await openChainIncidents(db, log, requester, chainId, breaks), {
+        recomputedFrom,
+        verifiedBefore,
+      }),
+    );
   return verified;
 }

@@ -323,8 +323,8 @@ it("a cited record's own trail holds only that record's entries, and a record ou
 
 it("QA's Verify chain on an untouched chain replies Intact, verified through entry N, with N the chain's last entry; another role is refused", async () => {
   await submitTestTo('Ready');
-  const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   const [labLast, companyLast] = [await lastEntryOf(api.labId), await lastEntryOf('company')];
+  const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   assert.deepEqual(verified.chains, [
     {
       chain: 'lab',
@@ -333,6 +333,8 @@ it("QA's Verify chain on an untouched chain replies Intact, verified through ent
       breaks: [],
       verdict: 'Intact',
       report: `verified through entry ${labLast}`,
+      recomputedFrom: '1',
+      verifiedBefore: null,
     },
     {
       chain: 'company',
@@ -341,6 +343,8 @@ it("QA's Verify chain on an untouched chain replies Intact, verified through ent
       breaks: [],
       verdict: 'Intact',
       report: `verified through entry ${companyLast}`,
+      recomputedFrom: '1',
+      verifiedBefore: null,
     },
   ]);
   assert.equal(
@@ -500,7 +504,12 @@ it('after an entry is altered by the database owner, Verify chain names it as th
 
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   const incident = verified.chains[0]?.breaks[0]?.incident ?? assert.fail('the break names a System Incident');
-  assert.deepEqual(verified.chains[0], {
+  const {
+    recomputedFrom: _from,
+    verifiedBefore: _before,
+    ...shown
+  } = verified.chains[0] ?? assert.fail('the Lab chain');
+  assert.deepEqual(shown, {
     chain: 'lab',
     lastEntry: String(last),
     intactThrough: String(altered - 1n),
@@ -607,7 +616,7 @@ async function labOfItsOwn(code: string, entries: number) {
       );
     });
   const verify = async () => ok(await client.call(routes.verifyAuditTrail)).chains[0] ?? assert.fail('the Lab chain');
-  return { labId, alter, verify, last: BigInt(await lastEntryOf(labId)) };
+  return { labId, alter, verify, client, last: BigInt(await lastEntryOf(labId)) };
 }
 
 it('Verify chain reports both broken entries of a chain with two, each with its own System Incident, and raises the alarm once for each incident it opens', async () => {
@@ -863,4 +872,90 @@ it('Verify chain records 100 breaks one by one, and a 101st as one more break', 
   );
   assert.equal(more.length, 101);
   assert.equal(more[100]?.failure, '1 more break, from entry 101 to entry 101');
+});
+
+const chainVerificationsOf = (chain: string) =>
+  api.db
+    .selectFrom('chainVerification')
+    .select(['through', 'recomputedFrom', 'verifiedBy', sql<string>`encode(head, 'hex')`.as('head')])
+    .where('chain', '=', chain)
+    .orderBy('verifiedAt')
+    .execute();
+
+it('Verify chain records a Chain Verification for each intact chain and resumes from it next time, so a changed entry behind it is found only by Recompute every entry, which records none for a broken chain', async () => {
+  const lab = await labOfItsOwn('CKP', 4);
+  const last = String(lab.last);
+  const first = await lab.verify();
+  assert.deepEqual([first.verdict, first.recomputedFrom, first.verifiedBefore], ['Intact', '1', null]);
+  const [recorded] = await chainVerificationsOf(lab.labId);
+  const head = await api.db
+    .selectFrom('auditEntry')
+    .select(sql<string>`encode(hash, 'hex')`.as('hash'))
+    .where('chain', '=', lab.labId)
+    .where('seq', '=', last)
+    .executeTakeFirstOrThrow();
+  assert.deepEqual(recorded, { through: last, recomputedFrom: '1', verifiedBy: recorded?.verifiedBy, head: head.hash });
+  assert.equal(
+    (
+      await api.db
+        .selectFrom('person')
+        .select('username')
+        .where('id', '=', recorded?.verifiedBy ?? '')
+        .executeTakeFirst()
+    )?.username,
+    'ckp.qa',
+    'the QA who verified is recorded',
+  );
+
+  const second = await lab.verify();
+  assert.equal(
+    second.recomputedFrom,
+    String(lab.last + 1n),
+    'the next verification resumes after the Chain Verification',
+  );
+  assert.deepEqual(
+    [second.verifiedBefore?.through, second.verifiedBefore?.by, second.verdict],
+    [last, 'ckp.qa', 'Intact'],
+  );
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 2, 'each intact verification is recorded');
+
+  const behind = String(lab.last - 2n);
+  await lab.alter(behind);
+  assert.equal(
+    (await lab.verify()).verdict,
+    'Intact',
+    'a routine verification does not look behind the Chain Verification',
+  );
+  const every = ok(await lab.client.call(routes.recomputeAuditTrail)).chains[0] ?? assert.fail('the Lab chain');
+  assert.deepEqual(
+    [every.verdict, every.recomputedFrom, every.verifiedBefore, every.breaks.map((b) => b.entry)],
+    ['Broken', '1', null, [behind]],
+  );
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 3, 'a broken chain records no Chain Verification');
+  assert.equal(
+    ok(await lab.client.call(routes.recomputeAuditTrail)).chains[0]?.breaks[0]?.incident,
+    every.breaks[0]?.incident,
+    'recomputing again names the same System Incident',
+  );
+});
+
+it("Verify chain refuses, naming the chain, when a chain's recompute does not finish within the read limit, and opens no System Incident", async () => {
+  const slow = await startApi('lims_api_trail_slow_test', { verifyReadLimit: '300ms' });
+  const qa = await slow.login(await slow.addPerson('slow.qa', ['QA']));
+  const holder = await slow.superuser.connection().execute(async (held) => {
+    await sql`begin`.execute(held);
+    await sql`lock table lims.audit_chain in access exclusive mode`.execute(held);
+    const refused = refusedWith(await qa.call(routes.verifyAuditTrail), 'state');
+    await sql`rollback`.execute(held);
+    return refused;
+  });
+  assert.equal(
+    holder,
+    'Verifying the Lab chain did not finish within 30 seconds. Try again when the LIMS is less busy.',
+  );
+  assert.deepEqual(
+    await slow.db.selectFrom('systemIncident').select('kind').execute(),
+    [],
+    'a verification that did not finish is a refusal, not a failure',
+  );
 });

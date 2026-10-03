@@ -463,3 +463,108 @@ it("one transaction keeps one ID when it changes the session's time zone and dat
   assert.equal(ids.length, 2);
   assert.equal(ids[0], ids[1]);
 });
+
+describe('a verification resumes from the latest Chain Verification the company chain records', () => {
+  const zeros = sql`decode(repeat('00', 32), 'hex')`;
+  const breaksOf = async (chain: string, every = false) =>
+    (
+      await sql<{ seq: number; kind: string; fingerprint: string }>`
+        select b.seq::int, b.kind, encode(b.fingerprint, 'hex') as fingerprint
+        from ${every ? sql`lims.chain_breaks(${chain}, 0, ${zeros})` : sql`lims.chain_breaks(${chain})`} as b`.execute(
+        app,
+      )
+    ).rows;
+  const latestVerificationOf = async (chain: string) =>
+    (await sql<{ through: string }>`select through::text from lims.latest_chain_verification(${chain})`.execute(app))
+      .rows[0]?.through ?? null;
+  const asReplica = async (statement: string, values: unknown[]) => {
+    await superuser.query('begin');
+    await superuser.query('set local session_replication_role = replica');
+    await superuser.query(statement, values);
+    await superuser.query('commit');
+  };
+  let chain: string;
+  let qa: string;
+  before(async () => {
+    const owner = { actor: 'svc:test', role: 'system', reason: 'Set up a Lab whose chain is verified' };
+    ({ labId: chain } = await audited(app, owner, (tx) =>
+      tx
+        .insertInto('lab')
+        .values({ code: 'CV', name: 'Verified Lab', timeZone: 'UTC' })
+        .returning('labId')
+        .executeTakeFirstOrThrow(),
+    ));
+    await superuser.query('begin');
+    await superuser.query('set local session_replication_role = replica');
+    ({ id: qa } =
+      (
+        await superuser.query<{ id: string }>(
+          `insert into lims.person (username, display_name) values ('cv.qa', 'CV QA') returning id`,
+        )
+      ).rows[0] ?? assert.fail('the QA'));
+    await superuser.query('commit');
+    const rename = (name: string) =>
+      audited(app, { actor: 'person:cv.qa', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
+        tx.updateTable('lab').set({ name }).where('labId', '=', chain).execute(),
+      );
+    for (const n of [2, 3, 4, 5, 6]) await rename(`Verified Lab ${n}`);
+  });
+  const record = (through: number) =>
+    audited(app, { actor: 'person:cv.qa', role: 'QA', reason: 'Verify chain' }, (tx) =>
+      tx
+        .insertInto('chainVerification')
+        .values({
+          chain,
+          through: String(through),
+          head: sql`(select hash from lims.audit_entry where chain = ${chain} and seq = ${through})`,
+          recomputedFrom: '1',
+          verifiedBy: qa,
+        })
+        .execute(),
+    );
+
+  it('a changed entry behind the Chain Verification is found only by a recompute from the first entry; one after it is found either way, with one fingerprint', async () => {
+    assert.equal(await latestVerificationOf(chain), null);
+    await record(4);
+    assert.equal(await latestVerificationOf(chain), '4');
+    await asReplica(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 2`, [chain]);
+    assert.deepEqual(await breaksOf(chain), []);
+    assert.deepEqual(
+      (await breaksOf(chain, true)).map((b) => [b.seq, b.kind]),
+      [[2, 'Changed']],
+    );
+    await asReplica(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 5`, [chain]);
+    const [resumed, every] = [await breaksOf(chain), await breaksOf(chain, true)];
+    assert.deepEqual(resumed, every.slice(1));
+    assert.deepEqual(
+      resumed.map((b) => [b.seq, b.kind]),
+      [[5, 'Changed']],
+    );
+  });
+
+  it('a Chain Verification written behind the capture trigger, with no entry on the company chain, is not resumed from', async () => {
+    await asReplica(
+      `insert into lims.chain_verification (chain, through, head, recomputed_from, verified_by)
+       select $1, 6, hash, 1, $2 from lims.audit_entry where chain = $1 and seq = 6`,
+      [chain, qa],
+    );
+    assert.equal(await latestVerificationOf(chain), '4', 'the forged row is passed over for the recorded one');
+    assert.deepEqual(
+      (await breaksOf(chain)).map((b) => b.seq),
+      [5],
+    );
+  });
+
+  it('a Chain Verification whose entries are no longer all present is not resumed from, so the missing run is found', async () => {
+    await asReplica(`delete from lims.audit_entry where chain = $1 and seq = 3`, [chain]);
+    assert.equal(await latestVerificationOf(chain), null);
+    assert.deepEqual(
+      (await breaksOf(chain)).map((b) => [b.seq, b.kind]),
+      [
+        [2, 'Changed'],
+        [3, 'Missing'],
+        [5, 'Changed'],
+      ],
+    );
+  });
+});

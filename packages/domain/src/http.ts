@@ -148,6 +148,7 @@ export const auditedTable = Type.Enum({
   signature_statement: 'signature_statement',
   signing_role: 'signing_role',
   reauthentication: 'reauthentication',
+  chain_verification: 'chain_verification',
 } as const);
 export type AuditedTable = Static<typeof auditedTable>;
 const chainKind = Type.Enum({ lab: 'lab', company: 'company' } as const);
@@ -368,6 +369,10 @@ const chainVerification = Type.Object({
   /** Every break, in entry order; none when the chain is Intact. */
   breaks: Type.Array(chainBreak),
   report: Type.String(),
+  /** The first entry this verification recomputed: 1 for every entry, else the entry after the Chain Verification it resumed from. */
+  recomputedFrom: seq,
+  /** The Chain Verification resumed from: the entry it verified through, when, and who verified; null when none. */
+  verifiedBefore: nullable(Type.Object({ through: seq, at: instant, by: Type.String() })),
 });
 export type ChainVerification = Static<typeof chainVerification>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
@@ -605,6 +610,8 @@ export const routes = {
     trail,
   ),
   verifyAuditTrail: route('POST', '/api/audit/verify', { body: noBody }, auditTrailVerification),
+  /** Verify chain from each chain's first entry, whatever Chain Verification it holds. */
+  recomputeAuditTrail: route('POST', '/api/audit/recompute', { body: noBody }, auditTrailVerification),
   /** The Customers QA can export for: those with a Sample in this Lab. */
   auditExportCustomers: route('GET', '/api/audit-exports/customers', {}, Type.Array(customerRef)),
   auditExport: route(

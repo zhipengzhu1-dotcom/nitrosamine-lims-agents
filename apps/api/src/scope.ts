@@ -1,9 +1,12 @@
-import type { DB } from '@lims/db';
+import { type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
   type BreakKind,
+  type ChainKind,
+  type Instant,
   type NumberedKind,
   type NumberTaken,
+  type Resumed,
   type Role,
   recordNumber,
 } from '@lims/domain';
@@ -26,7 +29,8 @@ type CompanyTable =
   | 'lab'
   | 'identityVerification'
   | 'credentialLink'
-  | 'signatureStatement';
+  | 'signatureStatement'
+  | 'chainVerification';
 type LabTable = Exclude<keyof DB, CompanyTable | 'accessEvent' | 'auditEntry' | 'session' | 'systemIncident'>;
 
 function inLab(q: Kysely<DB>, labId: string) {
@@ -100,6 +104,72 @@ const BREAKS_ONE_BY_ONE = 100;
 /** A break, or the breaks after the first ones taken together, as a verification records it. */
 export type RecordedBreak = { entry: string; kind: BreakKind; through: string; breaks: number; fingerprint: string };
 
+export const VERIFY_READ_LIMIT_SECONDS = 30;
+const VERIFY_READ_LIMIT = `${VERIFY_READ_LIMIT_SECONDS}s`;
+
+export interface VerifyOptions {
+  everyEntry?: boolean;
+  /** A PostgreSQL interval such as `30s`. */
+  readLimit?: string | undefined;
+}
+
+/** A chain as the database recomputed it, before QA reads it. */
+export type RecomputedChain = {
+  chain: ChainKind;
+  chainId: string;
+  at: Instant;
+  lastEntry: string;
+  head: string;
+  breaks: RecordedBreak[];
+} & Resumed;
+
+export type VerifiedChains = { at: Instant; chains: RecomputedChain[] } | { timedOut: ChainKind };
+
+async function recompute(
+  tx: Kysely<DB>,
+  chain: string,
+  everyEntry: boolean,
+): Promise<Omit<RecomputedChain, 'chain' | 'chainId'>> {
+  const zero = sql`decode(repeat('00', 32), 'hex')`;
+  const { rows } = await sql<Omit<RecomputedChain, 'chain' | 'chainId'>>`
+    with resume as (
+      select case when ${everyEntry} then 0 else coalesce(c.through, 0) end as through,
+             case when ${everyEntry} then ${zero} else coalesce(c.head, ${zero}) end as head,
+             case when ${everyEntry} or c.through is null then null else json_build_object(
+               'through', c.through::text,
+               'at', to_char(c.verified_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+               'by', p.display_name) end as verified_before
+      from (select) as one
+      left join lims.latest_chain_verification(${chain}) as c on true
+      left join lims.person as p on p.id = c.verified_by
+    ), found as (
+      select b.*, row_number() over (order by b.seq) as n
+      from resume, lims.chain_breaks(${chain}, resume.through, resume.head) as b
+    ), recorded as (
+      select seq, kind, through, 1 as breaks, fingerprint from found where n <= ${BREAKS_ONE_BY_ONE}
+      union all
+      select min(seq), 'More', max(through), count(*)::int,
+        sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq))
+      from found where n > ${BREAKS_ONE_BY_ONE} having count(*) > 0
+    )
+    select to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at,
+      coalesce((select seq from lims.audit_chain where chain = ${chain}), 0)::text as last_entry,
+      encode(coalesce((select head from lims.audit_chain where chain = ${chain}), ${zero}), 'hex') as head,
+      (resume.through + 1)::text as recomputed_from,
+      resume.verified_before,
+      coalesce((
+        select json_agg(json_build_object(
+          'entry', r.seq::text, 'kind', r.kind, 'through', r.through::text, 'breaks', r.breaks,
+          'fingerprint', encode(r.fingerprint, 'hex')
+        ) order by r.seq)
+        from recorded as r
+      ), '[]') as breaks
+    from resume`.execute(tx);
+  const [found] = rows;
+  if (!found) throw new Error(`the recompute of chain ${chain} returned no row`);
+  return found;
+}
+
 /** The one lab-scoped seam: every read and write after login goes through it, filtered to the context's Lab. */
 export function labScope(db: Kysely<DB>, ctx: ActorContext) {
   const labId = ctx.lab.id;
@@ -109,43 +179,33 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     ...inLab(db, labId),
     /** Reaches only this Lab's chain and the company chain. */
     trail: () => db.selectFrom('auditEntry').where('chain', 'in', [labId, 'company']),
-    /** Recomputes this Lab's chain and the company chain in one statement, so both are read from one snapshot. */
-    verifyAuditTrail: async () => {
-      const lastEntry = (chain: string) =>
-        sql<string>`coalesce((select seq from lims.audit_chain where chain = ${chain}), 0)::text`;
-      const breaks = (chain: string) =>
-        sql<RecordedBreak[]>`coalesce((
-          with found as (
-            select b.*, row_number() over (order by b.seq) as n from lims.chain_breaks(${chain}) as b
-          ), recorded as (
-            select seq, kind, through, 1 as breaks, fingerprint from found where n <= ${BREAKS_ONE_BY_ONE}
-            union all
-            select min(seq), 'More', max(through), count(*)::int,
-              sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq))
-            from found where n > ${BREAKS_ONE_BY_ONE} having count(*) > 0
-          )
-          select json_agg(json_build_object(
-            'entry', r.seq::text, 'kind', r.kind, 'through', r.through::text, 'breaks', r.breaks,
-            'fingerprint', encode(r.fingerprint, 'hex')
-          ) order by r.seq)
-          from recorded as r
-        ), '[]')`;
-      const found = await db
-        .selectNoFrom([
-          sql<Date>`now()`.as('at'),
-          lastEntry(labId).as('labLast'),
-          breaks(labId).as('labBreaks'),
-          lastEntry('company').as('companyLast'),
-          breaks('company').as('companyBreaks'),
-        ])
-        .executeTakeFirstOrThrow();
-      return {
-        at: found.at,
-        chains: [
-          { chain: 'lab' as const, chainId: labId, lastEntry: found.labLast, breaks: found.labBreaks },
-          { chain: 'company' as const, chainId: 'company', lastEntry: found.companyLast, breaks: found.companyBreaks },
-        ],
+    /**
+     * Recomputes this Lab's chain and the company chain from one snapshot, each from its latest Chain Verification
+     * unless `everyEntry` asks for the whole chain, and each within `readLimit`: the first chain that overruns it is
+     * answered as `timedOut` instead of a failure.
+     */
+    verifyAuditTrail: async ({ everyEntry = false, readLimit = VERIFY_READ_LIMIT }: VerifyOptions = {}) => {
+      const read = async (tx: Kysely<DB>): Promise<VerifiedChains> => {
+        await sql`select set_config('statement_timeout', ${readLimit}, true)`.execute(tx);
+        const chains: RecomputedChain[] = [];
+        for (const [chain, chainId] of [
+          ['lab', labId],
+          ['company', 'company'],
+        ] as const) {
+          const found = await recompute(tx, chainId, everyEntry).catch((error: unknown) => {
+            if (postgresFault(error)?.sqlstate === '57014') return chain;
+            throw new Error(`Verify chain could not recompute the ${chain} chain`, { cause: error });
+          });
+          if (typeof found === 'string') return { timedOut: found };
+          chains.push({ chain, chainId, ...found });
+        }
+        const [first] = chains;
+        if (!first) throw new Error('Verify chain recomputed no chain');
+        return { at: first.at, chains };
       };
+      return db.isTransaction
+        ? read(db)
+        : db.transaction().setIsolationLevel('repeatable read').setAccessMode('read only').execute(read);
     },
     /** One audited transaction; a write a re-authentication enables holds that person's row before anything else. */
     write: <R>(reason: string, role: Role, fn: (q: WriteQueries) => Promise<R>, reauthenticated?: Reauthenticated) =>

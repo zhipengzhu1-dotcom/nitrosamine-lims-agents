@@ -159,8 +159,8 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     /^Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC\. Not anchored off-server \(demo\)\.$/,
   );
   await expect(page.locator('.chains li')).toHaveText([
-    /^Lab chain Intact verified through entry \d+$/,
-    /^Company chain Intact verified through entry \d+$/,
+    /^Lab chain Intact verified through entry \d+ (Every entry recomputed\.|Recomputed from entry \d+; entries through \d+ were verified .* by .*\.)$/,
+    /^Company chain Intact verified through entry \d+ (Every entry recomputed\.|Recomputed from entry \d+; entries through \d+ were verified .* by .*\.)$/,
   ]);
   for (const status of await page.locator('.chains .status').all()) {
     await expect(status, 'intact reads in the ok colour').toHaveCSS('color', INTACT_COLOUR);
@@ -211,7 +211,7 @@ test('QA verifying a broken chain sees Broken beside that chain, in its own glyp
   await expect(chains.first().locator('.breaks li').first()).toHaveText(
     /^entry 1 fails to verify, recorded as System Incident \w{8} Open$/,
   );
-  await expect(chains.last()).toHaveText(/^Company chain Intact verified through entry \d+$/);
+  await expect(chains.last()).toHaveText(/^Company chain Intact verified through entry \d+ (Every|Recomputed)/);
   const [broken, intact] = [chains.first().locator('.status').first(), chains.last().locator('.status')];
   await expect(broken).toHaveCSS('color', 'rgb(179, 38, 30)');
   await expect(intact).toHaveCSS('color', INTACT_COLOUR);

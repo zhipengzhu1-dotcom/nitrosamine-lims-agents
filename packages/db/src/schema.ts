@@ -96,6 +96,16 @@ export interface AuditExport {
   requestedRole: Generated<Role>;
 }
 
+export interface ChainVerification {
+  chain: string;
+  head: Buffer;
+  id: Generated<string>;
+  recomputedFrom: Int8;
+  through: Int8;
+  verifiedAt: Generated<Timestamp>;
+  verifiedBy: string;
+}
+
 export interface CommitKey {
   committedAt: Generated<Timestamp>;
   key: string;
@@ -322,6 +332,7 @@ export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
   auditExport: AuditExport;
+  chainVerification: ChainVerification;
   commitKey: CommitKey;
   credentialLink: CredentialLink;
   customer: Customer;
