@@ -4413,7 +4413,7 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
         stamp(id.probeEntry),
         `update lims.deployment set data_class = 'real', set_by_entry_id = '${id.probeEntry}'`,
       ),
-      'the database holds records created under fictional: audit_export, chain_verification, customer, enrolment_grant, equipment, equipment_event, method, result, room, sample, submission, system_incident, test, test_report, training_record, workstation',
+      'the database holds records created under fictional: audit_export, chain_verification, customer, document, document_version, enrolment_grant, equipment, equipment_event, method, result, room, sample, submission, system_incident, test, test_report, training_record, workstation',
     );
   });
 
