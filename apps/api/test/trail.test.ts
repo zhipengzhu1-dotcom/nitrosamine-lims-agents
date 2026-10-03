@@ -1378,6 +1378,40 @@ it('when the entry a Chain Verification names is changed, Verify chain opens one
   }
 });
 
+it("when the entry a Chain Verification names changes again, listing the changed entry's System Incident names the one that records the change now, not the contradicted Chain Verification's", async () => {
+  const lab = await labOfItsOwn('AGN', 4);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  const named = String(lab.last);
+  await lab.alter(named);
+  const stored = await api.db
+    .selectFrom('incidentBreak')
+    .innerJoin('systemIncident', 'systemIncident.id', 'incidentBreak.incidentId')
+    .select(['systemIncident.reference', 'incidentBreak.kind'])
+    .where(
+      'systemIncident.reference',
+      'in',
+      (await lab.verify()).breaks.map((b) => b.incident),
+    )
+    .execute();
+  const of = (kind: string) =>
+    stored.find((s) => s.kind === kind)?.reference ?? assert.fail(`the ${kind} break names a System Incident`);
+  const [changed, contradicted] = [of('Changed'), of('Contradicted')];
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update, again' where chain = ${lab.labId} and seq = ${named}`,
+  ]);
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: changed }));
+  assert.deepEqual(
+    [listed.asRecorded, listed.breaks.map((l) => [l.entry, l.kind, l.matches])],
+    [false, [[named, 'Changed', false]]],
+  );
+  assert.equal(listed.opened.length, 1, 'the read records the changed entry in one new System Incident');
+  assert.deepEqual(
+    [listed.incidents, listed.incidents.includes(contradicted)],
+    [listed.opened, false],
+    "the read names the System Incident that records the listed break, and not the contradicted Chain Verification's",
+  );
+});
+
 it("Verify chain refuses, naming the chain and the read limit, when a chain's recompute does not finish within it, and opens the System Incident the refusal names", async () => {
   const slow = await startApi('lims_api_trail_slow_test', { verifyReadLimitSeconds: 0.3 });
   const qa = await slow.login(await slow.addPerson('slow.qa', ['QA']));

@@ -301,8 +301,9 @@ export function incidentRoutes(app: App, db: Kysely<DB>, credentials: Credential
           `System Incident ${reference} was opened before the LIMS recorded a break's last entry. Verify the chain to record it again.`,
         );
       const scope = labScope(db, req.actor);
+      const range = { id, chain, first: firstFailure, last: lastFailure, fingerprint };
       const listed =
-        (await scope.breaksWithin({ id, chain, first: firstFailure, last: lastFailure, fingerprint })) ??
+        (await scope.breaksWithin(range)) ??
         refuse(
           'role',
           `System Incident ${reference} records breaks in another Lab's chain. Switch to that Lab to list them.`,
@@ -314,17 +315,9 @@ export function incidentRoutes(app: App, db: Kysely<DB>, credentials: Credential
         (c) => c.chainId === chain,
       );
       const found = verified ? await openChainIncidents(db, req.log, req.actor, chain, verified.breaks) : [];
-      const inRange = found.filter(
-        (b) =>
-          b.incident !== reference &&
-          BigInt(b.through) >= BigInt(firstFailure) &&
-          BigInt(b.entry) <= BigInt(lastFailure),
-      );
-      return {
-        ...listed,
-        incidents: [...new Set(inRange.map((b) => b.incident))],
-        opened: found.filter((b) => b.opened).map((b) => b.incident),
-      };
+      // Read again, so `incidents` names the incidents just opened by the same kind rule that chose the listed breaks.
+      const relisted = (await scope.breaksWithin(range)) ?? listed;
+      return { ...relisted, opened: found.filter((b) => b.opened).map((b) => b.incident) };
     },
   });
   for (const name of incidentStepNames) registerIncidentStep(app, db, credentials, name, release);
