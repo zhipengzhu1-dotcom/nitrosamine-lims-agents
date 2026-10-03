@@ -427,6 +427,64 @@ it('the Equipment and the Logbook line that moved it to In use show the Approved
   assert.equal(registered?.entry === 'status' && registered.signature, null, 'the registration line is unsigned');
 });
 
+const changesAfterApproval: [string, (equipment: Equipment) => Promise<Equipment>][] = [
+  [
+    'a Room move',
+    async (equipment) =>
+      ok(await as.lena.call(equipmentStepRoute('move'), { id: equipment.id, input: { roomId: prepRoom.id } })),
+  ],
+  [
+    'a Suspect',
+    async (equipment) =>
+      ok(await as.samir.call(equipmentStepRoute('markSuspect'), { id: equipment.id, input: { reason: 'It drifts.' } })),
+  ],
+  [
+    'retiring it',
+    async (equipment) => ok(await as.lena.call(equipmentStepRoute('retire'), { id: equipment.id, input: {} })),
+  ],
+];
+
+for (const [change, make] of changesAfterApproval)
+  it(`${change} after QA's Approved shows that Approved Signature unsigned, on the Equipment and on its In use line`, async () => {
+    const changed = await make(await inUse());
+    const [approved] = changed.signatures;
+    assert.equal(approved?.unsigned, true, 'the Equipment shows its Approved Signature unsigned');
+    const toInUse = changed.logbook.find((line) => line.entry === 'status' && line.to === 'InUse');
+    assert.equal(toInUse?.entry === 'status' && toInUse.signature?.unsigned, true, 'the In use line shows it unsigned');
+  });
+
+/** The hash, hex-encoded, that the stored Record Version `version` of the Equipment holds, if one is stored. */
+async function storedHash(equipmentId: string, version: number): Promise<string | undefined> {
+  const stored = await api.superuser
+    .selectFrom('recordVersion')
+    .select(sql<string>`encode(content_hash, 'hex')`.as('contentHash'))
+    .where('recordTable', '=', 'equipment')
+    .where('recordId', '=', equipmentId)
+    .where('version', '=', version)
+    .executeTakeFirst();
+  return stored?.contentHash;
+}
+
+it('the Record Version the Equipment shows is stored with the hash it shows, whatever step came last', async () => {
+  const registered = await register();
+  const approved = ok(await approve(as.quinn, registered, quinn));
+  const cleaned = ok(
+    await as.ana.call(equipmentStepRoute('recordEvent'), {
+      id: approved.id,
+      input: { kind: 'Cleaning', note: 'Wiped the pan.' },
+      signature: signing(approved, ana),
+    }),
+  );
+  const moved = ok(await as.lena.call(equipmentStepRoute('move'), { id: approved.id, input: { roomId: prepRoom.id } }));
+  const retired = ok(await as.lena.call(equipmentStepRoute('retire'), { id: approved.id, input: {} }));
+  for (const [step, shown] of Object.entries({ registered, approved, cleaned, moved, retired }))
+    assert.equal(
+      await storedHash(shown.id, shown.recordVersion.version),
+      shown.recordVersion.contentHash,
+      `${step}: Record Version ${shown.recordVersion.version}`,
+    );
+});
+
 it('an Equipment Event line shows its Performed Signature with the printed name as signed, and a Suspect line none', async () => {
   const signer = await api.addPerson('analyst.manifest', ['Analyst']);
   const equipment = await inUse();
