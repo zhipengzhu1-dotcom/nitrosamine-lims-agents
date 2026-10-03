@@ -302,7 +302,7 @@ const listedEvent = {
 };
 /**
  * One of a person's Access Events; a Lockout lists the sessions in this Lab that it ended, or null when it was recorded
- * before a Lockout was stamped at its lock's instant (c1513c5), so the record cannot say which sessions it ended.
+ * before a Lockout was stamped at its lock's instant (#207), so the record cannot say which sessions it ended.
  */
 const listedAccessEvent = Type.Union([
   Type.Object({ ...listedEvent, kind: Type.Literal('Lockout'), endedSessions: nullable(Type.Array(endedSession)) }),

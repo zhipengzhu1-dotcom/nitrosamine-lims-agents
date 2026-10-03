@@ -358,7 +358,7 @@ it('a Lockout stamped at the lock instant that ended no session in this Lab list
   assert.deepEqual(lockout.endedSessions, [], 'the record proves the Lockout ended no session here');
 });
 
-/** Locks the person out as the LIMS did before c1513c5: the Lockout is written after the lock, at its own instant. */
+/** Locks the person out as the LIMS did before #207: the Lockout is written after the lock, at its own instant. */
 async function lockOutUnstamped(account: Account): Promise<void> {
   await audited(api.superuser, SYSTEM, async (tx) => {
     await tx.updateTable('person').set({ lockedAt: sql`clock_timestamp()` }).where('id', '=', account.id).execute();
