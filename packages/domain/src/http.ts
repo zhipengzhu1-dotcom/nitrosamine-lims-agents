@@ -127,7 +127,7 @@ const signature = Type.Object({
   /** Null only on a Signature given before the signing function recorded what proved the signer. */
   authenticator: nullable(authenticator),
   signedAt: instant,
-  /** `signedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
+  /** `signedAt` on the wall clock of the zone its Lab was in at signing, ISO 8601 with that offset, as the database renders it. */
   signedAtLab: instant,
   /** The signed record's glossary noun, such as "Test Report". */
   record: Type.String(),

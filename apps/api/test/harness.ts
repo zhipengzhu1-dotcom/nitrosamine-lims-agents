@@ -133,6 +133,34 @@ export function refusedWith<R extends Route>(answer: Answer<R>, kind: RefusalKin
       );
 }
 
+/** The UTC instant `at` as ISO 8601 on the wall clock of `timeZone`, with that zone's offset, as Intl renders it. */
+export function onLabClock(at: string, timeZone = 'America/New_York'): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'longOffset',
+    // oxlint-disable-next-line no-restricted-globals -- parses an instant to render it; reads no clock
+  }).formatToParts(new Date(at));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '';
+  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice(3);
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${at.slice(19, -1)}${offset}`;
+}
+
+/**
+ * A database Lab-clock rendering cut from microseconds to the milliseconds a driver Date keeps, so it compares with
+ * `onLabClock` of that Date. It truncates, as the driver does when it parses the microseconds.
+ */
+export const toMillis = (atLab: string | null) => atLab?.replace(/(\.\d{3})\d{3}/, '$1');
+
+/** The Audit Trail reason `moveLabZone` writes. */
+export const labZoneMoveReason = 'Move the Lab to another time zone';
+
 /** A fresh 32-byte key for one test API. */
 const key = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
 const accessEventKey = key();
@@ -275,6 +303,12 @@ export async function startApi(name: string) {
         .where('personId', '=', account.id)
         .where('endedAt', 'is', null)
         .execute();
+    },
+    /** Moves the default Lab to `timeZone` through the Audit Trail, as the migration service would. */
+    async moveLabZone(timeZone: string): Promise<void> {
+      await audited(superuser, { actor: 'svc:migrate', role: 'system', reason: labZoneMoveReason }, (tx) =>
+        tx.updateTable('lab').set({ timeZone }).where('labId', '=', labId).execute(),
+      );
     },
     labId,
     qcLabId,
