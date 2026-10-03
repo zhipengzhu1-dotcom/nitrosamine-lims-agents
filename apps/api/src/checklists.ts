@@ -333,9 +333,10 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
       const unknown = unknownTick(inForce.items, body.ticks);
       if (unknown) refuse('unknownField', unknown);
       const saved = await scope.write('saveTestReview', 'Reviewer', async (q) => {
-        // The same ticks saved again return the review already saved, while it holds the content it was saved with, so a
-        // Reviewed press resent after a refusal or no answer names the same review and keeps its Commit Key. The Lab's chain, which the insert takes anyway, is
-        // held before the lookup, so two saves pressed at once see each other and save one review.
+        // The same ticks saved again return the review already saved, while it holds the content it was saved with,
+        // so a Reviewed press resent after a refusal or no answer names the same review and keeps its Commit Key. The
+        // Lab's chain, which the insert takes anyway, is held before the lookup, so two saves pressed at once see each
+        // other and save one review.
         await sql`select lims.lock_chains(${actor.lab.id})`.execute(q.company);
         const { id } =
           (await q
