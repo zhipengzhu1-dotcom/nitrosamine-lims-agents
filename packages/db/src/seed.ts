@@ -83,7 +83,7 @@ const ENTRIES: { title: string; summary: string; recordsExceptions?: [DemoExcept
   {
     title: 'Demo exception: demo login',
     summary:
-      'Every demo account shares one password, with no second factor, a lockout at 20 failures and the demo session limits. The seed also writes the re-authentication record behind each of these first approvals itself.',
+      'Every demo account shares one password, with no second factor, a lockout at 20 failures and the demo session limits. The seed also writes the re-authentication record behind each of these first approvals itself, with no password typed, so each records the authenticator Seed.',
     recordsExceptions: ['DemoLogin'],
   },
 ];
@@ -92,7 +92,7 @@ const assertSeeded = (username: string): never => {
   throw new Error(`the seed made no ${username}`);
 };
 
-/** Writes the entries as the seed, then signs each Approved as `operator` from a session in `labId` that lapses with the sweep. */
+/** Writes the entries as the seed, then signs each Approved as `operator`, with the Seed authenticator because no one types a password, from a session in `labId` that lapses with the sweep. */
 async function approveEntries(tx: Transaction<DB>, labId: string, operator: { id: string; username: string }) {
   const entries: string[] = [];
   for (const [i, entry] of ENTRIES.entries()) {
@@ -131,7 +131,7 @@ async function approveEntries(tx: Transaction<DB>, labId: string, operator: { id
       .executeTakeFirstOrThrow();
     const proof = await tx
       .insertInto('reauthentication')
-      .values({ labId, sessionId: session.id, personId: operator.id, meaning: 'Approved', authenticator: 'Password' })
+      .values({ labId, sessionId: session.id, personId: operator.id, meaning: 'Approved', authenticator: 'Seed' })
       .returning('id')
       .executeTakeFirstOrThrow();
     await sql`select lims.sign(${proof.id}, ${session.id}, 'release_log_entry', ${entryId}, ${seen.id},

@@ -518,7 +518,17 @@ export const zapBaselineResults = ['Passed', 'Warned', 'Failed'] as const;
 const imageDigest = Type.String({ pattern: '^[^@\\s]+@sha256:[0-9a-f]{64}$', maxLength: 400 });
 /** A Service Identity's name and the `table:OP` pairs it may write, as the Release Log entry that declared it reads. */
 const serviceIdentity = Type.Object({ name: Type.String(), scope: Type.Array(Type.String()) });
-/** A Release Log entry as recorded, with its Service Identities, whether it is approved, and the Record Version a signer sees. */
+/** The Approved Signature on a Release Log entry: who signed, in which role, with what meaning, when (UTC, a company record's time) and with what authenticator, as written (`Password`, or `Seed` for the seed's own approvals). */
+const releaseLogApproval = Type.Object({
+  signer: Type.String(),
+  username: Type.String(),
+  role,
+  meaning,
+  signedAt: instant,
+  authenticator: Type.String(),
+});
+export type ReleaseLogApproval = Static<typeof releaseLogApproval>;
+/** A Release Log entry as recorded, with its Service Identities, its Approved Signature once signed, and the Record Version a signer sees. */
 const releaseLogEntry = Type.Object({
   id: uuid,
   kind: Type.Enum(releaseLogKinds),
@@ -537,7 +547,7 @@ const releaseLogEntry = Type.Object({
   statement: nullable(Type.String()),
   identities: Type.Array(serviceIdentity),
   recordedAt: instant,
-  approved: Type.Boolean(),
+  approval: nullable(releaseLogApproval),
   recordVersion: recordVersionRef,
 });
 export type ReleaseLogEntry = Static<typeof releaseLogEntry>;

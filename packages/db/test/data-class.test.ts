@@ -617,6 +617,42 @@ describe('a captured write and a change of the data class take turns', () => {
     }));
 });
 
+describe('only the seed records a re-authentication with the Seed authenticator, and only on the fictional data class', () => {
+  /** Inserts a Seed re-authentication for the operator on `client`, rolled back; answers the refusal, or null. */
+  async function seedProof(d: Deployment, client: pg.Client): Promise<pg.DatabaseError | null> {
+    await client.query('begin');
+    try {
+      await client.query(AS_SERVICE('svc:test'));
+      await client.query(
+        `insert into lims.reauthentication (lab_id, session_id, person_id, meaning, authenticator)
+         values ($1, $2, $3, 'Approved', 'Seed')`,
+        [d.lab, d.operator.session, d.operator.id],
+      );
+      return null;
+    } catch (error) {
+      if (error instanceof pg.DatabaseError) return error;
+      throw error;
+    } finally {
+      await client.query('rollback');
+    }
+  }
+  const refusal = 'only the seed, on the fictional data class, records a re-authentication no one typed a password for';
+
+  it('the app role is refused the Seed authenticator once a person was written by an earlier transaction', () =>
+    inDeployment('lims_dc_seed_app', async (d) => {
+      const error = await seedProof(d, d.app);
+      assert.deepEqual([error?.code, error?.message], ['LA010', refusal]);
+      assert.equal(await seedProof(d, d.owner), null, 'the database owner may, on the fictional data class');
+    }));
+
+  it('the Seed authenticator is refused on the real data class, even to the database owner', () =>
+    inDeployment('lims_dc_seed_real', async (d) => {
+      await d.approved(await d.record(REAL));
+      const error = await seedProof(d, d.owner);
+      assert.deepEqual([error?.code, error?.message], ['LA010', refusal]);
+    }));
+});
+
 describe('a database that held people before the Release Log keeps signing in until its service identities entry is approved', () => {
   const people = { peopleBefore0028: true };
   const migrationEntry = async (d: Deployment) =>

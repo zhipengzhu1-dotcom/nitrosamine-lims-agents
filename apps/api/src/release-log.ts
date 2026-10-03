@@ -1,5 +1,13 @@
 import { type DB, postgresFault } from '@lims/db';
-import { type ActorContext, type DemoException, realDataGate, type Role, routes, type SigningBody } from '@lims/domain';
+import {
+  type ActorContext,
+  type DemoException,
+  type ReleaseLogApproval,
+  realDataGate,
+  type Role,
+  routes,
+  type SigningBody,
+} from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { type Login, reauthenticate, sourceAddressOf } from './auth.ts';
@@ -41,7 +49,13 @@ function listed(q: LabQueries) {
     'statementVersion',
     sql<string | null>`convert_from(statement, 'UTF8')`.as('statement'),
     'recordedAt',
-    sql<boolean>`lims.release_log_entry_approved(id)`.as('approved'),
+    sql<ReleaseLogApproval | null>`(select json_build_object(
+                                        'signer', g.printed_name, 'username', g.username, 'role', g.role,
+                                        'meaning', g.meaning, 'authenticator', g.authenticator,
+                                        'signedAt', to_char(g.signed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
+                                      from lims.signature as g join lims.record_version as v on v.id = g.record_version_id
+                                     where v.record_table = 'release_log_entry' and v.record_id = release_log_entry.id
+                                       and g.meaning = 'Approved')`.as('approval'),
     sql<Identity[]>`coalesce((select json_agg(json_build_object('name', s.name, 'scope', s.scope) order by s.name)
                                  from lims.service_identity as s where s.created_by_entry_id = release_log_entry.id), '[]')`.as(
       'identities',
@@ -208,7 +222,7 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
           'role',
           `A Release Log entry ${entry.statementVersion === null ? 'of the system' : 'bringing a signature statement into force'} is approved by ${role === 'QA' ? 'QA' : 'the Platform Operator'}.`,
         );
-      if (entry.approved) refuse('state', 'This Release Log entry is already approved.');
+      if (entry.approval !== null) refuse('state', 'This Release Log entry is already approved.');
       if (entry.statementVersion !== null && entry.statementVersion !== (await nextStatementVersion(scope)))
         refuse('state', 'Another signature statement came into force since this entry was recorded. Record it again.');
       const seen = await seenEntryVersion(scope, entry.id, signing);

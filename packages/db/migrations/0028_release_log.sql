@@ -531,6 +531,22 @@ grant execute on function lims.current_data_class(), lims.fictional_records(), l
   lims.open_demo_exceptions(), lims.declare_data_class_change(), lims.scope_pairs(text[]),
   lims.image_digest_refs(text[]) to lims_app;
 
+-- The seed approves its first Release Log entries with no password typed, so its re-authentication records say Seed,
+-- and every Signature on them copies it. Only the transaction that seeds an empty database, or the database owner,
+-- writes Seed (0015's exemption), and only on the fictional data class.
+alter table lims.reauthentication drop constraint reauthentication_authenticator_check,
+  add constraint reauthentication_authenticator_check check (authenticator in ('Password', 'Seed'));
+create function lims.seed_authenticator_only_seeding() returns trigger language plpgsql as $$
+begin
+  if new.authenticator = 'Seed' and not (lims.seeding_or_owner() and lims.current_data_class() = 'fictional') then
+    raise exception 'only the seed, on the fictional data class, records a re-authentication no one typed a password for'
+      using errcode = 'LA010';
+  end if;
+  return new;
+end $$;
+create trigger seed_authenticator_only_seeding before insert on lims.reauthentication
+  for each row execute function lims.seed_authenticator_only_seeding();
+
 -- lims.sign, with a company record's Record Version (no Lab) signable from any Lab the signer acts in.
 create or replace function lims.sign(p_reauthentication_id uuid, p_session_id uuid, p_record_table text, p_record_id uuid,
                           p_seen_version uuid, p_seen_hash bytea, p_statement_version integer, p_meaning lims.meaning,

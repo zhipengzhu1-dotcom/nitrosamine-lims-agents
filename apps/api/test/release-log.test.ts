@@ -75,16 +75,23 @@ describe('the deployment', () => {
 });
 
 describe('reading the Release Log', () => {
-  it('lists the seeded entries, each approved, the first declaring the service identities with their scopes', async () => {
+  it('lists the seeded entries, each approved by the seed, the first declaring the service identities with their scopes', async () => {
     const { entries, statement } = ok(await operator.call(routes.releaseLog));
     assert.ok(entries.length >= 6, `the seed records at least six entries; ${entries.length} listed`);
-    assert.ok(
-      entries.every((e) => e.approved),
-      `every seeded entry is approved: ${entries
-        .filter((e) => !e.approved)
-        .map((e) => e.title)
-        .join(', ')}`,
-    );
+    const seeded = entries.filter((e) => e.approval?.authenticator === 'Seed');
+    assert.equal(seeded.length, 6, 'the seed approves its six entries, and each Signature says Seed, as written');
+    for (const e of seeded)
+      assert.deepEqual(
+        { ...e.approval, signedAt: undefined },
+        {
+          signer: 'Ada Novak',
+          username: ada.username,
+          role: 'PlatformOperator',
+          meaning: 'Approved',
+          signedAt: undefined,
+          authenticator: 'Seed',
+        },
+      );
     const declaring = entries.find((e) => e.identities.length > 0) ?? assert.fail('an entry declares the identities');
     assert.ok(
       declaring.identities.some((i) => i.name === 'svc:sign-in' && i.scope.includes('access_event:INSERT')),
@@ -114,7 +121,7 @@ describe('recording a Release Log entry', () => {
       await record(operator, { kind: 'HostMove', title: 'Move to the VPS' }),
     ];
     for (const entry of entries) {
-      assert.equal(entry.approved, false);
+      assert.equal(entry.approval, null);
       assert.deepEqual(entry.recordVersion.version, 1);
       assert.deepEqual(await versionsOf(entry.id), [{ version: 1, labId: null }]);
     }
@@ -134,7 +141,7 @@ describe('recording a Release Log entry', () => {
       [evidence.imageDigests, evidence.ciRun, evidence.ciResult, evidence.zapBaselineResult],
       'the Record Version the Approved Signature covers holds the evidence',
     );
-    for (const entry of entries) assert.equal(ok(await approve(operator, entry, ada)).approved, true, entry.kind);
+    for (const entry of entries) assert.notEqual(ok(await approve(operator, entry, ada)).approval, null, entry.kind);
   });
 
   it('an entry declaring service identities is versioned again once they are inserted, and lists them', async () => {
@@ -288,11 +295,21 @@ describe('recording a Release Log entry', () => {
 });
 
 describe('approving a Release Log entry', () => {
-  it('the operator approves a system entry by re-entering their credentials; it is then approved and signed once', async () => {
+  it('the operator approves a system entry by re-entering their credentials; it is then signed once, and the Release Log shows who signed, as what and when', async () => {
     const entry = await record(operator);
+    const before = Date.now();
     const approved = ok(await approve(operator, entry, ada));
-    assert.equal(approved.approved, true);
     assert.equal(approved.id, entry.id);
+    const { signedAt, ...approval } = approved.approval ?? assert.fail('the entry is approved');
+    assert.deepEqual(approval, {
+      signer: 'Ada Novak',
+      username: ada.username,
+      role: 'PlatformOperator',
+      meaning: 'Approved',
+      authenticator: 'Password',
+    });
+    assert.match(signedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, 'the time is ISO 8601 UTC');
+    assert.ok(Date.parse(signedAt) >= before - 60_000, signedAt);
     const signatures = await api.superuser
       .selectFrom('signature')
       .innerJoin('recordVersion', 'recordVersion.id', 'signature.recordVersionId')
@@ -302,7 +319,10 @@ describe('approving a Release Log entry', () => {
     assert.deepEqual(signatures, [
       { meaning: 'Approved', role: 'PlatformOperator', printedName: 'Ada Novak', appRelease: 'test-release' },
     ]);
-    assert.ok(ok(await operator.call(routes.releaseLog)).entries.find((e) => e.id === entry.id)?.approved);
+    assert.deepEqual(
+      ok(await operator.call(routes.releaseLog)).entries.find((e) => e.id === entry.id)?.approval,
+      approved.approval,
+    );
   });
 
   it('a second approval is refused', async () => {
@@ -344,7 +364,7 @@ describe('approving a Release Log entry', () => {
       refusedWith(await approve(operator, entry, ada, { statementVersion: 999 }), 'signingRefused'),
       /Statement/,
     );
-    assert.equal(ok(await operator.call(routes.releaseLog)).entries.find((e) => e.id === entry.id)?.approved, false);
+    assert.equal(ok(await operator.call(routes.releaseLog)).entries.find((e) => e.id === entry.id)?.approval, null);
     const { count } = await api.superuser
       .selectFrom('signature')
       .innerJoin('recordVersion', 'recordVersion.id', 'signature.recordVersionId')
@@ -370,7 +390,7 @@ describe('approving a Release Log entry', () => {
   it('an entry setting the data class is approved after a mistyped password, which leaves a failure count to clear', async () => {
     const entry = await record(operator, { setsDataClass: 'fictional', fileVaultPersonalKey: false });
     refusedWith(await approve(operator, entry, ada, { password: 'wrong' }), 'badCredentials');
-    assert.equal(ok(await approve(operator, entry, ada)).approved, true);
+    assert.notEqual(ok(await approve(operator, entry, ada)).approval, null);
     const { dataClass, setByEntryId } = await api.superuser
       .selectFrom('deployment')
       .select(['dataClass', 'setByEntryId'])

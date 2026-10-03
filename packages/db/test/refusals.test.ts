@@ -3303,6 +3303,7 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
     ['lims.session.session_lab_id_id_person_id_key', 'unreachable: (lab_id, id) is already the key'],
     ['lims.record_version.record_version_id_content_hash_canonical_form_key', 'unreachable: id is already the key'],
     ['lims.release_log_entry.version_record', 'release-log.test.ts'],
+    ['lims.reauthentication.seed_authenticator_only_seeding', 'data-class.test.ts'],
     ['lims.service_identity.version_record', 'release-log.test.ts'],
     [
       'lims.service_identity.service_identity_created_by_entry_id_not_null',
