@@ -1930,7 +1930,7 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint: 'enrolment_grant_second_person_check',
     },
     ...each(
-      'a person whose count of failed sign-ins starts below zero, toward a later lockout, is refused',
+      "a person's count of failed sign-ins below zero is refused",
       'lims.person',
       'failed_logins',
       [-1, -2147483648],
