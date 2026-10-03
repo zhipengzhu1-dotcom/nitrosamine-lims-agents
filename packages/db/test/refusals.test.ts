@@ -668,6 +668,21 @@ async function refusalOf(
   return assert.fail(`the database accepted ${statement}`);
 }
 
+/** Like refusalOf, with triggers off, for a row a trigger would otherwise stamp over or refuse first. */
+async function refusalWithTriggersOff(statement: string, values: unknown[]): Promise<pg.DatabaseError> {
+  await client.query('begin');
+  try {
+    await client.query('set local session_replication_role = replica');
+    await client.query(statement, values);
+  } catch (error) {
+    if (error instanceof pg.DatabaseError) return error;
+    throw error;
+  } finally {
+    await client.query('rollback');
+  }
+  return assert.fail(`the database accepted ${statement}`);
+}
+
 function refusalOfRow(table: Table, change: Row = {}, context = true) {
   const row = { ...tables[table].row, ...change };
   return refusalOf(...insert(table, row), context, row);
@@ -1844,22 +1859,11 @@ describe('the database refuses a value outside its allowed set', () => {
 
 describe('a counter holds at most six digits and is never empty', () => {
   // The counter trigger lets a counter start only at zero, so these rows reach the constraints with triggers off.
-  async function refusalOfCounter(last: number | null): Promise<pg.DatabaseError> {
-    await client.query('begin');
-    try {
-      await client.query('set local session_replication_role = replica');
-      await client.query(`insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', $2)`, [
-        id.otherLab,
-        last,
-      ]);
-    } catch (error) {
-      if (error instanceof pg.DatabaseError) return error;
-      throw error;
-    } finally {
-      await client.query('rollback');
-    }
-    return assert.fail(`the database accepted a counter at ${last}`);
-  }
+  const refusalOfCounter = (last: number | null) =>
+    refusalWithTriggersOff(`insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', $2)`, [
+      id.otherLab,
+      last,
+    ]);
   covered.add('lims.counter.counter_last_check');
   covered.add('lims.counter.counter_last_not_null');
   it('a counter past 999999 or below zero is refused', async () => {
@@ -3340,20 +3344,8 @@ describe("a Lab's time zone changes only through a migration, and a Signature an
 
 describe('a kept time zone is a named zone of the time zone database, and a Sample keeps one exactly when it has a Received, even with the stamping triggers bypassed', () => {
   // The stamping triggers overwrite any zone a statement gives, so these rows reach the constraints with triggers off.
-  async function refusalWithTriggersOff(table: Table, change: Row): Promise<pg.DatabaseError> {
-    const [statement, values] = insert(table, { ...tables[table].row, ...change });
-    await client.query('begin');
-    try {
-      await client.query('set local session_replication_role = replica');
-      await client.query(statement, values);
-    } catch (error) {
-      if (error instanceof pg.DatabaseError) return error;
-      throw error;
-    } finally {
-      await client.query('rollback');
-    }
-    return assert.fail(`the database accepted ${statement}`);
-  }
+  const refusalOfKeptZone = (table: Table, change: Row) =>
+    refusalWithTriggersOff(...insert(table, { ...tables[table].row, ...change }));
   const received = '2026-09-30T00:00:00Z';
   const notZones = ['Mars/Olympus_Mons', 'UTC+5', ''];
   const cases: { name: string; table: Table; change: Row; constraint: string }[] = [
@@ -3385,7 +3377,7 @@ describe('a kept time zone is a named zone of the time zone database, and a Samp
   for (const c of cases) {
     covered.add(`${c.table}.${c.constraint}`);
     it(c.name, async () =>
-      assertConstraint(await refusalWithTriggersOff(c.table, c.change), '23514', c.table, c.constraint),
+      assertConstraint(await refusalOfKeptZone(c.table, c.change), '23514', c.table, c.constraint),
     );
   }
 });
