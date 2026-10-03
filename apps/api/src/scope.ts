@@ -157,7 +157,8 @@ async function recompute(tx: Kysely<DB>, chain: string, everyEntry: boolean): Pr
       from (select w.seq, w.kind, w.through, w.fingerprint
             from resume, lims.chain_breaks(${chain}, resume.through, resume.head) as w
             union all
-            select v.seq, v.kind, v.through, v.fingerprint from lims.chain_verification_breaks(${chain}) as v) as b
+            select v.seq, v.kind, v.through, v.fingerprint
+            from resume, lims.chain_verification_breaks(${chain}, resume.through) as v) as b
     ), recorded as (
       select seq, kind, through, 1 as breaks, fingerprint from found where n <= ${BREAKS_ONE_BY_ONE}
       union all

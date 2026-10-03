@@ -100,18 +100,22 @@ language sql stable security definer set search_path = lims, pg_temp as $$
   where (select count(*) from audit_entry e where e.chain = p_chain and e.seq between 1 and c.through) = c.through
 $$;
 
--- Every Chain Verification of the chain that the Audit Trail no longer matches, each a Contradicted break at its
--- entry, whatever System Incidents record: a recorded one keeps being reported and answers the same incident. The
--- fingerprint is the Chain Verification and the hash its entry carries now, so a further rewrite opens a new incident.
-create function lims.chain_verification_breaks(p_chain text)
+-- The latest Chain Verification of the chain after entry p_from, where the verification resumed, that the Audit Trail
+-- no longer matches, as one Contradicted break at its entry, whatever System Incidents record: a recorded one keeps
+-- being reported and answers the same incident, since a broken chain records no later Chain Verification. One rewrite
+-- is one break however many Chain Verifications name its entries, and a verification checks only those after the one it
+-- resumed from. The fingerprint is the Chain Verification and the hash its entry carries now, so a further rewrite
+-- opens a new incident.
+create function lims.chain_verification_breaks(p_chain text, p_from bigint)
 returns table (seq bigint, kind text, through bigint, fingerprint bytea)
 language sql stable security definer set search_path = lims, pg_temp as $$
   select c.through, 'Contradicted', c.through,
          sha256(uuid_send(c.id)
                 || coalesce((select e.hash from audit_entry e where e.chain = p_chain and e.seq = c.through), ''::bytea))
   from chain_verification c
-  where c.chain = p_chain and not chain_verification_holds(c)
-  order by c.through, c.verified_at
+  where c.chain = p_chain and c.through > p_from and not chain_verification_holds(c)
+  order by c.through desc, c.verified_at desc
+  limit 1
 $$;
 
 -- Every break after entry p_from, whose hash is p_head, each with the fingerprint a recompute from the first entry
@@ -162,10 +166,10 @@ language sql stable security definer set search_path = lims, pg_temp as $$
   from (select c.through, c.head from latest_chain_verification(p_chain) c
         union all select 0, decode(repeat('00', 32), 'hex')
         order by through desc limit 1) as resume,
-       lateral chain_breaks(p_chain, resume.through, resume.head) as b
-  union all
-  select v.seq, v.kind, v.through, v.fingerprint from chain_verification_breaks(p_chain) as v
-  order by seq, kind
+       lateral (select * from chain_breaks(p_chain, resume.through, resume.head)
+                union all
+                select * from chain_verification_breaks(p_chain, resume.through)) as b
+  order by b.seq, b.kind
 $$;
 
 -- Returns the first seq that fails to verify, or null.
@@ -177,4 +181,4 @@ $$;
 grant execute on function lims.latest_chain_verification(text) to lims_app;
 grant execute on function lims.chain_breaks(text, bigint, bytea) to lims_app;
 grant execute on function lims.chain_breaks(text) to lims_app;
-grant execute on function lims.chain_verification_breaks(text) to lims_app;
+grant execute on function lims.chain_verification_breaks(text, bigint) to lims_app;

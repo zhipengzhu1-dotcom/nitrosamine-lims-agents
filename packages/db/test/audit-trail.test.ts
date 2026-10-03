@@ -696,6 +696,32 @@ describe('a Chain Verification is resumed from only while its own entry and its 
     );
   });
 
+  it('a rewrite behind many Chain Verifications is one break, at the latest one it contradicts, however many name its entries', async () => {
+    const chain = await verifiedLab('CD', 4);
+    const verifiedBy = qa;
+    await audited(app, { actor: 'person:cb.qa', role: 'QA', reason: 'Verify chain' }, (tx) =>
+      tx
+        .insertInto('chainVerification')
+        .values(
+          [4, 4, 5].map((through) => ({
+            chain,
+            through: String(through),
+            head: sql<Buffer>`(select hash from lims.audit_entry where chain = ${chain} and seq = ${through})`,
+            recomputedFrom: '1',
+            verifiedBy,
+          })),
+        )
+        .execute(),
+    );
+    await asReplica(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 2`, [chain]);
+    await rewrittenForward(chain, 2);
+    assert.deepEqual(
+      (await breaksOf(chain)).map((b) => [b.seq, b.kind]),
+      [[5, 'Contradicted']],
+    );
+    assert.deepEqual(await breaksOf(chain), await breaksOf(chain), 'the break keeps its fingerprint');
+  });
+
   it('a Chain Verification whose record is an old company entry rewritten into one and rehashed is not resumed from, and is reported as a break', async () => {
     const chain = await verifiedLab('CG', 2);
     await asReplica(
