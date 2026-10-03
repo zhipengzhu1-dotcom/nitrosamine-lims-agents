@@ -22,6 +22,7 @@ create table lims.document (
   document_type lims.document_type not null,
   number        text               not null unique,
   created_at    timestamptz        not null default now(),
+  data_class    lims.data_class    not null default lims.current_data_class(),
   unique (lab_id, id)
 );
 
@@ -63,6 +64,7 @@ create table lims.document_version (
   effective_date date                 not null,
   abandon_reason text,
   saved_at       timestamptz          not null default now(),
+  data_class     lims.data_class      not null default lims.current_data_class(),
   foreign key (lab_id, document_id) references lims.document (lab_id, id),
   unique (document_id, version),
   constraint document_version_abandon_reason_check
@@ -234,7 +236,8 @@ create trigger refuse_truncate before truncate on lims.document_version
 alter table lims.record_version
   drop constraint record_version_record_table_check,
   add constraint record_version_record_table_check check (
-    record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'document_version')
+    record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'release_log_entry',
+                     'document_version')
   );
 
 create or replace function lims.save_record_version(p_lab_id uuid, p_table text, p_record_id uuid) returns void
@@ -246,6 +249,7 @@ begin
   bytes := convert_to((case p_table
     when 'test' then test_content(p_lab_id, p_record_id)
     when 'test_report' then test_report_content(p_lab_id, p_record_id)
+    when 'release_log_entry' then release_log_entry_content(p_record_id)
     when 'system_incident' then incident_content(p_record_id)
     when 'equipment' then (select equipment_content(e) from equipment e where e.lab_id = p_lab_id and e.id = p_record_id)
     when 'equipment_event' then
@@ -254,7 +258,7 @@ begin
   end)::text, 'UTF8');
   if bytes is null then return; end if;
   select * into latest from record_version
-    where lab_id = p_lab_id and record_table = p_table and record_id = p_record_id
+    where lab_id is not distinct from p_lab_id and record_table = p_table and record_id = p_record_id
     order by version desc limit 1;
   if latest.content_hash = sha256(bytes) then return; end if;
   insert into record_version (lab_id, record_table, record_id, version, canonical_form, content)
@@ -267,13 +271,12 @@ insert into lims.signing_role (role, meaning) values
   ('LabManager', 'Authored'), ('Analyst', 'Authored'), ('Reviewer', 'Authored'), ('QA', 'Authored'), ('QA', 'Approved')
   on conflict do nothing;
 
--- Authored is a Signature Meaning of a Document version only, and QA signs Approved only on one or on Equipment;
--- another record kind may be signed Approved in another role. Equipment and its Events are left to
--- check_equipment_signing (0037), which gives each its one meaning, Equipment's being QA's Approved (#129). A Document
--- version is signed Authored, Reviewed or Approved, each by a different person: Authored once, by its author in a
--- business role, on the Draft; Reviewed In Review, after Authored, in the Reviewer role, by someone who did not author
--- it; Approved once, In Review, after a Reviewed, in the QA role, by someone who neither authored nor reviewed it.
--- lims.sign checks the signer, the proof, the role they hold and the version shown; this checks who may sign what.
+-- Authored is a Signature Meaning of a Document version only. Every other record kind is left to its own signing rule,
+-- whatever its meaning: which kinds take Approved, and in which role, is apply_release_log_entry's (0038, below). A
+-- Document version is signed Authored, Reviewed or Approved, each by a different person: Authored once, by its author
+-- in a business role, on the Draft; Reviewed In Review, after Authored, in the Reviewer role, by someone who did not
+-- author it; Approved once, In Review, after a Reviewed, in the QA role, by someone who neither authored nor reviewed
+-- it. lims.sign checks the signer, the proof, the role they hold and the version shown; this checks who may sign what.
 create function lims.check_document_signing() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -282,19 +285,10 @@ declare
   authors uuid[];
   reviews uuid[];
 begin
-  select * into signed from record_version where lab_id = new.lab_id and id = new.record_version_id;
-  if signed.id is null then
-    return new; -- signature_record_version_fkey refuses it
-  end if;
-  if signed.record_table in ('equipment', 'equipment_event') then
-    return new;
-  end if;
-  if signed.record_table <> 'document_version' then
+  select * into signed from record_version where id = new.record_version_id;
+  if signed.record_table is distinct from 'document_version' then
     if new.meaning = 'Authored' then
       raise exception 'Authored is a Signature Meaning of a Document version only' using errcode = 'LA010';
-    end if;
-    if new.meaning = 'Approved' and new.role = 'QA' then
-      raise exception 'QA signs Approved only on a Document version or Equipment' using errcode = 'LA010';
     end if;
     return new;
   end if;
@@ -346,6 +340,55 @@ end $$;
 
 create trigger document_signing before insert on lims.signature
   for each row execute function lims.check_document_signing();
+
+-- 0038's approval rule, with a Document version among the records signed Approved: its Approved is QA's, as
+-- check_document_signing holds. The Release Log and Equipment rules are 0038's, unchanged.
+create or replace function lims.apply_release_log_entry() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  v        record_version;
+  e        release_log_entry;
+  approver text;
+begin
+  select * into v from record_version where id = new.record_version_id;
+  if v.record_table not in ('release_log_entry', 'equipment', 'document_version') and new.meaning = 'Approved' then
+    raise exception 'only a Release Log entry, Equipment or a Document version is signed Approved'
+      using errcode = 'LA011';
+  end if;
+  if v.record_table = 'equipment' and new.meaning = 'Approved' and new.role::text <> 'QA' then
+    raise exception 'Equipment is signed Approved only by QA, not %', new.role using errcode = 'LA010';
+  end if;
+  if v.record_table <> 'release_log_entry' then return null; end if;
+  if new.meaning <> 'Approved' then
+    raise exception 'a Release Log entry is signed Approved, not %', new.meaning using errcode = 'LA011';
+  end if;
+  -- The row lock makes a second approval of the entry wait for the first, and then see it.
+  select * into e from release_log_entry where id = v.record_id for no key update;
+  approver := case when e.statement_version is not null then 'QA' else 'PlatformOperator' end;
+  if new.role::text <> approver then
+    raise exception 'a Release Log entry % is approved by %, not %',
+      case when e.statement_version is not null then 'bringing a signature statement into force' else 'of the system' end,
+      approver, new.role using errcode = 'LA011';
+  end if;
+  if exists (select from signature g join record_version x on x.id = g.record_version_id
+              where x.record_table = 'release_log_entry' and x.record_id = e.id and g.meaning = 'Approved'
+                and g.id <> new.id) then
+    raise exception 'the Release Log entry is already approved' using errcode = 'LA011';
+  end if;
+  if e.sets_data_class is not null then
+    perform set_this_transaction('lims.release_log', e.id::text);
+    update deployment set data_class = e.sets_data_class, set_by_entry_id = e.id;
+    perform set_this_transaction('lims.release_log', '');
+  end if;
+  if e.statement_version is not null then
+    if e.statement_version <> (select max(version) + 1 from signature_statement) then
+      raise exception 'the signature statement version % does not follow the version in force', e.statement_version
+        using errcode = 'LA011';
+    end if;
+    insert into signature_statement (version, statement) values (e.statement_version, e.statement);
+  end if;
+  return null;
+end $$;
 
 revoke execute on function lims.document_type_code(lims.document_type), lims.document_version_content(uuid),
   lims.document_signers(uuid, lims.meaning) from public;

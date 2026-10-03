@@ -97,6 +97,13 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   }),
   registerRoom: entry(routes.registerRoom, { name: 'Balance Room (fictional)', reason: 'Register a Room' }),
   enrolWorkstation: entry(routes.enrolWorkstation, { workstationId: randomUUID(), reason: 'Enrol the bench PC' }),
+  recordReleaseLogEntry: entry(routes.recordReleaseLogEntry, {
+    kind: 'ConfigurationChange',
+    title: 'Sweep interval',
+    summary: 'The sweep interval moves from 60 s to 30 s.',
+    reason: 'Record the change',
+  }),
+  approveReleaseLogEntry: entry(routes.approveReleaseLogEntry, { entryId: randomUUID(), ...signature }),
   unlock: entry(routes.unlock, { password: 'not-the-password' }),
   changePassword: entry(routes.changePassword, { password: 'not-the-password', newPassword: 'Benchline-2026-unused' }),
   createDocument: entry(routes.createDocument, {

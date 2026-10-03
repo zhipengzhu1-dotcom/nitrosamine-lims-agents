@@ -25,7 +25,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
+import { api, type LockMode, lock, Refused, signOut, useApi, useFictional, useSecondsLeft } from './api.ts';
 import { CodeField, useLoginPolicy } from './form.tsx';
 import { reducedMotion } from './motion.ts';
 
@@ -386,12 +386,17 @@ export function Shell({
 
 const noActions: readonly RailAction[] = [];
 
+/** The words every screen carries unless the deployment's data class is real. */
+function FictionalBanner() {
+  return useFictional() ? <span className="fict">Fictional data only</span> : null;
+}
+
 export function TopBar({ lab, children }: { lab?: Lab; children?: ReactNode }) {
   return (
     <header className="top">
       <span className="brand">{lab && <b title={lab.name}>{lab.code}</b>}Nitrosamine LIMS</span>
       {children}
-      <span className="fict">Fictional data only</span>
+      <FictionalBanner />
     </header>
   );
 }
@@ -588,7 +593,7 @@ function Rail({
           <fieldset className="sheet__set" disabled={busy}>
             <h2 id="sheet-title">
               {shown.signs ? `Sign ${shown.signs.meaning}` : shown.label}
-              <span className="fict">Fictional data only</span>
+              <FictionalBanner />
             </h2>
             <div className="sheet__body">
               {shown.fields.length > 0 && (

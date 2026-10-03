@@ -556,6 +556,18 @@ _Avoid_: E-sig, approval, sign-off
 What an Electronic Signature attests: Performed, Verified, Reviewed, Approved, Released, Authored or Acknowledged.
 _Avoid_: Signature type, status
 
+**Release Log**:
+The company record of every release, configuration change and host move of the LIMS: an entry names what changed and what it declares (Service Identities it creates or retires, a demo exception it records or lapses, a Signature Statement version it brings into force, the Data Class it sets), and takes effect only in the transaction where the Platform Operator, or QA for a Signature Statement, signs it Approved. A Release also carries its validation evidence, which the Approved Signature covers: the digest of each image it ships, the CI run that tested them with its result, and the ZAP baseline result. An entry is never changed or removed.
+_Avoid_: Changelog, release notes, deployment log
+
+**Service Identity**:
+A non-person actor the LIMS writes as, named `svc:` and a name, such as `svc:sign-in`. A Release Log entry declares it with the record types and operations it may write, and the database refuses any write of its outside that scope or before the entry is approved. Another entry retires it, once.
+_Avoid_: Service account, system user, bot
+
+**Data Class**:
+Whether the deployment holds `fictional` or `real` records. Every record is stamped with the class it was created under and keeps it. The class starts fictional and changes only when a Release Log entry setting it is signed Approved, and never to real while the real-data gate names an unmet condition, any record created under fictional remains other than the Lab and the approver's own account and Memberships, or anyone holds Admin together with another role.
+_Avoid_: Environment, mode, demo flag
+
 **Signature Statement**:
 The QA-approved, versioned sentence a signer attests to on every Electronic Signature, shown on the signature sheet before the credentials. Each Signature records the version it showed and its hash, and a later version comes into force only through a Release Log entry that QA signs Approved.
 _Avoid_: Attestation text, legal text, disclaimer

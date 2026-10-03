@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import type { Kysely } from 'kysely';
+import { type Kysely, sql, type Transaction } from 'kysely';
 import { seedConfig } from './config.ts';
 import { hashPassword } from './credentials.ts';
 import { audited, createDb, type DB, databaseUrl } from './db.ts';
@@ -29,6 +29,117 @@ export interface SeededAccount {
 const secondLab = { code: 'QC', name: 'QC Laboratory (fictional)', members: ['lena.manager', 'rui.reviewer'] } as const;
 
 const SEED = { actor: 'svc:seed', role: 'system', reason: 'Seed fictional demo data' };
+
+/** The service identities the LIMS acts as, each held by the database to the writes its Release Log entry declares. */
+export const SERVICE_IDENTITIES = [
+  {
+    name: 'svc:seed',
+    scope: [
+      'customer:INSERT',
+      'method:INSERT',
+      'lab:INSERT',
+      'room:INSERT',
+      'person:INSERT',
+      'membership:INSERT',
+      'training_record:INSERT',
+      'release_log_entry:INSERT',
+      'service_identity:INSERT',
+    ],
+  },
+  { name: 'svc:sign-in', scope: ['access_event:INSERT', 'person:UPDATE', 'credential_link:UPDATE'] },
+  { name: 'svc:session-sweep', scope: ['access_event:INSERT'] },
+  { name: 'svc:incident', scope: ['system_incident:INSERT'] },
+] as const;
+
+type DemoException = 'TwoRole' | 'Anchoring' | 'FileVault' | 'PlaintextAtCloudflare' | 'DemoLogin';
+
+// The first Release Log entries: one declaring the service identities, then one per demo exception the demo runs
+// under (ADR 0002). Each is approved by the Platform Operator in the seed transaction, with a re-authentication
+// record the seed writes itself, which the DemoLogin entry records.
+const ENTRIES: { title: string; summary: string; recordsExceptions?: [DemoException] }[] = [
+  {
+    title: 'Service identities of the API and the seed',
+    summary: `Declares ${SERVICE_IDENTITIES.map((s) => s.name).join(', ')} and the writes each may make.`,
+  },
+  {
+    title: 'Demo exception: one person holds two roles',
+    summary: 'Ada Novak holds Admin and PlatformOperator in the R&D Laboratory, so that the demo has one operator.',
+    recordsExceptions: ['TwoRole'],
+  },
+  {
+    title: 'Demo exception: no anchoring of the Audit Trail',
+    summary: 'The Audit Trail chain heads are not anchored outside the database until anchoring is built.',
+    recordsExceptions: ['Anchoring'],
+  },
+  {
+    title: 'Demo exception: FileVault without a personal recovery key',
+    summary:
+      'The Mac that hosts the demo has no personal FileVault key recorded; each entry that sets the data class records the fdesetup result.',
+    recordsExceptions: ['FileVault'],
+  },
+  {
+    title: 'Demo exception: plaintext at Cloudflare',
+    summary: 'TLS ends at Cloudflare, which sees the demo traffic in plaintext before the tunnel to the Mac.',
+    recordsExceptions: ['PlaintextAtCloudflare'],
+  },
+  {
+    title: 'Demo exception: demo login',
+    summary:
+      'Every demo account shares one password, with no second factor, a lockout at 20 failures and the demo session limits. The seed also writes the re-authentication record behind each of these first approvals itself, with no password typed, so each records the authenticator Seed.',
+    recordsExceptions: ['DemoLogin'],
+  },
+];
+
+const assertSeeded = (username: string): never => {
+  throw new Error(`the seed made no ${username}`);
+};
+
+/** Writes the entries as the seed, then signs each Approved as `operator`, with the Seed authenticator because no one types a password, from a session in `labId` that lapses with the sweep. */
+async function approveEntries(tx: Transaction<DB>, labId: string, operator: { id: string; username: string }) {
+  const entries: string[] = [];
+  for (const [i, entry] of ENTRIES.entries()) {
+    const { id } = await tx
+      .insertInto('releaseLogEntry')
+      .values({ kind: 'ConfigurationChange', ...entry })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    if (i === 0)
+      await tx
+        .insertInto('serviceIdentity')
+        .values(SERVICE_IDENTITIES.map((s) => ({ name: s.name, scope: [...s.scope], createdByEntryId: id })))
+        .execute();
+    entries.push(id);
+  }
+  const session = await tx
+    .insertInto('session')
+    .values({ labId, personId: operator.id, tokenHash: randomBytes(32) })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  await sql`select set_config('lims.actor', ${`person:${operator.username}`}, true),
+                   set_config('lims.role', 'PlatformOperator', true),
+                   set_config('lims.reason', 'Approve the first Release Log entries', true)`.execute(tx);
+  const { version: statementVersion } = await tx
+    .selectFrom('signatureStatement')
+    .select('version')
+    .orderBy('version', 'desc')
+    .executeTakeFirstOrThrow();
+  for (const entryId of entries) {
+    const seen = await tx
+      .selectFrom('recordVersion')
+      .select(['id', 'contentHash'])
+      .where('recordTable', '=', 'release_log_entry')
+      .where('recordId', '=', entryId)
+      .orderBy('version', 'desc')
+      .executeTakeFirstOrThrow();
+    const proof = await tx
+      .insertInto('reauthentication')
+      .values({ labId, sessionId: session.id, personId: operator.id, meaning: 'Approved', authenticator: 'Seed' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await sql`select lims.sign(${proof.id}, ${session.id}, 'release_log_entry', ${entryId}, ${seen.id},
+                               ${seen.contentHash}, ${statementVersion}, 'Approved', 'seed')`.execute(tx);
+  }
+}
 
 /**
  * Seeds two Labs, two Rooms in the first, one Customer, one Method and the demo people, who all share one password,
@@ -87,6 +198,10 @@ export async function seed(
         await tx.insertInto('membership').values({ labId: secondLabId, personId: id, role: p.role }).execute();
       out.push({ id, username: p.username, role: p.role, password });
     }
+    const ada = out.find((a) => a.username === 'ada.admin') ?? assertSeeded('ada.admin');
+    // The demo's one operator: Admin and PlatformOperator in one person, the TwoRole exception the entries record.
+    await tx.insertInto('membership').values({ labId, personId: ada.id, role: 'PlatformOperator' }).execute();
+    await approveEntries(tx, labId, ada);
     return out;
   });
   return accounts;
