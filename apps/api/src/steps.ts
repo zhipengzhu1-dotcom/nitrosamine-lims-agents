@@ -82,6 +82,7 @@ const effects: { [K in StepName]: Effect<StepInput<K>> } = {
         })
         .execute(),
   },
+  signPerformedAgain: { write: async () => {} },
   review: { write: async () => {} },
   release: {
     signedRecord: 'test_report',
@@ -100,7 +101,7 @@ export async function factsFor(
 ): Promise<StepFacts> {
   const signatures = test
     ? await signedVersions(q)
-        .select(['signature.meaning', 'signature.personId'])
+        .select(['signature.meaning', 'signature.personId', 'recordVersion.recordTable', superseded.as('superseded')])
         .where((eb) =>
           eb.or([
             eb.and([eb('recordVersion.recordTable', '=', 'test'), eb('recordVersion.recordId', '=', test.id)]),
@@ -121,6 +122,7 @@ export async function factsFor(
     : [];
   const signers: StepFacts['signers'] = {};
   for (const { meaning, personId } of signatures) signers[meaning] = [...(signers[meaning] ?? []), personId];
+  const signedOnLatest = signatures.filter((s) => s.recordTable === 'test' && !s.superseded).map((s) => s.meaning);
   const assignee = assigneeId ?? test?.assigneeId ?? null;
   const trained =
     assignee &&
@@ -142,6 +144,7 @@ export async function factsFor(
     assignee,
     assigneeTrained: Boolean(trained),
     signers,
+    signedOnLatest,
     pendingChange: Boolean(test && (await pendingChangeOn(q, test.id))),
   };
 }
@@ -231,6 +234,11 @@ export async function changesOf(q: LabQueries, testId: string) {
     }),
   );
 }
+
+/** True for a Signature row of `signedVersions` once its record has a later Record Version than the one signed. */
+export const superseded = sql<boolean>`exists (select from lims.record_version later
+  where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
+    and later.record_id = record_version.record_id and later.version > record_version.version)`;
 
 /** Every Signature of the Lab joined to the Record Version it was given on. */
 export function signedVersions(q: LabQueries) {

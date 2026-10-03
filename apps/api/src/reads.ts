@@ -5,7 +5,7 @@ import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 import { statementInForce } from './signing.ts';
-import { changeFactsFor, changesOf, factsFor, latestVersion, signedVersions } from './steps.ts';
+import { changeFactsFor, changesOf, factsFor, latestVersion, signedVersions, superseded } from './steps.ts';
 import { onWallClock, signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
@@ -78,14 +78,7 @@ async function testView(scope: Scope, id: string) {
       ? []
       : await signedVersions(scope)
           .select(signatureReplyColumns)
-          .select([
-            'recordVersion.recordTable as record',
-            sql<boolean>`exists (select from lims.record_version later
-              where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
-                and later.record_id = record_version.record_id and later.version > record_version.version)`.as(
-              'unsigned',
-            ),
-          ])
+          .select(['recordVersion.recordTable as record', superseded.as('unsigned')])
           .where('recordVersion.recordId', 'in', ids)
           .orderBy('signature.signedAt')
           .execute()

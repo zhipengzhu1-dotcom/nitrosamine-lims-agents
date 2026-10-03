@@ -7,6 +7,7 @@ import {
   steps,
   type TestRow,
   type TestState,
+  unsignedMeanings,
 } from '@lims/domain';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
@@ -167,7 +168,7 @@ export function TestPage({
     <>
       <h1 className="record-head">
         {test.sampleNumber} <Status key={test.state} state={test.state} fresh={freshState.has(test.state)} />
-        {view.signatures.some((s) => s.unsigned) && <Status mark="Signatures unsigned" />}
+        {unsignedMeanings(view.signatures).length > 0 && <Status mark="Signatures unsigned" />}
       </h1>
       <dl className="facts">
         <dt>Sample</dt>
@@ -237,9 +238,9 @@ const resultLine = (r: Result) => `Result: ${r.analyte} ${r.value} ${r.unit}, pe
 
 const signatureKey = (s: Signature) => s.meaning + s.signedAt;
 
-/** The rail's line for a record with Signatures the server returns as unsigned, or nothing to say. */
+/** The rail's line for a record with a Signature Meaning no Signature gives on it as it reads now, or nothing to say. */
 export function unsignedNotice(rows: Signature[]): string | undefined {
-  const unsigned = rows.filter((s) => s.unsigned).map((s) => s.meaning);
+  const unsigned = unsignedMeanings(rows);
   return unsigned.length ? `Unsigned: ${unsigned.join(', ')}. The record changed after signing.` : undefined;
 }
 const rowClass = (s: Signature, fresh?: ReadonlySet<string>) =>

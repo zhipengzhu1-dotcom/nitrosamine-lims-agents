@@ -62,6 +62,7 @@ export const stepUi: {
       { name: 'performedOn', label: 'Performed on', kind: 'date' },
     ],
   },
+  signPerformedAgain: { label: 'Sign Performed again', fields: [] },
   review: { label: 'Review', fields: [] },
   release: { label: 'Release', fields: [], record: 'The Test Report this release issues' },
 };
@@ -80,7 +81,7 @@ export interface SigningView {
   recordVersion: RecordVersionRef;
   statement: SignatureStatement;
 }
-export const stateOrder = Object.values(steps).map((s) => s.to);
+export const stateOrder = [...new Set(Object.values(steps).map((s) => s.to))];
 export const words = (name: string) => name.replace(/([a-z])([A-Z])/g, '$1 $2');
 
 const unsignedLook = {

@@ -166,9 +166,10 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     review: rui,
     release: quinn,
   } satisfies {
-    [K in StepName]: Account;
+    // Performed is signed again only after an approved Critical Data Change, which this walk makes none of.
+    [K in Exclude<StepName, 'signPerformedAgain'>]: Account;
   };
-  for (const name of stepNames) {
+  for (const name of stepNames.filter((n) => n !== 'signPerformedAgain')) {
     const entries = auditTrail.filter((e) => e.reason === name);
     assert.ok(entries.length > 0, `an audit entry for ${name}`);
     for (const e of entries)
@@ -480,6 +481,8 @@ it('a signing on sight of a Record Version that is no longer the latest is refus
         .where('id', '=', customerId)
         .execute(),
   );
+  // The rename leaves Performed on the earlier Record Version too, so the Analyst signs the Test as it reads now.
+  assert.equal((await take(as.ana, 'signPerformedAgain', id, {}, ana)).status, 200);
   const refused = await as.rui.call(stepRoute('review'), {
     commitKey: randomUUID(),
     testId: id,
@@ -493,7 +496,7 @@ it('a signing on sight of a Record Version that is no longer the latest is refus
   const after = await view(id, as.rui);
   assert.deepEqual(
     [after.test.state, after.signatures.map((s) => s.meaning)],
-    ['SubmittedForReview', ['Performed']],
+    ['SubmittedForReview', ['Performed', 'Performed']],
     'no Reviewed Signature and no state move',
   );
   assert.ok(

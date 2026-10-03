@@ -76,6 +76,22 @@ test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs
     entries.filter({ hasText: 'Critical Data Change Decision' }).filter({ hasText: 'Approved' }).first(),
     'the approval is in the Audit Trail',
   ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review', exact: true })).toHaveCount(0);
+
+  await openTest(page, 'ana.analyst', testId);
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Signatures unsigned');
+  await page.getByRole('button', { name: 'Sign Performed again' }).click();
+  await expect(page.getByRole('heading', { name: 'Sign Performed' })).toBeVisible();
+  await expect(sheet(page)).toContainText('0.0310 ppm');
+  await shot(page, 'resign-sheet');
+  await page.getByLabel(/User ID/).fill('ana.analyst');
+  await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
+  await page.getByRole('button', { name: 'Sign as Performed' }).click();
+  await railSays(page, 'Performed Signature recorded in the Audit Trail. The Test is now Submitted For Review.');
+  await expect(page.getByRole('heading', { level: 1 })).not.toContainText('Signatures unsigned');
+
+  await openTest(page, 'rui.reviewer', testId);
+  await expect(page.getByRole('button', { name: 'Review', exact: true })).toBeVisible();
 
   await openTest(page, 'ana.analyst', testId);
   await page.getByRole('button', { name: 'Propose change' }).click();

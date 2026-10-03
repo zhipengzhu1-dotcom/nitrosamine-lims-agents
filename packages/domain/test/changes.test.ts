@@ -10,6 +10,7 @@ import {
   type Role,
   refusal,
   type StepFacts,
+  steps,
   type TestState,
 } from '../src/index.ts';
 
@@ -128,19 +129,24 @@ describe('every Test step that signs waits while a Critical Data Change is pendi
     assignee: 'ana',
     assigneeTrained: true,
     signers: { Performed: ['ana'], Reviewed: ['rui'] },
+    signedOnLatest: [],
     pendingChange: true,
   };
   const signing: [Parameters<typeof refusal>[0], TestState, Role][] = [
     ['enterResult', 'Assigned', 'Analyst'],
+    ['signPerformedAgain', 'SubmittedForReview', 'Analyst'],
     ['review', 'SubmittedForReview', 'Reviewer'],
     ['release', 'Reviewed', 'QA'],
   ];
   for (const [name, state, role] of signing)
     it(`${name} is refused while a change is pending`, () =>
-      assert.deepEqual(refusal(name, state, [role], { ...f, actor: name === 'enterResult' ? 'ana' : f.actor }), {
-        kind: 'changePending',
-        message: 'The Test cannot be signed while a Critical Data Change on it is pending.',
-      }));
+      assert.deepEqual(
+        refusal(name, state, [role], { ...f, actor: steps[name].role === 'Analyst' ? 'ana' : f.actor }),
+        {
+          kind: 'changePending',
+          message: 'The Test cannot be signed while a Critical Data Change on it is pending.',
+        },
+      ));
   it('a step that does not sign is not held up', () =>
     assert.equal(refusal('assign', 'Ready', ['LabManager'], f), null));
 });

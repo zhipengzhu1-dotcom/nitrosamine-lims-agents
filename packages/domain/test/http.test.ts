@@ -109,6 +109,7 @@ describe('a step body requires testId when the step starts from a state, and sig
     receive: ['commitKey', 'testId', 'input'],
     assign: ['commitKey', 'testId', 'input'],
     enterResult: ['commitKey', 'testId', 'input', 'signature'],
+    signPerformedAgain: ['commitKey', 'testId', 'input', 'signature'],
     review: ['commitKey', 'testId', 'input', 'signature'],
     release: ['commitKey', 'testId', 'input', 'signature'],
   };

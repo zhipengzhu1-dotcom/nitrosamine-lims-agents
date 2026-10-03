@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  nextStep,
   type Refusal,
   type Role,
   type Sentence,
@@ -42,16 +43,20 @@ const allowed: StepFacts = {
   assignee: 'ana',
   assigneeTrained: true,
   signers: { Performed: ['pia'], Reviewed: ['rui'], Approved: ['rui'] },
+  signedOnLatest: ['Performed', 'Reviewed'],
   pendingChange: false,
 };
+/** Facts that pass `name`'s guard: Performed is signed again only once an approved change left the Result unsigned. */
+const allowedFor = (name: StepName): StepFacts =>
+  name === 'signPerformedAgain' ? { ...allowed, signedOnLatest: [] } : allowed;
 
 describe('a step from any state but its own is refused', () => {
   for (const name of stepNames) {
     const { from, role } = steps[name];
     it(`${name} is taken only from ${from ?? 'no'} state`, () => {
-      assert.equal(refusal(name, from, [role], allowed), null, `${name} from ${from} by ${role}`);
+      assert.equal(refusal(name, from, [role], allowedFor(name)), null, `${name} from ${from} by ${role}`);
       for (const state of states.filter((s) => s !== from))
-        assert.deepEqual(refusal(name, state, [role], allowed), {
+        assert.deepEqual(refusal(name, state, [role], allowedFor(name)), {
           kind: 'state',
           message: `The ${name} step needs a Test in ${from ?? 'no'} state, not ${state}.`,
         });
@@ -64,9 +69,9 @@ describe('a step by any role but its own is refused', () => {
     const { from, role } = steps[name];
     it(`${name} is taken only by the ${role} role`, () => {
       const expected: Refusal = { kind: 'role', message: `The ${name} step is taken by the ${role} role.` };
-      assert.deepEqual(refusal(name, from, [], allowed), expected, 'a person with no role');
+      assert.deepEqual(refusal(name, from, [], allowedFor(name)), expected, 'a person with no role');
       for (const other of roles.filter((r) => r !== role))
-        assert.deepEqual(refusal(name, from, [other], allowed), expected, other);
+        assert.deepEqual(refusal(name, from, [other], allowedFor(name)), expected, other);
     });
   }
 });
@@ -121,12 +126,55 @@ describe("a step whose guard fails is refused with the guard's reason", () => {
       facts: { signers: { Performed: ['pia'], Reviewed: ['rui'], Approved: ['ana'] } },
       refused: 'QA cannot release a Test after approving a Critical Data Change on it.',
     },
+    {
+      name: 'signing the corrected Result Performed by anyone but the assigned Analyst is refused',
+      step: 'signPerformedAgain',
+      facts: { assignee: 'wes' },
+      refused: 'Only the assigned Analyst can sign the Test Performed again.',
+    },
+    {
+      name: 'signing Performed again while a Performed Signature covers the Result as it reads now is refused',
+      step: 'signPerformedAgain',
+      facts: { signedOnLatest: ['Performed'] },
+      refused: 'The Test as it reads now is already signed Performed.',
+    },
+    {
+      name: 'a review of a corrected Result the assigned Analyst has not signed Performed again is refused',
+      step: 'review',
+      facts: { signedOnLatest: [] },
+      refused: "The Test as it reads now needs the assigned Analyst's Performed Signature before review.",
+    },
+    {
+      name: 'a release of a corrected Result the assigned Analyst has not signed Performed again is refused',
+      step: 'release',
+      facts: { signedOnLatest: ['Reviewed'] },
+      refused: "The Test as it reads now needs the assigned Analyst's Performed Signature before release.",
+    },
+    {
+      name: 'a release of a corrected Result no Reviewer has signed Reviewed again is refused',
+      step: 'release',
+      facts: { signedOnLatest: ['Performed'] },
+      refused: 'The Test as it reads now needs a Reviewed Signature before release.',
+    },
   ];
   for (const c of cases)
     it(c.name, () => {
       const { from, role } = steps[c.step];
-      assert.equal(refusal(c.step, from, [role], allowed), null, `${c.step} with facts that pass its guard`);
+      assert.equal(refusal(c.step, from, [role], allowedFor(c.step)), null, `${c.step} with facts that pass its guard`);
       const expected: Refusal | null = c.refused === null ? null : { kind: 'guard', message: c.refused };
-      assert.deepEqual(refusal(c.step, from, [role], { ...allowed, ...c.facts }), expected);
+      assert.deepEqual(refusal(c.step, from, [role], { ...allowedFor(c.step), ...c.facts }), expected);
     });
+});
+
+describe('after an approved change the assigned Analyst signs Performed again, then a Reviewer reviews', () => {
+  const corrected: StepFacts = { ...allowed, signers: { Performed: ['ana'], Approved: ['rui'] }, signedOnLatest: [] };
+  it('the next step for the assigned Analyst is to sign Performed again, and a Reviewer has none until then', () => {
+    assert.equal(nextStep('SubmittedForReview', ['Analyst'], corrected), 'signPerformedAgain');
+    assert.equal(nextStep('SubmittedForReview', ['Reviewer'], { ...corrected, actor: 'dee' }), null);
+  });
+  it('once Performed covers the corrected Result, review is next and signing Performed again is not', () => {
+    const resigned: StepFacts = { ...corrected, signedOnLatest: ['Performed'] };
+    assert.equal(nextStep('SubmittedForReview', ['Analyst'], resigned), null);
+    assert.equal(nextStep('SubmittedForReview', ['Reviewer'], { ...resigned, actor: 'dee' }), 'review');
+  });
 });

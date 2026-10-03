@@ -3898,6 +3898,7 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
     ['lims.result.refuse_removal', 'critical-data-changes.test.ts'],
     ['lims.result.refuse_truncate', 'critical-data-changes.test.ts'],
     ['lims.signature.test_signing_waits_for_change', 'critical-data-changes.test.ts'],
+    ['lims.signature.test_signing_waits_for_performed', 'critical-data-changes.test.ts'],
     [
       'lims.critical_data_change.critical_data_change_lab_id_id_test_id_key',
       'unreachable: (lab_id, id) is already the key',

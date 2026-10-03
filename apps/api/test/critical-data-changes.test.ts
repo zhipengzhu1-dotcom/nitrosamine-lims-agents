@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { audited, type DB, postgresFault } from '@lims/db';
-import { changeStepRoute, routes, stepRoute } from '@lims/domain';
+import { changeStepRoute, routes, stepRoute, unsignedMeanings } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import { type Account, type Client, ok, refusedWith as refusedOver, signatureOf, startApi } from './harness.ts';
 
@@ -535,6 +535,44 @@ describe('no Test step signs while a Critical Data Change on one of its Results 
   });
 });
 
+describe('a Test is reviewed and released only once Performed binds its latest Record Version, even past the registry', () => {
+  it('a Reviewed or Released Signature after an approval is refused until Performed is signed on the corrected Result', async () => {
+    const test = await performedTest();
+    await approve(await propose(test), test.testId);
+    // No step issues a Test Report before review, so the owner issues one to show the Released refusal.
+    const { id: reportId } = await audited(
+      api.superuser,
+      { actor: 'svc:test', role: 'system', reason: 'Issue a Test Report on a corrected Result' },
+      (tx) =>
+        tx
+          .insertInto('testReport')
+          .values({ labId: api.labId, testId: test.testId, number: `CDC-P${test.testId.slice(0, 5)}` })
+          .returning('id')
+          .executeTakeFirstOrThrow(),
+    );
+    const review = () =>
+      acting(api.db, dana, 'Reviewer', (tx) => signThrough(tx, dana, 'Reviewed', 'test', test.testId));
+    const release = () =>
+      acting(api.db, quinn, 'QA', (tx) => signThrough(tx, quinn, 'Released', 'test_report', reportId));
+    for (const [meaning, sign] of [
+      ['Reviewed', review],
+      ['Released', release],
+    ] as const) {
+      const error = await refusal(sign());
+      assert.deepEqual(
+        [error.code, error.message],
+        [
+          'LA010',
+          `a Test and the Test Report built on it are signed ${meaning} only once a Performed Signature binds the Test's latest Record Version`,
+        ],
+      );
+    }
+    await acting(api.db, ana, 'Analyst', (tx) => signThrough(tx, ana, 'Performed', 'test', test.testId));
+    assert.ok(await review(), 'the Reviewed Signature is given on the corrected Result once it is signed Performed');
+    assert.ok(await release(), 'the Released Signature is given on the Test Report once Performed covers the Result');
+  });
+});
+
 describe("a Result's value changes only through an approved Critical Data Change, even for the superuser", () => {
   it('a direct change of a saved value is refused', async () => {
     const test = await performedTest();
@@ -984,8 +1022,13 @@ describe("a refusal only the database sees reaches the bench as the registry's o
   });
 });
 
-/** Takes the review or release step on the Test as `by`, signing the Record Version the page shows now. */
-const signStep = async (client: Client, step: 'review' | 'release', testId: string, by: Account) =>
+/** Takes a signing step on the Test as `by`, signing the Record Version the page shows now. */
+const signStep = async (
+  client: Client,
+  step: 'signPerformedAgain' | 'review' | 'release',
+  testId: string,
+  by: Account,
+) =>
   client.call(stepRoute(step), {
     commitKey: randomUUID(),
     testId,
@@ -1006,6 +1049,7 @@ describe('an approval on a Reviewed Test sends it back for review before it is r
       'the first Reviewed Signature no longer covers the Test',
     );
     refusedOver(await signStep(as.quinn, 'release', testId, quinn), 'state');
+    ok(await signStep(as.ana, 'signPerformedAgain', testId, ana));
     assert.equal(ok(await as.dana.call(routes.test, { id: testId })).next, 'review');
     ok(await signStep(as.dana, 'review', testId, dana));
     ok(await signStep(as.quinn, 'release', testId, quinn));
@@ -1017,6 +1061,7 @@ describe('an approval on a Reviewed Test sends it back for review before it is r
     ok(await signStep(as.rhea, 'review', testId, rhea));
     ok(await proposeOver(testId));
     ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    ok(await signStep(as.ana, 'signPerformedAgain', testId, ana));
     ok(await signStep(as.dana, 'review', testId, dana));
     assert.equal(
       refusedOver(await signStep(as.rhea, 'release', testId, rhea), 'guard'),
@@ -1027,12 +1072,67 @@ describe('an approval on a Reviewed Test sends it back for review before it is r
     ok(await proposeOver(second.testId));
     const approval = await approvalOf(as.rhea, second.testId, rhea);
     ok(await as.rhea.call(changeStepRoute('approveChange'), { testId: second.testId, ...approval }));
+    ok(await signStep(as.ana, 'signPerformedAgain', second.testId, ana));
     ok(await signStep(as.rui, 'review', second.testId, rui));
     assert.equal(
       refusedOver(await signStep(as.rhea, 'release', second.testId, rhea), 'guard'),
       'QA cannot release a Test after approving a Critical Data Change on it.',
     );
     ok(await signStep(as.quinn, 'release', second.testId, quinn));
+  });
+});
+
+describe('after an approval the assigned Analyst signs the corrected Result Performed before review and release', () => {
+  it('review waits for the Performed signing, and the released Test Report then names no meaning as unsigned', async () => {
+    const { testId } = await performedTest();
+    ok(await proposeOver(testId));
+    ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    assert.equal(ok(await as.dana.call(routes.test, { id: testId })).next, null, 'a Reviewer has no step yet');
+    assert.equal(
+      refusedOver(await signStep(as.dana, 'review', testId, dana), 'guard'),
+      "The Test as it reads now needs the assigned Analyst's Performed Signature before review.",
+    );
+    assert.equal(ok(await as.ana.call(routes.test, { id: testId })).next, 'signPerformedAgain');
+    ok(await signStep(as.ana, 'signPerformedAgain', testId, ana));
+    const resigned = ok(await as.ana.call(routes.test, { id: testId }));
+    assert.deepEqual([resigned.test.state, resigned.next], ['SubmittedForReview', null]);
+    assert.deepEqual(
+      resigned.signatures.filter((s) => s.meaning === 'Performed').map((s) => [s.recordVersion.version, s.unsigned]),
+      [
+        [3, true],
+        [4, false],
+      ],
+      'the superseded Performed Signature stays listed as unsigned beside the one on the corrected Result',
+    );
+    assert.equal(ok(await as.dana.call(routes.test, { id: testId })).next, 'review');
+    ok(await signStep(as.dana, 'review', testId, dana));
+    ok(await signStep(as.quinn, 'release', testId, quinn));
+    const report = ok(await as.cora.call(routes.report, { id: testId }));
+    assert.deepEqual(
+      report.signatures.map((s) => [s.meaning, s.unsigned]),
+      [
+        ['Performed', true],
+        ['Approved', false],
+        ['Performed', false],
+        ['Reviewed', false],
+        ['Released', false],
+      ],
+    );
+    assert.deepEqual(unsignedMeanings(report.signatures), [], 'the Test Report names no Signature Meaning unsigned');
+  });
+
+  it('signing Performed again is refused to another Analyst, and once Performed covers the Result as it reads now', async () => {
+    const { testId } = await performedTest();
+    assert.equal(
+      refusedOver(await signStep(as.ana, 'signPerformedAgain', testId, ana), 'guard'),
+      'The Test as it reads now is already signed Performed.',
+    );
+    ok(await proposeOver(testId));
+    ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    assert.equal(
+      refusedOver(await signStep(as.dana, 'signPerformedAgain', testId, dana), 'guard'),
+      'Only the assigned Analyst can sign the Test Performed again.',
+    );
   });
 });
 
@@ -1047,6 +1147,7 @@ describe('a Customer sees only the Approved Critical Data Changes of a released 
     const pendingView = ok(await as.cora.call(routes.test, { id: testId }));
     assert.deepEqual([pendingView.withheld, pendingView.changes], [true, []]);
     ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    ok(await signStep(as.ana, 'signPerformedAgain', testId, ana));
     ok(await signStep(as.rui, 'review', testId, rui));
     ok(await signStep(as.quinn, 'release', testId, quinn));
     const view = ok(await as.cora.call(routes.test, { id: testId }));
@@ -1060,6 +1161,7 @@ describe('a Customer sees only the Approved Critical Data Changes of a released 
     assert.deepEqual(signed, [
       ['Performed', 'Test'],
       ['Approved', 'Critical Data Change'],
+      ['Performed', 'Test'],
       ['Reviewed', 'Test'],
       ['Released', 'Test Report'],
     ]);

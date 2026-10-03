@@ -402,6 +402,40 @@ end $$;
 create trigger test_signing_waits_for_change before insert on lims.signature
   for each row execute function lims.refuse_signing_while_change_pending();
 
+-- A Test is reviewed and released only as it reads now (21 CFR 211.194(a)(7)): a new Record Version, such as an
+-- approved Critical Data Change makes, leaves the Performed Signature on the earlier one, so a Reviewed or Released
+-- Signature waits until Performed binds the Test's latest Record Version.
+create function lims.refuse_signing_before_performed() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  signed_test uuid;
+  latest      uuid;
+begin
+  if new.meaning not in ('Reviewed', 'Released') then
+    return new;
+  end if;
+  select coalesce(r.test_id, v.record_id) into signed_test
+    from record_version v
+    left join test_report r on v.record_table = 'test_report' and r.lab_id = v.lab_id and r.id = v.record_id
+   where v.lab_id = new.lab_id and v.id = new.record_version_id and v.record_table in ('test', 'test_report');
+  if signed_test is null then
+    return new;
+  end if;
+  select id into latest from record_version
+   where lab_id = new.lab_id and record_table = 'test' and record_id = signed_test
+   order by version desc limit 1;
+  if not exists (select from signature s
+                  where s.lab_id = new.lab_id and s.record_version_id = latest and s.meaning = 'Performed') then
+    raise exception 'a Test and the Test Report built on it are signed % only once a Performed Signature binds the Test''s latest Record Version',
+      new.meaning using errcode = 'LA010';
+  end if;
+  return new;
+end $$;
+
+-- Named to fire after test_signing_waits_for_change, so a signing beside a pending change meets that refusal first.
+create trigger test_signing_waits_for_performed before insert on lims.signature
+  for each row execute function lims.refuse_signing_before_performed();
+
 grant execute on function lims.acting_person() to lims_app;
 grant select on lims.picklist_reason to lims_app;
 grant select on lims.critical_data_change, lims.critical_data_change_decision to lims_app;

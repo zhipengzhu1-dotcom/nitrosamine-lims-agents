@@ -663,6 +663,7 @@ const stepInputs = {
     },
     closed,
   ),
+  signPerformedAgain: Type.Object({}, closed),
   review: Type.Object({}, closed),
   release: Type.Object({}, closed),
 } satisfies { [K in StepName]: TObject };
