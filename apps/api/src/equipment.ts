@@ -10,6 +10,7 @@ import {
   equipmentStepNames,
   equipmentStepRoute,
   equipmentSteps,
+  type FitnessStatus,
   labStaff,
   type LogbookEntry,
   mayReadEquipment,
@@ -45,7 +46,11 @@ const byPerson = (username: string | null, displayName: string | null) => ({
 /** A Logbook line as the API holds it, with its time as the database returned it. */
 type Line = LogbookEntry extends infer E ? (E extends { at: unknown } ? Omit<E, 'at'> & { at: Date } : never) : never;
 
-type Snapshot = { fitness_status?: StoredFitnessStatus; room_id?: string } | null;
+/** The Fitness Status a row of lims.equipment holds, which is never Expired: the database refuses it. */
+function stored(status: FitnessStatus): StoredFitnessStatus {
+  if (status === 'Expired') throw new Error('lims.equipment stores no Expired Fitness Status');
+  return status;
+}
 
 /**
  * The Logbook: the Equipment Events, and the Fitness Status changes and Room moves the Audit Trail holds for it, in
@@ -67,7 +72,15 @@ async function logbookOf(scope: Scope, id: string, rooms: Map<string, RoomRef>):
   const changes = await scope
     .trail()
     .leftJoin('person', (j) => j.on(sql<boolean>`'person:' || person.username = audit_entry.actor`))
-    .select(['auditEntry.at', 'auditEntry.oldRow', 'auditEntry.newRow', 'person.username', 'person.displayName'])
+    .select([
+      'auditEntry.at',
+      sql<FitnessStatus | null>`(audit_entry.old_row ->> 'fitness_status')::lims.fitness_status`.as('fromStatus'),
+      sql<FitnessStatus | null>`(audit_entry.new_row ->> 'fitness_status')::lims.fitness_status`.as('toStatus'),
+      sql<string | null>`audit_entry.old_row ->> 'room_id'`.as('fromRoom'),
+      sql<string | null>`audit_entry.new_row ->> 'room_id'`.as('toRoom'),
+      'person.username',
+      'person.displayName',
+    ])
     .where('auditEntry.tableName', '=', 'equipment')
     .where(sql<boolean>`audit_entry.new_row ->> 'id' = ${id}`)
     .orderBy('auditEntry.seq')
@@ -81,13 +94,17 @@ async function logbookOf(scope: Scope, id: string, rooms: Map<string, RoomRef>):
     at: e.at,
   }));
   for (const c of changes) {
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- an Audit Trail snapshot holds the stored row of lims.equipment
-    const [before, after] = [c.oldRow as Snapshot, c.newRow as Snapshot];
     const by = byPerson(c.username, c.displayName);
-    if (after?.fitness_status && after.fitness_status !== before?.fitness_status)
-      entries.push({ entry: 'status', from: before?.fitness_status ?? null, to: after.fitness_status, by, at: c.at });
-    if (before?.room_id && after?.room_id && before.room_id !== after.room_id)
-      entries.push({ entry: 'move', from: room(before.room_id), to: room(after.room_id), by, at: c.at });
+    if (c.toStatus && c.toStatus !== c.fromStatus)
+      entries.push({
+        entry: 'status',
+        from: c.fromStatus && stored(c.fromStatus),
+        to: stored(c.toStatus),
+        by,
+        at: c.at,
+      });
+    if (c.fromRoom && c.toRoom && c.fromRoom !== c.toRoom)
+      entries.push({ entry: 'move', from: room(c.fromRoom), to: room(c.toRoom), by, at: c.at });
   }
   return entries.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
@@ -120,10 +137,9 @@ async function readEquipment(scope: Scope, db: Kysely<DB>, id: string) {
       .executeTakeFirst()) ?? refuse('notFound', 'No Equipment of this Lab has that id.');
   const rooms = new Map((await scope.from('room').select(['id', 'name']).execute()).map((r) => [r.id, r]));
   const { roomId, username, displayName, contentHash, version, fitnessStatus, ...facts } = row;
-  if (fitnessStatus === 'Expired') throw new Error('lims.equipment stores no Expired Fitness Status');
   return {
     ...facts,
-    fitnessStatus,
+    fitnessStatus: stored(fitnessStatus),
     room: rooms.get(roomId) ?? { id: roomId, name: 'Unknown Room' },
     responsiblePerson: { username, displayName },
     recordVersion: { version, canonicalForm: 1, contentHash },
@@ -181,7 +197,17 @@ const effects: { [K in EquipmentStepName]: Effect<K> } = {
     return null;
   },
   markSuspect: async (q, target, input) => recordEvent(q, target, 'Suspect', input.reason),
-  recordEvent: async (q, target, input) => recordEvent(q, target, input.kind, input.note),
+  recordEvent: async (q, target, input) => {
+    const event = await recordEvent(q, target, input.kind, input.note);
+    if ('version' in input)
+      await q
+        .update('equipment')
+        .set(input.kind === 'SoftwareChange' ? { softwareVersion: input.version } : { firmwareVersion: input.version })
+        .where('id', '=', target.id)
+        .executeTakeFirstOrThrow()
+        .catch(movedOn);
+    return event;
+  },
   move: async (q, { id, status }, input) => {
     const known = await q.from('room').select('id').where('id', '=', input.roomId).executeTakeFirst();
     if (!known) refuse('notFound', 'No Room of this Lab has that id.');
@@ -314,12 +340,7 @@ export function equipmentRoutes(app: App, db: Kysely<DB>, release: string): void
         .select(['equipment.id', 'equipment.name', 'equipment.kind', 'room.name as room', 'equipment.fitnessStatus'])
         .orderBy('equipment.name')
         .execute()
-        .then((rows) =>
-          rows.map(({ fitnessStatus, ...row }) => {
-            if (fitnessStatus === 'Expired') throw new Error('lims.equipment stores no Expired Fitness Status');
-            return { ...row, fitnessStatus };
-          }),
-        );
+        .then((rows) => rows.map(({ fitnessStatus, ...row }) => ({ ...row, fitnessStatus: stored(fitnessStatus) })));
     },
   });
   app.route({

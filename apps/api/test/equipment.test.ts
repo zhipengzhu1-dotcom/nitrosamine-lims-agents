@@ -123,6 +123,32 @@ it('a Repair recorded and signed Performed on In use Equipment suspends it', asy
   assert.equal(repaired.fitnessStatus, 'Suspended');
 });
 
+it('a software or firmware change records the version now installed and suspends In use Equipment', async () => {
+  const equipment = await inUse();
+  const updated = ok(
+    await as.ana.call(equipmentStepRoute('recordEvent'), {
+      id: equipment.id,
+      input: { kind: 'SoftwareChange', note: 'Installed the vendor patch.', version: '2.4.1' },
+      signature: signing(equipment, ana),
+    }),
+  );
+  assert.deepEqual([updated.softwareVersion, updated.fitnessStatus], ['2.4.1', 'Suspended']);
+  const flashed = ok(
+    await as.ana.call(equipmentStepRoute('recordEvent'), {
+      id: equipment.id,
+      input: { kind: 'FirmwareChange', note: 'Flashed the load cell firmware.', version: 'FW 7' },
+      signature: signing(updated, ana),
+    }),
+  );
+  assert.deepEqual([flashed.softwareVersion, flashed.firmwareVersion], ['2.4.1', 'FW 7']);
+  const unnamed = await as.ana.send(equipmentStepRoute('recordEvent'), {
+    id: equipment.id,
+    input: { kind: 'SoftwareChange', note: 'Installed something.' },
+    signature: signing(flashed, ana),
+  });
+  refusedWith(unnamed, 'malformed');
+});
+
 it('an Equipment Event without the Performed signing is refused', async () => {
   const equipment = await inUse();
   const refused = await as.ana.call(equipmentStepRoute('recordEvent'), {

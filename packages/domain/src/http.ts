@@ -827,23 +827,27 @@ export function incidentStepRoute<K extends IncidentStepName>(name: K) {
 const equipmentStepInputs = {
   approve: Type.Object({}, closed),
   markSuspect: Type.Object({ reason: actionText }, closed),
-  recordEvent: Type.Object(
-    {
-      kind: Type.Enum({
-        Cleaning: 'Cleaning',
-        Maintenance: 'Maintenance',
-        Repair: 'Repair',
-        SoftwareChange: 'SoftwareChange',
-        FirmwareChange: 'FirmwareChange',
-        Note: 'Note',
-      } as const satisfies { [K in Exclude<db.EquipmentEventKind, 'Suspect'>]: K }),
-      note: actionText,
-    },
-    closed,
-  ),
+  /** A software or firmware change names the version now installed, so the record's identity stays current. */
+  recordEvent: Type.Union([
+    Type.Object(
+      {
+        kind: Type.Enum({ Cleaning: 'Cleaning', Maintenance: 'Maintenance', Repair: 'Repair', Note: 'Note' } as const),
+        note: actionText,
+      },
+      closed,
+    ),
+    Type.Object(
+      {
+        kind: Type.Enum({ SoftwareChange: 'SoftwareChange', FirmwareChange: 'FirmwareChange' } as const),
+        note: actionText,
+        version: text,
+      },
+      closed,
+    ),
+  ]),
   move: Type.Object({ roomId: uuid }, closed),
   retire: Type.Object({}, closed),
-} satisfies { [K in EquipmentStepName]: TObject };
+} satisfies { [K in EquipmentStepName]: TSchema };
 /** What each Equipment step takes, as its route validates it. */
 export type EquipmentStepInputs = { [K in EquipmentStepName]: Static<(typeof equipmentStepInputs)[K]> };
 export interface EquipmentStepBody<K extends EquipmentStepName> {

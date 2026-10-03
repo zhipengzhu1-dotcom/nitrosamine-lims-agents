@@ -28,6 +28,8 @@ interface StepUi<K extends EquipmentStepName> {
   done: string;
 }
 
+const optionalText = (name: string, label: string): Field => ({ name, label, kind: 'text', optional: true });
+
 const eventKinds: readonly EquipmentStepInputs['recordEvent']['kind'][] = [
   'Cleaning',
   'Maintenance',
@@ -56,11 +58,15 @@ const equipmentUi: { [K in EquipmentStepName]: StepUi<K> } = {
     fields: () => [
       { name: 'kind', label: 'Kind', kind: 'pick', picks: eventKinds.map((k) => ({ value: k, text: words(k) })) },
       { name: 'note', label: 'What was done', kind: 'text' },
+      optionalText('version', 'Version now installed (software or firmware change)'),
     ],
     input: (v) => {
       const kind = eventKinds.find((k) => k === v.kind);
       if (!kind) throw new Error('The Kind chosen is not one the LIMS records.');
-      return { kind, note: v.note ?? '' };
+      const note = v.note ?? '';
+      return kind === 'SoftwareChange' || kind === 'FirmwareChange'
+        ? { kind, note, version: v.version ?? '' }
+        : { kind, note };
     },
     done: 'Performed Signature recorded in the Audit Trail. The Equipment Event is in the Logbook.',
   },
@@ -118,8 +124,6 @@ function equipmentAction(
     },
   };
 }
-
-const optionalText = (name: string, label: string): Field => ({ name, label, kind: 'text', optional: true });
 
 /** The Lab Manager's registration: identity, Room and Responsible Person; the Equipment starts Quarantined. */
 function registration(choices: EquipmentChoices, onDone: () => Promise<void>): RailAction {
@@ -272,7 +276,7 @@ function EquipmentRecord({
         </dd>
       </dl>
       <h2>Logbook</h2>
-      <StackTable columns={logbookColumns} rows={view.logbook} rowKey={(l) => `${l.at}:${l.entry}`} />
+      <StackTable columns={logbookColumns} rows={view.logbook} rowKey={(l) => JSON.stringify(l)} />
     </>,
   );
 }
