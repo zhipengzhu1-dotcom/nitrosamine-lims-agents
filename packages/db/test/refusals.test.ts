@@ -2264,13 +2264,29 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
     );
   });
 
-  covered.add('lims.incident_break.written_with_incident');
+  covered.add('lims.incident_break.breaks_written_once');
+  const breakAdded = [
+    '23514',
+    "a chain-verify System Incident's breaks are written once, in one statement, and give its count",
+  ];
   it('a break recorded on a System Incident after the transaction that opened it is refused', async () => {
     const error = await refusalOf(...insert('lims.incident_break', breakRow(9)));
-    assert.deepEqual(
-      [error.code, error.message],
-      ['23514', 'a break is recorded in the transaction that opens its System Incident'],
-    );
+    assert.deepEqual([error.code, error.message], breakAdded);
+  });
+  it('a break recorded in a transaction that updates its open System Incident is refused', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('update lims.system_incident set state = state where id = $1', [id.chainIncident]);
+      const error = await client.query(...insert('lims.incident_break', breakRow(9))).then(
+        () => assert.fail('the database recorded the break'),
+        (e: unknown) => e,
+      );
+      assert.ok(error instanceof pg.DatabaseError);
+      assert.deepEqual([error.code, error.message], breakAdded);
+    } finally {
+      await client.query('rollback');
+    }
   });
   it('a break recorded on a System Incident that records no chain break is refused', async () => {
     const error = await refusalOf(...insert('lims.incident_break', { ...breakRow(4), incident_id: id.systemIncident }));
@@ -2303,9 +2319,15 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
          values ($1, 'ChainVerifyFailure', $2, $3, $4, $5, $6, $7, $8)`,
         [incident, reference, id.person, id.lab, first, last, count, fingerprint],
       ],
-      ...stored.map(({ seq, through = seq }): [string, unknown[]] =>
-        insert('lims.incident_break', { incident_id: incident, seq, kind: 'Changed', through, fingerprint: fp7 }),
-      ),
+      ...(stored.length === 0
+        ? []
+        : [
+            [
+              `insert into lims.incident_break (incident_id, seq, kind, through, fingerprint)
+               select $1, b.seq, 'Changed', b.through, $2 from unnest($3::bigint[], $4::bigint[]) as b(seq, through)`,
+              [incident, fp7, stored.map((b) => b.seq), stored.map((b) => b.through ?? b.seq)],
+            ] satisfies [string, unknown[]],
+          ]),
     ];
   };
   /** The refusal that committing `statements`, run in one transaction, raises. */
@@ -2332,9 +2354,16 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       { seq: 5, fingerprint: fp7 },
     ]),
   };
-  for (const [what, reference, incident, stored] of [
+  for (const [what, reference, incident, stored, refused] of [
     ['without the breaks it covers', 'RF00000P', twoBreaks, []],
-    ['whose breaks do not give its count', 'RF00000Q', twoBreaks, [{ seq: 4 }]],
+    ['whose breaks do not give its count', 'RF00000Q', twoBreaks, [{ seq: 4 }], breakAdded],
+    ['whose breaks do not give its first entry', 'RF00000V', { ...twoBreaks, first: 3 }, [{ seq: 4 }, { seq: 5 }]],
+    [
+      'whose one break does not give its fingerprint',
+      'RF00000X',
+      { first: 4, last: 4, count: 1, fingerprint: Buffer.alloc(32, 9) },
+      [{ seq: 4 }],
+    ],
     [
       'whose breaks do not give its range',
       'RF00000R',
@@ -2358,7 +2387,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       const error = await refusalAtCommit(moreIncident(reference, incident, stored));
       assert.deepEqual(
         [error.code, error.message],
-        [
+        refused ?? [
           '23514',
           'a chain-verify System Incident records every break it covers, which give its count, range and fingerprint',
         ],

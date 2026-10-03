@@ -12,7 +12,7 @@ import {
   type SystemIncident,
 } from '@lims/domain';
 import { routes } from '@lims/domain';
-import { type ReactNode, useMemo } from 'react';
+import { type ReactNode, useEffect, useMemo } from 'react';
 import { api, useApi, useFresh } from './api.ts';
 import { type Field, type RailAction, Shell, Status, words } from './rail.tsx';
 import { Split } from './split.tsx';
@@ -150,11 +150,11 @@ function IncidentLinks({ references }: { references: string[] }) {
  * read would have recorded the change, so it says that Verify chain does.
  */
 function BreaksVerdict({ data }: { data: Breaks }) {
+  const recordedBefore = useMemo(() => data.incidents.filter((reference) => !data.opened.includes(reference)), [data]);
   const at = `Recomputed ${time(data.recomputedAt)}.`;
   if (data.asRecorded) return <>{at} These are the breaks this System Incident recorded.</>;
   if (data.breaks.length === 0)
     return <>{at} No break remains in this range: the breaks this System Incident recorded no longer read as broken.</>;
-  const recordedBefore = data.incidents.filter((reference) => !data.opened.includes(reference));
   return (
     <>
       {at} The chain has changed inside this range since this System Incident was opened.
@@ -178,10 +178,15 @@ function BreaksVerdict({ data }: { data: Breaks }) {
 
 /**
  * Every break inside a chain verification incident's range as the chain reads now, and whether it recorded them;
- * once they differ, the breaks it stored when it opened, each marked by whether it reads the same now.
+ * once they differ, the breaks it stored when it opened, each marked by whether it reads the same now. A changed
+ * range names the System Incidents that record it, which a read of QA's may have just opened, so `changed` reloads
+ * the list beside the record to hold them.
  */
-function IncidentBreaks({ reference }: { reference: string }) {
+function IncidentBreaks({ reference, changed }: { reference: string; changed: () => Promise<void> }) {
   const { data, error } = useApi(routes.incidentBreaks, { reference });
+  useEffect(() => {
+    if (data && !data.asRecorded) void changed();
+  }, [data, changed]);
   return (
     <section aria-labelledby="incident-breaks">
       <h2 id="incident-breaks">Breaks in this range</h2>
@@ -284,7 +289,7 @@ function IncidentRecord({
           {view.recordVersion.version} · <code className="hash">{view.recordVersion.contentHash}</code>
         </dd>
       </dl>
-      {view.chain && <IncidentBreaks reference={view.reference} />}
+      {view.chain && <IncidentBreaks reference={view.reference} changed={afterStep} />}
       <h2>Impact and actions</h2>
       <p className="muted">QA answers whether this could have affected results or records.</p>
       <dl className="facts">

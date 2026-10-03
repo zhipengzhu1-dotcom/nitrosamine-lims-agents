@@ -271,6 +271,20 @@ function closeQcIncidentAt(entry: string) {
   );
 }
 
+/** Alters the broken QC Lab entry a second time, so that the chain reads differently from what its incident recorded. */
+function alterQcEntryAgain(entry: string) {
+  execFileSync(
+    '../../scripts/pg.sh',
+    ['psql', '-q', '-v', 'ON_ERROR_STOP=1', '-v', `entry=${entry}`, '--single-transaction', '-d', E2E_DATABASE],
+    {
+      input: `set local session_replication_role = replica;
+              update lims.audit_entry set reason = 'Altered again behind the chain (e2e)'
+               where chain = (select lab_id::text from lims.lab where code = 'QC') and seq = :entry;`,
+      stdio: ['pipe', 'ignore', 'inherit'],
+    },
+  );
+}
+
 test('QA verifying a chain whose break has a Closed System Incident still sees Broken, with that incident marked Closed', async ({
   page,
 }) => {
@@ -316,5 +330,17 @@ test("QA opens a break's System Incident from Verify chain and reads every break
   await expect(breaks).toContainText('These are the breaks this System Incident recorded.');
   await expect(breaks.getByRole('row')).toHaveCount(2);
   await expect(breaks.getByRole('row').last().getByRole('cell')).toHaveText([entry, 'Changed', entry]);
+
+  // The entry is altered again behind the chain: QA's next read records the change as a new System Incident, names
+  // it, and the list beside the record shows it.
+  alterQcEntryAgain(entry);
+  await page.reload();
+  await expect(breaks).toContainText('The chain has changed inside this range since this System Incident was opened.');
+  const named = /System Incident ([0-9A-HJKMNP-TV-Z]{8})/.exec((await breaks.textContent()) ?? '')?.[1] ?? '';
+  expect(named).not.toBe('');
+  await expect(breaks.getByRole('region', { name: 'As this System Incident recorded them' })).toBeVisible();
+  // The list beside the record, which only desktop width shows, holds the incident the read named.
+  const list = page.locator('.split__list');
+  if (await list.isVisible()) await expect(list.getByRole('row').filter({ hasText: named })).toHaveCount(1);
   await signOutFromRail(page);
 });

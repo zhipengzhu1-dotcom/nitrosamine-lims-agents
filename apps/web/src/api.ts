@@ -12,7 +12,7 @@ import {
   type SessionClock,
   type SignedInView,
 } from '@lims/domain';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { setPersonReducesMotion } from './motion.ts';
 
 export class Refused extends Error {
@@ -241,11 +241,15 @@ export function useApi<R extends Route>(
   useEffect(() => {
     for (const settle of waiting.current.splice(0)) settle();
   }, [state]);
-  const reload = () =>
-    new Promise<void>((settle) => {
-      waiting.current.push(settle);
-      setVersion((v) => v + 1);
-    });
+  // One function for the component's life, so that an effect may depend on it without running again every render.
+  const reload = useCallback(
+    () =>
+      new Promise<void>((settle) => {
+        waiting.current.push(settle);
+        setVersion((v) => v + 1);
+      }),
+    [],
+  );
   return state.path === path ? { ...state, reload } : { reload };
 }
 

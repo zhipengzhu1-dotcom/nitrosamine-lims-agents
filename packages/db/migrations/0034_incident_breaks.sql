@@ -6,9 +6,9 @@ set local role lims_owner;
 -- unable to say which entries were broken when it opened. The breaks are its own rows, not a column of the audited
 -- incident: lims.capture copies the whole row into every Audit Trail entry on it, and a chain with thousands of breaks
 -- would then be copied into each of the incident's entries, inside the time the verification has to write them. The
--- rows are written once, in the transaction that opens the incident, and never change; the incident's fingerprint
--- and its content hash (below) bind them, which is why the Audit Trail does not capture them. An incident opened
--- before this migration has none.
+-- rows are written once, in one statement of the transaction that opens the incident, and never change; the
+-- incident's fingerprint and its content hash (below) bind them, which is why the Audit Trail does not capture them.
+-- An incident opened before this migration has none.
 create table lims.incident_break (
   incident_id uuid   not null references lims.system_incident,
   seq         bigint not null,
@@ -23,27 +23,29 @@ create trigger refuse_change before update or delete on lims.incident_break
 create trigger refuse_truncate before truncate on lims.incident_break
   for each statement execute function lims.refuse_change();
 
--- A break belongs to a chain-verify System Incident and is written in the transaction that opens it, so that no break
--- is added to an incident after it opened. After the row's own checks and its foreign key, so that they refuse first.
--- Definer's rights, as lims.sign has, because written_here is the owner's.
-create function lims.written_with_incident() returns trigger
-language plpgsql security definer set search_path = lims, pg_temp as $$
-declare
-  incident_chain text;
-  incident_xmin  xid;
+-- A break belongs to a chain-verify System Incident, and the statement that writes an incident's breaks leaves it
+-- with exactly its break count, so that no break is added to an incident after it opened: its count is a fact that
+-- keep_incident_facts freezes, and a break is never removed. Once per statement, after the rows' own checks and their
+-- foreign key, so that those refuse first and a chain with thousands of breaks is counted once.
+create function lims.breaks_written_once() returns trigger
+language plpgsql set search_path = lims, pg_temp as $$
 begin
-  select chain, xmin into incident_chain, incident_xmin from system_incident where id = new.incident_id;
-  if incident_chain is null then
+  if exists (select from (select distinct incident_id from added) a
+             join system_incident i on i.id = a.incident_id
+             where i.chain is null) then
     raise exception 'a break is recorded only on a chain-verify System Incident' using errcode = '23514';
   end if;
-  if not coalesce(written_here(incident_xmin), false) then
-    raise exception 'a break is recorded in the transaction that opens its System Incident' using errcode = '23514';
+  if exists (select from (select distinct incident_id from added) a
+             join system_incident i on i.id = a.incident_id
+             where (select count(*) from incident_break b where b.incident_id = i.id) is distinct from i.break_count) then
+    raise exception 'a chain-verify System Incident''s breaks are written once, in one statement, and give its count'
+      using errcode = '23514';
   end if;
   return null;
 end $$;
 
-create trigger written_with_incident after insert on lims.incident_break
-  for each row execute function lims.written_with_incident();
+create trigger breaks_written_once after insert on lims.incident_break
+  referencing new table as added for each statement execute function lims.breaks_written_once();
 
 -- Checked when the opening transaction commits, because the foreign key makes the incident come before its breaks: a
 -- chain-verify System Incident's breaks give its count, its first and last entry, and its fingerprint (the digest
