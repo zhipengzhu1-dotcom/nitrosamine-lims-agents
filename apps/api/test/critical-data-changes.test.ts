@@ -1081,6 +1081,40 @@ describe('an approval on a Reviewed Test sends it back for review before it is r
     assert.equal(ok(await as.quinn.call(routes.test, { id: testId })).test.state, 'Reported');
   });
 
+  it('a Test Review ticked before an approved change is not signed Reviewed, even on its newest Record Version after Performed is signed again', async () => {
+    const { testId } = await performedTest();
+    const { input } = await api.reviewPress(as.dana, testId, dana);
+    ok(await proposeOver(testId));
+    ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    ok(await signStep(as.ana, 'signPerformedAgain', testId, ana));
+    const newest = await api.db
+      .selectFrom('recordVersion')
+      .select(['version', sql<string>`encode(content_hash, 'hex')`.as('contentHash')])
+      .where('recordTable', '=', 'test_review')
+      .where('recordId', '=', input.review)
+      .orderBy('version', 'desc')
+      .executeTakeFirstOrThrow();
+    assert.ok(newest.version > 1, 'the approved change wrote a new Record Version of the Test Review');
+    const { statement } = ok(await as.dana.call(routes.test, { id: testId }));
+    const signature = {
+      username: dana.username,
+      password: dana.password,
+      recordVersion: newest,
+      statementVersion: statement?.version ?? assert.fail('a signer sees the signature statement'),
+    };
+    refusedOver(
+      await as.dana.call(stepRoute('review'), { commitKey: randomUUID(), testId, input, signature }),
+      'recordChanged',
+    );
+    const error = await refusal(
+      acting(api.db, dana, 'Reviewer', (tx) => signThrough(tx, dana, 'Reviewed', 'test_review', input.review)),
+    );
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA010', 'a Test Review is signed Reviewed only as it was saved: the Test changed after it was ticked'],
+    );
+  });
+
   it('neither the Reviewer who approved the change nor one who reviewed an earlier Record Version releases', async () => {
     const { testId } = await performedTest();
     ok(await signStep(as.rhea, 'review', testId, rhea));

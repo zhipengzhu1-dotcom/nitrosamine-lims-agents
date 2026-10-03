@@ -148,7 +148,7 @@ export async function testChecklist(scope: Scope, test: { id: string; state: str
 
 /**
  * Refuses a Reviewed press unless the Test Review it names is of this Test, was saved by the signer on the Test checklist
- * in force, and ticks every ticked item with each needed comment.
+ * in force, ticks every ticked item with each needed comment, and still holds the content it was saved with.
  */
 export async function reviewToSign(scope: LabQueries, ctx: ActorContext, testId: string, reviewId: string) {
   const review =
@@ -168,6 +168,14 @@ export async function reviewToSign(scope: LabQueries, ctx: ActorContext, testId:
   if (!isTicks(review.ticks)) throw new Error(`the Test Review ${reviewId} holds ticks of an unknown shape`);
   const incomplete = checklistRefusal(inForce.items, review.ticks);
   if (incomplete) refuse('checklistIncomplete', incomplete);
+  const { rows } = await sql<{
+    asSaved: boolean;
+  }>`select lims.test_review_as_saved(${ctx.lab.id}, ${reviewId}) as "asSaved"`.execute(scope.company);
+  if (!rows[0]?.asSaved)
+    refuse(
+      'recordChanged',
+      'The Test changed since its Test Review was saved. Tick the checklist again before signing.',
+    );
 }
 
 /** The review checklist routes: staff read every version, QA drafts and approves one, a Reviewer saves a Test Review. */
@@ -325,8 +333,8 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
       const unknown = unknownTick(inForce.items, body.ticks);
       if (unknown) refuse('unknownField', unknown);
       const saved = await scope.write('saveTestReview', 'Reviewer', async (q) => {
-        // The same ticks saved again return the review already saved, so a Reviewed press resent after a refusal or no
-        // answer names the same review and keeps its Commit Key. The Lab's chain, which the insert takes anyway, is
+        // The same ticks saved again return the review already saved, while it holds the content it was saved with, so a
+        // Reviewed press resent after a refusal or no answer names the same review and keeps its Commit Key. The Lab's chain, which the insert takes anyway, is
         // held before the lookup, so two saves pressed at once see each other and save one review.
         await sql`select lims.lock_chains(${actor.lab.id})`.execute(q.company);
         const { id } =
@@ -337,6 +345,7 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
             .where('checklistVersionId', '=', inForce.id)
             .where('savedBy', '=', `person:${actor.person.username}`)
             .where(sql<boolean>`ticks = ${JSON.stringify(body.ticks)}::jsonb`)
+            .where(sql<boolean>`lims.test_review_as_saved(lab_id, id)`)
             .orderBy('savedAt')
             .orderBy('id')
             .executeTakeFirst()) ??

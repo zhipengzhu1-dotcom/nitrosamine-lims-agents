@@ -4493,7 +4493,8 @@ describe('a Signature is written only by the signing function, which refuses eve
     });
 
     covered.add('lims.signature.review_signing');
-    const onlyReviews = 'Reviewed is the Signature Meaning of a Test Review, and a Test Review is signed only Reviewed';
+    const onlyReviews =
+      'Reviewed is the Signature Meaning of a Test Review or a Document version, and a Test Review is signed only Reviewed';
     const reviewCases: { name: string; statements: () => string[]; message: () => Promise<string> | string }[] = [
       {
         name: 'signing Reviewed on the Test itself, not on a Test Review, is refused',
@@ -4556,6 +4557,24 @@ describe('a Signature is written only by the signing function, which refuses eve
         name: 'signing Reviewed on a Test Review that another person saved is refused',
         statements: () => [...holdsQaAndReviewer, ...approve(v1), actingAs('QA'), save(ticksOf(v1)), ...signReview()],
         message: () => 'a Reviewed Signature binds a Test Review the signer saved',
+      },
+      {
+        name: 'signing Reviewed on a Test Review re-versioned by a change to its Test is refused, so its ticks are made again',
+        statements: () => [
+          ...reviewed(),
+          `update lims.customer set name = name || ' (renamed)' where id = '${id.customer}'`,
+          asPerson('Reviewer'),
+          proof(reviewing, 'Reviewed'),
+          sign({
+            reauthentication: reviewing,
+            table: 'test_review',
+            recordId: review,
+            seen: versionOf(review, 2),
+            hash: hashOf(review, 2),
+            meaning: 'Reviewed',
+          }),
+        ],
+        message: () => 'a Test Review is signed Reviewed only as it was saved: the Test changed after it was ticked',
       },
       {
         name: 'a second Approved signing on one Review Checklist version is refused',

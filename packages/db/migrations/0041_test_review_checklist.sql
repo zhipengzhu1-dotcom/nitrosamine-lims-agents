@@ -199,6 +199,17 @@ language sql stable security definer set search_path = lims, pg_temp as $$
    where r.lab_id = p_lab_id and r.id = p_review_id
 $$;
 
+-- True while a Test Review holds the content it was saved with: no change to its Test has re-versioned it, and its
+-- evidence reads as it did. Ticks made before the Test changed are ticked again, so a Reviewed Signature binds only this.
+create function lims.test_review_as_saved(p_lab_id uuid, p_review_id uuid) returns boolean
+language sql stable security definer set search_path = lims, pg_temp as $$
+  select coalesce((select v.version = 1
+                          and v.content_hash = sha256(convert_to(test_review_content(v.lab_id, v.record_id)::text, 'UTF8'))
+                     from record_version v
+                    where v.lab_id = p_lab_id and v.record_table = 'test_review' and v.record_id = p_review_id
+                    order by v.version desc limit 1), false)
+$$;
+
 -- 0040's Record Version rules, with a Test Review and a Review Checklist version among the records versioned.
 alter table lims.record_version
   drop constraint record_version_record_table_check,
@@ -320,7 +331,7 @@ begin
   end if;
   if new.meaning = 'Reviewed' and signed.record_table not in ('test_review', 'document_version')
      or signed.record_table = 'test_review' and new.meaning <> 'Reviewed' then
-    raise exception 'Reviewed is the Signature Meaning of a Test Review, and a Test Review is signed only Reviewed'
+    raise exception 'Reviewed is the Signature Meaning of a Test Review or a Document version, and a Test Review is signed only Reviewed'
       using errcode = 'LA010';
   end if;
   if signed.record_table = 'review_checklist_version' and new.meaning <> 'Approved' then
@@ -343,6 +354,10 @@ begin
     end if;
     if review.saved_by <> (select 'person:' || p.username from person p where p.id = new.person_id) then
       raise exception 'a Reviewed Signature binds a Test Review the signer saved' using errcode = 'LA010';
+    end if;
+    if signed.version <> 1 or not test_review_as_saved(signed.lab_id, signed.record_id) then
+      raise exception 'a Test Review is signed Reviewed only as it was saved: the Test changed after it was ticked'
+        using errcode = 'LA010';
     end if;
   elsif signed.record_table = 'review_checklist_version' then
     select * into chosen from review_checklist_version where id = signed.record_id;
@@ -480,8 +495,9 @@ begin
   return new;
 end $$;
 
--- The evidence sources and version 1 of each Review Checklist are change-control configuration this migration writes,
--- as the picklist reasons are, so the real-data gate does not read them. 0040's list, with the checklist tables.
+-- The evidence sources and the Review Checklist versions are change-control configuration, as the Release Log and the
+-- signature statement are: this migration writes version 1 of each checklist, and QA drafts and signs Approved every
+-- later one, so the real-data gate does not read them. 0040's list, with the checklist tables.
 create or replace function lims.gate_exempt_tables() returns text[]
 language sql immutable as $$
   select array['access_event', 'credential_link', 'deployment', 'evidence_source', 'identity_verification', 'lab',
@@ -493,10 +509,10 @@ $$;
 revoke execute on function lims.stamp_saver(), lims.check_test_review_ticks(), lims.check_item_in_its_draft(),
   lims.review_checklist_content(uuid), lims.review_checklist_content_hash(uuid), lims.review_checklist_in_force(text),
   lims.review_evidence(uuid, uuid, text), lims.test_review_content(uuid, uuid), lims.version_review_checklist(uuid, uuid),
-  lims.check_review_signing() from public;
+  lims.check_review_signing(), lims.test_review_as_saved(uuid, uuid) from public;
 grant execute on function lims.review_checklist_content(uuid), lims.review_checklist_content_hash(uuid),
   lims.review_checklist_in_force(text), lims.review_evidence(uuid, uuid, text), lims.test_review_content(uuid, uuid),
-  lims.version_review_checklist(uuid, uuid) to lims_app;
+  lims.version_review_checklist(uuid, uuid), lims.test_review_as_saved(uuid, uuid) to lims_app;
 grant select on lims.evidence_source to lims_app;
 grant select, insert on lims.review_checklist_version, lims.review_checklist_item, lims.test_review to lims_app;
 
