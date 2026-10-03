@@ -7,7 +7,8 @@ export interface StepFacts {
   actor: PersonId;
   assignee: PersonId | null;
   assigneeTrained: boolean;
-  signers: Partial<Record<Meaning, PersonId>>;
+  /** Everyone who signed each meaning on any Record Version of the Test, and Approved on any of its Critical Data Changes. */
+  signers: Partial<Record<Meaning, readonly PersonId[]>>;
   /** True while a Critical Data Change on the Test's Result is neither approved, rejected nor withdrawn. */
   pendingChange: boolean;
 }
@@ -46,17 +47,21 @@ export const steps = {
     to: 'Reviewed',
     role: 'Reviewer',
     signs: 'Reviewed',
-    guard: (f) => (f.signers.Performed === f.actor ? 'The Analyst who performed the Test cannot review it.' : null),
+    guard: (f) =>
+      f.signers.Performed?.includes(f.actor) ? 'The Analyst who performed the Test cannot review it.' : null,
   },
   release: {
     from: 'Reviewed',
     to: 'Reported',
     role: 'QA',
     signs: 'Released',
-    guard: (f) =>
-      f.signers.Performed === f.actor || f.signers.Reviewed === f.actor
-        ? 'QA cannot release a Test they performed or reviewed.'
-        : null,
+    guard: (f) => {
+      if (f.signers.Performed?.includes(f.actor) || f.signers.Reviewed?.includes(f.actor))
+        return 'QA cannot release a Test they performed or reviewed.';
+      return f.signers.Approved?.includes(f.actor)
+        ? 'QA cannot release a Test after approving a Critical Data Change on it.'
+        : null;
+    },
   },
 } satisfies Record<string, Step>;
 

@@ -16,6 +16,7 @@ const [cora, samir, lena, ana, rui, quinn] = [
   api.person('quinn'),
 ];
 const dana = await api.addPerson('dana.analyst-reviewer', ['Analyst', 'Reviewer'], { trained: true });
+const rhea = await api.addPerson('rhea.reviewer-qa', ['Reviewer', 'QA']);
 const as = {
   cora: await api.login(cora),
   samir: await api.login(samir),
@@ -24,6 +25,7 @@ const as = {
   rui: await api.login(rui),
   quinn: await api.login(quinn),
   dana: await api.login(dana),
+  rhea: await api.login(rhea),
 };
 
 const saved = '0.0300';
@@ -754,5 +756,57 @@ describe('the bench proposes, approves, rejects and withdraws a Critical Data Ch
     refusedOver(await withdraw(as.dana, changeId), 'guard');
     ok(await withdraw(as.ana, changeId));
     refusedOver(await withdraw(as.ana, changeId), 'state');
+  });
+});
+
+/** Takes the review or release step on the Test as `by`, signing the Record Version the page shows now. */
+const signStep = async (client: Client, step: 'review' | 'release', testId: string, by: Account) =>
+  client.call(stepRoute(step), {
+    commitKey: randomUUID(),
+    testId,
+    input: {},
+    signature: await signatureOf(client, testId, by),
+  });
+
+describe('an approval on a Reviewed Test sends it back for review before it is released', () => {
+  it('the Test returns to SubmittedForReview, release waits for a new review, and someone else then releases', async () => {
+    const { testId } = await performedTest();
+    ok(await signStep(as.rui, 'review', testId, rui));
+    ok(await proposeOver(testId));
+    ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    const view = ok(await as.quinn.call(routes.test, { id: testId }));
+    assert.equal(view.test.state, 'SubmittedForReview');
+    assert.ok(
+      view.signatures.filter((s) => s.meaning === 'Reviewed').every((s) => s.unsigned),
+      'the first Reviewed Signature no longer covers the Test',
+    );
+    refusedOver(await signStep(as.quinn, 'release', testId, quinn), 'state');
+    assert.equal(ok(await as.dana.call(routes.test, { id: testId })).next, 'review');
+    ok(await signStep(as.dana, 'review', testId, dana));
+    ok(await signStep(as.quinn, 'release', testId, quinn));
+    assert.equal(ok(await as.quinn.call(routes.test, { id: testId })).test.state, 'Reported');
+  });
+
+  it('neither the Reviewer who approved the change nor one who reviewed an earlier Record Version releases', async () => {
+    const { testId } = await performedTest();
+    ok(await signStep(as.rhea, 'review', testId, rhea));
+    ok(await proposeOver(testId));
+    ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    ok(await signStep(as.dana, 'review', testId, dana));
+    assert.equal(
+      refusedOver(await signStep(as.rhea, 'release', testId, rhea), 'guard'),
+      'QA cannot release a Test they performed or reviewed.',
+    );
+
+    const second = await performedTest();
+    ok(await proposeOver(second.testId));
+    const approval = await approvalOf(as.rhea, second.testId, rhea);
+    ok(await as.rhea.call(changeStepRoute('approveChange'), { testId: second.testId, ...approval }));
+    ok(await signStep(as.rui, 'review', second.testId, rui));
+    assert.equal(
+      refusedOver(await signStep(as.rhea, 'release', second.testId, rhea), 'guard'),
+      'QA cannot release a Test after approving a Critical Data Change on it.',
+    );
+    ok(await signStep(as.quinn, 'release', second.testId, quinn));
   });
 });

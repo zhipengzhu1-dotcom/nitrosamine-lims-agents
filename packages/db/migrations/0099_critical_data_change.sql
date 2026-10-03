@@ -204,7 +204,8 @@ end $$;
 create trigger decide before insert on lims.critical_data_change_decision
   for each row execute function lims.decide_critical_data_change();
 
--- An approval makes the new value current in its own transaction: the Result changes under this stamp and no other.
+-- An approval makes the new value current in its own transaction: the Result changes under this stamp and no other. A
+-- Reviewed Test goes back to SubmittedForReview, because its Reviewed Signature no longer covers the value.
 create function lims.apply_critical_data_change() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -214,6 +215,8 @@ begin
   perform set_this_transaction('lims.critical_data_change', change.id::text);
   update result set value = change.new_value where lab_id = change.lab_id and id = change.result_id;
   perform set_this_transaction('lims.critical_data_change', '');
+  update test set state = 'SubmittedForReview'
+   where lab_id = change.lab_id and id = change.test_id and state = 'Reviewed';
   return null;
 end $$;
 

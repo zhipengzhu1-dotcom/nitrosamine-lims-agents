@@ -41,7 +41,7 @@ const allowed: StepFacts = {
   actor: 'ana',
   assignee: 'ana',
   assigneeTrained: true,
-  signers: { Performed: 'pia', Reviewed: 'rui' },
+  signers: { Performed: ['pia'], Reviewed: ['rui'], Approved: ['rui'] },
   pendingChange: false,
 };
 
@@ -94,20 +94,32 @@ describe("a step whose guard fails is refused with the guard's reason", () => {
     {
       name: 'a review by the Analyst who performed the Test is refused',
       step: 'review',
-      facts: { signers: { Performed: 'ana' } },
+      facts: { signers: { Performed: ['ana'] } },
       refused: 'The Analyst who performed the Test cannot review it.',
     },
     {
       name: 'a release by the Analyst who performed the Test is refused',
       step: 'release',
-      facts: { signers: { Performed: 'ana', Reviewed: 'rui' } },
+      facts: { signers: { Performed: ['ana'], Reviewed: ['rui'] } },
       refused: 'QA cannot release a Test they performed or reviewed.',
     },
     {
       name: 'a release by the Reviewer who reviewed the Test is refused',
       step: 'release',
-      facts: { signers: { Performed: 'pia', Reviewed: 'ana' } },
+      facts: { signers: { Performed: ['pia'], Reviewed: ['ana'] } },
       refused: 'QA cannot release a Test they performed or reviewed.',
+    },
+    {
+      name: 'a release by a Reviewer of an earlier Record Version of the Test is refused',
+      step: 'release',
+      facts: { signers: { Performed: ['pia'], Reviewed: ['ana', 'rui'] } },
+      refused: 'QA cannot release a Test they performed or reviewed.',
+    },
+    {
+      name: 'a release by the Reviewer who approved a Critical Data Change on the Test is refused',
+      step: 'release',
+      facts: { signers: { Performed: ['pia'], Reviewed: ['rui'], Approved: ['ana'] } },
+      refused: 'QA cannot release a Test after approving a Critical Data Change on it.',
     },
   ];
   for (const c of cases)

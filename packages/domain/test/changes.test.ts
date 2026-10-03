@@ -127,7 +127,7 @@ describe('every Test step that signs waits while a Critical Data Change is pendi
     actor: 'qa',
     assignee: 'ana',
     assigneeTrained: true,
-    signers: { Performed: 'ana', Reviewed: 'rui' },
+    signers: { Performed: ['ana'], Reviewed: ['rui'] },
     pendingChange: true,
   };
   const signing: [Parameters<typeof refusal>[0], TestState, Role][] = [

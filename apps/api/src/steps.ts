@@ -98,12 +98,30 @@ export async function factsFor(
   test: FactsTest | null,
   assigneeId?: string,
 ): Promise<StepFacts> {
+  // The Test's own Signatures, and the Approved ones on its Critical Data Changes.
   const signatures = test
     ? await signedVersions(q)
         .select(['signature.meaning', 'signature.personId'])
-        .where('recordVersion.recordId', '=', test.id)
+        .where((eb) =>
+          eb.or([
+            eb.and([eb('recordVersion.recordTable', '=', 'test'), eb('recordVersion.recordId', '=', test.id)]),
+            eb.and([
+              eb('recordVersion.recordTable', '=', 'critical_data_change'),
+              eb(
+                'recordVersion.recordId',
+                'in',
+                q
+                  .from('criticalDataChange')
+                  .select('criticalDataChange.id')
+                  .where('criticalDataChange.testId', '=', test.id),
+              ),
+            ]),
+          ]),
+        )
         .execute()
     : [];
+  const signers: StepFacts['signers'] = {};
+  for (const { meaning, personId } of signatures) signers[meaning] = [...(signers[meaning] ?? []), personId];
   const assignee = assigneeId ?? test?.assigneeId ?? null;
   const trained =
     assignee &&
@@ -124,7 +142,7 @@ export async function factsFor(
     actor: ctx.person.id,
     assignee,
     assigneeTrained: Boolean(trained),
-    signers: Object.fromEntries(signatures.map((s) => [s.meaning, s.personId])),
+    signers,
     pendingChange: Boolean(test && (await pendingChangeOn(q, test.id))),
   };
 }
