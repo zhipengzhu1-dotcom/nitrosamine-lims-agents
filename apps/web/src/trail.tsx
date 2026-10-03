@@ -5,6 +5,8 @@ import {
   type AuditedTable,
   auditedRecords,
   type AuditTrailVerification,
+  type ChainReading,
+  resumedLine,
   isTestState,
   type ShownValue,
   routes,
@@ -137,16 +139,18 @@ function RawDialog({ entry, onClose }: { entry: TrailEntry | null; onClose: () =
   );
 }
 
+const resumedText = (c: ChainReading) => resumedLine(c, time);
+
 function VerifyChain() {
   const inFlight = useRef(false);
   const [busy, setBusy] = useState(false);
   const [answer, setAnswer] = useState<{ found: AuditTrailVerification } | { failed: string } | null>(null);
-  async function verify() {
+  async function verify(route: typeof routes.verifyAuditTrail | typeof routes.recomputeAuditTrail) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
     try {
-      setAnswer({ found: await api(routes.verifyAuditTrail) });
+      setAnswer({ found: await api(route) });
     } catch (error) {
       setAnswer({ failed: failureText(error) });
     } finally {
@@ -156,8 +160,23 @@ function VerifyChain() {
   }
   return (
     <div className="verify">
-      <button type="button" className="btn" onClick={() => void verify()} disabled={busy} aria-busy={busy}>
+      <button
+        type="button"
+        className="btn"
+        onClick={() => void verify(routes.verifyAuditTrail)}
+        disabled={busy}
+        aria-busy={busy}
+      >
         Verify chain
+      </button>
+      <button
+        type="button"
+        className="btn"
+        onClick={() => void verify(routes.recomputeAuditTrail)}
+        disabled={busy}
+        aria-busy={busy}
+      >
+        Recompute every entry
       </button>
       <div className="verdict" aria-live="polite">
         {answer && 'failed' in answer && <p className="note--bad">{answer.failed}</p>}
@@ -167,7 +186,8 @@ function VerifyChain() {
             <ul className="chains">
               {answer.found.chains.map((c) => (
                 <li key={c.chain}>
-                  {chainWords[c.chain]} <Status mark={c.verdict} /> {c.report}
+                  {chainWords[c.chain]} <Status mark={c.verdict} /> {c.report}{' '}
+                  <span className="muted">{resumedText(c)}</span>
                   {c.breaks.length > 0 && (
                     <ul className="breaks">
                       {c.breaks.map((b) => (

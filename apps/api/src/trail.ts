@@ -3,10 +3,11 @@ import {
   type ActorContext,
   actorUsername,
   type AuditedTable,
+  type AuditTrailVerification,
   auditedRecords,
   auditOp,
-  type ChainVerification,
-  chainVerification,
+  type ChainReading,
+  chainReading,
   currentLabel,
   describeTrail,
   imagesOf,
@@ -33,12 +34,20 @@ import {
   type SqlBool,
   sql,
 } from 'kysely';
-import type { FastifyBaseLogger } from 'fastify';
+import type { FastifyBaseLogger, FastifyRequest } from 'fastify';
 import { Value } from 'typebox/value';
 import type { App } from './app.ts';
-import { openChainIncidents } from './incident.ts';
+import { openChainIncidents, openSystemIncident } from './incident.ts';
 import { refuse } from './refuse.ts';
-import { labScope, type Scope } from './scope.ts';
+import {
+  labScope,
+  type RecomputedChain,
+  type Scope,
+  VERIFY_READ_LIMIT_SECONDS,
+  inUtc,
+  type VerifiedChains,
+  type VerifyOptions,
+} from './scope.ts';
 
 function snapshot(row: Json | null): RowSnapshot | null {
   if (row === null) return null;
@@ -51,8 +60,6 @@ function opOf(op: string): TimedEntry['op'] {
   throw new Error(`an Audit Trail entry has the op ${op}`);
 }
 
-const inUtc = (at: RawBuilder<unknown>) =>
-  sql<Instant>`to_char(${at} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 /** `at` on `zone`'s wall clock, ISO 8601 to the microsecond with the zone's offset, rendered by the database so that no host clock formats it; null when `at` may be null. */
 export const onWallClock = <At>(at: RawBuilder<At>, zone: RawBuilder<unknown>) => sql<
   null extends At ? Instant | null : Instant
@@ -217,6 +224,15 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'signature_statement':
     case 'signing_role':
       return true;
+    case 'chain_verification':
+      return Boolean(
+        await scope.company
+          .selectFrom('chainVerification')
+          .select('id')
+          .where('id', '=', id)
+          .where('chain', 'in', [scope.ctx.lab.id, 'company'])
+          .executeTakeFirst(),
+      );
     case 'person':
       return Boolean(await scope.from('membership').select('personId').where('personId', '=', id).executeTakeFirst());
     case 'customer':
@@ -244,7 +260,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
   }
 }
 
-export function trailRoutes(app: App, db: Kysely<DB>): void {
+export function trailRoutes(app: App, db: Kysely<DB>, readLimitSeconds?: number): void {
   app.route({
     ...routes.testTrail,
     handler: async (req) => {
@@ -295,29 +311,75 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
 
   app.route({
     ...routes.verifyAuditTrail,
-    handler: async (req) => {
-      if (!req.actor.roles.includes('QA')) refuse('role', 'Verifying the Audit Trail is a QA action.');
-      const { at, chains } = await labScope(db, req.actor).verifyAuditTrail();
-      return { at, chains: await chainVerifications(db, req.log, req.actor, chains) };
-    },
+    handler: (req) =>
+      verify(db, req, { everyEntry: false, readLimitSeconds: readLimitSeconds ?? VERIFY_READ_LIMIT_SECONDS.routine }),
+  });
+  app.route({
+    ...routes.recomputeAuditTrail,
+    handler: (req) =>
+      verify(db, req, { everyEntry: true, readLimitSeconds: readLimitSeconds ?? VERIFY_READ_LIMIT_SECONDS.everyEntry }),
   });
 }
 
-/** A chain as the database recomputed it, before QA reads it. */
-export type RecomputedChain = Awaited<ReturnType<Scope['verifyAuditTrail']>>['chains'][number];
+async function verify(db: Kysely<DB>, req: FastifyRequest, options: VerifyOptions): Promise<AuditTrailVerification> {
+  if (!req.actor.roles.includes('QA')) refuse('role', 'Verifying the Audit Trail is a QA action.');
+  const scope = labScope(db, req.actor);
+  const { at, chains: recomputed } = await chainsOf(db, req, await scope.verifyAuditTrail(options));
+  const chains = await chainReadings(db, req.log, req.actor, recomputed);
+  const intact = recomputed.filter((c) => c.breaks.length === 0 && c.lastEntry !== '0');
+  if (intact.length > 0)
+    await scope.write('Verify chain', 'QA', (q) =>
+      q.company
+        .insertInto('chainVerification')
+        .values(
+          intact.map((c) => ({
+            chain: c.chainId,
+            through: c.lastEntry,
+            head: Buffer.from(c.head, 'hex'),
+            recomputedFrom: c.recomputedFrom,
+            verifiedBy: req.actor.person.id,
+          })),
+        )
+        .execute(),
+    );
+  return { at, chains };
+}
+
+/**
+ * The recomputed chains, or, once a System Incident under the request's reference records the overrun, the refusal
+ * that names the chain whose recompute did not finish within the read limit, the limit and that incident; the incident
+ * is written on `db`'s own connection, so it lands while the read's transaction is aborted.
+ */
+export async function chainsOf(
+  db: Kysely<DB>,
+  req: FastifyRequest,
+  verified: VerifiedChains,
+): Promise<Extract<VerifiedChains, { chains: RecomputedChain[] }>> {
+  if (!('timedOut' in verified)) return verified;
+  await openSystemIncident(db, req, verified.error);
+  return refuse(
+    'state',
+    `Verifying the ${verified.timedOut === 'lab' ? 'Lab' : 'company'} chain did not finish within ${verified.withinSeconds} seconds, and System Incident ${req.id} records it. Try again when the LIMS is less busy.`,
+  );
+}
 
 /**
  * Reads each recomputed chain as QA sees it; each break opens its System Incident, or answers the one that records it
  * already, so no break is shown without a record.
  */
-export async function chainVerifications(
+export async function chainReadings(
   db: Kysely<DB>,
   log: FastifyBaseLogger,
   requester: ActorContext,
   chains: RecomputedChain[],
-): Promise<ChainVerification[]> {
+): Promise<ChainReading[]> {
   const verified = [];
-  for (const { chain, chainId, lastEntry, breaks } of chains)
-    verified.push(chainVerification(chain, lastEntry, await openChainIncidents(db, log, requester, chainId, breaks)));
+  for (const { chain, chainId, lastEntry, breaks, recomputedFrom, verifiedBefore } of chains)
+    verified.push(
+      chainReading(chain, lastEntry, await openChainIncidents(db, log, requester, chainId, breaks), {
+        recomputedFrom,
+        verifiedBefore,
+      }),
+    );
   return verified;
 }
