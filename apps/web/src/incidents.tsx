@@ -180,7 +180,9 @@ function BreaksVerdict({ data }: { data: Breaks }) {
  * Every break inside a chain verification incident's range as the chain reads now, and whether it recorded them;
  * once they differ, the breaks it stored when it opened, each marked by whether it reads the same now. A changed
  * range names the System Incidents that record it, which a read of QA's may have just opened, so `changed` reloads
- * the list beside the record to hold them.
+ * the list beside the record to hold them. It reloads on every changed range, not only when `opened` names one,
+ * because a read that ran twice (the dev server's StrictMode sends each read twice) shows the second answer, whose
+ * `opened` is empty although the first opened the incident.
  */
 function IncidentBreaks({ reference, changed }: { reference: string; changed: () => Promise<void> }) {
   const { data, error } = useApi(routes.incidentBreaks, { reference });
