@@ -59,6 +59,9 @@ const id = {
   otherLabRoom: randomUUID(),
   workstation: randomUUID(),
   lockedOut: randomUUID(),
+  equipment: randomUUID(),
+  equipmentEvent: randomUUID(),
+  manager: randomUUID(),
 };
 const missing = randomUUID();
 const token = Buffer.alloc(32, 1);
@@ -84,7 +87,7 @@ const fixtureContent = Buffer.from('{"id":"fixture"}');
 /** Signature statement 1's hash, read from the migrated database before the fixtures are written. */
 let statementHash: Buffer = zeros;
 
-type Fixture = [string, Row];
+type Fixture = [Table, Row];
 /** Rows written in one transaction, because a break is recorded only in the transaction that opens its incident, in one statement. */
 const isGroup = (f: Fixture | Fixture[]): f is Fixture[] => Array.isArray(f[0]);
 const fixture: (Fixture | Fixture[])[] = [
@@ -101,6 +104,7 @@ const fixture: (Fixture | Fixture[])[] = [
   ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
   // A second Admin, who created no account and issued no one-time link, so an enrolment grant can come from them.
   ['lims.person', { id: id.secondAdmin, username: 'refusal.second', display_name: 'Second Admin' }],
+  ['lims.person', { id: id.manager, username: 'refusal.manager', display_name: 'Refusal Manager' }],
   [
     'lims.person',
     {
@@ -124,6 +128,7 @@ const fixture: (Fixture | Fixture[])[] = [
   ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.otherLab, person_id: id.secondAdmin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
+  ['lims.membership', { lab_id: id.lab, person_id: id.manager, role: 'LabManager' }],
   [
     'lims.identity_verification',
     {
@@ -337,6 +342,24 @@ const fixture: (Fixture | Fixture[])[] = [
       previous_session_id: id.otherSession,
       roles: '{Analyst}',
     },
+  ],
+  [
+    'lims.equipment',
+    {
+      lab_id: id.lab,
+      id: id.equipment,
+      kind: 'Balance',
+      name: 'BAL-01 (fictional)',
+      manufacturer: 'Refusal Instruments (fictional)',
+      model: 'RX-5',
+      serial: 'SN-0001',
+      room_id: id.room,
+      responsible_person_id: id.person,
+    },
+  ],
+  [
+    'lims.equipment_event',
+    { lab_id: id.lab, id: id.equipmentEvent, equipment_id: id.equipment, kind: 'Suspect', note: 'Drifts (fictional).' },
   ],
 ];
 const labSwitch: Row = {
@@ -574,6 +597,25 @@ const tables = {
     row: { lab_id: id.lab, name: 'Sample Preparation Room (fictional)' },
     notNull: ['lab_id', 'id', 'name'],
   },
+  'lims.equipment': {
+    noun: 'Equipment',
+    row: {
+      lab_id: id.lab,
+      kind: 'Balance',
+      name: 'BAL-02 (fictional)',
+      manufacturer: 'Refusal Instruments (fictional)',
+      model: 'RX-5',
+      serial: 'SN-0002',
+      room_id: id.room,
+      responsible_person_id: id.person,
+    },
+    notNull: ['id', 'kind', 'name', 'manufacturer', 'model', 'serial', 'room_id', 'fitness_status'],
+  },
+  'lims.equipment_event': {
+    noun: 'Equipment Event',
+    row: { lab_id: id.lab, equipment_id: id.equipment, kind: 'Suspect', note: 'Reads 0.3 mg high (fictional).' },
+    notNull: ['id', 'equipment_id', 'kind', 'note'],
+  },
   'lims.workstation': {
     noun: 'Workstation',
     row: { lab_id: id.lab, name: 'RF-BENCH-02', room_id: id.room, browser_policy: 'Managed Chrome' },
@@ -682,6 +724,8 @@ const auditedTables: Table[] = [
   'lims.enrolment_grant',
   'lims.room',
   'lims.workstation',
+  'lims.equipment',
+  'lims.equipment_event',
 ];
 
 const bare = (table: string) => table.slice(table.indexOf('.') + 1);
@@ -731,15 +775,29 @@ const staged = (row: Row) => {
   return Promise.resolve();
 };
 
+/** Refusal Manager, who holds LabManager in the Lab, acting in that role. */
+const asLabManager = `select set_config('lims.actor', 'person:refusal.manager', true), set_config('lims.role', 'LabManager', true)`;
+
+/**
+ * Who a table's triggers demand of a probe row, set after the audit context: the Lab's Lab Manager registers
+ * Equipment, and a member of the Lab's staff (Refusal Person, its Analyst) records an Equipment Event.
+ */
+const actingFor: Partial<Record<Table, string>> = {
+  'lims.equipment': asLabManager,
+  'lims.equipment_event': `select set_config('lims.actor', 'person:refusal.person', true)`,
+};
+
 async function refusalOf(
   statement: string,
   values: unknown[] = [],
   context = true,
   row: Row = {},
+  acting?: string,
 ): Promise<pg.DatabaseError> {
   await client.query('begin');
   try {
     if (context) await client.query(AUDIT_CONTEXT);
+    if (acting) await client.query(acting);
     await staged(row);
     await client.query(statement, values);
   } catch (error) {
@@ -768,7 +826,7 @@ async function refusalWithTriggersOff(statement: string, values: unknown[]): Pro
 
 function refusalOfRow(table: Table, change: Row = {}, context = true) {
   const row = { ...tables[table].row, ...change };
-  return refusalOf(...insert(table, row), context, row);
+  return refusalOf(...insert(table, row), context, row, actingFor[table]);
 }
 
 function assertConstraint(error: pg.DatabaseError, code: string, table: Table, constraint: string): void {
@@ -797,7 +855,8 @@ before(async () => {
     await client.query('begin');
     await client.query(AUDIT_CONTEXT);
     for (const [table, row] of isGroup(group) ? group : [group]) {
-      if (table === 'lims.chain_verification') await client.query(actingAs('QA'));
+      const acting = table === 'lims.chain_verification' ? actingAs('QA') : actingFor[table];
+      if (acting) await client.query(acting);
       await staged(row);
       await client.query(...insert(table, row));
     }
@@ -824,7 +883,8 @@ it('the base row of every table is accepted, so each refusal below comes from th
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      if (table === 'lims.chain_verification') await client.query(actingAs('QA'));
+      const acting = table === 'lims.chain_verification' ? actingAs('QA') : actingFor[table];
+      if (acting) await client.query(acting);
       await staged(tables[table].row);
       await client.query(...insert(table, tables[table].row));
     } finally {
@@ -876,6 +936,8 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.chain_verification': { id: id.chainVerification },
     'lims.room': { id: id.room },
     'lims.workstation': { id: id.workstation },
+    'lims.equipment': { id: id.equipment },
+    'lims.equipment_event': { id: id.equipmentEvent },
     'lims.audit_chain': { chain: 'company' },
     'lims.audit_entry': { seq: 1 },
     'public.schema_migration': { name: '0001_roles.sql' },
@@ -3383,7 +3445,49 @@ describe('a Signature is written only by the signing function, which refuses eve
     );
   });
 
+  it('an Equipment Event this transaction recorded is signed Performed on sight of its Equipment', async () => {
+    const event = randomUUID();
+    // Version 2 is the Equipment as the fixture left it: registered, then a Suspect recorded on it.
+    assert.equal(
+      await attempt(
+        asPerson(),
+        reauthenticate(),
+        `insert into lims.equipment_event (lab_id, id, equipment_id, kind, note)
+         values ('${id.lab}', '${event}', '${id.equipment}', 'Cleaning', 'Wiped the pan (fictional).')`,
+        sign({
+          table: 'equipment_event',
+          recordId: event,
+          seen: versionOf(id.equipment, 2),
+          hash: hashOf(id.equipment, 2),
+        }),
+      ),
+      null,
+    );
+  });
+
+  const probeEvent = randomUUID();
   const cases: { name: string; statements: string[]; message: string | RegExp }[] = [
+    {
+      name: 'the Lab Manager signing a Test Performed is refused; Performed is theirs only on an Equipment Event',
+      statements: [
+        asPerson('LabManager'),
+        `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', 'LabManager')`,
+        reauthenticate(),
+        sign(),
+      ],
+      message: 'the Lab Manager signs Performed only an Equipment Event',
+    },
+    {
+      name: 'signing an Equipment Event on sight of a record that is not its Equipment is refused',
+      statements: [
+        asPerson(),
+        reauthenticate(),
+        `insert into lims.equipment_event (lab_id, id, equipment_id, kind, note)
+         values ('${id.lab}', '${probeEvent}', '${id.equipment}', 'Cleaning', 'Wiped the pan (fictional).')`,
+        sign({ table: 'equipment_event', recordId: probeEvent }),
+      ],
+      message: 'the Equipment Event signed is not recorded on the Equipment shown',
+    },
     {
       name: 'a service identity cannot sign',
       statements: [asService, reauthenticate(), sign()],
@@ -4047,6 +4151,538 @@ describe('a person is inserted without a lockout, so the database stamps every l
   });
 });
 
+describe('Equipment keeps its identity and moves through its Fitness Statuses only as the rules allow', () => {
+  refusesEach('23505', [
+    {
+      name: 'a second piece of Equipment of the same name in one Lab is refused',
+      table: 'lims.equipment',
+      change: { name: 'BAL-01 (fictional)' },
+      constraint: 'equipment_lab_id_name_key',
+    },
+  ]);
+  refusesEach('23503', [
+    {
+      name: 'Equipment in a Room of another Lab is refused',
+      table: 'lims.equipment',
+      change: { room_id: id.otherLabRoom },
+      constraint: 'equipment_lab_id_room_id_fkey',
+    },
+    {
+      name: 'an Equipment Event on Equipment that does not exist is refused',
+      table: 'lims.equipment_event',
+      change: { equipment_id: missing },
+      constraint: 'equipment_event_lab_id_equipment_id_fkey',
+    },
+  ]);
+  refusesEach('23514', [
+    {
+      name: 'Equipment with a blank serial number is refused',
+      table: 'lims.equipment',
+      change: { serial: ' ' },
+      constraint: 'equipment_identity_check',
+    },
+    {
+      name: 'an Equipment Event with a blank note is refused',
+      table: 'lims.equipment_event',
+      change: { note: ' ' },
+      constraint: 'equipment_event_note_check',
+    },
+  ]);
+
+  /** Runs `body` in a transaction that is rolled back, with Refusal Person, the Lab's Analyst, acting unless it says otherwise. */
+  const within = async (body: () => Promise<void>) => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(actingFor['lims.equipment_event'] ?? '');
+      await body();
+    } finally {
+      await client.query('rollback');
+    }
+  };
+  /** Registers Equipment as Refusal Manager, the Lab's Lab Manager, who then acts for the rest of the transaction. */
+  const register = async (name: string) => {
+    await client.query(asLabManager);
+    const row = { ...tables['lims.equipment'].row, name, serial: `SN-${name}` };
+    const { rows } = await client.query<{ id: string }>(
+      `${insert('lims.equipment', row)[0]} returning id`,
+      Object.values(row),
+    );
+    return rows[0]?.id ?? assert.fail('the Equipment is registered');
+  };
+  const statusOf = async (equipmentId: string) =>
+    (await client.query<{ s: string }>('select fitness_status as s from lims.equipment where id = $1', [equipmentId]))
+      .rows[0]?.s;
+  const recordEvent = async (equipmentId: string, kind: string) => {
+    const { rows } = await client.query<{ id: string }>(
+      `insert into lims.equipment_event (lab_id, equipment_id, kind, note) values ($1, $2, $3, 'Fictional note.')
+       returning id`,
+      [id.lab, equipmentId, kind],
+    );
+    return rows[0]?.id ?? assert.fail('the Equipment Event is recorded');
+  };
+
+  /**
+   * A Signature with `meaning` over a new Record Version of the record as it is now, or of `content` when given.
+   * With `past`, it is written past the triggers, as lims.sign would leave it; without, it meets every trigger on
+   * lims.signature.
+   */
+  const signOver = async (
+    table: 'equipment' | 'equipment_event',
+    recordId: string,
+    meaning: string,
+    past: boolean,
+    content?: string,
+  ) => {
+    if (past) await client.query('set local session_replication_role = replica');
+    const reauthentication = randomUUID();
+    await client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', reauthentication]);
+    await client.query(
+      `with version as (
+         insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
+         select $1, $2, $3,
+                coalesce((select max(version) from lims.record_version
+                           where lab_id = $1 and record_table = $2 and record_id = $3), 0) + 1,
+                1,
+                convert_to((case
+                  when $8::text is not null then $8::jsonb
+                  when $2::text = 'equipment' then (select lims.equipment_content(e) from lims.equipment e where e.id = $3)
+                  else (select lims.equipment_event_content(v) from lims.equipment_event v where v.id = $3)
+                end)::text, 'UTF8')
+         returning id, content_hash, canonical_form)
+       insert into lims.signature (lab_id, person_id, printed_name, username, role, meaning, record_version_id,
+                                   content_hash, canonical_form, statement_version, statement_hash, authenticator,
+                                   session_id, app_release, reauthentication_id, signed_time_zone)
+       select $1, $4, 'Refusal Person', 'refusal.person', 'QA', $5, id, content_hash, canonical_form, 1,
+              (select statement_hash from lims.signature_statement where version = 1), 'Password', $6, 'test', $7,
+              (select time_zone from lims.lab where lab_id = $1)
+         from version`,
+      [id.lab, table, recordId, id.person, meaning, id.session, reauthentication, content ?? null],
+    );
+    if (past) await client.query('set local session_replication_role = origin');
+  };
+  const approve = async (equipmentId: string) => {
+    await signOver('equipment', equipmentId, 'Approved', true);
+    await client.query(`update lims.equipment set fitness_status = 'InUse' where id = $1`, [equipmentId]);
+  };
+
+  covered.add('lims.equipment.keep_equipment');
+  covered.add('lims.equipment.equipment_fitness_status_check');
+  covered.add('lims.equipment_event.record_equipment_event');
+  covered.add('lims.equipment_event.require_event_signing');
+  covered.add('lims.signature.equipment_signing');
+
+  it('Equipment registered in any Fitness Status but Quarantined is refused', async () => {
+    const error = await refusalOfRow('lims.equipment', { fitness_status: 'InUse' });
+    assert.deepEqual([error.code, error.message], ['LA014', 'Equipment is registered Quarantined, not InUse']);
+  });
+
+  it('Equipment whose Responsible Person is not on the staff of its Lab is refused', async () => {
+    for (const outsider of [id.admin, id.operator]) {
+      const error = await refusalOfRow('lims.equipment', { responsible_person_id: outsider });
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA014', "the Responsible Person of Equipment is a member of its Lab's staff"],
+      );
+    }
+  });
+
+  it('Equipment registered by anyone but the Lab Manager is refused', async () => {
+    const row = tables['lims.equipment'].row;
+    const error = await refusalOf(...insert('lims.equipment', row), true, row);
+    assert.deepEqual([error.code, error.message], ['LA014', 'Equipment is registered only by the Lab Manager']);
+  });
+
+  it('a person acting as Lab Manager who holds it only in another Lab, or only Analyst in this Lab, is refused registering, moving and retiring Equipment', async () => {
+    const row = { ...tables['lims.equipment'].row, name: 'BAL-12 (fictional)', serial: 'SN-0012' };
+    const attempts: [string, (room: string) => Promise<unknown>][] = [
+      ['registered', () => client.query(...insert('lims.equipment', row))],
+      ['moved', (room) => client.query('update lims.equipment set room_id = $2 where id = $1', [id.equipment, room])],
+      [
+        'Retired',
+        () => client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [id.equipment]),
+      ],
+    ];
+    for (const [who, managerOf] of [
+      ['refusal.other', id.otherLab],
+      ['refusal.person', null],
+    ] as const)
+      for (const [what, attempt] of attempts)
+        await within(async () => {
+          if (managerOf) {
+            await client.query('select lims.lock_chains($1, $2)', [id.lab, managerOf]);
+            await client.query(`insert into lims.membership (lab_id, person_id, role) values ($1, $2, 'LabManager')`, [
+              managerOf,
+              id.otherPerson,
+            ]);
+          }
+          const room = await client.query<{ id: string }>(
+            `insert into lims.room (lab_id, name) values ($1, 'Weighing Room (fictional)') returning id`,
+            [id.lab],
+          );
+          await client.query(`select set_config('lims.actor', $1, true), set_config('lims.role', 'LabManager', true)`, [
+            `person:${who}`,
+          ]);
+          await assert.rejects(attempt(room.rows[0]?.id ?? assert.fail('the Room is added')), {
+            code: 'LA014',
+            message: `Equipment is ${what} only by the Lab Manager of its Lab, not ${who}`,
+          });
+        });
+  });
+
+  it('Equipment moved to another Room by anyone but the Lab Manager is refused', async () => {
+    await within(async () => {
+      const other = await client.query<{ id: string }>(
+        `insert into lims.room (lab_id, name) values ($1, 'Weighing Room (fictional)') returning id`,
+        [id.lab],
+      );
+      await assert.rejects(
+        client.query('update lims.equipment set room_id = $2 where id = $1', [id.equipment, other.rows[0]?.id]),
+        { code: 'LA014', message: 'Equipment is moved only by the Lab Manager' },
+      );
+    });
+  });
+
+  it('Equipment moved to In use with any other change in the same write is refused', async () => {
+    await within(async () => {
+      const balance = await register('BAL-08');
+      await signOver('equipment', balance, 'Approved', true);
+      await assert.rejects(
+        client.query(`update lims.equipment set fitness_status = 'InUse', asset_number = 'A-08' where id = $1`, [
+          balance,
+        ]),
+        { code: 'LA014', message: 'Equipment moves to In use as QA saw it; nothing else changes in that write' },
+      );
+    });
+  });
+
+  it('a software or firmware version change suspends In use Equipment', async () => {
+    await within(async () => {
+      const balance = await register('BAL-09');
+      await approve(balance);
+      await client.query(`update lims.equipment set software_version = '2.0' where id = $1`, [balance]);
+      assert.equal(await statusOf(balance), 'Suspended');
+      await approve(balance);
+      await client.query(`update lims.equipment set firmware_version = 'FW 2' where id = $1`, [balance]);
+      assert.equal(await statusOf(balance), 'Suspended');
+    });
+  });
+
+  it('the app role updates only the columns a step writes: the versions, the Room and the Fitness Status', async () => {
+    const { rows } = await client.query<{ privilege: string }>(
+      `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
+        where grantee = 'lims_app' and table_schema = 'lims' and table_name = 'equipment' and privilege_type = 'UPDATE'
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.privilege),
+      ['UPDATE firmware_version', 'UPDATE fitness_status', 'UPDATE room_id', 'UPDATE software_version'],
+    );
+    const error = await refusalOf(
+      `set local role lims_app; update lims.equipment set name = 'Renamed' where id = '${id.equipment}'`,
+    );
+    assert.equal(error.code, '42501', error.message);
+  });
+
+  it('an Equipment Event recorded by someone who is not on the staff of its Lab is refused', async () => {
+    await within(async () => {
+      await client.query(`select set_config('lims.actor', 'person:refusal.admin', true)`);
+      await assert.rejects(recordEvent(id.equipment, 'Note'), {
+        code: 'LA015',
+        message: "an Equipment Event is recorded by a member of its Lab's staff, not refusal.admin",
+      });
+    });
+  });
+
+  it('changing the serial number of Equipment is refused, even for the superuser', async () => {
+    const error = await refusalOf(`update lims.equipment set serial = 'SN-9999' where id = $1`, [id.equipment]);
+    assert.deepEqual([error.code, error.message], ['LA002', 'the identity of Equipment never changes']);
+  });
+
+  it('Equipment set Expired by hand is refused, because Expired is derived and never stored', async () => {
+    const error = await refusalOf(`update lims.equipment set fitness_status = 'Expired' where id = $1`, [id.equipment]);
+    assert.deepEqual([error.code, error.constraint], ['23514', 'equipment_fitness_status_check']);
+  });
+
+  it('Equipment moved to In use without an Approved Signature in the same transaction is refused', async () => {
+    const error = await refusalOf(`update lims.equipment set fitness_status = 'InUse' where id = $1`, [id.equipment]);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA014', 'Equipment moves to In use only with an Approved Signature over it, given in the same transaction'],
+    );
+  });
+
+  it('Quarantined Equipment marked Suspended is refused', async () => {
+    const error = await refusalOf(`update lims.equipment set fitness_status = 'Suspended' where id = $1`, [
+      id.equipment,
+    ]);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA014', 'Equipment is Suspended only from In use, not Quarantined'],
+    );
+  });
+
+  it('Equipment Approved in the same transaction moves to In use, and a move to another Room suspends it', async () => {
+    await within(async () => {
+      const balance = await register('BAL-03');
+      await approve(balance);
+      assert.equal(await statusOf(balance), 'InUse');
+      const other = await client.query<{ id: string }>(
+        `insert into lims.room (lab_id, name) values ($1, 'Weighing Room (fictional)') returning id`,
+        [id.lab],
+      );
+      await client.query('update lims.equipment set room_id = $2 where id = $1', [balance, other.rows[0]?.id]);
+      assert.equal(await statusOf(balance), 'Suspended');
+    });
+  });
+
+  it('Equipment Retired by anyone but the Lab Manager is refused', async () => {
+    const error = await refusalOf(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [id.equipment]);
+    assert.deepEqual([error.code, error.message], ['LA014', 'Equipment is Retired only by the Lab Manager']);
+  });
+
+  it('Retired Equipment never changes, and no Equipment Event is recorded on it', async () => {
+    await within(async () => {
+      const balance = await register('BAL-04');
+      await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
+      await assert.rejects(client.query(`update lims.equipment set name = 'Renamed' where id = $1`, [balance]), {
+        code: 'LA014',
+        message: 'Retired Equipment never changes',
+      });
+    });
+    await within(async () => {
+      const balance = await register('BAL-05');
+      await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
+      await assert.rejects(recordEvent(balance, 'Note'), {
+        code: 'LA014',
+        message: 'an Equipment Event is never recorded on Retired Equipment',
+      });
+    });
+  });
+
+  it('a Repair recorded on Equipment In use suspends it', async () => {
+    await within(async () => {
+      const balance = await register('BAL-06');
+      await approve(balance);
+      await recordEvent(balance, 'Repair');
+      assert.equal(await statusOf(balance), 'Suspended');
+    });
+  });
+
+  /** Runs `body` in a transaction that commits, with Refusal Person acting, so that another session sees its rows. */
+  const committed = async (body: () => Promise<void>) => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(actingFor['lims.equipment_event'] ?? '');
+      await body();
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    }
+  };
+
+  /**
+   * Runs `first` in a transaction this client holds open, has another session record a Suspect Event on
+   * `equipmentId`, asserts that the Event waits on a lock rather than landing beside the held change, commits `first`,
+   * and answers how the Event ended: committed (null) or refused.
+   */
+  const suspectWhileHeld = async (
+    first: () => Promise<void>,
+    equipmentId: string,
+  ): Promise<pg.DatabaseError | null> => {
+    const other = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    const watcher = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    await other.connect();
+    await watcher.connect();
+    try {
+      await client.query('begin');
+      await client.query(AUDIT_CONTEXT);
+      await first();
+      const { rows } = await other.query<{ pid: number }>('select pg_backend_pid() as pid');
+      await other.query('begin');
+      await other.query(AUDIT_CONTEXT);
+      await other.query(actingFor['lims.equipment_event'] ?? '');
+      const answered = { yet: false };
+      const suspect = other
+        .query(
+          `insert into lims.equipment_event (lab_id, equipment_id, kind, note) values ($1, $2, 'Suspect', 'Drifts (fictional).')`,
+          [id.lab, equipmentId],
+        )
+        .then(
+          () => {
+            answered.yet = true;
+            return null;
+          },
+          (e: unknown) => {
+            answered.yet = true;
+            return e instanceof pg.DatabaseError ? e : assert.fail(String(e));
+          },
+        );
+      const waiting = async () =>
+        (
+          await watcher.query(`select wait_event_type = 'Lock' as waits from pg_stat_activity where pid = $1`, [
+            rows[0]?.pid,
+          ])
+        ).rows[0]?.waits === true;
+      while (!answered.yet && !(await waiting()));
+      assert.equal(answered.yet, false, 'the Suspect Event answered before the held change committed');
+      await client.query('commit');
+      const outcome = await suspect;
+      await other.query(outcome ? 'rollback' : 'commit');
+      return outcome;
+    } finally {
+      await client.query('rollback');
+      await other.end();
+      await watcher.end();
+    }
+  };
+
+  it('a Suspect Event raised while the Lab Manager retires Suspended Equipment waits for the retire and is then refused', async () => {
+    let balance = '';
+    await committed(async () => {
+      balance = await register('BAL-10');
+      await approve(balance);
+      await recordEvent(balance, 'Suspect');
+      assert.equal(await statusOf(balance), 'Suspended');
+    });
+    const refused = await suspectWhileHeld(async () => {
+      await client.query('select lims.lock_chains($1)', [id.lab]);
+      await client.query(asLabManager);
+      await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
+    }, balance);
+    assert.deepEqual(
+      [refused?.code, refused?.message],
+      ['LA014', 'an Equipment Event is never recorded on Retired Equipment'],
+    );
+  });
+
+  it('a Suspect Event raised while QA approves Quarantined Equipment waits for the Approved signing, and the Equipment ends Suspended', async () => {
+    let balance = '';
+    await committed(async () => {
+      balance = await register('BAL-11');
+    });
+    const outcome = await suspectWhileHeld(() => approve(balance), balance);
+    assert.equal(outcome, null, outcome?.message);
+    assert.equal(await statusOf(balance), 'Suspended');
+  });
+
+  it('an Equipment Event recorded by a service identity is refused', async () => {
+    await within(async () => {
+      await client.query(`select set_config('lims.actor', 'svc:test', true)`);
+      await assert.rejects(recordEvent(id.equipment, 'Note'), {
+        code: 'LA015',
+        message: 'an Equipment Event is recorded by a person, not svc:test',
+      });
+    });
+  });
+
+  it('an Equipment Event other than Suspect without the Performed Signature of its recorder is refused at commit', async () => {
+    await within(async () => {
+      await recordEvent(id.equipment, 'Cleaning');
+      await assert.rejects(client.query('set constraints all immediate'), {
+        code: 'LA010',
+        message: 'an Equipment Event is signed Performed by the person who records it',
+      });
+    });
+    await within(async () => {
+      const cleaning = await recordEvent(id.equipment, 'Cleaning');
+      await signOver('equipment_event', cleaning, 'Performed', true);
+      await client.query('set constraints all immediate');
+    });
+  });
+
+  for (const [name, setUp, message] of [
+    [
+      'Equipment signed with any meaning but Approved is refused',
+      async () => signOver('equipment', id.equipment, 'Reviewed', false),
+      'Equipment is signed only Approved',
+    ],
+    [
+      'Equipment signed Approved while In use is refused',
+      async () => {
+        const balance = await register('BAL-07');
+        await approve(balance);
+        await signOver('equipment', balance, 'Approved', false);
+      },
+      'Equipment is signed Approved while Quarantined or Suspended, not InUse',
+    ],
+    [
+      'Equipment signed Approved over content that is not its current content is refused',
+      async () => signOver('equipment', id.equipment, 'Approved', false, '{"id":"stale"}'),
+      'the Approved Signature binds the Equipment as it is now; it must be read again before signing',
+    ],
+    [
+      'Equipment signed Approved over its content before an Event was recorded on it is refused',
+      async () => {
+        const { rows } = await client.query<{ content: string }>(
+          'select lims.equipment_content(e)::text as content from lims.equipment e where id = $1',
+          [id.equipment],
+        );
+        await recordEvent(id.equipment, 'Suspect');
+        await signOver('equipment', id.equipment, 'Approved', false, rows[0]?.content);
+      },
+      'the Approved Signature binds the Equipment as it is now; it must be read again before signing',
+    ],
+    [
+      'an Equipment Event signed with any meaning but Performed is refused',
+      async () => signOver('equipment_event', await recordEvent(id.equipment, 'Note'), 'Approved', false),
+      'an Equipment Event is signed only Performed',
+    ],
+    [
+      'a Suspect Equipment Event signed is refused',
+      async () => signOver('equipment_event', id.equipmentEvent, 'Performed', false),
+      'a Suspect Equipment Event is not signed',
+    ],
+    [
+      'an Equipment Event signed Performed a second time is refused',
+      async () => {
+        const note = await recordEvent(id.equipment, 'Note');
+        await signOver('equipment_event', note, 'Performed', true);
+        await signOver('equipment_event', note, 'Performed', false);
+      },
+      'an Equipment Event is signed Performed once',
+    ],
+  ] as const)
+    it(name, async () => {
+      await within(async () => {
+        await assert.rejects(setUp(), { code: 'LA010', message });
+      });
+    });
+});
+
+describe('Equipment is never removed, and an Equipment Event is never changed or removed, even by the superuser', () => {
+  for (const [name, table, trigger, statement] of [
+    ['deleting Equipment is refused', 'lims.equipment', 'refuse_change', 'delete from lims.equipment'],
+    ['truncating the Equipment is refused', 'lims.equipment', 'refuse_truncate', 'truncate lims.equipment cascade'],
+    [
+      'updating an Equipment Event is refused',
+      'lims.equipment_event',
+      'refuse_change',
+      `update lims.equipment_event set note = 'Changed.'`,
+    ],
+    [
+      'deleting an Equipment Event is refused',
+      'lims.equipment_event',
+      'refuse_change',
+      'delete from lims.equipment_event',
+    ],
+    [
+      'truncating the Equipment Events is refused',
+      'lims.equipment_event',
+      'refuse_truncate',
+      'truncate lims.equipment_event',
+    ],
+  ] as const) {
+    covered.add(`${table}.${trigger}`);
+    it(name, async () => {
+      const error = await refusalOf(statement);
+      assert.deepEqual([error.code, error.message], ['LA002', `${bare(table)} rows are never changed or removed`]);
+    });
+  }
+});
+
 it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
     ['lims.authenticator.authenticator_pkey', 'authenticator.test.ts'],
@@ -4098,6 +4734,38 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
     ['lims.submission.version_record', 'record-version.test.ts'],
     ['lims.method.version_record', 'record-version.test.ts'],
     ['lims.customer.version_record', 'record-version.test.ts'],
+    ['lims.equipment.version_record', 'apps/api/test/equipment.test.ts'],
+    ['lims.equipment_event.version_record', 'apps/api/test/equipment.test.ts'],
+    [
+      'lims.equipment.equipment_lab_id_not_null',
+      'unreachable: keep_equipment refuses a Responsible Person outside the Lab first',
+    ],
+    [
+      'lims.equipment.equipment_responsible_person_id_not_null',
+      'unreachable: keep_equipment refuses a Responsible Person outside the Lab first',
+    ],
+    [
+      'lims.equipment.equipment_lab_id_fkey',
+      'unreachable: keep_equipment refuses a Responsible Person outside the Lab first',
+    ],
+    [
+      'lims.equipment.equipment_responsible_person_id_fkey',
+      'unreachable: keep_equipment refuses a Responsible Person outside the Lab first',
+    ],
+    ['lims.equipment.equipment_registered_at_not_null', 'unreachable: keep_equipment stamps it'],
+    [
+      'lims.equipment_event.equipment_event_lab_id_not_null',
+      'unreachable: record_equipment_event refuses a recorder who is not on the staff of a null Lab first',
+    ],
+    [
+      'lims.equipment_event.equipment_event_recorded_by_not_null',
+      'unreachable: record_equipment_event stamps it or refuses',
+    ],
+    [
+      'lims.equipment_event.equipment_event_recorded_by_fkey',
+      'unreachable: record_equipment_event takes it from lims.person',
+    ],
+    ['lims.equipment_event.equipment_event_recorded_at_not_null', 'unreachable: record_equipment_event stamps it'],
   ]);
   const { rows } = await client.query<{ rule: string }>(
     `select n.nspname || '.' || c.relname || '.' || k.conname as rule

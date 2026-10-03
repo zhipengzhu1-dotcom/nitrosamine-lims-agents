@@ -17,6 +17,10 @@ export type ArrayTypeImpl<T> = T extends ColumnType<infer S, infer I, infer U>
 
 export type AuditExportFormat = "CSV" | "JSON";
 
+export type EquipmentEventKind = "Cleaning" | "FirmwareChange" | "Maintenance" | "Note" | "Repair" | "SoftwareChange" | "Suspect";
+
+export type FitnessStatus = "Expired" | "InUse" | "Quarantined" | "Retired" | "Suspended";
+
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
@@ -147,6 +151,33 @@ export interface EnrolmentGrant {
   personId: string;
   tokenHash: Buffer;
   usedAt: Timestamp | null;
+}
+
+export interface Equipment {
+  assetNumber: string | null;
+  firmwareVersion: string | null;
+  fitnessStatus: Generated<FitnessStatus>;
+  id: Generated<string>;
+  kind: string;
+  labId: string;
+  manufacturer: string;
+  model: string;
+  name: string;
+  registeredAt: Generated<Timestamp>;
+  responsiblePersonId: string;
+  roomId: string;
+  serial: string;
+  softwareVersion: string | null;
+}
+
+export interface EquipmentEvent {
+  equipmentId: string;
+  id: Generated<string>;
+  kind: EquipmentEventKind;
+  labId: string;
+  note: string;
+  recordedAt: Generated<Timestamp>;
+  recordedBy: string;
 }
 
 export interface IdentityVerification {
@@ -376,6 +407,8 @@ export interface DB {
   credentialLink: CredentialLink;
   customer: Customer;
   enrolmentGrant: EnrolmentGrant;
+  equipment: Equipment;
+  equipmentEvent: EquipmentEvent;
   identityVerification: IdentityVerification;
   incidentBreak: IncidentBreak;
   lab: Lab;
