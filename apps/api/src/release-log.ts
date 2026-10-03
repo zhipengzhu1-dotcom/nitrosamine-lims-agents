@@ -54,17 +54,14 @@ const one = async (scope: Scope, id: string) =>
   (await listed(scope).where('id', '=', id).executeTakeFirst()) ??
   refuse('notFound', 'The LIMS has no such Release Log entry.');
 
-/** Refuses an entry that would set the real data class while any gate condition is unmet, naming each one. */
+/** Refuses an entry that would set the real data class while any gate condition is unmet, naming each one. The open demo exceptions and the fictional records are the database's own answers, which its class trigger checks again. */
 async function gateReal(scope: Scope, login: Login, fileVaultPersonalKey: boolean): Promise<void> {
-  const approved = await scope.company
-    .selectFrom('releaseLogEntry')
-    .select(exceptionColumns)
-    .where(sql<boolean>`lims.release_log_entry_approved(id)`)
-    .execute();
-  const lapsed = new Set(approved.flatMap((e) => e.lapsesExceptions));
-  const openExceptions = [...new Set(approved.flatMap((e) => e.recordsExceptions))].filter((x) => !lapsed.has(x));
-  const { fictionalRecords } = await scope.company
-    .selectNoFrom(sql<string[]>`lims.fictional_records()`.as('fictionalRecords'))
+  const { openExceptions, fictionalRecords } = await scope.company
+    .selectNoFrom([
+      // Read as text[], because the driver parses an array of a Postgres enum as one string.
+      sql<DemoException[]>`lims.open_demo_exceptions()::text[]`.as('openExceptions'),
+      sql<string[]>`lims.fictional_records()`.as('fictionalRecords'),
+    ])
     .executeTakeFirstOrThrow();
   const verdict = realDataGate({
     login,
@@ -150,6 +147,20 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
         refuse('guard', 'An entry setting the data class records whether the host holds a personal FileVault key.');
       if ((declared.statementVersion === undefined) !== (statement === undefined))
         refuse('guard', 'A new signature statement comes with its version, and a version with its statement.');
+      if (
+        declared.statementVersion !== undefined &&
+        (declared.setsDataClass !== undefined ||
+          declared.fileVaultPersonalKey !== undefined ||
+          (declared.recordsExceptions ?? []).length > 0 ||
+          (declared.lapsesExceptions ?? []).length > 0 ||
+          identities.length > 0)
+      )
+        refuse(
+          'guard',
+          'An entry bringing a signature statement into force carries no other change, because QA approves it alone.',
+        );
+      if (declared.recordsExceptions?.some((x) => declared.lapsesExceptions?.includes(x)))
+        refuse('guard', 'An entry records a demo exception or lapses it, not both.');
       if (declared.statementVersion !== undefined && declared.statementVersion !== (await nextStatementVersion(scope)))
         refuse('guard', 'A new signature statement takes the version after the one in force.');
       if (declared.setsDataClass === 'real') await gateReal(scope, login, declared.fileVaultPersonalKey ?? false);

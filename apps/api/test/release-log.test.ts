@@ -172,6 +172,47 @@ describe('recording a Release Log entry', () => {
     );
   });
 
+  it('refuses an entry bringing a signature statement into force that carries any other change, since QA approves it alone', async () => {
+    const statementVersion = (await statementInForce()) + 1;
+    for (const other of [
+      { recordsExceptions: ['TwoRole'] },
+      { lapsesExceptions: ['TwoRole'] },
+      { setsDataClass: 'fictional', fileVaultPersonalKey: true },
+      { identities: [{ name: 'svc:smuggled', scope: ['customer:INSERT'] }] },
+    ] satisfies Partial<ReleaseLogEntryDraft>[])
+      assert.equal(
+        refusedWith(
+          await qa.call(
+            routes.recordReleaseLogEntry,
+            draft({ statementVersion, statement: 'A new statement.', ...other }),
+          ),
+          'guard',
+        ),
+        'An entry bringing a signature statement into force carries no other change, because QA approves it alone.',
+      );
+  });
+
+  it('refuses an entry that records and lapses the same demo exception', async () => {
+    assert.equal(
+      refusedWith(
+        await operator.call(
+          routes.recordReleaseLogEntry,
+          draft({ recordsExceptions: ['TwoRole', 'Anchoring'], lapsesExceptions: ['Anchoring'] }),
+        ),
+        'guard',
+      ),
+      'An entry records a demo exception or lapses it, not both.',
+    );
+  });
+
+  it('refuses a service identity whose scope does not name a table and INSERT, UPDATE or DELETE', async () => {
+    const answer = await operator.call(
+      routes.recordReleaseLogEntry,
+      draft({ identities: [{ name: 'svc:loose', scope: ['customer:insert'] }] }),
+    );
+    assert.match(refusedWith(answer, 'malformed'), /scope/);
+  });
+
   it('refuses an entry setting real while the gate refuses, naming each unmet condition', async () => {
     const answer = await operator.call(
       routes.recordReleaseLogEntry,
@@ -268,6 +309,19 @@ describe('approving a Release Log entry', () => {
       .where('recordVersion.recordId', '=', entry.id)
       .executeTakeFirstOrThrow();
     assert.equal(count, 0);
+  });
+
+  it('a demo exception recorded again after it lapsed stands again, and the gate names it', async () => {
+    for (const change of [
+      { lapsesExceptions: ['TwoRole'] },
+      { recordsExceptions: ['TwoRole'] },
+    ] satisfies Partial<ReleaseLogEntryDraft>[])
+      ok(await approve(operator, await record(operator, change), ada));
+    const message = refusedWith(
+      await operator.call(routes.recordReleaseLogEntry, draft({ setsDataClass: 'real', fileVaultPersonalKey: true })),
+      'realDataRefused',
+    );
+    assert.match(message, /Every demo exception is recorded as lapsed; .*TwoRole/);
   });
 
   it('an unknown entry is not found', async () => {

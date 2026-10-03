@@ -535,7 +535,10 @@ const releaseLogEntry = Type.Object({
 export type ReleaseLogEntry = Static<typeof releaseLogEntry>;
 const releaseLog = Type.Object({ entries: Type.Array(releaseLogEntry), statement: signatureStatement });
 const serviceIdentityDeclaration = Type.Object(
-  { name: Type.String({ pattern: '^svc:.+$', maxLength: 200 }), scope: Type.Array(text, { minItems: 1 }) },
+  {
+    name: Type.String({ pattern: '^svc:.+$', maxLength: 200 }),
+    scope: Type.Array(Type.String({ pattern: '^[a-z_]+:(INSERT|UPDATE|DELETE)$', maxLength: 200 }), { minItems: 1 }),
+  },
   closed,
 );
 /** What an operator or QA records: the entry's declarations, its Service Identities and the reason. The database binds the pairs (a Release needs its release, a data class its FileVault fact, a statement its version). */
