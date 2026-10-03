@@ -153,6 +153,8 @@ export const auditedTable = Type.Enum({
   test: 'test',
   result: 'result',
   test_report: 'test_report',
+  document: 'document',
+  document_version: 'document_version',
   record_version: 'record_version',
   signature: 'signature',
   audit_export: 'audit_export',
@@ -556,7 +558,7 @@ const documentView = Type.Object({
   recordVersion: nullable(recordVersionRef),
   statement: signatureStatement,
   /** The steps the person asking may take on the newest version now, from the step registry. */
-  steps: Type.Array(Type.Union(documentStepNames.map((name) => Type.Literal(name)))),
+  steps: Type.Array(Type.Enum(documentStepNames)),
 });
 export type DocumentView = Static<typeof documentView>;
 /** One line of the vault: a Document's number and its newest version. */

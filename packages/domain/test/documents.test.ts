@@ -29,7 +29,13 @@ describe('the Document step registry', () => {
       ana,
       'A Document version is signed Authored by its author.',
     ],
-    ['Admin may not sign Authored', 'signAuthored', draft, ada, 'The signAuthored step is taken by the LabManager, Analyst, Reviewer, QA role.'],
+    [
+      'Admin may not sign Authored',
+      'signAuthored',
+      draft,
+      ada,
+      'The signAuthored step is taken by the LabManager, Analyst, Reviewer, QA role.',
+    ],
     [
       'Authored is signed on a Draft only',
       'signAuthored',
@@ -70,7 +76,13 @@ describe('the Document step registry', () => {
     ],
     ['the author abandons a Draft', 'abandon', draft, lena, null],
     ['QA abandons a version in review', 'abandon', inReview, quinn, null],
-    ['an Analyst who did not author it may not abandon', 'abandon', draft, ana, 'A Document version is Abandoned by its author or QA.'],
+    [
+      'an Analyst who did not author it may not abandon',
+      'abandon',
+      draft,
+      ana,
+      'A Document version is Abandoned by its author or QA.',
+    ],
     [
       'an Effective version is not abandoned',
       'abandon',

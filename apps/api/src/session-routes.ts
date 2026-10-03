@@ -2,6 +2,7 @@ import type { DB } from '@lims/db';
 import type { Kysely } from 'kysely';
 import type { App } from './app.ts';
 import { actorFor, labSwitchRoute, lockScreenRoutes, SESSION_COOKIE, type Credentials } from './auth.ts';
+import { documentRoutes } from './documents.ts';
 import { passwordChangeRoute } from './password-change.ts';
 import { preferenceRoutes } from './preferences.ts';
 import { readRoutes } from './reads.ts';
@@ -41,6 +42,7 @@ export function sessionRoutes(
     readRoutes(signedIn, db, verifyReadLimitSeconds);
     staffRoutes(signedIn, db, limits);
     stepRoutes(signedIn, db, credentials, release);
+    documentRoutes(signedIn, db, credentials, release);
     workstationRoutes(signedIn, db);
   });
 }

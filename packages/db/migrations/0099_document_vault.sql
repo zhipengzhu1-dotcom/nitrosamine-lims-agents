@@ -76,8 +76,8 @@ create unique index document_version_one_effective on lims.document_version (doc
 create unique index document_version_one_open on lims.document_version (document_id)
   where status in ('Draft', 'InReview', 'Approved');
 
--- Canonical form 1 of a Document version: what its Signatures cover. Status is left out, so a move between states
--- leaves the Signatures standing; the Effective Date is in, so the Approved Signature binds the date it set.
+-- Canonical form 1 of a Document version: what its Signatures cover. Its status, Effective Date and abandon reason are
+-- left out, so that approval leaves the Authored and Reviewed Signatures standing; the Audit Trail records each.
 create function lims.document_version_content(p_id uuid) returns jsonb
 language sql stable as $$
   select jsonb_build_object(
@@ -87,8 +87,7 @@ language sql stable as $$
     'version', v.version,
     'title', v.title,
     'body', v.body,
-    'author', p.username,
-    'effectiveDate', to_char(v.effective_date, 'YYYY-MM-DD'))
+    'author', p.username)
   from lims.document_version v
   join lims.document d on d.id = v.document_id
   join lims.person p on p.id = v.author_id
@@ -158,11 +157,10 @@ begin
   if new.status = 'InReview' and cardinality(document_signers(new.id, 'Authored')) = 0 then
     raise exception 'a Document version goes In Review only on its Authored Signature' using errcode = 'LA014';
   end if;
-  -- The content read here is the stored row's, so the Effective Date the signing bound is set by an earlier write.
-  if new.status = 'Approved' and (new.effective_date is distinct from old.effective_date or not exists (
+  if new.status = 'Approved' and not exists (
        select from signature s join record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
         where v.record_table = 'document_version' and v.record_id = new.id and s.meaning = 'Approved'
-          and v.content_hash = sha256(convert_to(document_version_content(new.id)::text, 'UTF8')))) then
+          and v.content_hash = sha256(convert_to(document_version_content(new.id)::text, 'UTF8'))) then
     raise exception 'a Document version is Approved only by an Approved Signature over its content as it is now'
       using errcode = 'LA014';
   end if;

@@ -1118,7 +1118,9 @@ describe('a Document version is one open and one Effective version of its Docume
     },
   ];
   for (const c of pastTriggers) {
-    covered.add(`lims.${c.constraint.startsWith('document_version') ? 'document_version' : 'document'}.${c.constraint}`);
+    covered.add(
+      `lims.${c.constraint.startsWith('document_version') ? 'document_version' : 'document'}.${c.constraint}`,
+    );
     it(c.name, async () => {
       const error = await refusalWithTriggersOff(c.statement, []);
       const constraint = error.constraint ?? `${error.table}_${error.column}_not_null`;
@@ -3941,6 +3943,7 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
+      await client.query('select lims.lock_chains($1::text, $2::text)', [id.lab, id.otherLab]);
       const { rows } = await client.query<{ number: string }>(
         `insert into lims.document (lab_id, document_type) values ($1, 'SOP'), ($1, 'Policy'), ($2, 'SOP') returning number`,
         [id.lab, id.otherLab],
@@ -3973,20 +3976,23 @@ describe('a Document keeps its number, and its versions reach Effective only thr
   });
 
   covered.add('lims.document_version.version_record');
-  it('a Document version is versioned when written, and again when its Effective Date is set', async () => {
+  it('a Document version is versioned when written and when its Draft changes, and not when it moves on', async () => {
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      await client.query(versionIn('InReview'));
+      await client.query(versionIn('Draft'));
+      await client.query(`update lims.document_version set title = 'Probe again' where id = $1`, [version]);
+      await client.query(signed('Authored', id.admin));
+      await client.query(`update lims.document_version set status = 'InReview' where id = $1`, [version]);
       await client.query(`update lims.document_version set effective_date = '2099-01-01' where id = $1`, [version]);
-      const { rows } = await client.query<{ version: number; date: string | null }>(
-        `select version, convert_from(content, 'UTF8')::jsonb ->> 'effectiveDate' as date from lims.record_version
+      const { rows } = await client.query<{ version: number; title: string }>(
+        `select version, convert_from(content, 'UTF8')::jsonb ->> 'title' as title from lims.record_version
           where record_table = 'document_version' and record_id = $1 order by version`,
         [version],
       );
       assert.deepEqual(rows, [
-        { version: 1, date: null },
-        { version: 2, date: '2099-01-01' },
+        { version: 1, title: 'Probe' },
+        { version: 2, title: 'Probe again' },
       ]);
     } finally {
       await client.query('rollback');
@@ -4042,15 +4048,6 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       name: 'a Document version Approved with no Approved Signature is refused',
       statements: [
         versionIn('InReview'),
-        `update lims.document_version set status = 'Approved', effective_date = '2099-01-01' where id = '${version}'`,
-      ],
-      message: 'a Document version is Approved only by an Approved Signature over its content as it is now',
-    },
-    {
-      name: 'a Document version Approved over content that changed after the Approved Signature is refused',
-      statements: [
-        versionIn('InReview'),
-        signed('Approved', id.otherPerson),
         `update lims.document_version set status = 'Approved', effective_date = '2099-01-01' where id = '${version}'`,
       ],
       message: 'a Document version is Approved only by an Approved Signature over its content as it is now',

@@ -7,6 +7,10 @@ export const documentAuthors: readonly Role[] = ['LabManager', 'Analyst', 'Revie
 export const mayAuthorDocuments = (roles: readonly Role[]): boolean =>
   roles.some((role) => documentAuthors.includes(role));
 
+/** Every person of the Lab's staff reads the vault: everyone but a Customer and the Platform Operator. */
+export const mayReadDocuments = (roles: readonly Role[]): boolean =>
+  roles.some((role) => role !== 'Customer' && role !== 'PlatformOperator');
+
 /** What a Document version holds that decides which step may be taken on it: its status, its author, and who signed what. */
 export interface DocumentFacts {
   status: DocumentStatus;
