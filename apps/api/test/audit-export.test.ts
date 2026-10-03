@@ -15,7 +15,7 @@ import {
 } from '@lims/domain';
 import { sql } from 'kysely';
 import { Value } from 'typebox/value';
-import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
+import { type Account, type Client, labZoneMoveReason, ok, refusedWith, signatureOf, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_audit_export_test');
 const write = <T>(reason: string, fn: Parameters<typeof audited<T>>[2]) =>
@@ -447,6 +447,56 @@ it('a CSV cell a spreadsheet would run as a formula starts with an apostrophe', 
   const csv = fileText((await generate(northwindId, 'CSV')).files[0]);
   assert.ok(csv.includes(`"'=HYPERLINK(""https://example.invalid"",""open"")"`), 'the formula is quoted and inert');
   assert.ok(!/(^|,)"?=HYPERLINK/m.test(csv), 'no cell starts with the formula');
+});
+
+it("each change to the Lab's time zone is in the export with its actor, reason and time, and both chains still verify intact", async () => {
+  await submitted(as.cora);
+  const { timeZone: before } = await api.db
+    .selectFrom('lab')
+    .select('timeZone')
+    .where('labId', '=', api.labId)
+    .executeTakeFirstOrThrow();
+  await api.moveLabZone('Asia/Tokyo');
+  await api.moveLabZone(before);
+  const answer = await generate(northwindId);
+  const data = dataOf(answer);
+  const labEntries = data.entries.filter((e) => e.record.table === 'lab');
+  assert.ok(
+    labEntries.every((e) => e.chain === 'lab' && e.record.id === api.labId),
+    "only this Lab's own record, never the Tokyo Lab's",
+  );
+  const zoneChanges = labEntries.flatMap((e) =>
+    e.changes
+      .filter((c) => c.field === 'time_zone')
+      .map((c) => ({
+        old: c.old?.text ?? null,
+        new: c.new?.text ?? null,
+        actor: e.actor.label,
+        role: e.actor.role,
+        reason: e.reason,
+      })),
+  );
+  const moved = { actor: 'svc:migrate', role: 'system', reason: labZoneMoveReason };
+  assert.deepEqual(zoneChanges.slice(-2), [
+    { old: before, new: 'Asia/Tokyo', ...moved },
+    { old: 'Asia/Tokyo', new: before, ...moved },
+  ]);
+  assert.equal(zoneChanges[0]?.old, null, "the Lab's insert sets its first zone");
+  for (const e of labEntries.slice(-2)) {
+    assert.match(e.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, 'the change in UTC to the microsecond');
+    assert.match(e.atLab ?? '', /[+-]\d{2}:\d{2}$/, "the change on the Lab's clock");
+  }
+  assert.deepEqual(
+    data.chains.map((c) => [c.chain, c.verdict]),
+    [
+      ['lab', 'Intact'],
+      ['company', 'Intact'],
+    ],
+  );
+  const pdf = fileText(answer.files[1]);
+  assert.ok(pdf.includes(`Time zone: ${before} -> Asia/Tokyo`), 'the PDF shows the move');
+  assert.ok(pdf.includes(`Reason: ${labZoneMoveReason}`), 'the PDF shows its reason');
+  assert.ok(pdf.includes('the Lab entries show each change of zone'), 'the PDF header points to them');
 });
 
 it('an export that finds a chain break names, in its data file and its PDF, the one System Incident that Verify chain and a second export name, requested by the exporting QA', async () => {
