@@ -553,7 +553,7 @@ A non-person actor the LIMS writes as, named `svc:` and a name, such as `svc:sig
 _Avoid_: Service account, system user, bot
 
 **Data Class**:
-Whether the deployment holds `fictional` or `real` records. Every record is stamped with the class it was created under and keeps it. The class starts fictional and changes only when a Release Log entry setting it is signed Approved, and never to real while the real-data gate names an unmet condition or any record created under fictional remains.
+Whether the deployment holds `fictional` or `real` records. Every record is stamped with the class it was created under and keeps it. The class starts fictional and changes only when a Release Log entry setting it is signed Approved, and never to real while the real-data gate names an unmet condition, any record created under fictional remains other than the Lab and the approver's own account and Memberships, or anyone holds Admin together with another role.
 _Avoid_: Environment, mode, demo flag
 
 **Signature Statement**:

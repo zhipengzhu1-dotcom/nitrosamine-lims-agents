@@ -54,22 +54,18 @@ const one = async (scope: Scope, id: string) =>
   (await listed(scope).where('id', '=', id).executeTakeFirst()) ??
   refuse('notFound', 'The LIMS has no such Release Log entry.');
 
-/** Refuses an entry that would set the real data class while any gate condition is unmet, naming each one. The open demo exceptions and the fictional records are the database's own answers, which its class trigger checks again. */
-async function gateReal(scope: Scope, login: Login, fileVaultPersonalKey: boolean): Promise<void> {
-  const { openExceptions, fictionalRecords } = await scope.company
+/** Refuses an entry that would set the real data class while any gate condition is unmet, naming each one. The open demo exceptions, the fictional records and accounts and the people holding Admin with another role are the database's own answers, which its class trigger checks again against the signer; here the acting person stands in for the approver. */
+async function gateReal(scope: Scope, login: Login, fileVaultPersonalKey: boolean, approver: string): Promise<void> {
+  const facts = await scope.company
     .selectNoFrom([
       // Read as text[], because the driver parses an array of a Postgres enum as one string.
       sql<DemoException[]>`lims.open_demo_exceptions()::text[]`.as('openExceptions'),
       sql<string[]>`lims.fictional_records()`.as('fictionalRecords'),
+      sql<string[]>`lims.fictional_accounts(${approver})`.as('fictionalAccounts'),
+      sql<string[]>`lims.admins_with_another_role()`.as('adminsWithAnotherRole'),
     ])
     .executeTakeFirstOrThrow();
-  const verdict = realDataGate({
-    login,
-    anchoringLive: ANCHORING_LIVE,
-    fileVaultPersonalKey,
-    openExceptions,
-    fictionalRecords,
-  });
+  const verdict = realDataGate({ login, anchoringLive: ANCHORING_LIVE, fileVaultPersonalKey, ...facts });
   if (!verdict.allowed)
     refuse(
       'realDataRefused',
@@ -163,7 +159,8 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
         refuse('guard', 'An entry records a demo exception or lapses it, not both.');
       if (declared.statementVersion !== undefined && declared.statementVersion !== (await nextStatementVersion(scope)))
         refuse('guard', 'A new signature statement takes the version after the one in force.');
-      if (declared.setsDataClass === 'real') await gateReal(scope, login, declared.fileVaultPersonalKey ?? false);
+      if (declared.setsDataClass === 'real')
+        await gateReal(scope, login, declared.fileVaultPersonalKey ?? false, req.actor.person.id);
       if (
         declared.setsDataClass === 'fictional' &&
         (await scope.company.selectFrom('deployment').select('dataClass').executeTakeFirstOrThrow()).dataClass ===
@@ -203,7 +200,8 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
       if (entry.statementVersion !== null && entry.statementVersion !== (await nextStatementVersion(scope)))
         refuse('state', 'Another signature statement came into force since this entry was recorded. Record it again.');
       const seen = await seenEntryVersion(scope, entry.id, signing);
-      if (entry.setsDataClass === 'real') await gateReal(scope, login, entry.fileVaultPersonalKey ?? false);
+      if (entry.setsDataClass === 'real')
+        await gateReal(scope, login, entry.fileVaultPersonalKey ?? false, req.actor.person.id);
       const reauthenticated = await reauthenticate(
         db,
         { actor: req.actor, session: req.sessionKey },

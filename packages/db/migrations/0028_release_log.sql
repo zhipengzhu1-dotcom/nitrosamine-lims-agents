@@ -131,15 +131,42 @@ begin
   end loop;
 end $$;
 
--- The tables the gate does not read for a fictional record, among those that carry the class: the deployment's own
--- structure and accounts (a real deployment creates its Lab and owner before its class can change), sign-in and
--- signing infrastructure (whose rows hang off a record the gate finds) and change control itself. Every other table
--- that carries the class is read, so a captured table added later is read unless it is named here.
+-- The tables the gate does not read for any fictional record, among those that carry the class: the Lab (a real
+-- deployment creates its Lab before its class can change), the accounts, which lims.fictional_accounts reads by person
+-- instead, sign-in and signing infrastructure (whose rows hang off a record the gate finds) and change control itself.
+-- Every other table that carries the class is read, so a captured table added later is read unless it is named here.
 create function lims.gate_exempt_tables() returns text[]
 language sql immutable as $$
   select array['access_event', 'credential_link', 'deployment', 'identity_verification', 'lab', 'membership', 'person',
-               'reauthentication', 'record_version', 'release_log_entry', 'room', 'service_identity', 'signature',
-               'signature_statement', 'signing_role', 'workstation']
+               'reauthentication', 'record_version', 'release_log_entry', 'service_identity', 'signature',
+               'signature_statement', 'signing_role']
+$$;
+
+-- The account tables holding a row created under fictional for anyone but p_person: an account, a Membership, an
+-- Identity Verification or a one-time link. The person approving the entry that sets real is the one account the
+-- deployment needed before its class could change; every other was granted, checked or issued under fictional, with
+-- nothing signed for it.
+create function lims.fictional_accounts(p_person uuid) returns text[]
+language sql volatile security definer set search_path = lims, pg_temp as $$
+  select array_remove(array[
+    case when exists (select from credential_link where data_class = 'fictional' and person_id is distinct from p_person)
+         then 'credential_link' end,
+    case when exists (select from identity_verification v
+                       where v.data_class = 'fictional'
+                         and not exists (select from person p where p.identity_verification_id = v.id and p.id = p_person))
+         then 'identity_verification' end,
+    case when exists (select from membership where data_class = 'fictional' and person_id is distinct from p_person)
+         then 'membership' end,
+    case when exists (select from person where data_class = 'fictional' and id is distinct from p_person)
+         then 'person' end], null)
+$$;
+
+-- The usernames of the people holding Admin together with another role in any Lab: the TwoRole demo exception in fact.
+create function lims.admins_with_another_role() returns text[]
+language sql volatile security definer set search_path = lims, pg_temp as $$
+  select coalesce(array_agg(p.username order by p.username), '{}') from person p
+   where exists (select from membership m where m.person_id = p.id and m.role = 'Admin')
+     and exists (select from membership m where m.person_id = p.id and m.role <> 'Admin')
 $$;
 
 create function lims.fictional_records() returns text[]
@@ -198,6 +225,7 @@ language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
   held text[];
   standing demo_exception[];
+  signer uuid;
 begin
   if new.set_by_entry_id is null or this_transaction('lims.release_log') is distinct from new.set_by_entry_id::text then
     raise exception 'the data class changes only when a Release Log entry setting it is signed Approved' using errcode = 'LA011';
@@ -220,6 +248,18 @@ begin
     held := fictional_records();
     if held <> '{}' then
       raise exception 'the database holds records created under fictional: %', array_to_string(held, ', ') using errcode = 'LA011';
+    end if;
+    -- The signer of the Approved Signature this transaction is inserting, whose own account carries into real.
+    select g.person_id into signer from signature g join record_version v on v.id = g.record_version_id
+     where v.record_table = 'release_log_entry' and v.record_id = new.set_by_entry_id and g.meaning = 'Approved';
+    held := fictional_accounts(signer);
+    if held <> '{}' then
+      raise exception 'the database holds accounts created under fictional for someone other than the signer: %',
+        array_to_string(held, ', ') using errcode = 'LA011';
+    end if;
+    held := admins_with_another_role();
+    if held <> '{}' then
+      raise exception 'a person holds Admin together with another role: %', array_to_string(held, ', ') using errcode = 'LA011';
     end if;
   end if;
   return new;
@@ -468,7 +508,8 @@ grant insert (kind, title, summary, release, sets_data_class, file_vault_persona
               lapses_exceptions, statement_version, statement) on lims.release_log_entry to lims_app;
 grant insert (name, scope, created_by_entry_id) on lims.service_identity to lims_app;
 grant update (retired_by_entry_id) on lims.service_identity to lims_app;
-grant execute on function lims.current_data_class(), lims.fictional_records(), lims.release_log_entry_approved(uuid),
+grant execute on function lims.current_data_class(), lims.fictional_records(), lims.fictional_accounts(uuid),
+  lims.admins_with_another_role(), lims.release_log_entry_approved(uuid),
   lims.open_demo_exceptions(), lims.declare_data_class_change(), lims.scope_pairs(text[]) to lims_app;
 
 -- lims.sign, with a company record's Record Version (no Lab) signable from any Lab the signer acts in.

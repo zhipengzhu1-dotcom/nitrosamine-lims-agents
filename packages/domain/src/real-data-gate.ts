@@ -142,7 +142,19 @@ export interface DeploymentFacts {
   openExceptions: DemoException[];
   /** The tables holding a record created under the fictional data class, from `lims.fictional_records()`. */
   fictionalRecords: string[];
+  /** The account tables holding a row created under fictional for anyone but the approver, from `lims.fictional_accounts()`. */
+  fictionalAccounts: string[];
+  /** The usernames of the people holding Admin together with another role, from `lims.admins_with_another_role()`. */
+  adminsWithAnotherRole: string[];
 }
+
+/** The glossary words for the account tables `lims.fictional_accounts()` names, in the order the gate lists them. */
+const ACCOUNT_WORDS: [table: string, words: string][] = [
+  ['person', 'accounts'],
+  ['membership', 'Memberships'],
+  ['identity_verification', 'Identity Verifications'],
+  ['credential_link', 'one-time links'],
+];
 
 export type GateVerdict = { allowed: true } | { allowed: false; conditions: Sentence[] };
 
@@ -164,5 +176,17 @@ export function realDataGate(facts: DeploymentFacts, list: Control[] = controls)
   if (!facts.fileVaultPersonalKey) conditions.push('The host holds a personal FileVault key.');
   if (facts.fictionalRecords.length > 0)
     conditions.push(`No record was created under fictional; ${facts.fictionalRecords.join(', ')} hold one.`);
+  if (facts.fictionalAccounts.length > 0) {
+    const held = ACCOUNT_WORDS.filter(([table]) => facts.fictionalAccounts.includes(table)).map(([, words]) => words);
+    conditions.push(
+      `No account, Membership, Identity Verification or one-time link created under fictional is held for anyone but the approver; ${held.join(', ')} remain.`,
+    );
+  }
+  if (facts.adminsWithAnotherRole.length > 0) {
+    const holders = facts.adminsWithAnotherRole;
+    conditions.push(
+      `No one holds Admin together with another role; ${holders.join(', ')} ${holders.length === 1 ? 'does' : 'do'}.`,
+    );
+  }
   return conditions.length === 0 ? { allowed: true } : { allowed: false, conditions };
 }

@@ -9,6 +9,8 @@ const met: DeploymentFacts = {
   fileVaultPersonalKey: true,
   openExceptions: [],
   fictionalRecords: [],
+  fictionalAccounts: [],
+  adminsWithAnotherRole: [],
 };
 
 it('the control registry is the table in docs/real-data-gate.md, row for row', async () => {
@@ -49,6 +51,18 @@ describe('the real-data gate names each unmet condition and allows real data onl
       name: 'the tables holding a record created under fictional are named',
       facts: { ...met, fictionalRecords: ['customer', 'test'] },
       conditions: ['No record was created under fictional; customer, test hold one.'],
+    },
+    {
+      name: 'the account records created under fictional for someone other than the approver are named in glossary words',
+      facts: { ...met, fictionalAccounts: ['credential_link', 'identity_verification', 'membership', 'person'] },
+      conditions: [
+        'No account, Membership, Identity Verification or one-time link created under fictional is held for anyone but the approver; accounts, Memberships, Identity Verifications, one-time links remain.',
+      ],
+    },
+    {
+      name: 'a person holding Admin together with another role is named',
+      facts: { ...met, adminsWithAnotherRole: ['ada.admin'] },
+      conditions: ['No one holds Admin together with another role; ada.admin does.'],
     },
   ];
   for (const c of cases) {

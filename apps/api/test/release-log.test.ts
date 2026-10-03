@@ -225,6 +225,8 @@ describe('recording a Release Log entry', () => {
       /Anchoring of the Audit Trail is live/,
       /The host holds a personal FileVault key/,
       /No record was created under fictional; .*customer/,
+      /held for anyone but the approver; accounts, Memberships/,
+      /No one holds Admin together with another role; ada\.admin does/,
     ])
       assert.match(message, condition);
     assert.doesNotMatch(message, /login runs/, 'the harness runs the decided login');

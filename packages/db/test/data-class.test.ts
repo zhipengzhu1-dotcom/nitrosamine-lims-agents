@@ -307,8 +307,49 @@ describe('the real data class is set by an approved Release Log entry once every
       assert.equal(await d.dataClass(), 'fictional');
     }));
 
+  it('the data class is refused real while another person holds an account or a Membership created under fictional', () =>
+    inDeployment('lims_dc_other_account', async (d) => {
+      const other = randomUUID();
+      await d.asService(
+        [
+          `insert into lims.person (id, username, display_name, password_hash) values ($1, 'fictional.other', 'Fictional Other', 'not-a-real-hash')`,
+          [other],
+        ],
+        [`insert into lims.membership (lab_id, person_id, role) values ($1, $2, 'QA')`, [d.lab, other]],
+      );
+      const error = await d.approve(await d.record(REAL));
+      assert.deepEqual(
+        [error?.code, error?.message],
+        ['LA011', 'the database holds accounts created under fictional for someone other than the signer: membership, person'],
+      );
+      assert.equal(await d.dataClass(), 'fictional');
+    }));
+
+  it('the data class is refused real while a Room created under fictional is held', () =>
+    inDeployment('lims_dc_room', async (d) => {
+      await d.asService([`insert into lims.room (lab_id, name) values ($1, 'Fictional Room')`, [d.lab]]);
+      const error = await d.approve(await d.record(REAL));
+      assert.deepEqual([error?.code, error?.message], ['LA011', 'the database holds records created under fictional: room']);
+      assert.equal(await d.dataClass(), 'fictional');
+    }));
+
+  it('the data class is refused real while the signer holds Admin together with Platform Operator', () =>
+    inDeployment('lims_dc_two_roles', async (d) => {
+      await d.asService([
+        `insert into lims.membership (lab_id, person_id, role) values ($1, $2, 'Admin')`,
+        [d.lab, d.operator.id],
+      ]);
+      const error = await d.approve(await d.record(REAL));
+      assert.deepEqual(
+        [error?.code, error?.message],
+        ['LA011', 'a person holds Admin together with another role: class.operator'],
+      );
+      assert.equal(await d.dataClass(), 'fictional');
+    }));
+
   it('with no fictional record and no open exception, approving the entry sets the class real, citing the entry', () =>
     inDeployment('lims_dc_real', async (d) => {
+      // The signer's own person and Membership were created under fictional; they carry into the real deployment.
       const real = await d.record(REAL);
       await d.approved(real);
       const { rows } = await d.owner.query<{ data_class: string; set_by_entry_id: string }>(
@@ -420,7 +461,7 @@ describe('no captured table escapes the real-data gate', () => {
     assert.deepEqual(rows, []);
   });
 
-  it('the gate leaves out only the named structure, account, sign-in, signing and change-control tables', async () => {
+  it('the gate leaves out only the Lab, the accounts it reads by person, and the sign-in, signing and change-control tables', async () => {
     const { rows } = await d.owner.query<{ exempt: string[] }>('select lims.gate_exempt_tables() as exempt');
     assert.deepEqual(rows[0]?.exempt, [
       'access_event',
@@ -433,12 +474,10 @@ describe('no captured table escapes the real-data gate', () => {
       'reauthentication',
       'record_version',
       'release_log_entry',
-      'room',
       'service_identity',
       'signature',
       'signature_statement',
       'signing_role',
-      'workstation',
     ]);
   });
 
