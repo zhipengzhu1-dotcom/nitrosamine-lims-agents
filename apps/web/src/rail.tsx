@@ -1,6 +1,7 @@
 import {
   type ActorContext,
   type ChainVerdict,
+  type ChangeState,
   decimalPattern,
   mayTake,
   type IncidentState,
@@ -33,6 +34,8 @@ export interface Field<N extends string = string> {
   kind: FieldKind;
   /** The words a `choice` field offers, as the LIMS records them. */
   options?: readonly string[];
+  /** A field the server takes only with some entries, such as a reason's own text with Other. */
+  optional?: true;
 }
 
 /** The web's only per-step table: what each step asks for. Role, states and Signature Meaning come from the registry. */
@@ -113,7 +116,19 @@ const markLook = {
       </>
     ),
   },
-} as const satisfies Record<ChainVerdict | IncidentState | 'Unsigned' | 'Signatures unsigned', unknown>;
+  Pending: {
+    tone: 'bad',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M8 5v3.5l2.5 1.5" />
+      </>
+    ),
+  },
+  Approved: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
+  Rejected: { tone: 'done', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
+  Withdrawn: { tone: 'done', glyph: <path d="M4 8h8" /> },
+} as const satisfies Record<ChainVerdict | IncidentState | ChangeState | 'Unsigned' | 'Signatures unsigned', unknown>;
 
 /**
  * A Test state with its track, or a mark with its glyph: a chain verdict, a System Incident's state, an unsigned
@@ -723,7 +738,7 @@ function FieldInput({ field, value, onChange }: { field: Field; value: string; o
         ))}
       </select>
     );
-  const props = { required: true, value, onChange: change };
+  const props = { required: !field.optional, value, onChange: change };
   if (field.kind === 'date') return <input type="date" {...props} />;
   if (field.kind === 'decimal') return <input inputMode="decimal" pattern={decimalPattern} {...props} />;
   return <input {...props} />;

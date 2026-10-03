@@ -1,0 +1,68 @@
+import { randomUUID } from 'node:crypto';
+import { DEMO_PASSWORD } from '../playwright.config.ts';
+import { expect, type Page, signInByApi, submittedTest, test } from './walk.ts';
+
+const railSays = (page: Page, text: string | RegExp) => expect(page.getByRole('status')).toContainText(text);
+const sheet = (page: Page) => page.locator('form.sheet');
+const shot = (page: Page, name: string) =>
+  page.screenshot({ path: test.info().outputPath(`${test.info().project.name}-${name}.png`) });
+
+async function openTest(page: Page, username: string, testId: string) {
+  await signInByApi(page, username);
+  await page.goto(`/#/tests/${testId}`);
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Critical Data Changes' })).toBeVisible();
+}
+
+test('the assigned Analyst proposes a change to a saved Result, a Reviewer signs it Approved, and a second proposal is withdrawn', async ({
+  page,
+}) => {
+  const testId = await submittedTest(page, `Metformin HCl tablets (fictional, change ${randomUUID()})`);
+  const changes = page.locator('ul.changes');
+
+  await openTest(page, 'ana.analyst', testId);
+  await page.getByRole('button', { name: 'Propose change' }).click();
+  await sheet(page).getByLabel('New value as written').fill('0.0310');
+  await sheet(page).getByRole('combobox', { name: 'Reason', exact: true }).selectOption('Other');
+  await sheet(page).getByRole('button', { name: 'Propose change' }).click();
+  await railSays(page, 'The Critical Data Change was refused: the reason Other needs its text.');
+  await shot(page, 'propose-refused');
+  await sheet(page).getByRole('combobox', { name: 'Reason', exact: true }).selectOption('Transcription error');
+  await shot(page, 'propose-sheet');
+  await sheet(page).getByRole('button', { name: 'Propose change' }).click();
+  await railSays(page, 'The Critical Data Change is proposed and waits for a Reviewer.');
+  await expect(changes).toContainText('Pending');
+  await expect(changes).toContainText('Result value: 0.0300 → 0.0310 ppm');
+  await changes.scrollIntoViewIfNeeded();
+  await shot(page, 'pending');
+
+  await openTest(page, 'rui.reviewer', testId);
+  await expect(page.getByRole('button', { name: 'Review' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Approve change' }).click();
+  await expect(page.getByRole('heading', { name: 'Sign Approved' })).toBeVisible();
+  await expect(sheet(page)).toContainText('Result value: 0.0300 → 0.0310 ppm');
+  await page.getByLabel(/User ID/).fill('rui.reviewer');
+  await page.getByLabel(/Password/).fill(DEMO_PASSWORD);
+  await shot(page, 'approve-sheet');
+  await page.getByRole('button', { name: 'Sign as Approved' }).click();
+  await railSays(page, 'Approved Signature recorded. The Result holds the new value.');
+  await expect(changes).toContainText('Approved');
+  await expect(page.locator('dd.value')).toContainText('0.0310 ppm');
+  await changes.scrollIntoViewIfNeeded();
+  await shot(page, 'approved');
+
+  await openTest(page, 'ana.analyst', testId);
+  await page.getByRole('button', { name: 'Propose change' }).click();
+  await sheet(page).getByLabel('New value as written').fill('0.0320');
+  await sheet(page).getByRole('combobox', { name: 'Reason', exact: true }).selectOption('Transcription error');
+  await sheet(page).getByRole('button', { name: 'Propose change' }).click();
+  await railSays(page, 'waits for a Reviewer');
+  await page.getByRole('button', { name: 'Withdraw change' }).click();
+  await sheet(page).getByRole('combobox', { name: 'Reason', exact: true }).selectOption('Proposed in error');
+  await sheet(page).getByRole('button', { name: 'Withdraw change' }).click();
+  await railSays(page, 'The Critical Data Change is withdrawn. The Result is unchanged.');
+  await expect(changes).toContainText('Withdrawn');
+  await expect(page.locator('dd.value')).toContainText('0.0310 ppm');
+  await changes.scrollIntoViewIfNeeded();
+  await shot(page, 'withdrawn');
+});

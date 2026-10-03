@@ -10,6 +10,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { useApi, useFresh } from './api.ts';
+import { Changes, useChangeAction } from './changes.tsx';
 import { Shell, Status, stateOrder, stepAction, words } from './rail.tsx';
 import { Split } from './split.tsx';
 import { type Column, StackTable } from './stack.tsx';
@@ -135,17 +136,19 @@ export function TestPage({
   const onTrailReload = useCallback((fn: () => Promise<void>) => setReloadTrail(() => fn), []);
   const freshState = useFresh(view, (v) => [v.test.state]);
   const freshSignatures = useFresh(view, (v) => v.signatures.map(signatureKey));
+  const refresh = async () => {
+    await Promise.all([reload(), reloadTrail(), afterStep?.()]);
+  };
+  const changeAction = useChangeAction(view, refresh);
   const action = view?.next
     ? stepAction(
         view.next,
         id,
         [testLine(view.test), ...(view.result ? [resultLine(view.result)] : [])],
-        async () => {
-          await Promise.all([reload(), reloadTrail(), afterStep?.()]);
-        },
+        refresh,
         view.recordVersion && view.statement ? { recordVersion: view.recordVersion, statement: view.statement } : null,
       )
-    : null;
+    : changeAction;
   const frame = (record: ReactNode) => (
     <Shell me={me} active="tests" action={action} notice={view && unsignedNotice(view.signatures)} railKey={id}>
       {list ? <Split list={list} record={record} closeHref="#/tests" /> : record}
@@ -205,6 +208,12 @@ export function TestPage({
         </dl>
       ) : (
         <p className="muted">No Result entered.</p>
+      )}
+      {!view.withheld && result && (
+        <>
+          <h2>Critical Data Changes</h2>
+          <Changes rows={view.changes} />
+        </>
       )}
       <h2>Signatures</h2>
       {view.withheld ? (

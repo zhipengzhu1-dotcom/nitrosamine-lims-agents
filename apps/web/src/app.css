@@ -1439,3 +1439,14 @@ a.btn {
 .export__done code {
   overflow-wrap: anywhere;
 }
+
+.changes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+.changes p {
+  margin: 4px 0 0;
+}
