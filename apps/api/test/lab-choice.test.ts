@@ -4,8 +4,7 @@ import { it } from 'node:test';
 import { audited, type Role } from '@lims/db';
 import { routes, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
-import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, Client, ok, refusedWith, startApi, HARNESS_LOGIN } from './harness.ts';
 
 const api = await startApi('lims_api_lab_choice_test');
 const SYSTEM = { actor: 'svc:test', role: 'system', reason: 'Arrange a Lab choice test' };
@@ -220,7 +219,7 @@ it('the failed Lab switch that reaches the limit locks the account, writes a Loc
   await audited(api.db, SYSTEM, (tx) =>
     tx
       .updateTable('person')
-      .set({ failedLogins: LOCKOUT_AFTER_FAILURES - 1 })
+      .set({ failedLogins: HARNESS_LOGIN.lockoutAfter - 1 })
       .where('id', '=', person.id)
       .execute(),
   );

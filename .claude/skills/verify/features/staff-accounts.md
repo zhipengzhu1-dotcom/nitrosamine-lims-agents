@@ -7,6 +7,8 @@ The Admin records an Identity Verification (printed name and what was checked), 
 - Record an Identity Verification. It lists under "Checked, awaiting an account" until an account names it.
 - Create the account. The region `One-time link` shows the link once; the staff table shows `No Membership yet` and `Not set yet`.
 - Set a password through the one-time link at `#/welcome/<token>`. A second use is refused.
+- Issue an enrolment link (`Enrolment link` in the `Authenticator` column) as a second Admin: the region `Enrolment link` shows it once as `#/authenticator?grant=<token>`. The Admin who created the account or issued its one-time link is refused by the database.
+- Enrol the authenticator through the enrolment link with the person's own password, in a browser where no one else is signed in. A spent, expired or missing grant is the uniform credential refusal.
 - Grant a Membership with a reason. The Admin-apart refusal shows in the form's `role=alert`.
 - Change a printed name with a reason. Earlier Signatures keep the name as signed.
 

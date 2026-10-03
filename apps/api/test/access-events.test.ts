@@ -5,9 +5,9 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { audited, type Role } from '@lims/db';
 import { routes } from '@lims/domain';
 import { sql } from 'kysely';
-import { LOCKOUT_AFTER_FAILURES, SESSION_LIMITS } from '../src/auth.ts';
+import { LOGIN } from '../src/auth.ts';
 import { labScope } from '../src/scope.ts';
-import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, Client, ok, refusedWith, startApi, HARNESS_LOGIN } from './harness.ts';
 
 const api = await startApi('lims_api_access_events_test');
 const SYSTEM = { actor: 'svc:test', role: 'system', reason: 'Arrange an Access Event test' };
@@ -278,13 +278,13 @@ it('a person whose Membership moved to another Lab during the session can still 
   refusedWith(await client.call(routes.me), 'noSession');
 });
 
-it(`the ${LOCKOUT_AFTER_FAILURES}th wrong password writes one lockout Access Event`, async () => {
+it(`the ${HARNESS_LOGIN.lockoutAfter}th wrong password writes one lockout Access Event`, async () => {
   const person = await api.addPerson('access.lockout', ['Analyst']);
-  for (let i = 0; i <= LOCKOUT_AFTER_FAILURES; i++) await signIn(person.username, 'not-the-password');
+  for (let i = 0; i <= HARNESS_LOGIN.lockoutAfter; i++) await signIn(person.username, 'not-the-password');
 
   const kinds = (await eventsOf(person.id)).map((e) => e.failureReason ?? e.kind);
   assert.deepEqual(kinds, [
-    ...Array.from({ length: LOCKOUT_AFTER_FAILURES }, () => 'WrongPassword'),
+    ...Array.from({ length: HARNESS_LOGIN.lockoutAfter }, () => 'WrongPassword'),
     'Lockout',
     'WrongPasswordOnLockedAccount',
   ]);
@@ -298,7 +298,7 @@ const sessionsOf = (account: Account) =>
     .orderBy('createdAt')
     .execute();
 const lockOut = async (account: Account) => {
-  for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
+  for (let i = 0; i < HARNESS_LOGIN.lockoutAfter; i++)
     refusedWith(await signIn(account.username, 'not-the-password'), 'badCredentials');
 };
 
@@ -308,7 +308,7 @@ it("under a Lockout, the Admin sees each of the person's sessions in this Lab th
     tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
   );
   await api.login(person);
-  await api.advanceClock(person, SESSION_LIMITS.decided.idleMs + 60_000);
+  await api.advanceClock(person, LOGIN.decided.idleMs + 60_000);
   ok(await (await api.login(person)).call(routes.logout));
   const noticed = await api.login(person);
   await api.login(person);
@@ -337,7 +337,7 @@ it("under a Lockout, the Admin sees each of the person's sessions in this Lab th
     events.map((e) => e.kind),
     [
       'Lockout',
-      ...Array.from({ length: LOCKOUT_AFTER_FAILURES }, () => 'SignInFailed'),
+      ...Array.from({ length: HARNESS_LOGIN.lockoutAfter }, () => 'SignInFailed'),
       'SignInSucceeded',
       'SignInSucceeded',
       'SignOut',
@@ -397,7 +397,7 @@ it('a sign-out that meets a Lockout not yet committed ends its session at the Lo
   await audited(api.db, SYSTEM, async (tx) => {
     await tx
       .updateTable('person')
-      .set({ failedLogins: LOCKOUT_AFTER_FAILURES, lockedAt: sql`clock_timestamp()` })
+      .set({ failedLogins: HARNESS_LOGIN.lockoutAfter, lockedAt: sql`clock_timestamp()` })
       .where('id', '=', person.id)
       .execute();
     await tx

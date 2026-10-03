@@ -1,7 +1,8 @@
 import type { DB } from '@lims/db';
 import type { Kysely } from 'kysely';
 import type { App } from './app.ts';
-import { actorFor, labSwitchRoute, lockScreenRoutes, SESSION_COOKIE, type SessionLimits } from './auth.ts';
+import { actorFor, labSwitchRoute, lockScreenRoutes, SESSION_COOKIE, type Credentials } from './auth.ts';
+import { passwordChangeRoute } from './password-change.ts';
 import { preferenceRoutes } from './preferences.ts';
 import { readRoutes } from './reads.ts';
 import { staffRoutes } from './staff.ts';
@@ -12,10 +13,11 @@ import { workstationRoutes } from './workstations.ts';
 export function sessionRoutes(
   app: App,
   db: Kysely<DB>,
-  limits: SessionLimits,
+  credentials: Credentials,
   release: string,
   verifyReadLimitSeconds?: number,
 ): void {
+  const limits = credentials.policy;
   const withSession = (whileLocked: boolean, routes: (scope: App) => void) =>
     app.register(async (scope) => {
       scope.decorateRequest('actor');
@@ -31,13 +33,14 @@ export function sessionRoutes(
       });
       routes(scope);
     });
-  withSession(true, (lockScreen) => lockScreenRoutes(lockScreen, db, limits));
+  withSession(true, (lockScreen) => lockScreenRoutes(lockScreen, db, credentials));
   withSession(false, (signedIn) => {
-    labSwitchRoute(signedIn, db, limits);
+    labSwitchRoute(signedIn, db, credentials);
+    passwordChangeRoute(signedIn, db, credentials);
     preferenceRoutes(signedIn, db);
     readRoutes(signedIn, db, verifyReadLimitSeconds);
     staffRoutes(signedIn, db, limits);
-    stepRoutes(signedIn, db, release);
+    stepRoutes(signedIn, db, credentials, release);
     workstationRoutes(signedIn, db);
   });
 }

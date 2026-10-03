@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "PasswordSet" | "ReauthenticationFailed" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
+export type AccessEventKind = "AbsoluteExpiry" | "AuthenticatorEnrolled" | "EnrolmentGrantIssued" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "PasswordChanged" | "PasswordSet" | "ReauthenticationFailed" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -20,6 +20,8 @@ export type AuditExportFormat = "CSV" | "JSON";
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
+
+export type ImpactAnswer = "No" | "Yes";
 
 export type IncidentKind = "ChainVerifyFailure" | "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure" | "UnraisableLogLine";
 
@@ -43,7 +45,7 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "PlatformOperator" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoCredential" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
+export type SignInFailure = "AccountLocked" | "AlreadyEnrolled" | "CodeAlreadyUsed" | "NoAuthenticator" | "NoCredential" | "NoEnrolmentGrant" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherPersonSignedIn" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongCode" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -96,6 +98,13 @@ export interface AuditExport {
   requestedRole: Generated<Role>;
 }
 
+export interface Authenticator {
+  enrolledAt: Generated<Timestamp>;
+  lastUsedStep: Int8 | null;
+  personId: string;
+  secretCiphertext: Buffer;
+}
+
 export interface ChainVerification {
   chain: string;
   head: Buffer;
@@ -128,6 +137,16 @@ export interface CredentialLink {
 export interface Customer {
   id: Generated<string>;
   name: string;
+}
+
+export interface EnrolmentGrant {
+  expiresAt: Generated<Timestamp>;
+  id: Generated<string>;
+  issuedAt: Generated<Timestamp>;
+  issuedBy: string;
+  personId: string;
+  tokenHash: Buffer;
+  usedAt: Timestamp | null;
 }
 
 export interface IdentityVerification {
@@ -218,6 +237,7 @@ export interface Sample {
   labId: string;
   number: string;
   receivedAt: Timestamp | null;
+  receivedTimeZone: ColumnType<string | null, never, never>;
   submissionId: string;
 }
 
@@ -248,6 +268,7 @@ export interface Signature {
   role: Role;
   sessionId: string | null;
   signedAt: Generated<Timestamp>;
+  signedTimeZone: ColumnType<string, never, never>;
   statementHash: Buffer | null;
   statementVersion: number | null;
   username: ColumnType<string, never, never>;
@@ -276,10 +297,19 @@ export interface SystemIncident {
   breakCount: number | null;
   chain: string | null;
   constraintName: string | null;
+  correctiveAction: string | null;
+  correctiveActionAt: Timestamp | null;
+  correctiveActionBy: string | null;
   errorClass: string | null;
   fingerprint: Buffer | null;
   firstFailure: Int8 | null;
   id: Generated<string>;
+  immediateAction: string | null;
+  immediateActionAt: Timestamp | null;
+  immediateActionBy: string | null;
+  impactAnswer: ImpactAnswer | null;
+  impactAnsweredAt: Timestamp | null;
+  impactAnsweredBy: string | null;
   kind: IncidentKind;
   lastFailure: Int8 | null;
   loggedAt: Timestamp | null;
@@ -332,10 +362,12 @@ export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
   auditExport: AuditExport;
+  authenticator: Authenticator;
   chainVerification: ChainVerification;
   commitKey: CommitKey;
   credentialLink: CredentialLink;
   customer: Customer;
+  enrolmentGrant: EnrolmentGrant;
   identityVerification: IdentityVerification;
   lab: Lab;
   membership: Membership;

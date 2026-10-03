@@ -1,6 +1,7 @@
 import type * as db from '@lims/db';
 import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
+import type { IncidentStepName } from './incidents.ts';
 import { type Step, type StepName, stepNames, steps } from './steps.ts';
 
 const role = Type.Enum({
@@ -46,8 +47,8 @@ const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
  * A point in time: on the wire, and so in the web and the tests, an ISO 8601 string the database clock produced, in
- * UTC unless its name ends in `Lab` (`atLab`, `receivedAtLab`, `signedAtLab`): that one carries the owning Lab's offset,
- * and the database renders it as text. For a UTC field the API hands Fastify the Date that Kysely returns, and Fastify
+ * UTC unless its name ends in `Lab` (`atLab`, `receivedAtLab`, `signedAtLab`): that one carries the offset of the
+ * owning Lab's time zone in force when it was written, and the database renders it as text. For a UTC field the API hands Fastify the Date that Kysely returns, and Fastify
  * writes it with toISOString.
  */
 export type Instant = string & { readonly [instantBrand]: true };
@@ -90,7 +91,7 @@ const testRow = Type.Object({
   sampleNumber: Type.String(),
   description: Type.String(),
   receivedAt: nullable(instant),
-  /** `receivedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
+  /** `receivedAt` on the wall clock of the Lab time zone the Sample kept, ISO 8601 with its offset, as the database renders it. */
   receivedAtLab: nullable(instant),
   customer: Type.String(),
   methodCode: Type.String(),
@@ -115,18 +116,26 @@ const recordVersionRef = Type.Object({
   contentHash: Type.String({ pattern: '^[0-9a-f]{64}$' }),
 });
 export type RecordVersionRef = Static<typeof recordVersionRef>;
+/** What proved a signer at their Signature: the password alone under the demo login, or the password and an authenticator code. */
+export const authenticator = Type.Enum({ Password: 'Password', PasswordAndCode: 'PasswordAndCode' } as const);
+export type Authenticator = Static<typeof authenticator>;
 const signature = Type.Object({
   meaning: meaning,
   signer: Type.String(),
   username: Type.String(),
   role: role,
+  /** Null only on a Signature given before the signing function recorded what proved the signer. */
+  authenticator: nullable(authenticator),
   signedAt: instant,
   /** `signedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
   signedAtLab: instant,
   /** The signed record's glossary noun, such as "Test Report". */
   record: Type.String(),
   recordVersion: recordVersionRef,
-  /** True once the record has a Record Version later than the one this Signature was given on. */
+  /**
+   * True once the record no longer holds the content this Signature was given on: a Lab record has a Record Version
+   * later than the signed one, or a System Incident's content hashes differently from its signed Record Version.
+   */
   unsigned: Type.Boolean(),
 });
 export type Signature = Static<typeof signature>;
@@ -138,6 +147,7 @@ export const auditedTable = Type.Enum({
   person: 'person',
   method: 'method',
   submission: 'submission',
+  lab: 'lab',
   sample: 'sample',
   test: 'test',
   result: 'result',
@@ -196,7 +206,7 @@ const trailChange = Type.Object({
 export type TrailChange = Static<typeof trailChange>;
 /**
  * One Audit Trail entry in glossary words. `at` is the instant in UTC to the microsecond, as the hashed bytes render
- * it; `atLab` is the same instant on the owning Lab's wall clock, ISO 8601 with the Lab's offset, and null on the
+ * it; `atLab` is the same instant on the owning Lab's zone in force then, ISO 8601 with its offset, and null on the
  * company chain. The web formats each in `apps/web/src/time.ts`.
  */
 const trailEntry = Type.Object({
@@ -223,6 +233,8 @@ const staffPerson = Type.Object({
   roles: Type.Array(role),
   /** True once the person has set a password through their one-time link. */
   credentialSet: Type.Boolean(),
+  /** True once the person has enrolled their authenticator through an enrolment grant. */
+  authenticatorEnrolled: Type.Boolean(),
   identityVerifiedAt: nullable(instant),
   /** Who checked the person's identity and what they checked; null for a seeded demo account. */
   identityVerifiedBy: nullable(Type.String()),
@@ -254,6 +266,9 @@ const accessEventKindButLockout = Type.Enum({
   LabSwitchFailed: 'LabSwitchFailed',
   ReauthenticationFailed: 'ReauthenticationFailed',
   PasswordSet: 'PasswordSet',
+  PasswordChanged: 'PasswordChanged',
+  AuthenticatorEnrolled: 'AuthenticatorEnrolled',
+  EnrolmentGrantIssued: 'EnrolmentGrantIssued',
 } as const satisfies { [K in Exclude<db.AccessEventKind, 'Lockout'>]: K });
 const signInFailure = Type.Enum({
   UnknownUserId: 'UnknownUserId',
@@ -268,6 +283,12 @@ const signInFailure = Type.Enum({
   OtherUserId: 'OtherUserId',
   SessionEnded: 'SessionEnded',
   WrongUserId: 'WrongUserId',
+  WrongCode: 'WrongCode',
+  NoAuthenticator: 'NoAuthenticator',
+  AlreadyEnrolled: 'AlreadyEnrolled',
+  OtherPersonSignedIn: 'OtherPersonSignedIn',
+  CodeAlreadyUsed: 'CodeAlreadyUsed',
+  NoEnrolmentGrant: 'NoEnrolmentGrant',
 } as const satisfies { [K in db.SignInFailure]: K });
 /** A session a Lockout ended, at the Lockout's instant: when it was signed in, and on which Workstation. */
 const endedSession = Type.Object({ id: uuid, signedInAt: instant, workstation: nullable(Type.String()) });
@@ -302,6 +323,11 @@ export const grantableRoles = ['SampleCustodian', 'Analyst', 'Reviewer', 'QA', '
 const accountCreated = Type.Object({
   person: staffPerson,
   link: Type.Object({ token: Type.String(), expiresAt: instant }),
+});
+/** The enrolment grant's token goes to the person, who enrols their authenticator with it; the LIMS keeps only its hash. */
+const enrolmentGrantIssued = Type.Object({
+  person: staffPerson,
+  grant: Type.Object({ token: Type.String(), expiresAt: instant }),
 });
 const reasonText = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
 /** Lower-case letters, digits, dots and hyphens, starting with a letter, as the seeded usernames are. */
@@ -408,6 +434,13 @@ const auditExport = Type.Object({
   files: Type.Tuple([exportedFile, exportedFile]),
 });
 export type AuditExport = Static<typeof auditExport>;
+const impactAnswer = Type.Enum({ Yes: 'Yes', No: 'No' } as const satisfies { [K in db.ImpactAnswer]: K });
+export type ImpactAnswer = Static<typeof impactAnswer>;
+/** Who recorded something on a System Incident. */
+const recorder = Type.Object({ username: Type.String(), displayName: Type.String() });
+/** An action as recorded on a System Incident: its text, who recorded it and the database's time. */
+const recordedText = Type.Object({ text: Type.String(), by: recorder, at: instant });
+export type RecordedText = Static<typeof recordedText>;
 const systemIncident = Type.Object({
   reference: Type.String({ pattern: `^${referencePattern}$` }),
   kind: Type.Enum({
@@ -445,8 +478,31 @@ const systemIncident = Type.Object({
   openedAt: instant,
   /** For an incident the database could not write at the time, the instant its log line was written, from the API host's clock. */
   loggedAt: nullable(instant),
+  /** QA's answer to "could this have affected results or records?", once recorded. */
+  impact: nullable(Type.Object({ answer: impactAnswer, by: recorder, at: instant })),
+  /** The owner's immediate and corrective actions (ISO/IEC 17025 7.11.3 e), once recorded. */
+  immediateAction: nullable(recordedText),
+  correctiveAction: nullable(recordedText),
+  /**
+   * The Record Version an Acknowledged signing from this session binds: the incident's content as it is now, numbered
+   * in this session's Lab, and the version a signing given on sight of it writes if the content is still the same.
+   */
+  recordVersion: recordVersionRef,
+  statement: signatureStatement,
+  /** The Acknowledged Signature, once given, with the Record Version it was given on and whether it still binds. */
+  acknowledged: nullable(signature),
 });
 export type SystemIncident = Static<typeof systemIncident>;
+/** One line of the System Incident list: enough to pick one out. */
+const incidentRow = Type.Object({
+  reference: systemIncident.properties.reference,
+  kind: systemIncident.properties.kind,
+  state: incidentState,
+  openedAt: instant,
+  step: nullable(Type.String()),
+  chain: systemIncident.properties.chain,
+});
+export type IncidentRow = Static<typeof incidentRow>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** What a committed step answers, and what a retry of the same press answers again. */
 export type StepTaken = Static<typeof stepTaken>;
@@ -489,16 +545,28 @@ export const isRefusalKind = (value: unknown): value is RefusalKind => refusalKi
 export const refusalBody = Type.Object({ kind: Type.Enum(refusalKinds), message: Type.String() });
 export type RefusalBody = Static<typeof refusalBody>;
 
+/** The six-digit code from the person's authenticator, which the decided login asks for; any other text is a wrong code. */
+const code = Type.Optional(text);
 /** A sign-in names its Lab; the schema lets it out so that the API can answer `labNotChosen` after the password. */
-const signIn = Type.Object({ username: text, password: text, labId: Type.Optional(uuid) }, closed);
-const labSwitch = Type.Object({ username: text, password: text, labId: uuid }, closed);
+const signIn = Type.Object({ username: text, password: text, code, labId: Type.Optional(uuid) }, closed);
+const labSwitch = Type.Object({ username: text, password: text, code, labId: uuid }, closed);
+/** The grant is the token from a second Admin's enrolment link; without one the enrolment is the uniform credential refusal. */
+const authenticatorEnrolment = Type.Object(
+  { username: text, password: text, grant: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })) },
+  closed,
+);
+/** An enrolled authenticator's secret, shown once: as text, and as the otpauth URI its QR code carries. */
+const enrolled = Type.Object({ secret: Type.String(), otpauth: Type.String() });
 /** A POST that takes nothing still declares a closed body, so that a field sent to it is refused like any other. */
 const noBody = Type.Object({}, closed);
 const byId = Type.Object({ id: uuid });
+const byReference = Type.Object({ reference: Type.String({ pattern: `^${referencePattern}$` }) });
+/** An action as the owner types it on a System Incident: up to a short paragraph, not blank. */
+const actionText = Type.String({ minLength: 1, maxLength: 2000, pattern: '\\S' });
 /** The Record Version the signer saw, as the screen showed it: the signing is refused if the record has moved on. */
 const seenVersion = Type.Object({ version: recordVersionRef.properties.version, contentHash: sha256Hex }, closed);
-const typedCredentials = Type.Object({ username: text, password: text }, closed);
-/** What a signer types on the signature sheet: their user ID and their password. */
+const typedCredentials = Type.Object({ username: text, password: text, code }, closed);
+/** What a signer types on the signature sheet: their user ID, their password and, under the decided login, a fresh code. */
 export type TypedCredentials = Static<typeof typedCredentials>;
 /** What a signing sends: the typed credentials, the Record Version the sheet showed and the signature statement version it showed. */
 const signingBody = Type.Object(
@@ -506,7 +574,9 @@ const signingBody = Type.Object(
   closed,
 );
 export type SigningBody = Static<typeof signingBody>;
-const reauthentication = Type.Object({ password: text }, closed);
+const reauthentication = Type.Object({ password: text, code }, closed);
+/** A signed-in password change: the current password and, under the decided login, a fresh code, then the new password. */
+const passwordChange = Type.Object({ password: text, code, newPassword: text }, closed);
 const room = Type.Object({ id: uuid, name: Type.String() });
 const workstation = Type.Object({
   id: uuid,
@@ -580,6 +650,8 @@ function route<
 /** Every route the API serves besides the steps. */
 export const routes = {
   labs: route('GET', '/api/labs', {}, Type.Array(lab)),
+  /** Tells the sign-in page, before any session, whether this login asks for an authenticator code. */
+  loginPolicy: route('GET', '/api/login', {}, Type.Object({ secondFactor: Type.Boolean() })),
   login: route('POST', '/api/login', { body: signIn }, signedIn),
   switchLab: route('POST', '/api/lab-switch', { body: labSwitch }, signedIn),
   logout: route('POST', '/api/logout', { body: noBody }, Type.Object({ ended: Type.Literal(true) })),
@@ -590,6 +662,12 @@ export const routes = {
     Type.Object({ locked: Type.Literal(true), message: Type.String() }),
   ),
   unlock: route('POST', '/api/unlock', { body: reauthentication }, signedIn),
+  changePassword: route(
+    'POST',
+    '/api/password',
+    { body: passwordChange },
+    Type.Object({ changed: Type.Literal(true) }),
+  ),
   workstations: route('GET', '/api/workstations', {}, workstations),
   registerRoom: route('POST', '/api/rooms', { body: roomRegistration }, room),
   registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
@@ -634,6 +712,12 @@ export const routes = {
     accountCreated,
   ),
   issueLink: route('POST', '/api/staff/links', { body: Type.Object({ personId: uuid }, closed) }, accountCreated),
+  issueEnrolmentGrant: route(
+    'POST',
+    '/api/staff/enrolment-grants',
+    { body: Type.Object({ personId: uuid }, closed) },
+    enrolmentGrantIssued,
+  ),
   accessEvents: route('GET', '/api/staff/:id/access-events', { params: byId }, personAccessEvents),
   grantMembership: route(
     'POST',
@@ -647,19 +731,42 @@ export const routes = {
     { body: Type.Object({ personId: uuid, printedName: text, reason: reasonText }, closed) },
     staffPerson,
   ),
+  enrolAuthenticator: route('POST', '/api/authenticator', { body: authenticatorEnrolment }, enrolled),
   setPasswordThroughLink: route(
     'POST',
     '/api/credentials',
     { body: Type.Object({ token: Type.String({ minLength: 1, maxLength: 100 }), password: text }, closed) },
     Type.Object({ username: Type.String() }),
   ),
-  incident: route(
-    'GET',
-    '/api/incidents/:reference',
-    { params: Type.Object({ reference: Type.String({ pattern: `^${referencePattern}$` }) }) },
-    systemIncident,
-  ),
+  /** The System Incidents not yet Closed, newest first, for Admin and QA. */
+  incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
+  incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
 } satisfies Record<string, Route>;
+
+const incidentStepInputs = {
+  answerImpact: Type.Object({ answer: impactAnswer }, closed),
+  recordImmediateAction: Type.Object({ text: actionText }, closed),
+  recordCorrectiveAction: Type.Object({ text: actionText }, closed),
+  acknowledge: Type.Object({}, closed),
+  close: Type.Object({}, closed),
+} satisfies { [K in IncidentStepName]: TObject };
+/** What each System Incident step takes, as its route validates it. */
+export type IncidentStepInputs = { [K in IncidentStepName]: Static<(typeof incidentStepInputs)[K]> };
+/** The body of a System Incident step: the incident, the step's input, and the signature when the step signs. */
+export interface IncidentStepBody<K extends IncidentStepName> {
+  reference: string;
+  input: IncidentStepInputs[K];
+  signature?: SigningBody;
+}
+
+/** The route of one step on a System Incident: the body names the incident, carries the step's input, and a signature when the step signs. */
+export function incidentStepRoute<K extends IncidentStepName>(name: K) {
+  const body = Type.Object(
+    { ...byReference.properties, input: incidentStepInputs[name], signature: Type.Optional(signingBody) },
+    closed,
+  );
+  return route('POST', `/api/incident-steps/${name}`, { body }, systemIncident);
+}
 
 /** The route of one step, whose body requires a Commit Key, a testId when the step starts from a state, and a signature when it signs. */
 export function stepRoute<K extends StepName>(name: K) {

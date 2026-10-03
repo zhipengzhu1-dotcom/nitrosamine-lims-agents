@@ -1,7 +1,7 @@
 import { type ActorContext, routes } from '@lims/domain';
 import { useApi } from './api.ts';
-import { demoSigning, Shell, Status } from './rail.tsx';
-import { Signatures, unsignedNotice } from './tests.tsx';
+import { Shell, Status } from './rail.tsx';
+import { Signatures, signingNotes, unsignedNotice } from './tests.tsx';
 import { When } from './time.tsx';
 
 export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
@@ -63,7 +63,12 @@ export function ReportPage({ me, id }: { me: ActorContext; id: string }) {
           )}
           <p className="muted">Printed as entered. No Specification or limit is applied in this version.</p>
           <h2>Signatures</h2>
-          <p className="fict">{demoSigning}</p>
+          {/* Each note comes from the Signatures as recorded, so a login switched since still describes them truly. */}
+          {signingNotes(data.signatures).map((note) => (
+            <p key={note} className="fict">
+              {note}
+            </p>
+          ))}
           <Signatures rows={data.signatures} />
         </article>
       )}

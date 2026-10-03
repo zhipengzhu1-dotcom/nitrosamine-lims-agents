@@ -10,6 +10,10 @@ The company's R&D laboratory, which tests mainly APIs for nitrosamine impurities
 One of the company's testing laboratories. Tests, equipment, stock and reports belong to exactly one Lab; methods, controlled company documents, people and Customers belong to the company.
 _Avoid_: Site, tenant, location
 
+**Lab time zone**:
+The time zone in which a Lab's own records show their wall-clock time, beside the UTC time. It is configuration of the LIMS, not an action a person takes, and each change to it shows in the Lab's Audit Trail. A Signature and a Received keep the Lab time zone that was in force when they were written, so a later change does not move their wall-clock time.
+_Avoid_: Site time, local time
+
 ### People and parties
 
 **Customer**:
@@ -71,6 +75,10 @@ _Avoid_: Full name, signing name
 **One-time link**:
 The link through which a person sets their own password, so that the Admin never sees or sets it. It works once and expires; the LIMS keeps only a hash of it.
 _Avoid_: Invitation, reset email, activation code
+
+**Enrolment grant**:
+The second person at an authenticator enrolment: a one-time token, carried by an enrolment link, that an Admin issues for a person, so that no one person holds both the password and the authenticator of another. The issuer is never the person, the Admin who created the account, or an Admin who issued one of its one-time links, and the Admin who issues it issues no one-time link for that person afterwards; the database refuses each. It works once and expires; the LIMS keeps only a hash of it.
+_Avoid_: Invitation, second-factor reset, approval
 
 ### Sample chain
 

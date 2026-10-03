@@ -32,19 +32,20 @@ describe('checkout-scoped e2e ports', () => {
     assert.deepEqual(one, checkoutE2ePorts('/a/one'));
   });
 
-  it('every checkout gets ports in 10000-19999, clear of the dev, demo and cluster ports, and its web port is never another checkout API port', () => {
-    const pairs = Array.from({ length: 2000 }, (_, i) => checkoutE2ePorts(`/checkouts/${i}`));
-    const apiPorts = new Set(pairs.map(({ api }) => api));
-    for (const { api, web } of pairs) {
-      assert.ok(api >= 10_000 && web <= 19_999, `ports ${api} ${web} lie in 10000-19999`);
-      assert.equal(web, api + 1);
-      assert.ok(!apiPorts.has(web), `web port ${web} is no checkout's API port`);
+  it('every checkout gets four consecutive ports in 10000-19999, clear of the dev, demo and cluster ports, and none of its web or decided-login ports is another checkout API port', () => {
+    const sets = Array.from({ length: 2000 }, (_, i) => checkoutE2ePorts(`/checkouts/${i}`));
+    const apiPorts = new Set(sets.map(({ api }) => api));
+    for (const { api, web, decidedApi, decidedWeb } of sets) {
+      assert.ok(api >= 10_000 && decidedWeb <= 19_999, `ports ${api}-${decidedWeb} lie in 10000-19999`);
+      assert.deepEqual([web, decidedApi, decidedWeb], [api + 1, api + 2, api + 3]);
+      for (const port of [web, decidedApi, decidedWeb])
+        assert.ok(!apiPorts.has(port), `port ${port} is no checkout's API port`);
     }
   });
 
   it('the checkout CLI prints the e2e ports Playwright uses', () => {
     const printed = execFileSync(process.execPath, [cli, 'e2e-ports'], { encoding: 'utf8' });
-    const { api, web } = checkoutE2ePorts();
-    assert.equal(printed.trim(), `${api} ${web}`);
+    const { api, web, decidedApi, decidedWeb } = checkoutE2ePorts();
+    assert.equal(printed.trim(), `${api} ${web} ${decidedApi} ${decidedWeb}`);
   });
 });

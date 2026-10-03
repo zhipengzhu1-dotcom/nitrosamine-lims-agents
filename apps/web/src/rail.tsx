@@ -5,6 +5,7 @@ import {
   mayTake,
   type IncidentState,
   type Lab,
+  type Meaning,
   type RecordVersionRef,
   type Role,
   pressText,
@@ -12,6 +13,7 @@ import {
   type SignatureStatement,
   type StepInput,
   type StepName,
+  incidentReaders,
   staffRefusal,
   stepRoute,
   steps,
@@ -21,13 +23,16 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
+import { CodeField, useLoginPolicy } from './form.tsx';
 import { reducedMotion } from './motion.ts';
 
-export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room';
+export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room' | 'choice';
 export interface Field<N extends string = string> {
   name: N;
   label: string;
   kind: FieldKind;
+  /** The words a `choice` field offers, as the LIMS records them. */
+  options?: readonly string[];
 }
 
 /** The web's only per-step table: what each step asks for. Role, states and Signature Meaning come from the registry. */
@@ -58,10 +63,15 @@ export const stepUi: {
   release: { label: 'Release', fields: [], record: 'The Test Report this release issues' },
 };
 
-type SignedMeaning = NonNullable<(typeof steps)[StepName]['signs']>;
+/** What the signature sheet says a signing re-enters under this login; a given Signature's note comes from the Signature itself. */
+const signingNote = (secondFactor: boolean) =>
+  secondFactor
+    ? 'A signing re-enters the user ID, the password and a fresh code from the authenticator.'
+    : 'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
 
-export const demoSigning =
-  'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
+/** The signing note once the login policy is known, the failure if it could not be read, and nothing while it is read. */
+export const signingNoteOf = (policy: ReturnType<typeof useLoginPolicy>) =>
+  policy.secondFactor === undefined ? (policy.error ?? '') : signingNote(policy.secondFactor);
 
 export interface SigningView {
   recordVersion: RecordVersionRef;
@@ -110,11 +120,13 @@ const markLook = {
  * Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
  * the word and glyph are final, and an accent plays around them.
  */
-export function Status(props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook }) {
+export function Status(
+  props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook; fresh?: boolean },
+) {
   if ('mark' in props) {
     const { tone, glyph } = markLook[props.mark];
     return (
-      <span className={`status status--${tone}`}>
+      <span className={`status status--${tone} ${props.fresh ? 'status--fresh' : ''}`}>
         {props.mark}
         <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
           {glyph}
@@ -140,7 +152,7 @@ export interface RailAction {
   label: string;
   context: string;
   fields: readonly Field[];
-  signs: ({ meaning: SignedMeaning; what: string[]; role: Role } & SigningView) | null;
+  signs: ({ meaning: Meaning; what: string[]; role: Role } & SigningView) | null;
   run: (input: Record<string, string>, credentials: TypedCredentials | null) => Promise<string>;
 }
 
@@ -232,6 +244,7 @@ export const modules = [
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
   { key: 'audit-export', name: 'Audit Export', holds: '', takes: 'generateAuditExport' },
+  { key: 'incidents', name: 'Incidents', holds: '', roles: incidentReaders },
   { key: 'workstations', name: 'Workstations', holds: '' },
   { key: 'staff', name: 'Staff', holds: '' },
 ] as const;
@@ -266,6 +279,7 @@ export function Shell({
           {modules
             .filter((m) => m.key !== 'staff' || staffRefusal(me.roles) === null)
             .filter((m) => !('takes' in m) || mayTake(m.takes, me.roles))
+            .filter((m) => !('roles' in m) || m.roles.some((role) => me.roles.includes(role)))
             .map((m) => (
               <a key={m.key} href={`#/${m.key}`} className={m.key === active ? 'active' : ''}>
                 {m.name}
@@ -326,6 +340,9 @@ function Rail({
   const [values, setValues] = useState<Record<string, string>>({});
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const policy = useLoginPolicy();
+  const secondFactor = policy.secondFactor === true;
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
   const [refusal, setRefusal] = useState<Note | null>(null);
@@ -405,13 +422,13 @@ function Rail({
   const closed = () => setSheet((s) => (s?.closing ? null : s));
 
   async function commit(a: RailAction) {
-    if (inFlight.current) return;
+    if (inFlight.current || (a.signs && policy.secondFactor === undefined)) return;
     inFlight.current = true;
     setBusy(true);
     onCommitting(true);
     setRefusal(null);
     try {
-      const text = await a.run(values, a.signs ? { username, password } : null);
+      const text = await a.run(values, a.signs ? { username, password, ...(secondFactor && { code }) } : null);
       setNote({ text, tone: 'ok', n: ++count.current, action: a.label });
       setUsername('');
       returnFocus.current = true;
@@ -431,6 +448,7 @@ function Rail({
       setBusy(false);
       if (mounted.current) onCommitting(false);
       setPassword('');
+      setCode('');
     }
   }
 
@@ -565,19 +583,32 @@ function Rail({
                         onChange={(e) => setPassword(e.target.value)}
                       />
                     </label>
+                    {secondFactor && (
+                      <CodeField
+                        value={code}
+                        aria-invalid={refusal !== null && !code}
+                        aria-describedby="sheet-line"
+                        onChange={(e) => setCode(e.target.value)}
+                      />
+                    )}
                   </section>
                 </>
               )}
             </div>
             <div className="sheet__foot">
               <p key={refusal?.n} id="sheet-line" className={`sheet__line ${refusal ? 'refusal' : ''}`}>
-                <span hidden={refusal !== null}>{shown.signs ? demoSigning : shown.context}</span>
+                <span hidden={refusal !== null}>{shown.signs ? signingNoteOf(policy) : shown.context}</span>
                 {refusal && <span>{refusal.text}</span>}
               </p>
               <button type="button" className="rbtn rbtn--quiet" onClick={() => close(false)}>
                 Cancel
               </button>
-              <button type="submit" className="rbtn" aria-busy={busy}>
+              <button
+                type="submit"
+                className="rbtn"
+                aria-busy={busy}
+                disabled={shown.signs !== null && policy.secondFactor === undefined}
+              >
                 {shown.signs ? `Sign as ${shown.signs.meaning}` : shown.label}
               </button>
             </div>
@@ -681,6 +712,17 @@ function FieldInput({ field, value, onChange }: { field: Field; value: string; o
   if (field.kind === 'method' || field.kind === 'analyst')
     return <LookupSelect field={field} value={value} onChange={change} />;
   if (field.kind === 'room') return <RoomSelect value={value} onChange={change} />;
+  if (field.kind === 'choice')
+    return (
+      <select required value={value} onChange={change}>
+        <option value="">Choose…</option>
+        {field.options?.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    );
   const props = { required: true, value, onChange: change };
   if (field.kind === 'date') return <input type="date" {...props} />;
   if (field.kind === 'decimal') return <input inputMode="decimal" pattern={decimalPattern} {...props} />;

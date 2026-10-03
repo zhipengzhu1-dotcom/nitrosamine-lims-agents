@@ -44,7 +44,20 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   const trail = page.getByRole('region', { name: 'Audit Trail' });
   const entries = trail.getByRole('listitem');
   await expect(trail.getByRole('heading', { name: 'Audit Trail' })).toBeVisible();
-  await expect(trail.getByText(/\d+ entries\. Times in UTC and in the Lab's zone, America\/New_York\./)).toBeVisible();
+  await expect(
+    trail.getByText(
+      /\d+ entries\. Times in UTC and on the Lab's zone in force when each was written, now America\/New_York\./,
+    ),
+  ).toBeVisible();
+  const zone = trail.getByRole('link', { name: 'America/New_York' });
+  await atLeast(zone, 44, 44);
+  await zone.click();
+  await expect(page.getByRole('heading', { level: 1 }), "the zone opens the Lab's own trail").toHaveText('Lab RD');
+  await expect(
+    page.getByRole('region', { name: 'Audit Trail' }).getByRole('listitem').first(),
+    'where the Lab and its time zone were recorded',
+  ).toContainText(/Time zone\s*America\/New_York/);
+  await page.goBack();
   await expect(entries.first()).toContainText('Company chain');
   await expect(entries.first()).toContainText('Cora Lindqvist (Customer) created the Submission');
   await expect(entries.first().locator('.entry__time')).toHaveText(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC$/);
@@ -90,7 +103,9 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     'App release',
     'Re-authentication',
     'Signed at',
+    'Signed in time zone',
   ]);
+  await expect(signed.locator('dt:text-is("Signed in time zone") + dd')).toHaveText('America/New_York');
   await expect(signed.locator('dt:text-is("Signature statement hash") + dd summary')).toHaveText(/^[0-9a-f]{48}…$/);
   await expect(signed.locator('dt:text-is("Signed at") + dd')).toHaveText(
     /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d -0[45]:00$/,
@@ -105,6 +120,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     receipt.locator('dt:text-is("Received") + dd'),
     "the trail's Received is the one the Test page shows",
   ).toHaveText(`none → ${received}`);
+  await expect(receipt.locator('dt:text-is("Received in time zone") + dd')).toHaveText('none → America/New_York');
   // The Signature entry above it also has long values (its copied hashes), so the Record Version is found by its content.
   const versioned = entries.filter({ has: page.locator('details.long', { hasText: '"analyte"' }) }).first();
   await expect(versioned).toContainText('Record Version');
@@ -247,8 +263,7 @@ function closeQcIncidentAt(entry: string) {
     '../../scripts/pg.sh',
     ['psql', '-q', '-v', 'ON_ERROR_STOP=1', '-v', `entry=${entry}`, '--single-transaction', '-d', E2E_DATABASE],
     {
-      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
-                     set_config('lims.reason', 'Close a System Incident (e2e)', true);
+      input: `set local session_replication_role = replica;
               update lims.system_incident set state = 'Closed'
                where chain = (select lab_id::text from lims.lab where code = 'QC') and first_failure = :entry;`,
       stdio: ['pipe', 'ignore', 'inherit'],
