@@ -266,6 +266,7 @@ export interface Submission {
 
 export interface SystemIncident {
   breakCount: number | null;
+  breaks: Json | null;
   chain: string | null;
   constraintName: string | null;
   correctiveAction: string | null;

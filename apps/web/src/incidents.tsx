@@ -1,6 +1,7 @@
 import {
   type ActorContext,
-  type BreakInRange,
+  type IncidentBreaks as Breaks,
+  type ListedBreak,
   forcesYes,
   type IncidentRow,
   type IncidentStepName,
@@ -121,13 +122,48 @@ function coveredEntries(first: string, { lastFailure: last, breakCount: count }:
   return last === first ? `${breaks} at entry ${first}` : `${breaks} from entry ${first} to entry ${last}`;
 }
 
-const breakColumns: Column<BreakInRange>[] = [
+const breakColumns: Column<ListedBreak>[] = [
   { head: 'Entry', cell: (b) => b.entry },
   { head: 'Kind', cell: (b) => words(b.kind) },
   { head: 'Last entry', cell: (b) => b.through },
 ];
 
-/** Every break inside a chain verification incident's range as the chain reads now, and whether it recorded them. */
+/** The break columns with a mark saying whether the other list holds the same break, under `head`. */
+const markedColumns = (head: string): Column<ListedBreak>[] => [
+  ...breakColumns,
+  { head, cell: (b) => <Status mark={b.matches ? 'As recorded' : 'Changed since opened'} /> },
+];
+
+/** What the recomputed breaks say against the ones the incident recorded, and which incidents record a change. */
+function BreaksVerdict({ data }: { data: Breaks }) {
+  const at = `Recomputed ${time(data.recomputedAt)}.`;
+  if (data.asRecorded) return <>{at} These are the breaks this System Incident recorded.</>;
+  if (data.breaks.length === 0)
+    return <>{at} No break remains in this range: the breaks this System Incident recorded no longer read as broken.</>;
+  return (
+    <>
+      {at} The chain has changed inside this range since this System Incident was opened.
+      {data.incidents.length > 0 && (
+        <>
+          {' '}
+          This read recorded the change as{' '}
+          {data.incidents.map((reference, i) => (
+            <span key={reference}>
+              {i > 0 && ', '}
+              <a href={`#/incidents/${reference}`}>System Incident {reference}</a>
+            </span>
+          ))}
+          .
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Every break inside a chain verification incident's range as the chain reads now, and whether it recorded them;
+ * once they differ, the breaks it stored when it opened, each marked by whether it reads the same now.
+ */
 function IncidentBreaks({ reference }: { reference: string }) {
   const { data, error } = useApi(routes.incidentBreaks, { reference });
   return (
@@ -137,12 +173,21 @@ function IncidentBreaks({ reference }: { reference: string }) {
       {data && (
         <>
           <p>
-            <Status mark={data.asRecorded ? 'As recorded' : 'Changed since opened'} />{' '}
-            {data.asRecorded
-              ? `Recomputed ${time(data.recomputedAt)}. These are the breaks this System Incident recorded.`
-              : `Recomputed ${time(data.recomputedAt)}. The chain has changed inside this range since this System Incident was opened; Verify chain records the change as a new System Incident.`}
+            <Status mark={data.asRecorded ? 'As recorded' : 'Changed since opened'} /> <BreaksVerdict data={data} />
           </p>
-          <StackTable columns={breakColumns} rows={data.breaks} rowKey={(b) => b.entry} />
+          {data.breaks.length > 0 && (
+            <StackTable
+              columns={data.recorded && !data.asRecorded ? markedColumns('Recorded') : breakColumns}
+              rows={data.breaks}
+              rowKey={(b) => b.entry}
+            />
+          )}
+          {data.recorded && !data.asRecorded && (
+            <section aria-labelledby="incident-breaks-recorded">
+              <h3 id="incident-breaks-recorded">As this System Incident recorded them</h3>
+              <StackTable columns={markedColumns('Now')} rows={data.recorded} rowKey={(b) => b.entry} />
+            </section>
+          )}
         </>
       )}
     </section>

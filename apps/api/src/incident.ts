@@ -123,12 +123,12 @@ const ALARM = 'System Incident alarm';
 
 /**
  * Opens, in one transaction, one System Incident for each recorded break that chain verification found in a chain,
- * naming the chain as the Audit Trail does, the break's first and last entries, how many breaks it is and their
- * fingerprint, with the verifying QA as the requesting person, and raises the alarm once for each incident it opened,
- * after they are written. A break verified before, unchanged, answers its incident, in whatever state it is now, and
- * opens no other and raises no alarm; a break tampered with again has a new fingerprint and opens its own. A failure
- * to write them fails the verification, whose 500 opens a System Incident of its own, so a break is never shown
- * without a record.
+ * naming the chain as the Audit Trail does, the break's first and last entries, how many breaks it is, their
+ * fingerprint and every break it covers, with the person whose verification found them as the requesting person, and
+ * raises the alarm once for each incident it opened, after they are written. A break verified before, unchanged,
+ * answers its incident, in whatever state it is now, and opens no other and raises no alarm; a break tampered with
+ * again has a new fingerprint and opens its own. A failure to write them fails the verification, whose 500 opens a
+ * System Incident of its own, so a break is never shown without a record.
  */
 export async function openChainIncidents(
   db: Kysely<DB>,
@@ -144,11 +144,13 @@ export async function openChainIncidents(
     await sql`select set_config('statement_timeout', ${INCIDENT_WRITE_LIMIT}, true)`.execute(tx);
     const { rows: opened } = await sql<{ reference: string; entry: string }>`
       insert into lims.system_incident
-        (kind, reference, requested_by, session_lab_id, chain, first_failure, last_failure, break_count, fingerprint)
+        (kind, reference, requested_by, session_lab_id, chain, first_failure, last_failure, break_count, fingerprint,
+         breaks)
       select 'ChainVerifyFailure', t.reference, ${requester.person.id}, ${requester.lab.id}, ${chain}, t.entry,
-        t.through, t.breaks, decode(t.fingerprint, 'hex')
+        t.through, t.breaks, decode(t.fingerprint, 'hex'), t.covered::jsonb
       from unnest(${references}::text[], ${column('entry')}::bigint[], ${column('through')}::bigint[],
-        ${column('breaks')}::int[], ${column('fingerprint')}::text[]) as t(reference, entry, through, breaks, fingerprint)
+        ${column('breaks')}::int[], ${column('fingerprint')}::text[], ${breaks.map((b) => JSON.stringify(b.covered))}::text[])
+        as t(reference, entry, through, breaks, fingerprint, covered)
       on conflict (chain, first_failure, fingerprint) do nothing
       returning reference, first_failure::text as entry`.execute(tx);
     const { rows: found } = await sql<{ key: string; reference: string; state: IncidentState }>`
@@ -162,10 +164,10 @@ export async function openChainIncidents(
   for (const { reference, entry } of opened)
     log.error({ alarm: { reference, kind: 'ChainVerifyFailure', chain, entry } }, ALARM);
   const byBreak = new Map(found.map((f) => [f.key, f]));
-  return breaks.map(({ fingerprint, ...b }) => {
-    const incident = byBreak.get(`${b.entry}:${fingerprint}`);
-    if (incident === undefined) throw new Error(`no System Incident records the break at entry ${b.entry}`);
-    return { ...b, incident: incident.reference, incidentState: incident.state };
+  return breaks.map(({ entry, kind, through, breaks: count, fingerprint }) => {
+    const incident = byBreak.get(`${entry}:${fingerprint}`);
+    if (incident === undefined) throw new Error(`no System Incident records the break at entry ${entry}`);
+    return { entry, kind, through, breaks: count, incident: incident.reference, incidentState: incident.state };
   });
 }
 

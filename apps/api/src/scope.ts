@@ -2,6 +2,7 @@ import type { DB } from '@lims/db';
 import {
   type ActorContext,
   type BreakInRange,
+  type ListedBreak,
   type BreakKind,
   type NumberedKind,
   type NumberTaken,
@@ -102,11 +103,29 @@ const BREAKS_ONE_BY_ONE = 100;
 /** What a `More` break records in place of its breaks' fingerprints: one digest of every break, in entry order. */
 const digestOfBreaks = sql<Buffer>`sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq))`;
 
-/** A break, or the breaks after the first ones taken together, as a verification records it. */
-export type RecordedBreak = { entry: string; kind: BreakKind; through: string; breaks: number; fingerprint: string };
+/** One break as a verification read it, with its fingerprint in hex. */
+export type CoveredBreak = { entry: string; kind: BreakInRange['kind']; through: string; fingerprint: string };
 
-/** A chain verification System Incident's break range and the fingerprint it recorded for the breaks inside it. */
-export type BreakRange = { chain: string; first: string; last: string; fingerprint: Buffer };
+/** A break, or the breaks after the first ones taken together, as a verification records it, with every break it covers. */
+export type RecordedBreak = {
+  entry: string;
+  kind: BreakKind;
+  through: string;
+  breaks: number;
+  fingerprint: string;
+  covered: CoveredBreak[];
+};
+
+/**
+ * A chain verification System Incident's break range, the fingerprint it recorded for the breaks inside it, and those
+ * breaks as JSON text, which an incident opened before the LIMS stored them does not have.
+ */
+export type BreakRange = { chain: string; first: string; last: string; fingerprint: Buffer; stored: string | null };
+
+/** One break as JSON, as a verification records it among the breaks an incident covers. */
+const coveredBreak = (b: string) =>
+  sql`json_build_object('entry', ${sql.ref(`${b}.seq`)}::text, 'kind', ${sql.ref(`${b}.kind`)},
+    'through', ${sql.ref(`${b}.through`)}::text, 'fingerprint', encode(${sql.ref(`${b}.fingerprint`)}, 'hex'))`;
 
 /** The one lab-scoped seam: every read and write after login goes through it, filtered to the context's Lab. */
 export function labScope(db: Kysely<DB>, ctx: ActorContext) {
@@ -126,14 +145,16 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
           with found as (
             select b.*, row_number() over (order by b.seq) as n from lims.chain_breaks(${chain}) as b
           ), recorded as (
-            select seq, kind, through, 1 as breaks, fingerprint from found where n <= ${BREAKS_ONE_BY_ONE}
+            select seq, kind, through, 1 as breaks, fingerprint, json_build_array(${coveredBreak('found')}) as covered
+            from found where n <= ${BREAKS_ONE_BY_ONE}
             union all
-            select min(seq), 'More', max(through), count(*)::int, ${digestOfBreaks}
+            select min(seq), 'More', max(through), count(*)::int, ${digestOfBreaks},
+              json_agg(${coveredBreak('found')} order by seq)
             from found where n > ${BREAKS_ONE_BY_ONE} having count(*) > 0
           )
           select json_agg(json_build_object(
             'entry', r.seq::text, 'kind', r.kind, 'through', r.through::text, 'breaks', r.breaks,
-            'fingerprint', encode(r.fingerprint, 'hex')
+            'fingerprint', encode(r.fingerprint, 'hex'), 'covered', r.covered
           ) order by r.seq)
           from recorded as r
         ), '[]')`;
@@ -154,20 +175,41 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
         ],
       };
     },
-    /** Recomputes the breaks covering `range` on this Lab's or the company chain, and whether it recorded them; null for another Lab's. */
-    breaksWithin: async ({ chain, first, last, fingerprint }: BreakRange) => {
+    /**
+     * Recomputes the breaks covering `range` on this Lab's or the company chain, each beside the breaks the incident
+     * stored, and whether they are the breaks it recorded; null for another Lab's chain.
+     */
+    breaksWithin: async ({ chain, first, last, fingerprint, stored }: BreakRange) => {
       if (chain !== labId && chain !== 'company') return null;
-      const { rows } = await sql<{ recomputedAt: Date; asRecorded: boolean; breaks: BreakInRange[] }>`
+      const sameBreak = (a: string, b: string) =>
+        sql`${sql.ref(`${a}.seq`)} = ${sql.ref(`${b}.seq`)} and ${sql.ref(`${a}.through`)} = ${sql.ref(`${b}.through`)}
+          and ${sql.ref(`${a}.fingerprint`)} = ${sql.ref(`${b}.fingerprint`)}`;
+      const { rows } = await sql<{
+        recomputedAt: Date;
+        asRecorded: boolean;
+        breaks: ListedBreak[];
+        recorded: ListedBreak[] | null;
+      }>`
         with found as (
           select b.seq, b.kind, b.through, b.fingerprint from lims.chain_breaks(${chain}) as b
           where b.through >= ${first}::bigint and b.seq <= ${last}::bigint
+        ), kept as (
+          select (k ->> 'entry')::bigint as seq, k ->> 'kind' as kind, (k ->> 'through')::bigint as through,
+            decode(k ->> 'fingerprint', 'hex') as fingerprint
+          from jsonb_array_elements(coalesce(${stored}::jsonb, '[]')) as k
         )
         select now() as recomputed_at,
           coalesce((select ${fingerprint} = ${digestOfBreaks} or (count(*) = 1 and bool_or(
               fingerprint = ${fingerprint} and seq = ${first}::bigint and through = ${last}::bigint))
             from found), false) as as_recorded,
-          coalesce((select json_agg(json_build_object('entry', seq::text, 'kind', kind, 'through', through::text)
-            order by seq) from found), '[]') as breaks`.execute(db);
+          coalesce((select json_agg(json_build_object('entry', f.seq::text, 'kind', f.kind, 'through', f.through::text,
+              'matches', exists (select from kept as k where ${sameBreak('k', 'f')})) order by f.seq)
+            from found as f), '[]') as breaks,
+          case when ${stored}::jsonb is not null then
+            coalesce((select json_agg(json_build_object('entry', k.seq::text, 'kind', k.kind, 'through', k.through::text,
+                'matches', exists (select from found as f where ${sameBreak('f', 'k')})) order by k.seq)
+              from kept as k), '[]')
+          end as recorded`.execute(db);
       const [recomputed] = rows;
       if (!recomputed) throw new Error('the break range read returned no row');
       return recomputed;

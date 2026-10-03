@@ -14,6 +14,7 @@ import {
 import { type Kysely, sql, type UpdateObject } from 'kysely';
 import type { App } from './app.ts';
 import { reauthenticate, sourceAddressOf } from './auth.ts';
+import { openChainIncidents } from './incident.ts';
 import { refuse } from './refuse.ts';
 import { labScope } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
@@ -294,10 +295,16 @@ export function incidentRoutes(app: App, db: Kysely<DB>, release: string): void 
       const incident =
         (await db
           .selectFrom('systemIncident')
-          .select(['chain', 'firstFailure', 'lastFailure', 'fingerprint'])
+          .select([
+            'chain',
+            'firstFailure',
+            'lastFailure',
+            'fingerprint',
+            sql<string | null>`breaks::text`.as('stored'),
+          ])
           .where('reference', '=', reference)
           .executeTakeFirst()) ?? refuse('notFound', `No System Incident has the reference ${reference}.`);
-      const { chain, firstFailure, lastFailure, fingerprint } = incident;
+      const { chain, firstFailure, lastFailure, fingerprint, stored } = incident;
       if (chain === null || firstFailure === null)
         refuse('state', `System Incident ${reference} records no break in an Audit Trail chain.`);
       if (lastFailure === null || fingerprint === null)
@@ -305,14 +312,23 @@ export function incidentRoutes(app: App, db: Kysely<DB>, release: string): void 
           'state',
           `System Incident ${reference} was opened before the LIMS recorded a break's last entry. Verify the chain to record it again.`,
         );
-      const range = { chain, first: firstFailure, last: lastFailure, fingerprint };
-      return (
-        (await labScope(db, req.actor).breaksWithin(range)) ??
+      const scope = labScope(db, req.actor);
+      const listed =
+        (await scope.breaksWithin({ chain, first: firstFailure, last: lastFailure, fingerprint, stored })) ??
         refuse(
           'role',
           `System Incident ${reference} records breaks in another Lab's chain. Switch to that Lab to list them.`,
-        )
+        );
+      if (listed.asRecorded) return { ...listed, incidents: [] };
+      const verified = (await scope.verifyAuditTrail()).chains.find((c) => c.chainId === chain);
+      const found = verified ? await openChainIncidents(db, req.log, req.actor, chain, verified.breaks) : [];
+      const inRange = found.filter(
+        (b) =>
+          b.incident !== reference &&
+          BigInt(b.through) >= BigInt(firstFailure) &&
+          BigInt(b.entry) <= BigInt(lastFailure),
       );
+      return { ...listed, incidents: [...new Set(inRange.map((b) => b.incident))] };
     },
   });
   for (const name of incidentStepNames) registerIncidentStep(app, db, name, release);

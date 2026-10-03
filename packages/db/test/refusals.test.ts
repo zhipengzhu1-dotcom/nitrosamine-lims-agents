@@ -59,6 +59,9 @@ const oneBreak = (entry: number) => ({
   last_failure: entry,
   break_count: 1,
   fingerprint: Buffer.alloc(32, 7),
+  breaks: JSON.stringify([
+    { entry: String(entry), kind: 'Changed', through: String(entry), fingerprint: '07'.repeat(32) },
+  ]),
 });
 const zeros = Buffer.alloc(32);
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest();
@@ -243,10 +246,7 @@ const fixture: [string, Row][] = [
       requested_by: id.person,
       session_lab_id: id.lab,
       chain: id.lab,
-      first_failure: 7,
-      last_failure: 7,
-      break_count: 1,
-      fingerprint: Buffer.alloc(32, 7),
+      ...oneBreak(7),
     },
   ],
   [
@@ -1589,6 +1589,12 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint: 'system_incident_break_check',
     },
     {
+      name: 'an unexpected-failure System Incident with recorded breaks is refused',
+      table: 'lims.system_incident',
+      change: { breaks: oneBreak(7).breaks },
+      constraint: 'system_incident_breaks_check',
+    },
+    {
       name: 'a chain-verify System Incident that records no breaks is refused',
       table: 'lims.system_incident',
       change: {
@@ -2165,6 +2171,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       typed_user_id_hmac: Buffer.alloc(32, 9),
       chain: 'company',
       first_failure: 1,
+      breaks: '[]',
     };
     for (const [column, value] of Object.entries(changes)) {
       const error = await refusalOf(
@@ -2189,6 +2196,36 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       ['23514', "a chain-verify System Incident records its break's fingerprint, last entry and count"],
     );
   });
+
+  covered.add('lims.system_incident.require_breaks');
+  const withBreaks = (breaks: unknown) =>
+    refusalOf(
+      `insert into lims.system_incident
+         (kind, reference, requested_by, chain, first_failure, last_failure, break_count, fingerprint, breaks)
+       values ('ChainVerifyFailure', 'RF00000N', $1, $2, 4, 5, 2, $3, $4)`,
+      [id.person, id.lab, Buffer.alloc(32, 7), breaks === null ? null : JSON.stringify(breaks)],
+    );
+  const covering = (entry: number, fingerprint: string) => ({
+    entry: String(entry),
+    kind: 'Changed',
+    through: String(entry),
+    fingerprint,
+  });
+  for (const [what, breaks] of [
+    ['without the breaks it covers', null],
+    ['whose breaks do not give its fingerprint', [covering(4, '07'.repeat(32)), covering(5, '07'.repeat(32))]],
+    ['whose breaks do not give its count', [covering(4, '07'.repeat(32))]],
+  ] as const)
+    it(`a new chain-verify System Incident ${what} is refused`, async () => {
+      const error = await withBreaks(breaks);
+      assert.deepEqual(
+        [error.code, error.message],
+        [
+          '23514',
+          'a chain-verify System Incident records every break it covers, which give its count, range and fingerprint',
+        ],
+      );
+    });
 
   it("a chain-verify System Incident opened before breaks carried a fingerprint still takes QA's answer", async () => {
     await client.query('begin');

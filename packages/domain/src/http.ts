@@ -385,13 +385,24 @@ const breakInRange = Type.Object({
 });
 export type BreakInRange = Static<typeof breakInRange>;
 /**
- * Every break inside a chain verification System Incident's range, recomputed at `recomputedAt`, and whether they are still
- * the breaks the incident recorded; false means the chain changed inside the range after the incident was opened.
+ * A break inside a System Incident's range, listed either as the chain reads now or as the incident stored it.
+ * `matches` says whether the other list holds the same break: the same entry, last entry and fingerprint.
+ */
+const listedBreak = Type.Object({ ...breakInRange.properties, matches: Type.Boolean() });
+export type ListedBreak = Static<typeof listedBreak>;
+/**
+ * Every break inside a chain verification System Incident's range, recomputed at `recomputedAt`, and whether they are
+ * still the breaks the incident recorded; false means the chain changed inside the range after the incident was opened.
+ * `recorded` is the breaks the incident stored when it opened, null for one opened before the LIMS stored them.
+ * `incidents` names the System Incidents that record the breaks inside the range now, other than this one: when the
+ * chain has changed there, the read records the change as Verify chain does, opening each that is new.
  */
 const incidentBreaks = Type.Object({
   recomputedAt: instant,
   asRecorded: Type.Boolean(),
-  breaks: Type.Array(breakInRange),
+  breaks: Type.Array(listedBreak),
+  recorded: Type.Union([Type.Array(listedBreak), Type.Null()]),
+  incidents: Type.Array(Type.String({ pattern: `^${referencePattern}$` })),
 });
 export type IncidentBreaks = Static<typeof incidentBreaks>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
