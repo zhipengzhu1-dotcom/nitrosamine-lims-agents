@@ -529,7 +529,7 @@ The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or a
 _Avoid_: Login log, session log, access log
 
 **Audit Export**:
-The Audit Trail of one Customer's Submissions, Samples, Tests and their records, with the shared records they use, which QA generates to answer that Customer's audit. Another Customer's identifiers are redacted wherever they appear. It comes as a searchable data file (JSON or CSV) with a PDF of the same entries, each entry in glossary words beside its raw values. Generating one is itself recorded in the Audit Trail with the hash of each file handed out. Customers never see the Audit Trail any other way.
+The Audit Trail of one Customer's Submissions, Samples, Tests and their records, with the shared records they use and the Lab's own entries, such as each change of its Lab time zone, which QA generates to answer that Customer's audit. Another Customer's identifiers are redacted wherever they appear. It comes as a searchable data file (JSON or CSV) with a PDF of the same entries, each entry in glossary words beside its raw values. Generating one is itself recorded in the Audit Trail with the hash of each file handed out. Customers never see the Audit Trail any other way.
 _Avoid_: Audit report, trail dump, audit log export
 
 **Lab switch**:

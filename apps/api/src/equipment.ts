@@ -1,7 +1,6 @@
 import { type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
-  type Authenticator,
   type EquipmentStepBody,
   type EquipmentStepInputs,
   type EquipmentStepName,
@@ -25,7 +24,7 @@ import { refuse } from './refuse.ts';
 import { labScope, type Scope, type WriteQueries } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
 import { signedVersions } from './steps.ts';
-import { signedAtLab } from './trail.ts';
+import { signatureReply, signatureReplyColumns } from './trail.ts';
 
 function readableBy(actor: ActorContext): void {
   if (!mayReadEquipment(actor.roles)) refuse('role', 'Equipment is read by the staff of its Lab.');
@@ -50,25 +49,16 @@ const byPerson = (username: string | null, displayName: string | null) => ({
 
 /**
  * The Signatures given on the Equipment records of `table` among `ids`, oldest first, each with its own id and the id
- * of the record it binds. A Signature is selected as the Test read selects one, and shows as unsigned once a later
- * Record Version of its record exists.
+ * of the record it binds. A Signature reads as every other read shows one (`signatureReplyColumns`), and shows as
+ * unsigned once a later Record Version of its record exists.
  */
 async function signaturesOn(scope: Scope, table: 'equipment' | 'equipment_event', ids: readonly string[]) {
   if (!ids.length) return [];
   const rows = await signedVersions(scope)
+    .select(signatureReplyColumns)
     .select([
       'signature.id',
       'recordVersion.recordId',
-      'signature.meaning',
-      'signature.printedName as signer',
-      'signature.username',
-      'signature.role',
-      sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
-      'signature.signedAt',
-      signedAtLab,
-      'recordVersion.version',
-      'recordVersion.canonicalForm',
-      sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
       sql<boolean>`exists (select from lims.record_version later
         where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
           and later.record_id = record_version.record_id and later.version > record_version.version)`.as('unsigned'),
@@ -78,11 +68,7 @@ async function signaturesOn(scope: Scope, table: 'equipment' | 'equipment_event'
     .orderBy('signature.signedAt')
     .execute();
   const record = table === 'equipment' ? 'Equipment' : 'Equipment Event';
-  return rows.map(({ id, recordId, version, canonicalForm, contentHash, ...signature }) => ({
-    id,
-    recordId,
-    signature: { ...signature, record, recordVersion: { version, canonicalForm, contentHash } },
-  }));
+  return rows.map(({ id, recordId, ...row }) => ({ id, recordId, signature: signatureReply(row, record) }));
 }
 type Signed = Awaited<ReturnType<typeof signaturesOn>>[number]['signature'];
 
