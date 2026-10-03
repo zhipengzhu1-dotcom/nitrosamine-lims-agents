@@ -574,6 +574,7 @@ const documentRow = Type.Object({
   status: documentStatus,
 });
 export type DocumentRow = Static<typeof documentRow>;
+const documentTitle = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
 const documentBody = Type.String({ minLength: 1, maxLength: 20000, pattern: '\\S' });
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** What a committed step answers, and what a retry of the same press answers again. */
@@ -829,7 +830,7 @@ export const routes = {
     '/api/documents',
     {
       body: Type.Object(
-        { documentType: documentType, title: text, body: documentBody, effectiveDate: calendarDate },
+        { documentType: documentType, title: documentTitle, body: documentBody, effectiveDate: calendarDate },
         closed,
       ),
     },

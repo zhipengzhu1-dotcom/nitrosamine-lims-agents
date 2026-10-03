@@ -110,7 +110,7 @@ it('a Draft becomes Effective today through Authored by its author, Reviewed by 
 it('an Effective Date after the Lab’s today leaves the version Approved, and a Draft dated before it is refused', async () => {
   assert.equal(
     refusedWith(await draft(as.lena, 'Back-dated (fictional)', '2020-01-01'), 'guard'),
-    `An Effective Date before the Lab's today, ${today}, is refused. Choose today or later.`,
+    `An Effective Date must be ${today}, the Lab's today, or later.`,
   );
   const { id } = ok(await draft(as.lena, 'Receiving samples (fictional)', later));
   ok(await step(as.lena, lena, 'signAuthored', id));
@@ -217,4 +217,29 @@ it('the author Abandons a Draft with a reason and it keeps its number; someone e
 it('a Customer neither reads nor writes the Document vault', async () => {
   refusedWith(await as.cora.call(routes.documents), 'role');
   refusedWith(await draft(as.cora), 'role');
+});
+
+it('a Title of only spaces is refused as a value', async () => {
+  refusedWith(await draft(as.lena, '   '), 'malformed');
+});
+
+it('a Platform Operator neither reads the Document vault nor writes or signs a Document', async () => {
+  const pat = await api.addPerson('pat.operator', ['PlatformOperator']);
+  const patClient = await api.login(pat);
+  const { id } = ok(await draft(as.lena));
+  refusedWith(await patClient.call(routes.documents), 'role');
+  refusedWith(await patClient.call(routes.document, { id }), 'role');
+  refusedWith(await draft(patClient), 'role');
+  for (const name of ['signAuthored', 'signReviewed', 'signApproved'] as const) {
+    const signature = await signing(as.lena, id, pat);
+    refusedWith(await patClient.call(documentStepRoute(name), { documentId: id, input: {}, signature }), 'role');
+  }
+});
+
+it('an Admin neither writes a Document nor signs one Authored', async () => {
+  const ada = api.person('ada');
+  const adaClient = await api.login(ada);
+  refusedWith(await draft(adaClient), 'role');
+  const { id } = ok(await draft(as.lena));
+  refusedWith(await step(adaClient, ada, 'signAuthored', id), 'role');
 });
