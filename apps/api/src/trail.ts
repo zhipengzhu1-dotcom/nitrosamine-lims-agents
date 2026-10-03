@@ -10,9 +10,11 @@ import {
   currentLabel,
   describeTrail,
   imagesOf,
+  instantKey,
   type Instant,
   isAuditedTable,
   type RecordIds,
+  recordKey,
   referencedRecords,
   type RowImage,
   type RowSnapshot,
@@ -21,6 +23,7 @@ import {
   storedInstants,
   type TimedEntry,
   type Trail,
+  type ZonedInstant,
 } from '@lims/domain';
 import {
   type ExpressionBuilder,
@@ -62,10 +65,12 @@ const entryAt = sql.ref('audit_entry.at');
 /** Selected as text, not a Date: the driver's Date keeps milliseconds, and order and labels compare `at` to the microsecond, as the hash renders it. */
 const atText = inUtc(entryAt);
 const atLabText = sql<Instant | null>`(
-  select ${onWallClock(entryAt, sql.ref('l.time_zone'))}
-    from lims.lab l where l.lab_id::text = audit_entry.chain)`;
+  select ${onWallClock(entryAt, sql.ref('z.zone'))}
+    from lims.lab l cross join lateral (select lims.lab_time_zone_at(l.lab_id, audit_entry.at) as zone) z
+   where l.lab_id::text = audit_entry.chain)`;
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
-const newId = sql<string>`new_row->>'id'`;
+const rowIdOf = (table: AuditedTable) => sql<string>`coalesce(new_row, old_row)->>${recordKey(table)}`;
+const newIdOf = (table: AuditedTable) => sql<string>`new_row->>${recordKey(table)}`;
 const usernameOf = sql<string>`new_row->>'username'`;
 
 export type Where = (eb: ExpressionBuilder<DB, 'auditEntry'>) => ExpressionWrapper<DB, 'auditEntry', SqlBool>;
@@ -125,7 +130,7 @@ async function imagesWanted(scope: Scope, wanted: RecordIds[], usernames: string
           return eb.and([
             eb('tableName', '=', table),
             eb('chain', '=', chainOf(scope, table)),
-            eb.or([...(ids.length > 0 ? [eb(newId, 'in', ids)] : []), ...byUsername]),
+            eb.or([...(ids.length > 0 ? [eb(newIdOf(table), 'in', ids)] : []), ...byUsername]),
           ]);
         }),
       ),
@@ -158,18 +163,20 @@ export async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<Ro
   return images;
 }
 
-/** Each stored instant as the database renders it, in UTC and on `zone`'s wall clock, so that no host clock formats one. */
+/** Each stored instant as the database renders it, in UTC and on the wall clock of the zone its row kept, else of the zone `labId`'s chain records in force at that instant, so that no host clock formats one and no zone change moves one. */
 export async function storedInstantsIn(
   scope: Scope,
-  zone: string,
-  stored: string[],
+  labId: string,
+  wanted: ZonedInstant[],
 ): Promise<Map<string, StoredInstant>> {
-  const value = sql.ref('v.stored');
-  const { rows } = await sql<StoredInstant & { stored: string }>`
-    select v.stored, ${inUtc(sql`${value}::timestamptz`)} as at,
-           ${onWallClock(sql`${value}::timestamptz`, sql`${zone}::text`)} as at_lab
-      from unnest(${stored}::text[]) as v(stored)`.execute(scope.company);
-  return new Map(rows.map(({ stored: key, ...rendered }) => [key, rendered]));
+  const value = sql`${sql.ref('v.stored')}::timestamptz`;
+  const { rows } = await sql<StoredInstant & ZonedInstant>`
+    select v.stored, v.zone, ${inUtc(value)} as at, ${onWallClock(value, sql.ref('z.zone'))} as at_lab
+      from unnest(${wanted.map((w) => w.stored)}::text[], ${wanted.map((w) => w.zone)}::text[]) as v(stored, zone)
+     cross join lateral (select coalesce(v.zone, lims.lab_time_zone_at(${labId}::uuid, ${value})) as zone) z`.execute(
+    scope.company,
+  );
+  return new Map(rows.map(({ stored, zone, ...rendered }) => [instantKey({ stored, zone }), rendered]));
 }
 
 async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, where: Where): Promise<Trail> {
@@ -181,7 +188,7 @@ async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, 
     .where('labId', '=', scope.ctx.lab.id)
     .executeTakeFirstOrThrow();
   const images = await imagesFor(scope, entries);
-  const instants = await storedInstantsIn(scope, timeZone, storedInstants(entries));
+  const instants = await storedInstantsIn(scope, scope.ctx.lab.id, storedInstants(entries));
   return {
     record: {
       table: root.table,
@@ -199,7 +206,7 @@ function staffScope(db: Kysely<DB>, req: { actor: Scope['ctx'] }): Scope {
   return labScope(db, req.actor);
 }
 
-/** Whether a company record is one this Lab already sees: a Method or a signature statement always, a Person through a Membership here, a Customer or Submission through a Sample here. */
+/** Whether a record is one this Lab already sees: a Method or a signature statement always, a Person through a Membership here, a Customer or Submission through a Sample here, and of the Labs only this one. */
 async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promise<boolean> {
   switch (table) {
     case 'method':
@@ -219,6 +226,8 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
       );
     case 'submission':
       return Boolean(await scope.from('sample').select('id').where('submissionId', '=', id).executeTakeFirst());
+    case 'lab':
+      return id === scope.ctx.lab.id;
     case 'sample':
     case 'test':
     case 'result':
@@ -275,7 +284,7 @@ export function trailRoutes(app: App, db: Kysely<DB>): void {
       if (!(await seenFromLab(scope, table, id)))
         refuse('notFound', `This Lab has no such ${auditedRecords[table].kind}.`);
       return trailOf(scope, { table, id }, (eb) =>
-        eb.and([eb('chain', '=', chainOf(scope, table)), eb('tableName', '=', table), eb(rowId, '=', id)]),
+        eb.and([eb('chain', '=', chainOf(scope, table)), eb('tableName', '=', table), eb(rowIdOf(table), '=', id)]),
       );
     },
   });

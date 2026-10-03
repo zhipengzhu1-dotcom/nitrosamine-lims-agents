@@ -47,8 +47,8 @@ const calendarDate = Type.String({ format: 'date' });
 declare const instantBrand: unique symbol;
 /**
  * A point in time: on the wire, and so in the web and the tests, an ISO 8601 string the database clock produced, in
- * UTC unless its name ends in `Lab` (`atLab`, `receivedAtLab`, `signedAtLab`): that one carries the owning Lab's offset,
- * and the database renders it as text. For a UTC field the API hands Fastify the Date that Kysely returns, and Fastify
+ * UTC unless its name ends in `Lab` (`atLab`, `receivedAtLab`, `signedAtLab`): that one carries the offset of the
+ * owning Lab's time zone in force when it was written, and the database renders it as text. For a UTC field the API hands Fastify the Date that Kysely returns, and Fastify
  * writes it with toISOString.
  */
 export type Instant = string & { readonly [instantBrand]: true };
@@ -91,7 +91,7 @@ const testRow = Type.Object({
   sampleNumber: Type.String(),
   description: Type.String(),
   receivedAt: nullable(instant),
-  /** `receivedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
+  /** `receivedAt` on the wall clock of the Lab time zone the Sample kept, ISO 8601 with its offset, as the database renders it. */
   receivedAtLab: nullable(instant),
   customer: Type.String(),
   methodCode: Type.String(),
@@ -147,6 +147,7 @@ export const auditedTable = Type.Enum({
   person: 'person',
   method: 'method',
   submission: 'submission',
+  lab: 'lab',
   sample: 'sample',
   test: 'test',
   result: 'result',
@@ -204,7 +205,7 @@ const trailChange = Type.Object({
 export type TrailChange = Static<typeof trailChange>;
 /**
  * One Audit Trail entry in glossary words. `at` is the instant in UTC to the microsecond, as the hashed bytes render
- * it; `atLab` is the same instant on the owning Lab's wall clock, ISO 8601 with the Lab's offset, and null on the
+ * it; `atLab` is the same instant on the owning Lab's zone in force then, ISO 8601 with its offset, and null on the
  * company chain. The web formats each in `apps/web/src/time.ts`.
  */
 const trailEntry = Type.Object({

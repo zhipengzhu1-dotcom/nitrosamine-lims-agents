@@ -544,7 +544,8 @@ th {
   font-variant-numeric: tabular-nums;
 }
 td a,
-.facts a {
+.facts a,
+.trail__head a {
   display: inline-block;
   min-width: 44px;
   padding: 13px 0;
