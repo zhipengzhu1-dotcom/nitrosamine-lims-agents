@@ -1,5 +1,7 @@
 import {
   type ActorContext,
+  type IncidentBreaks as Breaks,
+  type ListedBreak,
   forcesYes,
   type IncidentRow,
   type IncidentStepName,
@@ -10,7 +12,7 @@ import {
   type SystemIncident,
 } from '@lims/domain';
 import { routes } from '@lims/domain';
-import { type ReactNode, useMemo } from 'react';
+import { type ReactNode, useEffect, useMemo } from 'react';
 import { api, useApi, useFresh } from './api.ts';
 import { type Field, type RailAction, Shell, Status, words } from './rail.tsx';
 import { Split } from './split.tsx';
@@ -113,6 +115,107 @@ function Recorded({ record }: { record: Recording | null }) {
   );
 }
 
+/** Which entries a chain verification incident's breaks cover; one opened before ranges were recorded names its first. */
+function coveredEntries(first: string, { lastFailure: last, breakCount: count }: SystemIncident): string {
+  if (!last || !count) return `first failing entry ${first}`;
+  const breaks = count === 1 ? 'one break' : `${count} breaks`;
+  return last === first ? `${breaks} at entry ${first}` : `${breaks} from entry ${first} to entry ${last}`;
+}
+
+const breakColumns: Column<ListedBreak>[] = [
+  { head: 'Entry', cell: (b) => b.entry },
+  { head: 'Kind', cell: (b) => words(b.kind) },
+  { head: 'Last entry', cell: (b) => b.through },
+];
+
+/** The break columns with a mark saying whether the other list holds the same break, under `head`. */
+const markedColumns = (head: string): Column<ListedBreak>[] => [
+  ...breakColumns,
+  { head, cell: (b) => <Status mark={b.matches ? 'As recorded' : 'Changed since opened'} /> },
+];
+
+/** `references` as links, in a sentence. */
+function IncidentLinks({ references }: { references: string[] }) {
+  return references.map((reference, i) => (
+    <span key={reference}>
+      {i > 0 && ', '}
+      <a href={`#/incidents/${reference}`}>System Incident {reference}</a>
+    </span>
+  ));
+}
+
+/**
+ * What the recomputed breaks say against the ones the incident recorded, which incidents record the breaks as they
+ * read now, and which of them this read opened. Any reader's read of a changed range records the change, as Verify
+ * chain does, so the page says the same to an Admin as to QA.
+ */
+function BreaksVerdict({ data }: { data: Breaks }) {
+  const recordedBefore = useMemo(() => data.incidents.filter((reference) => !data.opened.includes(reference)), [data]);
+  const at = `Recomputed ${time(data.recomputedAt)}.`;
+  if (data.asRecorded) return <>{at} These are the breaks this System Incident recorded.</>;
+  if (data.breaks.length === 0)
+    return <>{at} No break remains in this range: the breaks this System Incident recorded no longer read as broken.</>;
+  return (
+    <>
+      {at} The chain has changed inside this range since this System Incident was opened.
+      {recordedBefore.length > 0 && (
+        <>
+          {' '}
+          <IncidentLinks references={recordedBefore} /> {recordedBefore.length === 1 ? 'records' : 'record'} the breaks
+          as they read now.
+        </>
+      )}
+      {data.opened.length > 0 && (
+        <>
+          {' '}
+          This read opened <IncidentLinks references={data.opened} />.
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * Every break inside a chain verification incident's range as the chain reads now, and whether it recorded them;
+ * once they differ, the breaks it stored when it opened, each marked by whether it reads the same now. A changed
+ * range names the System Incidents that record it, which this read may have just opened, so `changed` reloads
+ * the list beside the record to hold them. It reloads on every changed range, not only when `opened` names one,
+ * because a read that ran twice (the dev server's StrictMode sends each read twice) shows the second answer, whose
+ * `opened` is empty although the first opened the incident.
+ */
+function IncidentBreaks({ reference, changed }: { reference: string; changed: () => Promise<void> }) {
+  const { data, error } = useApi(routes.incidentBreaks, { reference });
+  useEffect(() => {
+    if (data && !data.asRecorded) void changed();
+  }, [data, changed]);
+  return (
+    <section aria-labelledby="incident-breaks">
+      <h2 id="incident-breaks">Breaks in this range</h2>
+      {error && <p className="note--bad">{error}</p>}
+      {data && (
+        <>
+          <p>
+            <Status mark={data.asRecorded ? 'As recorded' : 'Changed since opened'} /> <BreaksVerdict data={data} />
+          </p>
+          {data.breaks.length > 0 && (
+            <StackTable
+              columns={data.recorded && !data.asRecorded ? markedColumns('Recorded') : breakColumns}
+              rows={data.breaks}
+              rowKey={(b) => `${b.entry}:${b.kind}`}
+            />
+          )}
+          {data.recorded && !data.asRecorded && (
+            <section className="recorded-breaks" aria-labelledby="incident-breaks-recorded">
+              <h3 id="incident-breaks-recorded">As this System Incident recorded them</h3>
+              <StackTable columns={markedColumns('Now')} rows={data.recorded} rowKey={(b) => `${b.entry}:${b.kind}`} />
+            </section>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 /** One System Incident with what QA and the Admin have recorded on it, and the rail's next step for the signed-in person. */
 function IncidentRecord({
   me,
@@ -168,7 +271,7 @@ function IncidentRecord({
             <dt>Chain</dt>
             <dd>
               {view.chain}
-              {view.firstFailure && `, first failing entry ${view.firstFailure}`}
+              {view.firstFailure && `, ${coveredEntries(view.firstFailure, view)}`}
             </dd>
           </>
         )}
@@ -187,6 +290,7 @@ function IncidentRecord({
           {view.recordVersion.version} · <code className="hash">{view.recordVersion.contentHash}</code>
         </dd>
       </dl>
+      {view.chain && <IncidentBreaks reference={view.reference} changed={afterStep} />}
       <h2>Impact and actions</h2>
       <p className="muted">QA answers whether this could have affected results or records.</p>
       <dl className="facts">

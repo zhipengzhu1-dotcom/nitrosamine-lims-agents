@@ -394,6 +394,22 @@ it('a System Incident whose content changes after the Acknowledged signing retur
   );
 });
 
+it("a chain-verify System Incident's Acknowledged Signature binds the breaks it recorded: a bypassed change to one of them returns the Signature as unsigned", async () => {
+  const reference = await brokenChainIncident();
+  ok(await immediate(as.ada, reference, 'Reran the entry.'));
+  ok(await corrective(as.ada, reference, 'Added a check.'));
+  const signed = ok(await acknowledge(as.ada, reference, ada));
+  assert.equal(signed.acknowledged?.unsigned, false);
+  await api.superuser.transaction().execute(async (tx) => {
+    await sql`set local session_replication_role = replica`.execute(tx);
+    await sql`update lims.incident_break set kind = 'Missing'
+      where incident_id = (select id from lims.system_incident where reference = ${reference})`.execute(tx);
+  });
+  const changed = await view(as.ada, reference);
+  assert.equal(changed.acknowledged?.unsigned, true, 'the Signature no longer binds the content');
+  assert.notEqual(changed.recordVersion.contentHash, signed.recordVersion.contentHash);
+});
+
 it('the Acknowledged Signature keeps the Lab wall clock of the zone it was signed in after the Lab’s time zone changes', async () => {
   const { timeZone: before } = await api.db
     .selectFrom('lab')

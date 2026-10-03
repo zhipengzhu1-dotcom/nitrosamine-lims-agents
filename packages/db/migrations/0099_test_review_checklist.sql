@@ -182,7 +182,8 @@ $$;
 alter table lims.record_version
   drop constraint record_version_record_table_check,
   add constraint record_version_record_table_check
-    check (record_table in ('test', 'test_report', 'system_incident', 'test_review', 'review_checklist_version'));
+    check (record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'test_review',
+                            'review_checklist_version'));
 
 create or replace function lims.save_record_version(p_lab_id uuid, p_table text, p_record_id uuid) returns void
 language plpgsql security definer set search_path = lims, pg_temp as $$
@@ -194,6 +195,9 @@ begin
     when 'test' then test_content(p_lab_id, p_record_id)
     when 'test_report' then test_report_content(p_lab_id, p_record_id)
     when 'system_incident' then incident_content(p_record_id)
+    when 'equipment' then (select equipment_content(e) from equipment e where e.lab_id = p_lab_id and e.id = p_record_id)
+    when 'equipment_event' then
+      (select equipment_event_content(v) from equipment_event v where v.lab_id = p_lab_id and v.id = p_record_id)
     when 'test_review' then test_review_content(p_lab_id, p_record_id)
     when 'review_checklist_version' then review_checklist_content(p_record_id)
   end)::text, 'UTF8');
@@ -378,4 +382,5 @@ select v.id, v.kind, i.position, i.key, i.text, i.evidence is null, i.needs_comm
     ('Released', 5, 'reportChecked', 'The rendered report checked against the records (Customer, Sample IDs, condition at receipt, Method, units, disclaimers, accreditation marking against the frozen scope)', false, null)
   ) as i (kind, position, key, text, needs_comment, evidence) on i.kind = v.kind;
 
-insert into lims.signing_role (role, meaning) values ('QA', 'Approved');
+-- 0037 (#129) already gives QA Approved for Equipment, so the row is kept once.
+insert into lims.signing_role (role, meaning) values ('QA', 'Approved') on conflict do nothing;
