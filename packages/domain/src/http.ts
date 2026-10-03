@@ -1,6 +1,7 @@
 import type * as db from '@lims/db';
 import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
+import type { EquipmentStepName } from './equipment.ts';
 import type { IncidentStepName } from './incidents.ts';
 import { type Step, type StepName, stepNames, steps } from './steps.ts';
 
@@ -476,6 +477,88 @@ const incidentRow = Type.Object({
   chain: systemIncident.properties.chain,
 });
 export type IncidentRow = Static<typeof incidentRow>;
+
+const fitnessStatus = Type.Enum({
+  Quarantined: 'Quarantined',
+  InUse: 'InUse',
+  Suspended: 'Suspended',
+  Expired: 'Expired',
+  Retired: 'Retired',
+} as const satisfies { [K in db.FitnessStatus]: K });
+/** Whether Equipment may be used: Quarantined until QA approves it, In use, Suspended, Expired past its due date, or Retired. */
+export type FitnessStatus = Static<typeof fitnessStatus>;
+const storedFitnessStatus = Type.Enum({
+  Quarantined: 'Quarantined',
+  InUse: 'InUse',
+  Suspended: 'Suspended',
+  Retired: 'Retired',
+} as const satisfies { [K in Exclude<db.FitnessStatus, 'Expired'>]: K });
+const equipmentEventKind = Type.Enum({
+  Cleaning: 'Cleaning',
+  Maintenance: 'Maintenance',
+  Repair: 'Repair',
+  SoftwareChange: 'SoftwareChange',
+  FirmwareChange: 'FirmwareChange',
+  Note: 'Note',
+  Suspect: 'Suspect',
+} as const satisfies { [K in db.EquipmentEventKind]: K });
+export type EquipmentEventKind = Static<typeof equipmentEventKind>;
+const roomRef = Type.Object({ id: Type.String(), name: Type.String() });
+export type RoomRef = Static<typeof roomRef>;
+/** One line of the Logbook, in the database's time order: an Equipment Event, a Fitness Status change, or a move. */
+const logbookEntry = Type.Union([
+  Type.Object({
+    entry: Type.Literal('event'),
+    kind: equipmentEventKind,
+    note: Type.String(),
+    by: recorder,
+    at: instant,
+  }),
+  Type.Object({
+    entry: Type.Literal('status'),
+    from: nullable(storedFitnessStatus),
+    to: storedFitnessStatus,
+    by: recorder,
+    at: instant,
+  }),
+  Type.Object({ entry: Type.Literal('move'), from: roomRef, to: roomRef, by: recorder, at: instant }),
+]);
+export type LogbookEntry = Static<typeof logbookEntry>;
+const equipment = Type.Object({
+  id: Type.String(),
+  kind: Type.String(),
+  name: Type.String(),
+  manufacturer: Type.String(),
+  model: Type.String(),
+  serial: Type.String(),
+  assetNumber: nullable(Type.String()),
+  softwareVersion: nullable(Type.String()),
+  firmwareVersion: nullable(Type.String()),
+  room: roomRef,
+  responsiblePerson: recorder,
+  fitnessStatus: storedFitnessStatus,
+  registeredAt: instant,
+  /** The Record Version an Approved signing from this session binds: the Equipment as it is now. */
+  recordVersion: recordVersionRef,
+  statement: signatureStatement,
+  logbook: Type.Array(logbookEntry),
+});
+export type Equipment = Static<typeof equipment>;
+/** One line of the Equipment list: enough to pick one out. */
+const equipmentRow = Type.Object({
+  id: Type.String(),
+  name: Type.String(),
+  kind: Type.String(),
+  room: Type.String(),
+  fitnessStatus: storedFitnessStatus,
+});
+export type EquipmentRow = Static<typeof equipmentRow>;
+/** What a registration may name: the Lab's Rooms and the staff who may answer for Equipment. */
+const equipmentChoices = Type.Object({
+  rooms: Type.Array(roomRef),
+  staff: Type.Array(Type.Object({ id: Type.String(), ...recorder.properties })),
+});
+export type EquipmentChoices = Static<typeof equipmentChoices>;
 const stepTaken = Type.Object({ testId: uuid, state: testState });
 /** What a committed step answers, and what a retry of the same press answers again. */
 export type StepTaken = Static<typeof stepTaken>;
@@ -686,6 +769,33 @@ export const routes = {
   /** The System Incidents not yet Closed, newest first, for Admin and QA. */
   incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
   incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
+  /** The Lab's Equipment, by name, for its staff. */
+  equipmentList: route('GET', '/api/equipment', {}, Type.Array(equipmentRow)),
+  equipmentChoices: route('GET', '/api/equipment/choices', {}, equipmentChoices),
+  equipment: route('GET', '/api/equipment/:id', { params: byId }, equipment),
+  /** The Lab Manager registers Equipment, which starts Quarantined. */
+  registerEquipment: route(
+    'POST',
+    '/api/equipment',
+    {
+      body: Type.Object(
+        {
+          kind: text,
+          name: text,
+          manufacturer: text,
+          model: text,
+          serial: text,
+          assetNumber: Type.Optional(text),
+          softwareVersion: Type.Optional(text),
+          firmwareVersion: Type.Optional(text),
+          roomId: uuid,
+          responsiblePersonId: uuid,
+        },
+        closed,
+      ),
+    },
+    equipment,
+  ),
 } satisfies Record<string, Route>;
 
 const incidentStepInputs = {
@@ -711,6 +821,43 @@ export function incidentStepRoute<K extends IncidentStepName>(name: K) {
     closed,
   );
   return route('POST', `/api/incident-steps/${name}`, { body }, systemIncident);
+}
+
+const equipmentStepInputs = {
+  approve: Type.Object({}, closed),
+  markSuspect: Type.Object({ reason: actionText }, closed),
+  recordEvent: Type.Object(
+    {
+      kind: Type.Enum({
+        Cleaning: 'Cleaning',
+        Maintenance: 'Maintenance',
+        Repair: 'Repair',
+        SoftwareChange: 'SoftwareChange',
+        FirmwareChange: 'FirmwareChange',
+        Note: 'Note',
+      } as const satisfies { [K in Exclude<db.EquipmentEventKind, 'Suspect'>]: K }),
+      note: actionText,
+    },
+    closed,
+  ),
+  move: Type.Object({ roomId: uuid }, closed),
+  retire: Type.Object({}, closed),
+} satisfies { [K in EquipmentStepName]: TObject };
+/** What each Equipment step takes, as its route validates it. */
+export type EquipmentStepInputs = { [K in EquipmentStepName]: Static<(typeof equipmentStepInputs)[K]> };
+export interface EquipmentStepBody<K extends EquipmentStepName> {
+  id: string;
+  input: EquipmentStepInputs[K];
+  signature?: SigningBody;
+}
+
+/** The route of one step on Equipment: the body names the Equipment, carries the step's input, and a signature when the step signs. */
+export function equipmentStepRoute<K extends EquipmentStepName>(name: K) {
+  const body = Type.Object(
+    { ...byId.properties, input: equipmentStepInputs[name], signature: Type.Optional(signingBody) },
+    closed,
+  );
+  return route('POST', `/api/equipment-steps/${name}`, { body }, equipment);
 }
 
 /** The route of one step, whose body requires a Commit Key, a testId when the step starts from a state, and a signature when it signs. */

@@ -313,6 +313,8 @@ revoke execute on function lims.event_suspends(lims.equipment_event_kind), lims.
 grant execute on function lims.event_suspends(lims.equipment_event_kind), lims.equipment_content(lims.equipment),
   lims.equipment_content_hash(lims.equipment), lims.equipment_event_content(lims.equipment_event),
   lims.version_equipment_record(uuid, text, uuid) to lims_app;
+-- keep_equipment runs as the writer and asks whether the Approved Signature was written in this transaction.
+grant execute on function lims.written_here(xid) to lims_app;
 grant select, insert on lims.equipment, lims.equipment_event to lims_app;
 grant update (name, asset_number, software_version, firmware_version, room_id, responsible_person_id, fitness_status)
   on lims.equipment to lims_app;
