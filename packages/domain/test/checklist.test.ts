@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { type ChecklistItem, checklistRefusal, type Ticks, unknownTick } from '../src/index.ts';
+import {
+  type ChecklistItem,
+  checklistRefusal,
+  itemKeyOf,
+  selfApprovalRefusal,
+  type Ticks,
+  unknownTick,
+} from '../src/index.ts';
 
 const items: ChecklistItem[] = [
   { key: 'auditTrailReviewed', text: 'Audit trail reviewed', ticked: true, needsComment: false },
@@ -51,4 +58,39 @@ describe('a Test Review against its checklist', () => {
   ];
   for (const [name, ticks, expected] of unknown)
     it(`unknownTick: ${name}`, () => assert.equal(unknownTick(items, ticks), expected));
+});
+
+describe('a Review Checklist version as QA drafts and approves it', () => {
+  const keys: [string, string, string[], string][] = [
+    ['words become one camelCase key', 'Audit trail reviewed', [], 'auditTrailReviewed'],
+    ['digits, marks and accents are dropped', 'Peaks (n = 2) integrated: résumé', [], 'peaksNIntegratedRSum'],
+    [
+      'a key already in the draft gains a letter',
+      'Audit trail reviewed',
+      ['auditTrailReviewed'],
+      'auditTrailReviewedB',
+    ],
+    [
+      'the next letter follows when that is taken too',
+      'Audit trail reviewed',
+      ['auditTrailReviewed', 'auditTrailReviewedB'],
+      'auditTrailReviewedC',
+    ],
+    ['text with no letters is an item', '42', [], 'item'],
+  ];
+  for (const [name, text, taken, expected] of keys)
+    it(`itemKeyOf: ${name}`, () => assert.equal(itemKeyOf(text, taken), expected));
+
+  it('itemKeyOf: a long text gives a key of at most 64 letters', () =>
+    assert.equal(itemKeyOf('word '.repeat(40), []).length, 64));
+
+  it('selfApprovalRefusal: the QA who drafted a version is refused, naming it', () =>
+    assert.equal(
+      selfApprovalRefusal('Test', { version: 3, draftedBy: 'quinn' }, 'quinn'),
+      'You drafted version 3 of the Test Review Checklist, so another QA approves it.',
+    ));
+  it('selfApprovalRefusal: another QA, or a version the LIMS seeded, is not refused', () => {
+    assert.equal(selfApprovalRefusal('Run', { version: 2, draftedBy: 'quinn' }, 'qiao'), null);
+    assert.equal(selfApprovalRefusal('Run', { version: 1, draftedBy: null }, 'quinn'), null);
+  });
 });

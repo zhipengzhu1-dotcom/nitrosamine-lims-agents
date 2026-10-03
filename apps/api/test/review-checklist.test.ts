@@ -365,6 +365,11 @@ it('a QA does not approve a Review Checklist version they drafted, and another Q
 });
 
 it('a draft whose evidence the checklist kind cannot show, or whose keys repeat, is refused', async () => {
+  assert.deepEqual(
+    (await versions()).evidenceSources,
+    ['performedSignature'],
+    'the Test checklist offers its evidence',
+  );
   const item = { key: 'auditTrailReviewed', text: 'Audit trail reviewed', ticked: true, needsComment: false } as const;
   assert.equal(
     refusedWith(

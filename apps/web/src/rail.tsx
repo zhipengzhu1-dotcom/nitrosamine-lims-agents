@@ -114,6 +114,17 @@ const markLook = {
       </>
     ),
   },
+  'In force': intactLook,
+  Draft: unsignedLook,
+  Superseded: {
+    tone: 'done',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M4 12l8-8" />
+      </>
+    ),
+  },
   Closed: {
     tone: 'done',
     glyph: (
@@ -124,7 +135,15 @@ const markLook = {
     ),
   },
 } as const satisfies Record<
-  ChainVerdict | IncidentState | 'Unsigned' | 'Signatures unsigned' | 'As recorded' | 'Changed since opened',
+  | ChainVerdict
+  | IncidentState
+  | 'Unsigned'
+  | 'Signatures unsigned'
+  | 'As recorded'
+  | 'Changed since opened'
+  | 'In force'
+  | 'Draft'
+  | 'Superseded',
   unknown
 >;
 
@@ -313,6 +332,7 @@ export const modules = [
   { key: 'notebooks', name: 'Notebooks', holds: 'Each Lab Notebook with its entries, Addenda and Late Entries.' },
   { key: 'dashboards', name: 'Dashboards', holds: 'Workload, turnaround and overdue Tests across the Lab.' },
   { key: 'audit-export', name: 'Audit Export', holds: '', takes: 'generateAuditExport' },
+  { key: 'checklists', name: 'Review Checklists', holds: '', takes: 'draftReviewChecklist' },
   { key: 'incidents', name: 'Incidents', holds: '', roles: incidentReaders },
   { key: 'workstations', name: 'Workstations', holds: '' },
   { key: 'staff', name: 'Staff', holds: '' },

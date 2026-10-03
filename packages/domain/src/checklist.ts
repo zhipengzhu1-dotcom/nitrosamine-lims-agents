@@ -33,6 +33,21 @@ export function checklistRefusal(items: readonly ChecklistItem[], ticks: Ticks):
   return null;
 }
 
+/**
+ * The key a new item of a draft takes from its text: its ASCII words as one camelCase key of at most 64 letters, with a
+ * letter added while `taken` already holds it. Items copied from an earlier version keep their key, so ticks stay comparable.
+ */
+export function itemKeyOf(text: string, taken: readonly string[]): string {
+  const words = text.toLowerCase().match(/[a-z]+/g) ?? ['item'];
+  const base = words.map((w, i) => (i === 0 ? w : w[0]?.toUpperCase() + w.slice(1))).join('');
+  const letters = 'BCDEFGHIJKLMNOPQRSTUVWXYZ';
+  for (let n = 0; ; n++) {
+    const suffix = n === 0 ? '' : 'Z'.repeat(Math.floor((n - 1) / letters.length)) + letters[(n - 1) % letters.length];
+    const key = base.slice(0, 64 - suffix.length) + suffix;
+    if (!taken.includes(key)) return key;
+  }
+}
+
 /** Refuses a QA approving a checklist version they drafted, so that a second QA has read every version put in force. */
 export function selfApprovalRefusal(
   kind: ChecklistKind,

@@ -82,10 +82,12 @@ async function versionsOf(company: Company, kind: ChecklistKind): Promise<Checkl
       )
     : [];
   const inForce = await checklistInForce(company, kind);
+  const sources = await company.selectFrom('evidenceSource').select('source').where('kind', '=', kind).execute();
   return {
     kind,
     statement: await statementInForce(company),
     inForce: inForce?.version ?? null,
+    evidenceSources: evidenceSources.filter((source) => sources.some((s) => s.source === source)),
     versions: versions.map(({ id, version, savedBy, contentHash, approved }) => ({
       id,
       version,

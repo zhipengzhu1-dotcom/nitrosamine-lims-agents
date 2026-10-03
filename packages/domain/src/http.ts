@@ -400,6 +400,8 @@ const checklistVersions = Type.Object({
   kind: checklistKind,
   statement: signatureStatement,
   inForce: nullable(Type.Integer({ minimum: 1 })),
+  /** The evidence the LIMS computes for this kind of checklist, which a draft's evidence items may name. */
+  evidenceSources: Type.Array(Type.Enum(evidenceSources)),
   versions: Type.Array(
     Type.Object({
       id: uuid,

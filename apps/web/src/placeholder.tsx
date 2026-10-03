@@ -1,5 +1,6 @@
-import type { ActorContext } from '@lims/domain';
+import { type ActorContext, checklistKinds } from '@lims/domain';
 import { AccessEventsPage } from './access-events.tsx';
+import { ChecklistsPage } from './checklists.tsx';
 import { EquipmentPage } from './equipment.tsx';
 import { IncidentsPage } from './incidents.tsx';
 import { type Module, Shell } from './rail.tsx';
@@ -24,6 +25,8 @@ export function Placeholder({
   if (module.key === 'workstations') return <WorkstationsPage me={me} />;
   if (module.key === 'incidents') return <IncidentsPage me={me} open={open} />;
   if (module.key === 'equipment') return <EquipmentPage me={me} open={open} />;
+  if (module.key === 'checklists')
+    return <ChecklistsPage me={me} kind={checklistKinds.find((k) => k === open) ?? 'Test'} />;
   if (module.key === 'staff')
     return open ? <AccessEventsPage me={me} id={open} before={before} /> : <StaffPage me={me} />;
   return (
