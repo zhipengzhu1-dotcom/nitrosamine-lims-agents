@@ -100,6 +100,9 @@ test('the Admin records an Identity Verification, creates the account and grants
   await page.context().clearCookies();
   await signInByApi(page, 'bea.admin');
   await page.goto('/#/staff');
+  // The page is still the one the signed-out welcome loaded, and a hash change keeps it; a reload reads the new session.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Staff accounts' })).toBeVisible();
   await page
     .getByRole('row', { name: new RegExp(username) })
     .getByRole('button', { name: 'Enrolment link' })
