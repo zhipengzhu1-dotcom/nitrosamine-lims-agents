@@ -4766,10 +4766,6 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
       'unreachable: record_equipment_event takes it from lims.person',
     ],
     ['lims.equipment_event.equipment_event_recorded_at_not_null', 'unreachable: record_equipment_event stamps it'],
-    [
-      'lims.equipment_event.require_event_signing',
-      'a constraint trigger is listed as a constraint and as a trigger; its refusal is shown in this file',
-    ],
   ]);
   const { rows } = await client.query<{ rule: string }>(
     `select n.nspname || '.' || c.relname || '.' || k.conname as rule
