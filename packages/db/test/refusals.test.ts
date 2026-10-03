@@ -2358,16 +2358,20 @@ describe('a Review Checklist version and a Test Review record who saved them, an
     covered.add(`${table}.capture`);
     it(`a new ${noun} by a named actor without a role and a reason is refused`, async () => {
       await client.query('begin');
-      const error = await client
-        .query(`select set_config('lims.actor', 'person:refusal.admin', true)`)
-        .then(() => client.query(...insert(table, tables[table].row)))
-        .then(
-          () => assert.fail(`the database accepted a ${noun} with no role and reason`),
-          (e: unknown) => (e instanceof pg.DatabaseError ? e : assert.fail(String(e))),
-        )
-        .finally(() => client.query('rollback'));
-      assert.deepEqual([error.code, error.message], ['LA001', 'an audited write needs an actor, a role and a reason']);
-      assert.match(error.where ?? '', /^PL\/pgSQL function capture\(\)/);
+      try {
+        await client.query(`select set_config('lims.actor', 'person:refusal.admin', true)`);
+        await assert.rejects(client.query(...insert(table, tables[table].row)), (error: unknown) => {
+          assert.ok(error instanceof pg.DatabaseError);
+          assert.deepEqual(
+            [error.code, error.message],
+            ['LA001', 'an audited write needs an actor, a role and a reason'],
+          );
+          assert.match(error.where ?? '', /^PL\/pgSQL function capture\(\)/);
+          return true;
+        });
+      } finally {
+        await client.query('rollback');
+      }
     });
   }
 
@@ -3718,7 +3722,8 @@ describe('a Signature is written only by the signing function, which refuses eve
       asService,
       `select lims.lock_chains('company', '${id.lab}')`,
       ...['QA', 'Reviewer'].map(
-        (role) => `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', '${role}')`,
+        (role) =>
+          `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', '${role}')`,
       ),
     ];
     const proof = (reauthentication: string, meaning: string) =>
