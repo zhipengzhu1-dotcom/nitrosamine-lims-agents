@@ -348,8 +348,9 @@ end $$;
 create trigger version_record after insert on lims.critical_data_change
   for each row execute function lims.version_critical_data_change();
 
--- Approved is the Signature Meaning of a Critical Data Change and of nothing else, and a Critical Data Change is signed
--- only Approved. lims.sign checks the signer, the proof and the version shown; this checks what an Approved signing binds.
+-- A Critical Data Change is signed only Approved, and a Test or the Test Report built on it is never signed Approved.
+-- Other records may take Approved in later tickets. lims.sign checks the signer, the proof and the version shown; this
+-- checks which meaning a change, a Test and a Test Report may bind.
 create function lims.check_change_signing() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 declare
@@ -359,9 +360,11 @@ begin
   if signed.id is null then
     return new; -- signature_record_version_fkey refuses it
   end if;
-  if (new.meaning = 'Approved') <> (signed.record_table = 'critical_data_change') then
-    raise exception 'Approved is the Signature Meaning of a Critical Data Change, and a Critical Data Change is signed only Approved'
-      using errcode = 'LA010';
+  if signed.record_table = 'critical_data_change' and new.meaning <> 'Approved' then
+    raise exception 'a Critical Data Change is signed only Approved' using errcode = 'LA010';
+  end if;
+  if signed.record_table in ('test', 'test_report') and new.meaning = 'Approved' then
+    raise exception 'a Test and the Test Report built on it are never signed Approved' using errcode = 'LA010';
   end if;
   return new;
 end $$;

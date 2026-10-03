@@ -423,21 +423,34 @@ describe('a Critical Data Change is decided once: withdrawn by its proposer, app
   });
 });
 
-describe('Approved is the Signature Meaning of a Critical Data Change, given by a Reviewer acting as Reviewer', () => {
-  const onlyChanges =
-    'Approved is the Signature Meaning of a Critical Data Change, and a Critical Data Change is signed only Approved';
+describe('a Critical Data Change is signed only Approved, by a Reviewer acting as Reviewer', () => {
+  const notOnTests = 'a Test and the Test Report built on it are never signed Approved';
 
-  it('an Approved Signature on a Test, and a Reviewed Signature on a Critical Data Change, are refused', async () => {
+  it('an Approved Signature on a Test or its Test Report, and a Reviewed Signature on a change, are refused', async () => {
     const test = await performedTest();
     const onTest = await refusal(
       acting(api.db, rui, 'Reviewer', (tx) => signThrough(tx, rui, 'Approved', 'test', test.testId)),
     );
-    assert.deepEqual([onTest.code, onTest.message], ['LA010', onlyChanges]);
+    assert.deepEqual([onTest.code, onTest.message], ['LA010', notOnTests]);
+    const { id: reportId } = await audited(
+      api.superuser,
+      { actor: 'svc:test', role: 'system', reason: 'Issue a Test Report to sign Approved' },
+      (tx) =>
+        tx
+          .insertInto('testReport')
+          .values({ labId: api.labId, testId: test.testId, number: `CDC-A${test.testId.slice(0, 5)}` })
+          .returning('id')
+          .executeTakeFirstOrThrow(),
+    );
+    const onReport = await refusal(
+      acting(api.db, rui, 'Reviewer', (tx) => signThrough(tx, rui, 'Approved', 'test_report', reportId)),
+    );
+    assert.deepEqual([onReport.code, onReport.message], ['LA010', notOnTests]);
     const changeId = await propose(test);
     const onChange = await refusal(
       acting(api.db, rui, 'Reviewer', (tx) => signThrough(tx, rui, 'Reviewed', 'critical_data_change', changeId)),
     );
-    assert.deepEqual([onChange.code, onChange.message], ['LA010', onlyChanges]);
+    assert.deepEqual([onChange.code, onChange.message], ['LA010', 'a Critical Data Change is signed only Approved']);
   });
 
   it('an approval written by its Reviewer acting in another role is refused', async () => {
