@@ -1,7 +1,6 @@
 import { type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
-  type Authenticator,
   type IncidentStepBody,
   type IncidentStepInputs,
   type IncidentStepName,
@@ -15,10 +14,11 @@ import {
 import { type Kysely, sql, type UpdateObject } from 'kysely';
 import type { App } from './app.ts';
 import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
+import { openChainIncidents } from './incident.ts';
 import { refuse } from './refuse.ts';
 import { labScope } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
-import { signedAtLab } from './trail.ts';
+import { chainsOf, signatureReply, signatureReplyColumns } from './trail.ts';
 
 /** System Incidents are company records (map #1, lab-scope-incidents): Admin and QA of any Lab read and act on them. */
 function readableBy(actor: ActorContext): void {
@@ -102,29 +102,16 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
         .onRef('recordVersion.labId', '=', 'signature.labId')
         .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
     )
-    .select([
-      'signature.meaning',
-      'signature.printedName as signer',
-      'signature.username',
-      'signature.role',
-      sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
-      'signature.signedAt',
-      signedAtLab,
-      'recordVersion.version',
-      'recordVersion.canonicalForm',
-      sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
+    .select(signatureReplyColumns)
+    .select(
       sql<boolean>`record_version.content_hash <> lims.incident_content_hash(record_version.record_id)`.as('unsigned'),
-    ])
+    )
     .where('recordVersion.recordTable', '=', 'system_incident')
     .where('recordVersion.recordId', '=', row.id)
     .where('signature.meaning', '=', 'Acknowledged')
     .orderBy('signature.signedAt')
     .executeTakeFirst()
-    .then((signed) => {
-      if (!signed) return null;
-      const { version, canonicalForm, contentHash, ...signature } = signed;
-      return { ...signature, record: 'System Incident', recordVersion: { version, canonicalForm, contentHash } };
-    });
+    .then((signed) => (signed ? signatureReply(signed, 'System Incident') : null));
   const {
     id,
     impactAnswer,
@@ -292,6 +279,45 @@ export function incidentRoutes(app: App, db: Kysely<DB>, credentials: Credential
     handler: async (req) => {
       readableBy(req.actor);
       return (await readIncident(db, req.actor.lab.id, req.params.reference)).view;
+    },
+  });
+  app.route({
+    ...routes.incidentBreaks,
+    handler: async (req) => {
+      readableBy(req.actor);
+      const { reference } = req.params;
+      const incident =
+        (await db
+          .selectFrom('systemIncident')
+          .select(['id', 'chain', 'firstFailure', 'lastFailure', 'fingerprint'])
+          .where('reference', '=', reference)
+          .executeTakeFirst()) ?? refuse('notFound', `No System Incident has the reference ${reference}.`);
+      const { id, chain, firstFailure, lastFailure, fingerprint } = incident;
+      if (chain === null || firstFailure === null)
+        refuse('state', `System Incident ${reference} records no break in an Audit Trail chain.`);
+      if (lastFailure === null || fingerprint === null)
+        refuse(
+          'state',
+          `System Incident ${reference} was opened before the LIMS recorded a break's last entry. Verify the chain to record it again.`,
+        );
+      const scope = labScope(db, req.actor);
+      const range = { id, chain, first: firstFailure, last: lastFailure, fingerprint };
+      const listed =
+        (await scope.breaksWithin(range)) ??
+        refuse(
+          'role',
+          `System Incident ${reference} records breaks in another Lab's chain. Switch to that Lab to list them.`,
+        );
+      // A read that detects an unrecorded change records it, whoever reads: the opening is the LIMS recording what it
+      // found (EU Annex 11 §13), not a QA step.
+      if (listed.asRecorded) return { ...listed, opened: [] };
+      const verified = (await chainsOf(db, req, await scope.verifyAuditTrail())).chains.find(
+        (c) => c.chainId === chain,
+      );
+      const found = verified ? await openChainIncidents(db, req.log, req.actor, chain, verified.breaks) : [];
+      // Read again, so `incidents` names the incidents just opened by the same kind rule that chose the listed breaks.
+      const relisted = (await scope.breaksWithin(range)) ?? listed;
+      return { ...relisted, opened: found.filter((b) => b.opened).map((b) => b.incident) };
     },
   });
   for (const name of incidentStepNames) registerIncidentStep(app, db, credentials, name, release);

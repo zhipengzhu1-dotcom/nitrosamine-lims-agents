@@ -405,6 +405,47 @@ const chainReading = Type.Object({
   verifiedBefore: nullable(Type.Object({ through: seq, at: instant, by: Type.String() })),
 });
 export type ChainReading = Static<typeof chainReading>;
+/**
+ * One break as the chain reads now: its first entry, its kind, and the last entry it covers, which is past the first
+ * only for a run of missing entries.
+ */
+const breakInRange = Type.Object({
+  entry: seq,
+  kind: Type.Enum({
+    Changed: 'Changed',
+    Missing: 'Missing',
+    HeadMoved: 'HeadMoved',
+    Contradicted: 'Contradicted',
+  } as const),
+  through: seq,
+});
+export type BreakInRange = Static<typeof breakInRange>;
+/**
+ * A break inside a System Incident's range, listed either as the chain reads now or as the incident stored it.
+ * `matches` says whether the other list holds the same break: the same entry, last entry and fingerprint.
+ */
+const listedBreak = Type.Object({ ...breakInRange.properties, matches: Type.Boolean() });
+export type ListedBreak = Static<typeof listedBreak>;
+/**
+ * Every break inside a chain verification System Incident's range, recomputed at `recomputedAt`, and whether they are
+ * still the breaks the incident recorded; false means the chain changed inside the range after the incident was opened.
+ * A contradicted Chain Verification is a break of its own kind at the entry it names: only an incident that stored one
+ * lists it, or one that stored none and records that break by its fingerprint, and every other incident lists the
+ * other kinds, so two incidents at one entry each list their own break. `recorded` is the breaks the incident stored
+ * when it opened, null for one opened before the LIMS stored them. `incidents` names the System Incidents that record the listed breaks now, other than this one.
+ * When the chain has changed there, the read records the change as Verify chain does, whether an Admin or QA reads,
+ * and `opened` names every System Incident it opened, anywhere on the chain, with the reader as its requesting person.
+ */
+const reference = Type.String({ pattern: `^${referencePattern}$` });
+const incidentBreaks = Type.Object({
+  recomputedAt: instant,
+  asRecorded: Type.Boolean(),
+  breaks: Type.Array(listedBreak),
+  recorded: Type.Union([Type.Array(listedBreak), Type.Null()]),
+  incidents: Type.Array(reference),
+  opened: Type.Array(reference),
+});
+export type IncidentBreaks = Static<typeof incidentBreaks>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainReading) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
 const auditExportFormat = Type.Enum({ JSON: 'JSON', CSV: 'CSV' } as const satisfies { [K in db.AuditExportFormat]: K });
@@ -752,6 +793,8 @@ export const routes = {
   /** The System Incidents not yet Closed, newest first, for Admin and QA. */
   incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
   incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
+  /** Every break inside a chain verification System Incident's range, as this Lab's chain or the company chain reads now. */
+  incidentBreaks: route('GET', '/api/incidents/:reference/breaks', { params: byReference }, incidentBreaks),
 } satisfies Record<string, Route>;
 
 const incidentStepInputs = {

@@ -1,5 +1,6 @@
 import type {
   AuditedTable,
+  BreakInRange,
   ChainBreak,
   ChainKind,
   ChainReading,
@@ -454,7 +455,7 @@ export function describeTrail(
  * after the last entry a chain head that does not match it, or a Chain Verification the Audit Trail no longer matches.
  * `More` is every break after the ones a verification records one by one, taken together.
  */
-export type BreakKind = 'Changed' | 'Missing' | 'HeadMoved' | 'Contradicted' | 'More';
+export type BreakKind = BreakInRange['kind'] | 'More';
 
 /**
  * A break as the database found it, with the System Incident that records it, before it is read for QA; `through` is
