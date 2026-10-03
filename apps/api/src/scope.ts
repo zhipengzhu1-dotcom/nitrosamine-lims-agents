@@ -152,20 +152,23 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
         ],
       };
     },
-    /** One audited transaction; a write a re-authentication enables holds that person's row before anything else but `declare`, which takes no lock. */
+    /**
+     * One audited transaction. A write a re-authentication enables holds that person's row before anything else, and
+     * a write that changes the data class declares so before that, which takes no lock.
+     */
     write: <R>(
       reason: string,
       role: Role,
       fn: (q: WriteQueries) => Promise<R>,
       reauthenticated?: Reauthenticated,
-      declare?: (q: WriteQueries) => Promise<void>,
+      declaresDataClassChange = false,
     ) =>
       auditedAfterReauthentication(
         db,
         { actor: `person:${ctx.person.username}`, role, reason },
         reauthenticated,
         (tx) => fn(inWrite(tx, labId)),
-        declare && ((tx) => declare(inWrite(tx, labId))),
+        declaresDataClassChange,
       ),
   };
 }

@@ -468,7 +468,8 @@ create trigger version_record after insert or update or delete on lims.service_i
 -- declaring a service identity is approved, and always on the real data class. The seed approves its identities
 -- entry, so a fresh database is held to it from the seed on. A database that held people before the Release Log keeps
 -- its service identities unscoped, as before #102, until a Platform Operator approves the identities entry this
--- migration records for it; approving any other entry first leaves sign-in working (deploy/README.md). The database
+-- migration records for it, or any entry declaring a service identity; approving an entry that declares none leaves
+-- sign-in working (deploy/README.md). The database
 -- owner acting outside the LIMS is exempt, as from Identity Verification (0015): the owner's writes are captured all
 -- the same.
 create or replace function lims.capture() returns trigger

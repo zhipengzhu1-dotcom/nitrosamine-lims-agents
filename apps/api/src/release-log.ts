@@ -12,7 +12,7 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { type Login, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
-import { type LabQueries, labScope, type Scope, type WriteQueries } from './scope.ts';
+import { type LabQueries, labScope, type Scope } from './scope.ts';
 import { statementInForce } from './steps.ts';
 
 /** Anchoring of the Audit Trail is not built, so the gate reads it as not live until the build that makes it a record. */
@@ -237,14 +237,6 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
         'ReauthenticationFailed',
       );
       const sessionId = req.sessionKey.id;
-      // An entry setting the data class says so before the transaction's first chain, so the database locks the
-      // deployment row ahead of every chain, the order each captured write takes them in.
-      const declareClassChange =
-        entry.setsDataClass === null
-          ? undefined
-          : async (q: WriteQueries) => {
-              await sql`select lims.declare_data_class_change()`.execute(q.company);
-            };
       await scope.write(
         'Approve the Release Log entry',
         role,
@@ -266,7 +258,9 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
             .catch(signingRefused);
         },
         reauthenticated,
-        declareClassChange,
+        // An entry setting the data class says so before the transaction's first chain, so the database locks the
+        // deployment row ahead of every chain, the order each captured write takes them in.
+        entry.setsDataClass !== null,
       );
       req.log.info({ entryId: entry.id }, 'release log entry approved');
       return one(scope, entry.id);
