@@ -208,7 +208,7 @@ const fixture: [string, Row][] = [
       id: id.secondReauthentication,
       session_id: id.session,
       person_id: id.person,
-      meaning: 'Reviewed',
+      meaning: 'Performed',
       authenticator: 'Password',
     },
   ],
@@ -467,7 +467,7 @@ const tables = {
       printed_name: 'Refusal Person',
       username: 'refusal.person',
       role: 'Analyst',
-      meaning: 'Reviewed',
+      meaning: 'Performed',
       record_version_id: id.laterRecordVersion,
       content_hash: sha256(fixtureContent),
       canonical_form: 0,
@@ -2945,7 +2945,7 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
       ]);
       await client.query(
         `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
-         values ($1, $2, $3, $4, 'Reviewed', 'Password')`,
+         values ($1, $2, $3, $4, 'Performed', 'Password')`,
         [id.lab, proof, session, signer],
       );
       await signingStamp(signed);
@@ -3137,7 +3137,7 @@ describe('a Signature is written only by the signing function, which refuses eve
     },
     {
       name: 'signing with a re-authentication record from an earlier transaction is refused',
-      statements: [asPerson('Analyst'), sign({ reauthentication: id.secondReauthentication, meaning: 'Reviewed' })],
+      statements: [asPerson('Analyst'), sign({ reauthentication: id.secondReauthentication, meaning: 'Performed' })],
       message: 'the re-authentication record was written by an earlier transaction',
     },
     {
