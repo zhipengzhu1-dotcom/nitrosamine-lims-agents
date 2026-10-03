@@ -13,7 +13,17 @@ import {
   type TrailEntry,
 } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, onLabClock, refusedWith, signatureOf, startApi } from './harness.ts';
+import {
+  type Account,
+  type Client,
+  labZoneMoveReason,
+  ok,
+  onLabClock,
+  refusedWith,
+  signatureOf,
+  startApi,
+  toMillis,
+} from './harness.ts';
 
 const api = await startApi('lims_api_trail_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -393,7 +403,6 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
     const stored = entries.flatMap((e) => e.changes).flatMap((c) => [c.old?.instant, c.new?.instant]);
     return [...entries, ...stored].flatMap((i) => (i?.atLab ? [{ at: i.at, atLab: i.atLab }] : []));
   };
-  const toMillis = (atLab: string | null) => atLab?.replace(/(\.\d{3})\d{3}/, '$1');
   const writtenBefore = await submitTestTo('Reported');
   const shownBefore = await shownOn(writtenBefore);
   const trailBefore = await everyLabClockIn(writtenBefore);
@@ -428,7 +437,7 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
     const change = lab.entries.at(-1) ?? assert.fail('the zone change in the Lab trail');
     assert.deepEqual(
       [change.record.id, change.reason, change.changes.map((c) => [c.label, c.old?.text, c.new?.text])],
-      [api.labId, 'Move the Lab to a zone no other Lab has', [['Time zone', before, 'Asia/Tokyo']]],
+      [api.labId, labZoneMoveReason, [['Time zone', before, 'Asia/Tokyo']]],
     );
   } finally {
     await api.moveLabZone(before);

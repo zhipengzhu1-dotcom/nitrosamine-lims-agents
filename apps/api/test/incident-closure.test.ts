@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { forcesYes, incidentStepRoute, type Role, routes, type SigningBody, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, onLabClock, refusedWith, signatureOf, startApi } from './harness.ts';
+import { type Account, type Client, ok, onLabClock, refusedWith, signatureOf, startApi, toMillis } from './harness.ts';
 
 const api = await startApi('lims_api_incident_closure_test');
 const lou = await api.addPerson('lou.analyst', ['Analyst'], { trained: true });
@@ -407,7 +407,7 @@ it('the Acknowledged Signature keeps the Lab wall clock of the zone it was signe
   const signed =
     ok(await acknowledge(as.ada, reference, ada)).acknowledged ?? assert.fail('the Acknowledged Signature');
   assert.equal(
-    signed.signedAtLab.replace(/(\.\d{3})\d{3}/, '$1'),
+    toMillis(signed.signedAtLab),
     onLabClock(signed.signedAt, before),
     `signed on the ${before} clock, to the millisecond the UTC time carries`,
   );
