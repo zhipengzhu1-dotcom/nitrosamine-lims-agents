@@ -3940,14 +3940,16 @@ describe('a Document keeps its number, and its versions reach Effective only thr
   const versionIn = (status: string, effectiveDate = '2099-01-01'): Statement[] => [
     triggersOff,
     statement(
-      `insert into lims.document_version (lab_id, id, document_id, version, status, title, body, author_id, effective_date)
-       values ($1, $2, $3, 1, $4, 'Probe', 'Probe.', $5, $6)`,
+      `insert into lims.document_version (lab_id, id, document_id, version, status, title, body, author_id, effective_date,
+                                          abandon_reason)
+       values ($1, $2, $3, 1, $4, 'Probe', 'Probe.', $5, $6, $7)`,
       id.lab,
       version,
       id.emptyDocument,
       status,
       id.person,
       effectiveDate,
+      status === 'Abandoned' ? 'Not needed.' : null,
     ),
     statement(
       `insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
@@ -3994,6 +3996,22 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     statement('update lims.document_version set title = $1 where id = $2', title, version);
   const setEffectiveDate = (date: string) =>
     statement('update lims.document_version set effective_date = $1 where id = $2', date, version);
+  const setAbandonReason = (reason: string) =>
+    statement('update lims.document_version set abandon_reason = $1 where id = $2', reason, version);
+  /** Version 2 of the empty Document, written past the triggers in `status` with `effectiveDate`. */
+  const laterIn = (status: string, effectiveDate: string): Statement[] => [
+    triggersOff,
+    statement(
+      `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id, effective_date)
+       values ($1, $2, 2, $3, 'Later', 'Later.', $4, $5)`,
+      id.lab,
+      id.emptyDocument,
+      status,
+      id.person,
+      effectiveDate,
+    ),
+    triggersOn,
+  ];
   const abandon = (reason: string) =>
     statement(
       `update lims.document_version set status = 'Abandoned', abandon_reason = $1 where id = $2`,
@@ -4159,16 +4177,36 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     {
       name: 'a Draft that goes In Review with no Authored Signature is refused',
       statements: [...versionIn('Draft'), setStatus('InReview')],
-      message: 'a Document version goes In Review only on its Authored Signature',
+      message: 'a Document version goes In Review only on an Authored Signature over its content as it is now',
+    },
+    {
+      name: 'a Draft whose content changed after its Authored Signature does not go In Review',
+      statements: [
+        ...versionIn('Draft'),
+        ...signed('Authored', id.person),
+        setTitle('Changed after signing'),
+        setStatus('InReview'),
+      ],
+      message: 'a Document version goes In Review only on an Authored Signature over its content as it is now',
     },
     {
       name: 'a Document version Approved with no Approved Signature is refused',
       statements: [...versionIn('InReview'), setStatus('Approved')],
-      message: 'a Document version is Approved only by an Approved Signature over its content as it is now',
+      message: 'a Document version is Approved only by Reviewed and Approved Signatures over its content as it is now',
+    },
+    {
+      name: 'a Document version Approved with no Reviewed Signature is refused',
+      statements: [...versionIn('InReview'), ...signed('Approved', id.otherPerson), setStatus('Approved')],
+      message: 'a Document version is Approved only by Reviewed and Approved Signatures over its content as it is now',
     },
     {
       name: 'a Document version Approved after its Effective Date has passed is refused',
-      statements: [...versionIn('InReview', '2000-01-01'), ...signed('Approved', id.otherPerson), setStatus('Approved')],
+      statements: [
+        ...versionIn('InReview', '2000-01-01'),
+        ...signed('Reviewed', id.reviewer),
+        ...signed('Approved', id.otherPerson),
+        setStatus('Approved'),
+      ],
       message: 'a Document version is not Approved after its Effective Date, 2000-01-01, has passed',
     },
     {
@@ -4184,7 +4222,22 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     {
       name: 'an Effective version Superseded with no later Approved version is refused',
       statements: [...versionIn('Effective', '2026-01-01'), setStatus('Superseded')],
-      message: 'a Document version is Superseded only by a later Approved version',
+      message: 'a Document version is Superseded only by a later version whose Effective Date has come',
+    },
+    {
+      name: 'an Effective version Superseded by a later version Approved for a later Effective Date is refused',
+      statements: [...versionIn('Effective', '2026-01-01'), ...laterIn('Approved', '2099-01-01'), setStatus('Superseded')],
+      message: 'a Document version is Superseded only by a later version whose Effective Date has come',
+    },
+    {
+      name: "a change to an Abandoned version's abandon reason is refused",
+      statements: [...versionIn('Abandoned'), setAbandonReason('Rewritten.')],
+      message: "a Document version's abandon reason is written once, as it is Abandoned",
+    },
+    {
+      name: 'a Document version Abandoned by someone who claims QA but does not hold it is refused',
+      statements: [...versionIn('InReview'), asPerson('refusal.admin', 'QA'), abandon('Not needed.')],
+      message: 'a Document version is Abandoned by its author or QA',
     },
     {
       name: 'a Document version Abandoned by someone who is neither its author nor QA is refused',
@@ -4209,6 +4262,19 @@ describe('a Document keeps its number, and its versions reach Effective only thr
         [version],
       );
       assert.deepEqual(rows, [{ status: 'Abandoned', number: 'RF-FRM-0001' }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it('QA, who did not author it, Abandons an In Review version with a reason', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await accepted(...versionIn('InReview'), asPerson('refusal.other', 'QA'), abandon('Withdrawn.'));
+      const { rows } = await client.query('select status, abandon_reason from lims.document_version where id = $1', [
+        version,
+      ]);
+      assert.deepEqual(rows, [{ status: 'Abandoned', abandon_reason: 'Withdrawn.' }]);
     } finally {
       await client.query('rollback');
     }

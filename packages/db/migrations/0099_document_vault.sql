@@ -94,12 +94,14 @@ language sql stable as $$
   where v.id = p_id
 $$;
 
--- The signers of a Document version with a Meaning, over every Record Version of it.
+-- The signers of a Document version with a Meaning, over its content as it is now: a Signature over content that has
+-- since changed no longer counts.
 create function lims.document_signers(p_id uuid, p_meaning lims.meaning) returns uuid[]
 language sql stable as $$
   select coalesce(array_agg(s.person_id), '{}') from lims.signature s
     join lims.record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
    where v.record_table = 'document_version' and v.record_id = p_id and s.meaning = p_meaning
+     and v.content_hash = sha256(convert_to(lims.document_version_content(p_id)::text, 'UTF8'))
 $$;
 
 -- A version opens as a Draft, the next of its Document, written by the person acting, who is its author and holds a
@@ -132,9 +134,11 @@ begin
   return new;
 end $$;
 
--- A version moves Draft to In Review on its Authored Signature, In Review to Approved on its Approved Signature over
--- its content as it is now, Approved to Effective once its Effective Date has come in the Lab's zone, and Effective to
--- Superseded when a later version takes effect. An open version may be Abandoned, by its author or QA, with a reason.
+-- A version moves Draft to In Review on its Authored Signature, In Review to Approved on its Reviewed and Approved
+-- Signatures, each over its content as it is now, Approved to Effective once its Effective Date has come in the Lab's
+-- zone, and Effective to Superseded when a later version is Effective or Approved with an Effective Date that has
+-- come, which the API then makes Effective in the same transaction. An open version may be Abandoned, by its author
+-- or a person who holds QA in its Lab, with a reason written then and never changed.
 -- What the Signatures cover, the Effective Date among it, changes only while Draft, and the Effective Date is never
 -- written in the past. A version whose Effective Date has passed is not Approved: its Signatures would approve a day
 -- it did not take effect on.
@@ -153,6 +157,10 @@ begin
   if new.effective_date is distinct from old.effective_date and new.effective_date < lab_today then
     raise exception 'a Document version''s Effective Date is today or later in the Lab' using errcode = 'LA014';
   end if;
+  if new.abandon_reason is distinct from old.abandon_reason
+     and not (old.status <> 'Abandoned' and new.status = 'Abandoned') then
+    raise exception 'a Document version''s abandon reason is written once, as it is Abandoned' using errcode = 'LA014';
+  end if;
   if new.status = old.status then
     return new;
   end if;
@@ -164,13 +172,12 @@ begin
     raise exception 'a Document version does not move from % to %', old.status, new.status using errcode = 'LA014';
   end if;
   if new.status = 'InReview' and cardinality(document_signers(new.id, 'Authored')) = 0 then
-    raise exception 'a Document version goes In Review only on its Authored Signature' using errcode = 'LA014';
+    raise exception 'a Document version goes In Review only on an Authored Signature over its content as it is now'
+      using errcode = 'LA014';
   end if;
-  if new.status = 'Approved' and not exists (
-       select from signature s join record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
-        where v.record_table = 'document_version' and v.record_id = new.id and s.meaning = 'Approved'
-          and v.content_hash = sha256(convert_to(document_version_content(new.id)::text, 'UTF8'))) then
-    raise exception 'a Document version is Approved only by an Approved Signature over its content as it is now'
+  if new.status = 'Approved' and (cardinality(document_signers(new.id, 'Reviewed')) = 0
+                                  or cardinality(document_signers(new.id, 'Approved')) = 0) then
+    raise exception 'a Document version is Approved only by Reviewed and Approved Signatures over its content as it is now'
       using errcode = 'LA014';
   end if;
   if new.status = 'Approved' and new.effective_date < lab_today then
@@ -183,12 +190,17 @@ begin
   end if;
   if new.status = 'Superseded' and not exists (
        select from document_version later where later.document_id = new.document_id and later.version > new.version
-          and later.status in ('Approved', 'Effective')) then
-    raise exception 'a Document version is Superseded only by a later Approved version' using errcode = 'LA014';
+          and (later.status = 'Effective' or (later.status = 'Approved' and later.effective_date <= lab_today))) then
+    raise exception 'a Document version is Superseded only by a later version whose Effective Date has come'
+      using errcode = 'LA014';
   end if;
-  if new.status = 'Abandoned' and current_setting('lims.role', true) is distinct from 'QA'
+  if new.status = 'Abandoned'
      and not exists (select from person where id = new.author_id
-                        and 'person:' || username = current_setting('lims.actor', true)) then
+                        and 'person:' || username = current_setting('lims.actor', true))
+     and not (current_setting('lims.role', true) = 'QA'
+              and exists (select from membership m join person p on p.id = m.person_id
+                           where m.lab_id = new.lab_id and m.role = 'QA'
+                             and 'person:' || p.username = current_setting('lims.actor', true))) then
     raise exception 'a Document version is Abandoned by its author or QA' using errcode = 'LA014';
   end if;
   return new;
