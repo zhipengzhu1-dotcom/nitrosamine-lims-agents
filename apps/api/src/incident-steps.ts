@@ -1,6 +1,7 @@
 import { type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
+  type Authenticator,
   type IncidentStepBody,
   type IncidentStepInputs,
   type IncidentStepName,
@@ -13,12 +14,12 @@ import {
 } from '@lims/domain';
 import { type Kysely, sql, type UpdateObject } from 'kysely';
 import type { App } from './app.ts';
-import { reauthenticate, sourceAddressOf } from './auth.ts';
+import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { openChainIncidents } from './incident.ts';
 import { refuse } from './refuse.ts';
 import { labScope } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
-import { onWallClock } from './trail.ts';
+import { signedAtLab } from './trail.ts';
 
 /** System Incidents are company records (map #1, lab-scope-incidents): Admin and QA of any Lab read and act on them. */
 function readableBy(actor: ActorContext): void {
@@ -102,14 +103,14 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
         .onRef('recordVersion.labId', '=', 'signature.labId')
         .onRef('recordVersion.id', '=', 'signature.recordVersionId'),
     )
-    .innerJoin('lab', 'lab.labId', 'signature.labId')
     .select([
       'signature.meaning',
       'signature.printedName as signer',
       'signature.username',
       'signature.role',
+      sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
       'signature.signedAt',
-      onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('lab.time_zone')).as('signedAtLab'),
+      signedAtLab,
       'recordVersion.version',
       'recordVersion.canonicalForm',
       sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
@@ -181,7 +182,13 @@ function movedOn(error: unknown): never {
   throw new Error('the System Incident step failed in the database', { cause: error });
 }
 
-function registerIncidentStep<K extends IncidentStepName>(app: App, db: Kysely<DB>, name: K, release: string): void {
+function registerIncidentStep<K extends IncidentStepName>(
+  app: App,
+  db: Kysely<DB>,
+  credentials: Credentials,
+  name: K,
+  release: string,
+): void {
   const step = incidentSteps[name];
   const route = incidentStepRoute(name);
   app.post<{ Body: IncidentStepBody<K> }>(route.url, { schema: route.schema }, async (req) => {
@@ -215,8 +222,9 @@ function registerIncidentStep<K extends IncidentStepName>(app: App, db: Kysely<D
       step.signs !== null && signature
         ? await reauthenticate(
             db,
+            credentials,
             { actor, session: req.sessionKey },
-            { username: signature.username, password: signature.password },
+            { username: signature.username, password: signature.password, code: signature.code },
             step.role,
             sourceAddressOf(req),
             'ReauthenticationFailed',
@@ -227,10 +235,10 @@ function registerIncidentStep<K extends IncidentStepName>(app: App, db: Kysely<D
       name,
       step.role,
       async (q) => {
-        if (step.signs !== null && signature) {
+        if (step.signs !== null && signature && reauthenticated) {
           // lock_chain (LA004) wants the company chain declared before this Lab's, which the Signature writes to.
           await sql`select lims.lock_chains('company', ${actor.lab.id})`.execute(q.company);
-          const proof = await proveReauthentication(q, actor, sessionId, step.signs);
+          const proof = await proveReauthentication(q, actor, sessionId, step.signs, reauthenticated);
           const { rows } = await sql<{ id: string }>`select lims.version_system_incident(${proof}, ${id}) as id`
             .execute(q.company)
             .catch(signingRefused);
@@ -267,7 +275,7 @@ function registerIncidentStep<K extends IncidentStepName>(app: App, db: Kysely<D
 }
 
 /** The System Incident list and view for Admin and QA, and `POST /api/incident-steps/:step`, one route per registry entry. */
-export function incidentRoutes(app: App, db: Kysely<DB>, release: string): void {
+export function incidentRoutes(app: App, db: Kysely<DB>, credentials: Credentials, release: string): void {
   app.route({
     ...routes.incidents,
     handler: async (req) => {
@@ -330,5 +338,5 @@ export function incidentRoutes(app: App, db: Kysely<DB>, release: string): void 
       };
     },
   });
-  for (const name of incidentStepNames) registerIncidentStep(app, db, name, release);
+  for (const name of incidentStepNames) registerIncidentStep(app, db, credentials, name, release);
 }

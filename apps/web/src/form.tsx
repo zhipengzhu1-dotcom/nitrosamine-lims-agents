@@ -1,5 +1,6 @@
-import { type FormEvent, useRef, useState } from 'react';
-import { Refused } from './api.ts';
+import { type FormEvent, type InputHTMLAttributes, useRef, useState } from 'react';
+import { routes } from '@lims/domain';
+import { Refused, useApi } from './api.ts';
 
 interface Outcome {
   text: string;
@@ -42,6 +43,34 @@ export function useCommit() {
     </p>
   );
   return { busy, commit, shown };
+}
+
+/**
+ * Whether this login asks for an authenticator code, as the API answers: undefined until it answers, and with the
+ * failure if it did not, so that a form submits nothing before it knows what to send.
+ */
+export function useLoginPolicy(): { secondFactor: boolean | undefined; error: string | undefined } {
+  const { data, error } = useApi(routes.loginPolicy);
+  return { secondFactor: data?.secondFactor, error };
+}
+
+/** The authenticator code a person types beside their password when the login asks for one: six digits, and Enter sends the form. */
+export function CodeField(props: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label>
+      Authenticator code
+      <input
+        name="code"
+        required
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={6}
+        pattern="[0-9]{6}"
+        enterKeyHint="go"
+        {...props}
+      />
+    </label>
+  );
 }
 
 export const field = (form: FormData, name: string) => {

@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { audited } from '@lims/db';
 import { type Route, type RouteInput, routes, SESSION_ENDED, stepNames, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { endLapsedSessions, SESSION_LIMITS } from '../src/auth.ts';
+import { endLapsedSessions, LOGIN } from '../src/auth.ts';
 import { type Account, type Answer, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_workstations_test');
@@ -39,7 +39,7 @@ const signInOn = async (browser: Client, account: Account, labId = api.labId) =>
 const eventsOf = (subjectId: string) =>
   api.superuser
     .selectFrom('accessEvent')
-    .select(['kind', 'subjectId', 'takenById', 'workstationId', 'sessionId'])
+    .select(['kind', 'subjectId', 'takenById', 'workstationId', 'sessionId', 'failureReason'])
     .where('subjectId', '=', subjectId)
     .orderBy('at')
     .execute();
@@ -299,12 +299,14 @@ describe('Lock and Switch user', () => {
     });
     const servedWhileLocked = new Set<Route>([
       routes.labs,
+      routes.loginPolicy,
       routes.login,
       routes.session,
       routes.lock,
       routes.unlock,
       routes.logout,
       routes.setPasswordThroughLink,
+      routes.enrolAuthenticator,
     ]);
     const everyOther = [...Object.values(routes), ...stepNames.map((name) => stepRoute(name))].filter(
       (route) => !servedWhileLocked.has(route),
@@ -343,13 +345,13 @@ describe('Lock and Switch user', () => {
 
     const [session] = await sessionsOf(ana.id);
     assert.deepEqual(
-      (await eventsOf(ana.id)).map((e) => [e.kind, e.workstationId, e.sessionId]),
+      (await eventsOf(ana.id)).map((e) => [e.kind, e.workstationId, e.sessionId, e.failureReason]),
       [
-        ['SignInSucceeded', workstation.id, session?.id],
-        ['Lock', workstation.id, session?.id],
-        ['UnlockFailed', workstation.id, session?.id],
-        ['UnlockFailed', workstation.id, session?.id],
-        ['Unlock', workstation.id, session?.id],
+        ['SignInSucceeded', workstation.id, session?.id, null],
+        ['Lock', workstation.id, session?.id, null],
+        ['UnlockFailed', workstation.id, session?.id, 'WrongPassword'],
+        ['UnlockFailed', workstation.id, session?.id, 'WrongPassword'],
+        ['Unlock', workstation.id, session?.id, null],
       ],
     );
   });
@@ -370,9 +372,14 @@ describe('Lock and Switch user', () => {
       .executeTakeFirstOrThrow();
     assert.equal(person.failedLogins, 1, 'a locked account keeps the failures that led to it');
     assert.deepEqual(
-      (await eventsOf(ana.id)).map((e) => e.kind),
-      ['SignInSucceeded', 'Lock', 'UnlockFailed', 'UnlockFailed'],
-      'the refused unlock is an Access Event, as a sign-in refused by a Lockout is',
+      (await eventsOf(ana.id)).map((e) => [e.kind, e.failureReason]),
+      [
+        ['SignInSucceeded', null],
+        ['Lock', null],
+        ['UnlockFailed', 'WrongPassword'],
+        ['UnlockFailed', 'AccountLocked'],
+      ],
+      'the refused unlock is an Access Event with its reason, as a sign-in refused by a Lockout is',
     );
     const reasons = await api.superuser
       .selectFrom('auditEntry')
@@ -421,9 +428,9 @@ describe('Lock and Switch user', () => {
     const { workstation, browser } = await enrolledBrowser();
     const ana = await api.addPerson(`ana.expired-on-bench-${randomUUID()}`, ['Analyst']);
     await signInOn(browser, ana);
-    await api.advanceClock(ana, SESSION_LIMITS.decided.idleMs + 60_000);
+    await api.advanceClock(ana, LOGIN.decided.idleMs + 60_000);
 
-    await endLapsedSessions(api.db, SESSION_LIMITS.decided);
+    await endLapsedSessions(api.db, LOGIN.decided);
 
     const events = await eventsOf(ana.id);
     assert.deepEqual(
@@ -454,7 +461,7 @@ describe('Lock and Switch user', () => {
     const browser = await api.login(ana);
     ok(await browser.call(routes.lock));
     refusedWith(await browser.call(routes.unlock, { password: 'not-the-password' }), 'badCredentials');
-    await api.advanceClock(ana, SESSION_LIMITS.decided.idleMs + 60_000);
+    await api.advanceClock(ana, LOGIN.decided.idleMs + 60_000);
     refusedWith(await browser.call(routes.unlock, { password: ana.password }), 'noSession');
     assert.deepEqual(
       (await eventsOf(ana.id)).map((e) => e.kind).sort(),

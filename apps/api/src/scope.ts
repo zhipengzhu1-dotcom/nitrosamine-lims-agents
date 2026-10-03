@@ -28,6 +28,7 @@ type CompanyTable =
   | 'lab'
   | 'identityVerification'
   | 'credentialLink'
+  | 'enrolmentGrant'
   | 'signatureStatement'
   | 'systemIncident';
 type LabTable = Exclude<keyof DB, CompanyTable | 'accessEvent' | 'auditEntry' | 'session'>;
@@ -80,6 +81,8 @@ export type LabQueries = ReturnType<typeof inLab>;
 function inWrite(tx: Transaction<DB>, labId: string) {
   return {
     ...inLab(tx, labId),
+    /** Writes one Access Event in this write's transaction, so it commits with the record it witnesses. */
+    accessEvent: (event: Insertable<DB['accessEvent']>) => tx.insertInto('accessEvent').values(event).execute(),
     takeNumber: async (kind: NumberedKind) => {
       const { rows } = await sql<Omit<NumberTaken, 'kind'>>`select * from lims.take_number(${kind}, ${labId})`.execute(
         tx,

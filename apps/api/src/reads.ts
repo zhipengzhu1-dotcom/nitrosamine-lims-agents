@@ -1,12 +1,12 @@
 import type { DB } from '@lims/db';
-import { nextStep, recordKind, routes } from '@lims/domain';
+import { type Authenticator, nextStep, recordKind, routes } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
 import { statementInForce } from './signing.ts';
 import { factsFor, latestVersion, signedVersions } from './steps.ts';
-import { onWallClock, trailRoutes } from './trail.ts';
+import { onWallClock, signedAtLab, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
@@ -79,8 +79,9 @@ async function testView(scope: Scope, id: string) {
             'signature.printedName as signer',
             'signature.username',
             'signature.role',
+            sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
             'signature.signedAt',
-            onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('signature.signed_time_zone')).as('signedAtLab'),
+            signedAtLab,
             'recordVersion.recordTable as record',
             'recordVersion.version',
             'recordVersion.canonicalForm',

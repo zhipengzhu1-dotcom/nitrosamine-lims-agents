@@ -47,6 +47,8 @@ const id = {
   verified: randomUUID(),
   identityVerification: randomUUID(),
   credentialLink: randomUUID(),
+  secondAdmin: randomUUID(),
+  enrolmentGrant: randomUUID(),
   room: randomUUID(),
   otherLabRoom: randomUUID(),
   workstation: randomUUID(),
@@ -91,6 +93,8 @@ const fixture: (Fixture | Fixture[])[] = [
   ],
   ['lims.person', { id: id.admin, username: 'refusal.admin', display_name: 'Refusal Admin' }],
   ['lims.person', { id: id.operator, username: 'refusal.operator', display_name: 'Refusal Operator' }],
+  // A second Admin, who created no account and issued no one-time link, so an enrolment grant can come from them.
+  ['lims.person', { id: id.secondAdmin, username: 'refusal.second', display_name: 'Second Admin' }],
   [
     'lims.person',
     {
@@ -112,6 +116,7 @@ const fixture: (Fixture | Fixture[])[] = [
   ['lims.membership', { lab_id: id.lab, person_id: id.person, role: 'Analyst' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.otherPerson, role: 'QA' }],
   ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
+  ['lims.membership', { lab_id: id.otherLab, person_id: id.secondAdmin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
   [
     'lims.identity_verification',
@@ -133,6 +138,10 @@ const fixture: (Fixture | Fixture[])[] = [
     },
   ],
   ['lims.credential_link', { id: id.credentialLink, person_id: id.verified, token_hash: Buffer.alloc(32, 5) }],
+  [
+    'lims.enrolment_grant',
+    { id: id.enrolmentGrant, person_id: id.verified, issued_by: id.secondAdmin, token_hash: Buffer.alloc(32, 11) },
+  ],
   ['lims.training_record', { lab_id: id.lab, person_id: id.person, method_id: id.method }],
   [
     'lims.sample',
@@ -346,7 +355,7 @@ const tables = {
   },
   'lims.person': {
     noun: 'person',
-    row: { username: 'refusal.second', display_name: 'Second Person', password_hash: 'not-a-real-hash' },
+    row: { username: 'refusal.another', display_name: 'Another Person', password_hash: 'not-a-real-hash' },
     notNull: ['id', 'username', 'display_name', 'failed_logins', 'reduced_motion'],
   },
   'lims.identity_verification': {
@@ -363,6 +372,11 @@ const tables = {
     noun: 'one-time link',
     row: { person_id: id.verified, token_hash: Buffer.alloc(32, 6) },
     notNull: ['id', 'person_id', 'token_hash', 'issued_at', 'expires_at'],
+  },
+  'lims.enrolment_grant': {
+    noun: 'enrolment grant',
+    row: { person_id: id.verified, issued_by: id.secondAdmin, token_hash: Buffer.alloc(32, 12) },
+    notNull: ['id', 'person_id', 'issued_by', 'token_hash', 'issued_at', 'expires_at'],
   },
   'lims.method': {
     noun: 'Method',
@@ -636,6 +650,7 @@ const auditedTables: Table[] = [
   'lims.audit_export',
   'lims.identity_verification',
   'lims.credential_link',
+  'lims.enrolment_grant',
   'lims.room',
   'lims.workstation',
 ];
@@ -694,6 +709,21 @@ async function refusalOf(
   try {
     if (context) await client.query(AUDIT_CONTEXT);
     await staged(row);
+    await client.query(statement, values);
+  } catch (error) {
+    if (error instanceof pg.DatabaseError) return error;
+    throw error;
+  } finally {
+    await client.query('rollback');
+  }
+  return assert.fail(`the database accepted ${statement}`);
+}
+
+/** Like refusalOf, with triggers off, for a row a trigger would otherwise stamp over or refuse first. */
+async function refusalWithTriggersOff(statement: string, values: unknown[]): Promise<pg.DatabaseError> {
+  await client.query('begin');
+  try {
+    await client.query('set local session_replication_role = replica');
     await client.query(statement, values);
   } catch (error) {
     if (error instanceof pg.DatabaseError) return error;
@@ -788,6 +818,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.person': { id: id.person },
     'lims.identity_verification': { id: id.identityVerification },
     'lims.credential_link': { id: id.credentialLink },
+    'lims.enrolment_grant': { id: id.enrolmentGrant },
     'lims.method': { id: id.method },
     'lims.submission': { id: id.submission },
     'lims.lab': { lab_id: id.lab },
@@ -863,6 +894,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.credential_link',
       change: { token_hash: Buffer.alloc(32, 5) },
       constraint: 'credential_link_token_hash_key',
+    },
+    {
+      name: 'a second enrolment grant with the same token is refused',
+      table: 'lims.enrolment_grant',
+      change: { token_hash: Buffer.alloc(32, 11) },
+      constraint: 'enrolment_grant_token_hash_key',
     },
     {
       name: 'a second Method with the same code and version is refused',
@@ -1036,6 +1073,18 @@ describe('the database refuses a reference to a row that does not exist', () => 
       table: 'lims.credential_link',
       change: { person_id: missing },
       constraint: 'credential_link_person_id_fkey',
+    },
+    {
+      name: 'an enrolment grant for a person who does not exist is refused',
+      table: 'lims.enrolment_grant',
+      change: { person_id: missing },
+      constraint: 'enrolment_grant_person_id_fkey',
+    },
+    {
+      name: 'an enrolment grant issued by a person who does not exist is refused',
+      table: 'lims.enrolment_grant',
+      change: { issued_by: missing },
+      constraint: 'enrolment_grant_issued_by_fkey',
     },
     {
       name: 'a Submission for a Customer that does not exist is refused',
@@ -1405,7 +1454,7 @@ describe('the database refuses a value outside its allowed set', () => {
       'a re-authentication by an authenticator the LIMS does not have is refused',
       'lims.reauthentication',
       'authenticator',
-      ['Totp', 'password', ''],
+      ['Totp', 'Code', 'password', ''],
       'reauthentication_authenticator_check',
     ),
     {
@@ -1443,6 +1492,18 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { kind: 'SignInFailed', failure_reason: 'WrongUserId' },
       constraint: 'access_event_failure_kind_check',
     },
+    {
+      name: 'a failed unlock Access Event without a failure reason is refused',
+      table: 'lims.access_event',
+      change: { kind: 'UnlockFailed', failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_unlock_failure_check',
+    },
+    ...['NoCredential', 'NoLab', 'NoMembership', 'NotInWorkstationLab'].map((reason) => ({
+      name: `a failed unlock Access Event with the ${reason} reason, which no password, code or Lockout gives, is refused`,
+      table: 'lims.access_event' as const,
+      change: { kind: 'UnlockFailed', failure_reason: reason, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_kind_check',
+    })),
     ...each(
       'a Lab code that is not two to four capital letters is refused',
       'lims.lab',
@@ -1715,7 +1776,11 @@ describe('the database refuses a value outside its allowed set', () => {
     ...(['SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'] as const).map((kind) => ({
       name: `an Access Event of kind ${kind} without a session is refused`,
       table: 'lims.access_event' as const,
-      change: { kind, failure_reason: null, ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }) },
+      change: {
+        kind,
+        failure_reason: kind === 'UnlockFailed' ? 'WrongPassword' : null,
+        ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }),
+      },
       constraint: 'access_event_session_kind_check',
     })),
     ...(['IdleExpiry', 'AbsoluteExpiry'] as const).flatMap((kind) => [
@@ -1786,17 +1851,17 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { failure_reason: 'OtherUserId' },
       constraint: 'access_event_failure_kind_check',
     },
-    {
-      name: 'a failed Lab switch Access Event with a reason only a sign-in has is refused',
-      table: 'lims.access_event',
+    ...['NoLabChosen', 'AlreadyEnrolled', 'OtherPersonSignedIn'].map((reason) => ({
+      name: `a failed Lab switch Access Event with the ${reason} reason, which only a sign-in has, is refused`,
+      table: 'lims.access_event' as const,
       change: {
         kind: 'LabSwitchFailed',
-        failure_reason: 'NoLabChosen',
+        failure_reason: reason,
         session_lab_id: id.lab,
         session_id: id.session,
       },
       constraint: 'access_event_failure_kind_check',
-    },
+    })),
     {
       name: 'a Lab switch Access Event that names no previous session is refused',
       table: 'lims.access_event',
@@ -1896,27 +1961,81 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { used_at: '2000-01-01T00:00:00Z' },
       constraint: 'credential_link_use_check',
     },
+    ...each(
+      'an enrolment grant whose token hash is not 32 bytes is refused',
+      'lims.enrolment_grant',
+      'token_hash',
+      [Buffer.alloc(31, 7), Buffer.alloc(33, 7)],
+      'enrolment_grant_token_hash_check',
+    ),
+    {
+      name: 'an enrolment grant that expires before it is issued is refused',
+      table: 'lims.enrolment_grant',
+      change: { expires_at: '2000-01-01T00:00:00Z' },
+      constraint: 'enrolment_grant_expiry_check',
+    },
+    {
+      name: 'an enrolment grant used outside its life is refused',
+      table: 'lims.enrolment_grant',
+      change: { used_at: '2000-01-01T00:00:00Z' },
+      constraint: 'enrolment_grant_use_check',
+    },
+    {
+      name: 'an enrolment grant a person issues for themselves is refused',
+      table: 'lims.enrolment_grant',
+      change: { issued_by: id.verified },
+      constraint: 'enrolment_grant_second_person_check',
+    },
   ]);
+});
+
+describe('a failed unlock records why, as a failed sign-in does', () => {
+  it('a failed unlock Access Event with each reason a password, a code or a Lockout gives is accepted', async () => {
+    const reasons = [
+      'WrongPassword',
+      'WrongPasswordOnLockedAccount',
+      'AccountLocked',
+      'WrongCode',
+      'NoAuthenticator',
+      'CodeAlreadyUsed',
+    ];
+    for (const reason of reasons) {
+      const row = {
+        ...tables['lims.access_event'].row,
+        kind: 'UnlockFailed',
+        failure_reason: reason,
+        session_lab_id: id.lab,
+        session_id: id.session,
+      };
+      await client.query('begin');
+      try {
+        await client.query(AUDIT_CONTEXT);
+        await client.query(...insert('lims.access_event', row));
+      } finally {
+        await client.query('rollback');
+      }
+    }
+  });
+
+  it('every Access Event rule binds the rows written before it, except the reason that failed unlocks before #245 lack', async () => {
+    const { rows } = await client.query<{ name: string }>(
+      `select conname as name from pg_constraint
+        where conrelid = 'lims.access_event'::regclass and not convalidated order by conname`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.name),
+      ['access_event_unlock_failure_check'],
+    );
+  });
 });
 
 describe('a counter holds at most six digits and is never empty', () => {
   // The counter trigger lets a counter start only at zero, so these rows reach the constraints with triggers off.
-  async function refusalOfCounter(last: number | null): Promise<pg.DatabaseError> {
-    await client.query('begin');
-    try {
-      await client.query('set local session_replication_role = replica');
-      await client.query(`insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', $2)`, [
-        id.otherLab,
-        last,
-      ]);
-    } catch (error) {
-      if (error instanceof pg.DatabaseError) return error;
-      throw error;
-    } finally {
-      await client.query('rollback');
-    }
-    return assert.fail(`the database accepted a counter at ${last}`);
-  }
+  const refusalOfCounter = (last: number | null) =>
+    refusalWithTriggersOff(`insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', $2)`, [
+      id.otherLab,
+      last,
+    ]);
   covered.add('lims.counter.counter_last_check');
   covered.add('lims.counter.counter_last_not_null');
   it('a counter past 999999 or below zero is refused', async () => {
@@ -2211,6 +2330,12 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       table: 'lims.credential_link',
       trigger: 'refuse_truncate',
       statement: 'truncate lims.credential_link',
+    },
+    {
+      name: 'truncating the enrolment grants is refused',
+      table: 'lims.enrolment_grant',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.enrolment_grant',
     },
   ];
   for (const c of cases) {
@@ -2878,6 +3003,75 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
     }
   });
 
+  covered.add('lims.enrolment_grant.granted_by_a_second_admin');
+  it('an enrolment grant from the person, from someone who is not an Admin, from an Admin who created the account or issued its one-time link, or in another Admin’s name is refused', async () => {
+    const issue = 'insert into lims.enrolment_grant (person_id, issued_by, token_hash) values ($1, $2, $3)';
+    const token = Buffer.alloc(32, 13);
+    await refusedAs(issue, [id.verified, id.person, token], 'LA016', 'an enrolment grant is issued by an Admin');
+    // The fixture's Admin created refusal.verified and issued its one-time link, under their own name.
+    await refusedAs(
+      issue,
+      [id.verified, id.admin, token],
+      'LA016',
+      'an enrolment grant comes from a second Admin: not the one who created the account or issued its one-time link',
+    );
+    // The app role, unlike the owner, issues only in the acting Admin's name.
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('set local role lims_app');
+      await assert.rejects(client.query(issue, [id.verified, id.secondAdmin, token]), {
+        code: 'LA016',
+        message: 'an enrolment grant is issued by the acting Admin',
+      });
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.credential_link.link_not_from_the_grant_issuer');
+  it('a one-time link in the name of the Admin who issued the person’s enrolment grant is refused', async () => {
+    // The fixture's second Admin issued refusal.verified's enrolment grant.
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query("select set_config('lims.actor', 'person:refusal.second', true)");
+      await assert.rejects(
+        client.query('insert into lims.credential_link (person_id, token_hash) values ($1, $2)', [
+          id.verified,
+          Buffer.alloc(32, 14),
+        ]),
+        {
+          code: 'LA016',
+          message: 'a one-time link comes from an Admin who did not issue the person’s enrolment grant',
+        },
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.enrolment_grant.use_grant_once');
+  it('an enrolment grant is only ever marked used, once, even by the superuser', async () => {
+    const once = 'an enrolment grant is only ever marked used, once';
+    await refusedAs('update lims.enrolment_grant set token_hash = $1', [Buffer.alloc(32, 9)], 'LA002', once);
+    await refusedAs('delete from lims.enrolment_grant', [], 'LA002', once);
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('update lims.enrolment_grant set used_at = clock_timestamp() where id = $1', [
+        id.enrolmentGrant,
+      ]);
+      await client.query('savepoint used');
+      await assert.rejects(
+        client.query('update lims.enrolment_grant set used_at = clock_timestamp() where id = $1', [id.enrolmentGrant]),
+        { code: 'LA002', message: once },
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
   covered.add('lims.signature.sign_as_the_person');
   covered.add('lims.signature.signature_printed_name_not_null');
   it('a Signature takes the printed name and username its signer has, whatever the insert says', async () => {
@@ -2940,7 +3134,7 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
 
 // A System Incident's recorded breaks are bound by its fingerprint and its content hash, and copying them into each of
 // its Audit Trail entries is what their own table avoids (#250).
-it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys, the counters, the recorded breaks and the Audit Trail itself', async () => {
+it('every lims table is captured in the Audit Trail except the sessions, the authenticators, the Commit Keys, the counters, the recorded breaks and the Audit Trail itself', async () => {
   const { rows } = await client.query<{ name: string }>(
     `select 'lims.' || c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'lims' and c.relkind = 'r'
@@ -2949,7 +3143,15 @@ it('every lims table is captured in the Audit Trail except the sessions, the Com
   );
   assert.deepEqual(
     rows.map((row) => row.name),
-    ['lims.audit_chain', 'lims.audit_entry', 'lims.commit_key', 'lims.counter', 'lims.incident_break', 'lims.session'],
+    [
+      'lims.audit_chain',
+      'lims.audit_entry',
+      'lims.authenticator',
+      'lims.commit_key',
+      'lims.counter',
+      'lims.incident_break',
+      'lims.session',
+    ],
   );
 });
 
@@ -3520,6 +3722,43 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
   });
 });
 
+describe("a password is changed only by lims.change_password, after the session's person re-authenticated", () => {
+  const change = `select lims.change_password('${id.lab}', '${id.session}', 'scrypt-hmac$changed', '192.0.2.1')`;
+
+  it("a password change in a transaction not stamped with the re-authentication of the session's person is refused", async () => {
+    const error = await refusalOf(change);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA015', "a password change needs the session's person re-authenticated in this transaction"],
+    );
+    const other = await refusalOf(
+      `select lims.set_this_transaction('lims.reauthenticated', '${id.otherPerson}'); ${change}`,
+    );
+    assert.equal(other.code, 'LA015', other.message);
+  });
+
+  it("a password change after the session's person re-authenticated sets the hash and writes a PasswordChanged Access Event", async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(`select lims.set_this_transaction('lims.reauthenticated', '${id.person}')`);
+      await client.query(`set local role lims_app; ${change}`);
+      const { rows: person } = await client.query('select password_hash from lims.person where id = $1', [id.person]);
+      const { rows: events } = await client.query(
+        `select kind, session_lab_id, host(source_address) as source, roles::text as roles from lims.access_event
+          where session_id = $1 and kind = 'PasswordChanged'`,
+        [id.session],
+      );
+      assert.deepEqual(person, [{ password_hash: 'scrypt-hmac$changed' }]);
+      assert.deepEqual(events, [
+        { kind: 'PasswordChanged', session_lab_id: id.lab, source: '192.0.2.1', roles: '{Analyst}' },
+      ]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+});
+
 describe("a Lab's time zone changes only through a migration, and a Signature and a Received keep the zone in force when written", () => {
   it("the app role holds no update on a Lab's time zone, so a statement that changes it is refused", async () => {
     const error = await refusalOf("set local role lims_app; update lims.lab set time_zone = 'Asia/Tokyo'");
@@ -3604,6 +3843,46 @@ describe("a Lab's time zone changes only through a migration, and a Signature an
   });
 });
 
+describe('a kept time zone is a named zone of the time zone database, and a Sample keeps one exactly when it has a Received, even with the stamping triggers bypassed', () => {
+  // The stamping triggers overwrite any zone a statement gives, so these rows reach the constraints with triggers off.
+  const refusalOfKeptZone = (table: Table, change: Row) =>
+    refusalWithTriggersOff(...insert(table, { ...tables[table].row, ...change }));
+  const received = '2026-09-30T00:00:00Z';
+  const notZones = ['Mars/Olympus_Mons', 'UTC+5', ''];
+  const cases: { name: string; table: Table; change: Row; constraint: string }[] = [
+    ...notZones.map((zone) => ({
+      name: `a Signature kept in ${JSON.stringify(zone)}, which is not a named zone, is refused`,
+      table: 'lims.signature' as const,
+      change: { signed_time_zone: zone },
+      constraint: 'signature_signed_time_zone_check',
+    })),
+    ...notZones.map((zone) => ({
+      name: `a Received kept in ${JSON.stringify(zone)}, which is not a named zone, is refused`,
+      table: 'lims.sample' as const,
+      change: { received_at: received, received_time_zone: zone },
+      constraint: 'sample_received_time_zone_check',
+    })),
+    {
+      name: 'a Received time zone on a Sample with no Received is refused',
+      table: 'lims.sample',
+      change: { received_time_zone: 'America/New_York' },
+      constraint: 'sample_received_time_zone_received_at_check',
+    },
+    {
+      name: 'a Received with no time zone is refused',
+      table: 'lims.sample',
+      change: { received_at: received },
+      constraint: 'sample_received_time_zone_received_at_check',
+    },
+  ];
+  for (const c of cases) {
+    covered.add(`${c.table}.${c.constraint}`);
+    it(c.name, async () =>
+      assertConstraint(await refusalOfKeptZone(c.table, c.change), '23514', c.table, c.constraint),
+    );
+  }
+});
+
 describe('a person is inserted without a lockout, so the database stamps every lockout', () => {
   covered.add('lims.person.insert_unlocked');
   // A Customer User, the one person the app role may insert without an Identity Verification.
@@ -3624,6 +3903,12 @@ describe('a person is inserted without a lockout, so the database stamps every l
 
 it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
+    ['lims.authenticator.authenticator_pkey', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_person_id_fkey', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_person_id_not_null', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_secret_ciphertext_not_null', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_enrolled_at_not_null', 'authenticator.test.ts'],
+    ['lims.authenticator.step_moves_forward', 'authenticator.test.ts'],
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
     ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
     ['lims.access_event.stamp_lockout', 'session-expiry.test.ts'],

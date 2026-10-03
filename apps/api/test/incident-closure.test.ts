@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { forcesYes, incidentStepRoute, type Role, routes, type SigningBody, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
+import { type Account, type Client, ok, onLabClock, refusedWith, signatureOf, startApi, toMillis } from './harness.ts';
 
 const api = await startApi('lims_api_incident_closure_test');
 const lou = await api.addPerson('lou.analyst', ['Analyst'], { trained: true });
@@ -408,6 +408,36 @@ it("a chain-verify System Incident's Acknowledged Signature binds the breaks it 
   const changed = await view(as.ada, reference);
   assert.equal(changed.acknowledged?.unsigned, true, 'the Signature no longer binds the content');
   assert.notEqual(changed.recordVersion.contentHash, signed.recordVersion.contentHash);
+});
+
+it('the Acknowledged Signature keeps the Lab wall clock of the zone it was signed in after the Lab’s time zone changes', async () => {
+  const { timeZone: before } = await api.db
+    .selectFrom('lab')
+    .select('timeZone')
+    .where('labId', '=', api.labId)
+    .executeTakeFirstOrThrow();
+  const reference = await failedIncident();
+  ok(await answer(as.quinn, reference, 'Yes'));
+  ok(await immediate(as.ada, reference, 'Reran the entry.'));
+  ok(await corrective(as.ada, reference, 'Added a check.'));
+  const signed =
+    ok(await acknowledge(as.ada, reference, ada)).acknowledged ?? assert.fail('the Acknowledged Signature');
+  assert.equal(
+    toMillis(signed.signedAtLab),
+    onLabClock(signed.signedAt, before),
+    `signed on the ${before} clock, to the millisecond the UTC time carries`,
+  );
+  await api.moveLabZone('Asia/Tokyo');
+  try {
+    const shown = (await view(as.ada, reference)).acknowledged ?? assert.fail('the Acknowledged Signature');
+    assert.deepEqual(
+      [shown.signedAt, shown.signedAtLab],
+      [signed.signedAt, signed.signedAtLab],
+      'the zone change moves no Lab clock signed before it',
+    );
+  } finally {
+    await api.moveLabZone(before);
+  }
 });
 
 it('the open System Incident list is read by Admin and QA, newest first, and by no other role', async () => {

@@ -10,10 +10,11 @@ import Fastify, {
 } from 'fastify';
 import type { Kysely } from 'kysely';
 import type { Static, TSchema } from 'typebox';
-import { type Login, loginRoutes, scheduleExpirySweep, SESSION_LIMITS, type SessionKey } from './auth.ts';
+import { type Credentials, endLapsedSessions, type SessionKey, type SessionLimits } from './auth.ts';
+import { openJobIncident } from './incident.ts';
 import { apiLogger, checkLogVolume, type LogSink, type LogVolume } from './log.ts';
 import { answerThrown, refuse, requestReference } from './refuse.ts';
-import { sessionRoutes } from './session-routes.ts';
+import { apiRoutes } from './routes.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -50,7 +51,8 @@ export interface AppOptions {
   accessEventKey: Buffer;
   /** The proxies whose X-Forwarded-For names the source address of a request; none means the socket's peer is the source. */
   trustedProxies: string[];
-  login: Login;
+  /** The login policy, the password pepper and the TOTP secret key. */
+  credentials: Credentials;
   /** The app release every Signature records. */
   release: string;
   /** How often to run the expiry sweep, or null for an API whose caller runs it. */
@@ -58,7 +60,8 @@ export interface AppOptions {
 }
 
 export function buildApp(db: Kysely<DB>, options: AppOptions): App {
-  const limits = SESSION_LIMITS[options.login];
+  const { credentials } = options;
+  const limits = credentials.policy;
   const app = Fastify({
     logger: options.log ? apiLogger(options.log) : false,
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
@@ -69,8 +72,23 @@ export function buildApp(db: Kysely<DB>, options: AppOptions): App {
   app.decorateRequest('requester', null);
   app.setNotFoundHandler(() => refuse('notFound', 'The LIMS has no such route.'));
   if (options.logVolume) checkLogVolume(app, db, options.logVolume);
-  loginRoutes(app, db, options.accessEventKey, options.secureCookie, limits);
-  sessionRoutes(app, db, limits, options.release);
+  apiRoutes(app, db, options, credentials);
   if (options.sweepEveryMs !== null) scheduleExpirySweep(app, db, limits, options.sweepEveryMs);
   return app;
+}
+
+/** Runs the expiry sweep every `everyMs` until the app closes; a sweep that fails opens a System Incident. */
+export function scheduleExpirySweep(app: App, db: Kysely<DB>, limits: SessionLimits, everyMs: number): void {
+  let running: Promise<void> | null = null;
+  const sweep = setInterval(() => {
+    running ??= endLapsedSessions(db, limits)
+      .catch((err: Error) => openJobIncident(db, app.log, { reference: requestReference(), step: 'expirySweep' }, err))
+      .finally(() => {
+        running = null;
+      });
+  }, everyMs);
+  app.addHook('onClose', async () => {
+    clearInterval(sweep);
+    await running;
+  });
 }

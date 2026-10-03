@@ -46,11 +46,16 @@ function RecordVerification({ onDone }: { onDone: () => Promise<void> }) {
   );
 }
 
+/** A one-time link or an enrolment link just issued, shown once; `page` is where the token takes its holder. */
 interface Link {
+  page: 'welcome' | 'authenticator';
   printedName: string;
   token: string;
   expiresAt: Instant;
 }
+
+const linkUrlOf = (link: Link) =>
+  `${location.origin}${location.pathname}#/${link.page === 'welcome' ? `welcome/${link.token}` : `authenticator?grant=${link.token}`}`;
 
 function CreateAccount({
   verification,
@@ -70,7 +75,7 @@ function CreateAccount({
             identityVerificationId: verification.id,
             username: field(form, 'username'),
           });
-          await onCreated({ printedName: person.printedName, ...link });
+          await onCreated({ page: 'welcome', printedName: person.printedName, ...link });
           return `Account ${person.username} created.`;
         })
       }
@@ -214,7 +219,7 @@ function NewLink({ person, onIssued }: { person: StaffPerson; onIssued: (link: L
       onSubmit={(e) =>
         commit(e, async () => {
           const { link } = await api(routes.issueLink, { personId: person.id });
-          onIssued({ printedName: person.printedName, ...link });
+          onIssued({ page: 'welcome', printedName: person.printedName, ...link });
           return 'Not set yet; a new link is shown above.';
         })
       }
@@ -227,12 +232,38 @@ function NewLink({ person, onIssued }: { person: StaffPerson; onIssued: (link: L
   );
 }
 
+/** For a person who has not enrolled an authenticator: an enrolment link from this Admin, who must be a second Admin. */
+function NewEnrolmentLink({ person, onIssued }: { person: StaffPerson; onIssued: (link: Link) => void }) {
+  const { busy, commit, shown } = useCommit();
+  return (
+    <form
+      aria-label={`Enrolment link for ${person.printedName}`}
+      onSubmit={(e) =>
+        commit(e, async () => {
+          const { grant } = await api(routes.issueEnrolmentGrant, { personId: person.id });
+          onIssued({ page: 'authenticator', printedName: person.printedName, ...grant });
+          return 'Not enrolled yet; an enrolment link is shown above.';
+        })
+      }
+    >
+      {shown ?? 'Not enrolled yet'}
+      <button type="submit" className="btn btn--small" disabled={busy}>
+        Enrolment link
+      </button>
+    </form>
+  );
+}
+
 function staffColumns(onIssued: (link: Link) => void): Column<StaffPerson>[] {
   return [
     { head: 'Printed name', cell: (p) => p.printedName },
     { head: 'Username', cell: (p) => <code>{p.username}</code> },
     { head: 'Roles', cell: (p) => p.roles.map(words).join(', ') || 'No Membership yet' },
     { head: 'Password', cell: (p) => (p.credentialSet ? 'Set' : <NewLink person={p} onIssued={onIssued} />) },
+    {
+      head: 'Authenticator',
+      cell: (p) => (p.authenticatorEnrolled ? 'Enrolled' : <NewEnrolmentLink person={p} onIssued={onIssued} />),
+    },
     {
       head: 'Identity verified',
       cell: (p) =>
@@ -256,7 +287,7 @@ export function StaffPage({ me }: { me: ActorContext }) {
   const fresh = useFresh(data, (d) => d.people.map((p) => `${p.id}:${p.roles.join()}:${p.printedName}`));
   const [link, setLink] = useState<Link | null>(null);
   const columns = useMemo(() => staffColumns(setLink), []);
-  const linkUrl = link && `${location.origin}${location.pathname}#/welcome/${link.token}`;
+  const linkUrl = link && linkUrlOf(link);
   return (
     <Shell me={me} active="staff" action={null}>
       {/* The next press anywhere on the page takes the one-time link off the screen. */}
@@ -264,12 +295,28 @@ export function StaffPage({ me }: { me: ActorContext }) {
         <h1>Staff accounts</h1>
         {error && <p className="note--bad">{error}</p>}
         <RecordVerification onDone={reload} />
-        {link && (
+        {link && link.page === 'welcome' && (
           <section className="card" aria-label="One-time link">
             <h2>One-time link for {link.printedName}</h2>
             <p>
               Give this link to {link.printedName} in person. They choose their own password with it. It works once and
               expires at {time(link.expiresAt)}; the LIMS keeps no copy of it.
+            </p>
+            <p className="long">
+              <code>{linkUrl}</code>
+            </p>
+            <button type="button" className="btn" onClick={() => setLink(null)}>
+              Done
+            </button>
+          </section>
+        )}
+        {link && link.page === 'authenticator' && (
+          <section className="card" aria-label="Enrolment link">
+            <h2>Enrolment link for {link.printedName}</h2>
+            <p>
+              Give this link to {link.printedName} in person. They set up their authenticator with it and their own
+              password, in a browser where no one else is signed in. It works once and expires at {time(link.expiresAt)}
+              ; the LIMS keeps no copy of it.
             </p>
             <p className="long">
               <code>{linkUrl}</code>

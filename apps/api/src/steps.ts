@@ -20,7 +20,8 @@ import {
 } from '@lims/domain';
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
-import { type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
+import { type Credentials, type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
+import { incidentRoutes } from './incident-steps.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
 import { proveReauthentication, type Seen, type Signable, signRecord, statementInForce } from './signing.ts';
@@ -164,12 +165,12 @@ interface Signing {
 
 /** Signs the Test, or the Test Report this step issued on it. */
 async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signing: Signing) {
-  const { meaning, table, testId, seen, statementVersion, release } = signing;
+  const { reauthenticated, meaning, table, testId, seen, statementVersion, release } = signing;
   const recordId =
     table === 'test'
       ? testId
       : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id;
-  const proof = await proveReauthentication(q, ctx, sessionId, meaning);
+  const proof = await proveReauthentication(q, ctx, sessionId, meaning, reauthenticated);
   await signRecord(q, { proof, sessionId, meaning, table, recordId, seen, statementVersion, release });
 }
 
@@ -195,7 +196,13 @@ function receiptOf(kept: KeptCommit, sessionId: string, requestHash: Buffer): St
   return { testId: kept.testId, state: kept.state };
 }
 
-function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, release: string): void {
+function registerStep<K extends StepName>(
+  app: App,
+  db: Kysely<DB>,
+  credentials: Credentials,
+  name: K,
+  release: string,
+): void {
   const step: Step = steps[name];
   const effect: Effect<StepInput<K>> = effects[name];
   const route = stepRoute(name);
@@ -236,8 +243,9 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
       const seen = await seenVersion(scope, testId, signature);
       const reauthenticated = await reauthenticate(
         db,
+        credentials,
         { actor, session: req.sessionKey },
-        { username: signature.username, password: signature.password },
+        { username: signature.username, password: signature.password, code: signature.code },
         step.role,
         sourceAddressOf(req),
         'ReauthenticationFailed',
@@ -290,7 +298,11 @@ function registerStep<K extends StepName>(app: App, db: Kysely<DB>, name: K, rel
   });
 }
 
-/** `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema. */
-export function stepRoutes(app: App, db: Kysely<DB>, release: string): void {
-  for (const name of stepNames) registerStep(app, db, name, release);
+/**
+ * `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema, and the
+ * System Incident routes, whose steps sign through the same credentials and release.
+ */
+export function stepRoutes(app: App, db: Kysely<DB>, credentials: Credentials, release: string): void {
+  for (const name of stepNames) registerStep(app, db, credentials, name, release);
+  incidentRoutes(app, db, credentials, release);
 }

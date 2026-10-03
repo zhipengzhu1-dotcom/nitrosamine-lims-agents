@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "PasswordSet" | "ReauthenticationFailed" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
+export type AccessEventKind = "AbsoluteExpiry" | "AuthenticatorEnrolled" | "EnrolmentGrantIssued" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "PasswordChanged" | "PasswordSet" | "ReauthenticationFailed" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -45,7 +45,7 @@ export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "PlatformOperator" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoCredential" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
+export type SignInFailure = "AccountLocked" | "AlreadyEnrolled" | "CodeAlreadyUsed" | "NoAuthenticator" | "NoCredential" | "NoEnrolmentGrant" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherPersonSignedIn" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongCode" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -98,6 +98,13 @@ export interface AuditExport {
   requestedRole: Generated<Role>;
 }
 
+export interface Authenticator {
+  enrolledAt: Generated<Timestamp>;
+  lastUsedStep: Int8 | null;
+  personId: string;
+  secretCiphertext: Buffer;
+}
+
 export interface CommitKey {
   committedAt: Generated<Timestamp>;
   key: string;
@@ -120,6 +127,16 @@ export interface CredentialLink {
 export interface Customer {
   id: Generated<string>;
   name: string;
+}
+
+export interface EnrolmentGrant {
+  expiresAt: Generated<Timestamp>;
+  id: Generated<string>;
+  issuedAt: Generated<Timestamp>;
+  issuedBy: string;
+  personId: string;
+  tokenHash: Buffer;
+  usedAt: Timestamp | null;
 }
 
 export interface IdentityVerification {
@@ -343,9 +360,11 @@ export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
   auditExport: AuditExport;
+  authenticator: Authenticator;
   commitKey: CommitKey;
   credentialLink: CredentialLink;
   customer: Customer;
+  enrolmentGrant: EnrolmentGrant;
   identityVerification: IdentityVerification;
   incidentBreak: IncidentBreak;
   lab: Lab;
