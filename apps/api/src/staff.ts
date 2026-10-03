@@ -111,11 +111,20 @@ async function issueEnrolmentGrant(q: WriteQueries, actor: ActorContext, personI
 const LISTED_ACCESS_EVENTS = 100;
 
 /**
- * The person's newest Access Events that this Lab sees, each Lockout listing the sessions here that it ended, at its
- * instant, whether or not a request or the sweep has ended them yet.
+ * A page of a person's Access Events as this Lab's Admin reads them: the newest, or the newest before `before`, one of
+ * theirs that this Lab sees. Each Lockout lists the sessions here that it ended, at its instant, whether or not a
+ * request or the sweep has ended them yet.
  */
-async function accessEventsOf(scope: Scope, personId: string, limits: SessionLimits) {
-  const rows = await scope
+async function accessEventsOf(
+  db: Kysely<DB>,
+  actor: ActorContext,
+  limits: SessionLimits,
+  personId: string,
+  before: string | null,
+) {
+  const scope = adminScope(db, actor);
+  const person = await onePerson(scope, actor.lab.id, personId);
+  let listed = scope
     .accessEvents()
     .select([
       'id',
@@ -125,7 +134,16 @@ async function accessEventsOf(scope: Scope, personId: string, limits: SessionLim
       sql<string | null>`host(source_address)`.as('sourceAddress'),
       'failureReason',
     ])
-    .where('subjectId', '=', personId)
+    .where('subjectId', '=', personId);
+  if (before !== null) {
+    const theirs = await listed.where('id', '=', before).executeTakeFirst();
+    if (!theirs) refuse('notFound', 'This person has no such Access Event in this Lab.');
+    listed = listed.where((eb) => {
+      const at = eb.selectFrom('accessEvent').select('at').where('id', '=', before);
+      return eb.or([eb('at', '<', at), eb.and([eb('at', '=', at), eb('id', '>', before)])]);
+    });
+  }
+  const rows = await listed
     .orderBy('at', 'desc')
     .orderBy('id')
     .limit(LISTED_ACCESS_EVENTS + 1)
@@ -159,18 +177,23 @@ async function accessEventsOf(scope: Scope, personId: string, limits: SessionLim
       .map((s) => ({ id: s.id, signedInAt: s.signedInAt, workstation: workstation(s.workstationId) }));
     return Object.assign(listed, { kind: e.kind, endedSessions });
   });
-  return { events, earlierNotListed: rows.length > LISTED_ACCESS_EVENTS };
+  return {
+    person: { id: person.id, printedName: person.printedName, username: person.username },
+    events,
+    earlier: rows.length > LISTED_ACCESS_EVENTS ? (events.at(-1)?.id ?? null) : null,
+  };
 }
 
 /** The Admin's staff-account routes: each write is audited under the Admin with the step's name or the reason given. */
 export function staffRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): void {
   app.route({
     ...routes.accessEvents,
-    handler: async (req) => {
-      const scope = adminScope(db, req.actor);
-      const { id, printedName, username } = await onePerson(scope, req.actor.lab.id, req.params.id);
-      return { person: { id, printedName, username }, ...(await accessEventsOf(scope, id, limits)) };
-    },
+    handler: (req) => accessEventsOf(db, req.actor, limits, req.params.id, null),
+  });
+
+  app.route({
+    ...routes.earlierAccessEvents,
+    handler: (req) => accessEventsOf(db, req.actor, limits, req.params.id, req.params.before),
   });
 
   app.route({

@@ -117,8 +117,10 @@ test('the Admin records an Identity Verification, creates the account and grants
 
 /** The wrong passwords in a row that lock an account, as the API counts them. */
 const LOCKOUT_AFTER_FAILURES = 20;
+/** The Access Events a page of a person's list holds, as the API reads them. */
+const LISTED_ACCESS_EVENTS = 100;
 
-test('the Admin opens a locked-out person’s Access Events and sees, under the Lockout, the session it ended', async ({
+test('the Admin opens a locked-out person’s Access Events, sees under the Lockout the session it ended, and reaches the Lockout through Earlier Access Events once 100 newer ones exist', async ({
   page,
   playwright,
   baseURL,
@@ -171,6 +173,30 @@ test('the Admin opens a locked-out person’s Access Events and sees, under the 
   await expect(page.getByRole('row').filter({ hasText: 'Sign In Succeeded' })).toHaveCount(1);
   await expect(page.getByRole('row').filter({ hasText: 'Wrong Password' })).toHaveCount(LOCKOUT_AFTER_FAILURES);
   await shot('01-lockout');
+
+  const onLocked = await Promise.all(
+    Array.from({ length: LISTED_ACCESS_EVENTS }, () =>
+      stranger.post('/api/login', { data: { username, password: 'not-it', labId } }),
+    ),
+  );
+  for (const res of onLocked) expect(res.status()).toBe(401);
+  await page.reload();
+  await expect(page.getByRole('row').filter({ hasText: 'Wrong Password On Locked Account' })).toHaveCount(
+    LISTED_ACCESS_EVENTS,
+  );
+  await expect(lockout, 'the Lockout is older than the newest 100').toHaveCount(0);
+  const earlier = page.getByRole('link', { name: 'Earlier Access Events' });
+  expect((await earlier.boundingBox())?.height, 'a gloved finger can press it').toBeGreaterThanOrEqual(44);
+  await shot('02-newest');
+  await earlier.click();
+  await expect(lockout).toHaveCount(1);
+  await expect(page.getByRole('row').filter({ hasText: 'Sign In Succeeded' })).toHaveCount(1);
+  await expect(earlier, 'nothing is earlier than the oldest Access Event').toHaveCount(0);
+  await shot('03-earlier');
+  const newest = page.getByRole('link', { name: 'Newest Access Events' });
+  expect((await newest.boundingBox())?.height, 'a gloved finger can press it').toBeGreaterThanOrEqual(44);
+  await newest.click();
+  await expect(earlier).toBeVisible();
   await lou.dispose();
   await stranger.dispose();
 });
