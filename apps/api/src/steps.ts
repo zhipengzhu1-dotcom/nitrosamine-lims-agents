@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { DB } from '@lims/db';
 import {
   type ActorContext,
+  type ChangeFacts,
   type Meaning,
   type PersonId,
   pressText,
@@ -134,10 +135,11 @@ export function pendingChangeOn(q: LabQueries, testId: string) {
     .from('criticalDataChange')
     .select(['criticalDataChange.id', 'criticalDataChange.proposedBy'])
     .where('criticalDataChange.testId', '=', testId)
-    .where(({ not, exists, selectFrom }) =>
-      not(
-        exists(
-          selectFrom('criticalDataChangeDecision as d')
+    .where((eb) =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('criticalDataChangeDecision as d')
             .select('d.id')
             .whereRef('d.labId', '=', 'criticalDataChange.labId')
             .whereRef('d.changeId', '=', 'criticalDataChange.id'),
@@ -145,6 +147,72 @@ export function pendingChangeOn(q: LabQueries, testId: string) {
       ),
     )
     .executeTakeFirst();
+}
+
+type ChangeTest = Pick<Selectable<DB['test']>, 'id' | 'state' | 'assigneeId'>;
+
+/** What the change registry decides on for this Test and person, and the pending change itself. */
+export async function changeFactsFor(q: LabQueries, ctx: ActorContext, test: ChangeTest) {
+  const performed = await signedVersions(q)
+    .select('signature.personId')
+    .where('recordVersion.recordTable', '=', 'test')
+    .where('recordVersion.recordId', '=', test.id)
+    .where('signature.meaning', '=', 'Performed')
+    .executeTakeFirst();
+  const pending = await pendingChangeOn(q, test.id);
+  const facts: ChangeFacts = {
+    actor: ctx.person.id,
+    state: test.state,
+    assignee: test.assigneeId,
+    performedBy: performed?.personId ?? null,
+    pendingBy: pending?.proposedBy ?? null,
+  };
+  return { facts, pending };
+}
+
+/** The Test's Critical Data Changes, oldest first, each with its decision once made and its own Record Version. */
+export async function changesOf(q: LabQueries, testId: string) {
+  const rows = await q
+    .from('criticalDataChange')
+    .innerJoin('result', (j) =>
+      j.onRef('result.labId', '=', 'criticalDataChange.labId').onRef('result.id', '=', 'criticalDataChange.resultId'),
+    )
+    .innerJoin('picklistReason as reason', 'reason.id', 'criticalDataChange.reasonId')
+    .innerJoin('person as proposer', 'proposer.id', 'criticalDataChange.proposedBy')
+    .leftJoin('criticalDataChangeDecision as d', (j) =>
+      j.onRef('d.labId', '=', 'criticalDataChange.labId').onRef('d.changeId', '=', 'criticalDataChange.id'),
+    )
+    .leftJoin('person as decider', 'decider.id', 'd.decidedBy')
+    .leftJoin('picklistReason as decisionReason', 'decisionReason.id', 'd.reasonId')
+    .select([
+      'criticalDataChange.id',
+      'd.outcome',
+      'criticalDataChange.field',
+      'result.analyte',
+      'result.unit',
+      'criticalDataChange.oldValue',
+      'criticalDataChange.newValue',
+      'reason.label as reason',
+      'criticalDataChange.reasonText',
+      'proposer.displayName as proposedBy',
+      'criticalDataChange.proposedAt',
+      'decider.displayName as decidedBy',
+      'd.decidedAt',
+      'decisionReason.label as decisionReason',
+      'd.reasonText as decisionReasonText',
+    ])
+    .where('criticalDataChange.testId', '=', testId)
+    .orderBy('criticalDataChange.proposedAt')
+    .execute();
+  return Promise.all(
+    rows.map(async ({ outcome, ...row }) => {
+      const { version, canonicalForm, contentHash } = await latestVersion(q, 'critical_data_change', row.id);
+      return Object.assign(row, {
+        state: outcome ?? ('Pending' as const),
+        recordVersion: { version, canonicalForm, contentHash },
+      });
+    }),
+  );
 }
 
 /** Every Signature of the Lab joined to the Record Version it was given on. */

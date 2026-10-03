@@ -4,9 +4,8 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { changeFactsFor, changesOf } from './changes.ts';
 import { statementInForce } from './signing.ts';
-import { factsFor, latestVersion, signedVersions } from './steps.ts';
+import { changeFactsFor, changesOf, factsFor, latestVersion, signedVersions } from './steps.ts';
 import { onWallClock, signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 

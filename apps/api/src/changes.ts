@@ -1,7 +1,6 @@
 import { type DB, postgresFault } from '@lims/db';
 import {
   type ActorContext,
-  type ChangeFacts,
   type ChangeStepBody,
   type ChangeStepName,
   changeRefusal,
@@ -9,76 +8,13 @@ import {
   changeSteps,
   routes,
 } from '@lims/domain';
-import { type Kysely, type Selectable, sql } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
-import { type LabQueries, labScope } from './scope.ts';
+import { labScope } from './scope.ts';
 import { proveReauthentication, signRecord } from './signing.ts';
-import { latestVersion, pendingChangeOn, seenVersion, signedVersions } from './steps.ts';
-
-type ChangeTest = Pick<Selectable<DB['test']>, 'id' | 'state' | 'assigneeId'>;
-
-/** What the change registry decides on for this Test and person, and the pending change itself. */
-export async function changeFactsFor(q: LabQueries, ctx: ActorContext, test: ChangeTest) {
-  const performed = await signedVersions(q)
-    .select('signature.personId')
-    .where('recordVersion.recordTable', '=', 'test')
-    .where('recordVersion.recordId', '=', test.id)
-    .where('signature.meaning', '=', 'Performed')
-    .executeTakeFirst();
-  const pending = await pendingChangeOn(q, test.id);
-  const facts: ChangeFacts = {
-    actor: ctx.person.id,
-    state: test.state,
-    assignee: test.assigneeId,
-    performedBy: performed?.personId ?? null,
-    pendingBy: pending?.proposedBy ?? null,
-  };
-  return { facts, pending };
-}
-
-/** The Test's Critical Data Changes, oldest first, each with its decision once made and its own Record Version. */
-export async function changesOf(q: LabQueries, testId: string) {
-  const rows = await q
-    .from('criticalDataChange')
-    .innerJoin('result', (j) =>
-      j.onRef('result.labId', '=', 'criticalDataChange.labId').onRef('result.id', '=', 'criticalDataChange.resultId'),
-    )
-    .innerJoin('picklistReason as reason', 'reason.id', 'criticalDataChange.reasonId')
-    .innerJoin('person as proposer', 'proposer.id', 'criticalDataChange.proposedBy')
-    .leftJoin('criticalDataChangeDecision as d', (j) =>
-      j.onRef('d.labId', '=', 'criticalDataChange.labId').onRef('d.changeId', '=', 'criticalDataChange.id'),
-    )
-    .leftJoin('person as decider', 'decider.id', 'd.decidedBy')
-    .leftJoin('picklistReason as decisionReason', 'decisionReason.id', 'd.reasonId')
-    .select([
-      'criticalDataChange.id',
-      'd.outcome',
-      'criticalDataChange.field',
-      'result.analyte',
-      'result.unit',
-      'criticalDataChange.oldValue',
-      'criticalDataChange.newValue',
-      'reason.label as reason',
-      'criticalDataChange.reasonText',
-      'proposer.displayName as proposedBy',
-      'criticalDataChange.proposedAt',
-      'decider.displayName as decidedBy',
-      'd.decidedAt',
-      'decisionReason.label as decisionReason',
-      'd.reasonText as decisionReasonText',
-    ])
-    .where('criticalDataChange.testId', '=', testId)
-    .orderBy('criticalDataChange.proposedAt')
-    .execute();
-  return Promise.all(
-    rows.map(async ({ outcome, ...row }) => {
-      const { version, canonicalForm, contentHash } = await latestVersion(q, 'critical_data_change', row.id);
-      return { ...row, state: outcome ?? ('Pending' as const), recordVersion: { version, canonicalForm, contentHash } };
-    }),
-  );
-}
+import { changeFactsFor, seenVersion } from './steps.ts';
 
 /**
  * The database's own refusals of a proposal or decision (LA017, and a second decision on one change) reach the bench as
