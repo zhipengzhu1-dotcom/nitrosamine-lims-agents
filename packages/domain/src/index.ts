@@ -1,6 +1,7 @@
 export * from './audit.ts';
 export * from './changes.ts';
 export * from './http.ts';
+export * from './documents.ts';
 export * from './equipment.ts';
 export * from './incidents.ts';
 export * from './steps.ts';
@@ -9,4 +10,5 @@ export * from './redaction.ts';
 export * from './staff.ts';
 export * from './sentence.ts';
 export * from './signatures.ts';
+export * from './real-data-gate.ts';
 export * from './password.ts';

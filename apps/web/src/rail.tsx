@@ -3,6 +3,7 @@ import {
   type ChainVerdict,
   type ChangeState,
   decimalPattern,
+  type DocumentStatus,
   type FitnessStatus,
   labStaff,
   mayTake,
@@ -25,7 +26,7 @@ import {
 } from '@lims/domain';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
+import { api, type LockMode, lock, Refused, signOut, useApi, useFictional, useSecondsLeft } from './api.ts';
 import { CodeField, useLoginPolicy } from './form.tsx';
 import { reducedMotion } from './motion.ts';
 
@@ -97,6 +98,15 @@ const unsignedLook = {
     </>
   ),
 } as const;
+const closedLook = {
+  tone: 'done',
+  glyph: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M5.5 8.2l1.8 1.8 3.2-3.5" />
+    </>
+  ),
+} as const;
 const intactLook = { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> } as const;
 const brokenLook = { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> } as const;
 const markLook = {
@@ -116,12 +126,14 @@ const markLook = {
       </>
     ),
   },
-  Closed: {
-    tone: 'done',
+  Closed: closedLook,
+  Draft: { tone: 'plain', glyph: <path d="M3 13l1-3.5 6.5-6.5 2.5 2.5-6.5 6.5z" /> },
+  InReview: {
+    tone: 'plain',
     glyph: (
       <>
         <circle cx="8" cy="8" r="6" />
-        <path d="M5.5 8.2l1.8 1.8 3.2-3.5" />
+        <path d="M8 5v3.5l2.5 1.5" />
       </>
     ),
   },
@@ -137,10 +149,15 @@ const markLook = {
   Approved: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
   Rejected: { tone: 'done', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
   Withdrawn: { tone: 'done', glyph: <path d="M4 8h8" /> },
+  Effective: closedLook,
+  Superseded: { tone: 'plain', glyph: <path d="M3 8h9M9 5l3 3-3 3" /> },
+  Retired: { tone: 'plain', glyph: <path d="M3 8h10" /> },
+  Abandoned: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
 } as const satisfies Record<
   | ChainVerdict
   | IncidentState
   | ChangeState
+  | DocumentStatus
   | 'Unsigned'
   | 'Signatures unsigned'
   | 'As recorded'
@@ -194,8 +211,8 @@ const fitnessLook: { [S in FitnessStatus]: { word: string; tone: 'ok' | 'bad' | 
 
 /**
  * A Test state with its track, a Fitness Status, or a mark with its glyph: a chain verdict, a System Incident's state,
- * whether the breaks in its range are still the ones it recorded, an unsigned Signature, or a record with an unsigned
- * Signature. `fresh` marks a state the server has just confirmed on this page:
+ * a Document version's status, whether the breaks in its range are still the ones it recorded, an unsigned Signature,
+ * or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
  * the word and glyph are final, and an accent plays around them.
  */
 export function Status(
@@ -206,7 +223,7 @@ export function Status(
 ) {
   if ('mark' in props || 'fitness' in props) {
     const { word, tone, glyph } =
-      'mark' in props ? { word: props.mark, ...markLook[props.mark] } : fitnessLook[props.fitness];
+      'mark' in props ? { word: words(props.mark), ...markLook[props.mark] } : fitnessLook[props.fitness];
     return (
       <span className={`status status--${tone} ${props.fresh ? 'status--fresh' : ''}`}>
         {word}
@@ -335,16 +352,16 @@ export type Module = (typeof modules)[number];
 type ModuleKey = Module['key'];
 
 /**
- * `secondary` is a second step the person may take instead of `action`, such as rejecting a change beside approving it.
  * `notice` is what the rail says when the person has no step to take here, such as which Signatures are unsigned.
- * A new `railKey` starts the rail afresh, so a sheet or answer for one record never stays on for the next. The plane
- * takes no press while a commit waits for its answer, so the answer is shown beside the record it was taken on.
+ * `secondary` holds the other steps open beside `action`, each a quieter button after it. A new `railKey` starts the
+ * rail afresh, so a sheet or answer for one record never stays on for the next. The plane takes no press while a commit
+ * waits for its answer, so the answer is shown beside the record it was taken on.
  */
 export function Shell({
   me,
   active,
   action,
-  secondary = null,
+  secondary = noActions,
   notice,
   railKey,
   children,
@@ -352,7 +369,7 @@ export function Shell({
   me: ActorContext;
   active: ModuleKey | null;
   action: RailAction | null;
-  secondary?: RailAction | null;
+  secondary?: readonly RailAction[];
   notice?: string | undefined;
   railKey?: string;
   children: ReactNode;
@@ -381,12 +398,19 @@ export function Shell({
   );
 }
 
+const noActions: readonly RailAction[] = [];
+
+/** The words every screen carries unless the deployment's data class is real. */
+function FictionalBanner() {
+  return useFictional() ? <span className="fict">Fictional data only</span> : null;
+}
+
 export function TopBar({ lab, children }: { lab?: Lab; children?: ReactNode }) {
   return (
     <header className="top">
       <span className="brand">{lab && <b title={lab.name}>{lab.code}</b>}Nitrosamine LIMS</span>
       {children}
-      <span className="fict">Fictional data only</span>
+      <FictionalBanner />
     </header>
   );
 }
@@ -420,7 +444,7 @@ function Rail({
 }: {
   me: ActorContext;
   action: RailAction | null;
-  secondary: RailAction | null;
+  secondary: readonly RailAction[];
   notice?: string | undefined;
   onCommitting: (committing: boolean) => void;
 }) {
@@ -561,7 +585,8 @@ function Rail({
     }
   }
 
-  const press = (a: RailAction) => (!a.fields.length && !a.signs ? void commit(a) : open(a));
+  /** A step with nothing to enter or sign commits on the press; any other opens its sheet. */
+  const press = (a: RailAction) => (a.fields.length || a.signs ? open(a) : void commit(a));
   const shown = sheet?.action;
   return (
     <>
@@ -582,7 +607,7 @@ function Rail({
           <fieldset className="sheet__set" disabled={busy}>
             <h2 id="sheet-title">
               {shown.signs ? `Sign ${shown.signs.meaning}` : shown.label}
-              <span className="fict">Fictional data only</span>
+              <FictionalBanner />
             </h2>
             <div className="sheet__body">
               {shown.fields.length > 0 && (
@@ -749,17 +774,20 @@ function Rail({
             {action.label}
           </button>
         )}
-        {secondary && !opened && (
-          <button
-            type="button"
-            className="rbtn rbtn--quiet rbtn--second"
-            disabled={busy}
-            aria-busy={busy}
-            onClick={() => press(secondary)}
-          >
-            {secondary.label}
-          </button>
-        )}
+        {!opened &&
+          secondary.map((a) => (
+            <button
+              key={a.label}
+              type="button"
+              className="rbtn rbtn--quiet rbtn--commit"
+              data-instant={instant || undefined}
+              disabled={busy}
+              aria-busy={busy}
+              onClick={() => press(a)}
+            >
+              {a.label}
+            </button>
+          ))}
         <fieldset id="rail-session" className="rail__session" disabled={busy || locking}>
           {!me.workstation && (
             <button

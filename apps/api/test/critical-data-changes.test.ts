@@ -767,7 +767,7 @@ describe('the database refuses a malformed picklist reason, proposal or decision
   });
 
   const required: Record<Table, string[]> = {
-    picklist_reason: ['id', 'step', 'position', 'label'],
+    picklist_reason: ['id', 'step', 'position', 'label', 'dataClass'],
     critical_data_change: [
       'labId',
       'id',
@@ -780,8 +780,18 @@ describe('the database refuses a malformed picklist reason, proposal or decision
       'proposedBy',
       'proposedAt',
       'proposedOnVersion',
+      'dataClass',
     ],
-    critical_data_change_decision: ['labId', 'id', 'changeId', 'testId', 'outcome', 'decidedBy', 'decidedAt'],
+    critical_data_change_decision: [
+      'labId',
+      'id',
+      'changeId',
+      'testId',
+      'outcome',
+      'decidedBy',
+      'decidedAt',
+      'dataClass',
+    ],
   };
   it('every required field refuses a null', async () => {
     for (const table of tableNames)
@@ -806,12 +816,7 @@ describe('the database refuses a malformed picklist reason, proposal or decision
     ['critical_data_change', { labId: nowhere }, '23503', 'critical_data_change_lab_id_fkey'],
     ['critical_data_change', { testId: nowhere }, '23503', 'critical_data_change_lab_id_test_id_fkey'],
     ['critical_data_change', { resultId: nowhere }, '23503', 'critical_data_change_lab_id_result_id_fkey'],
-    [
-      'critical_data_change',
-      { proposedOnVersion: nowhere },
-      '23503',
-      'critical_data_change_lab_id_proposed_on_version_fkey',
-    ],
+    ['critical_data_change', { proposedOnVersion: nowhere }, '23503', 'critical_data_change_proposed_on_version_fkey'],
     ['critical_data_change', { reasonId: nowhere }, '23503', 'critical_data_change_reason_id_fkey'],
     ['critical_data_change', { proposedBy: nowhere }, '23503', 'critical_data_change_proposed_by_fkey'],
     ['critical_data_change', { id: pendingId }, '23505', 'critical_data_change_pkey'],

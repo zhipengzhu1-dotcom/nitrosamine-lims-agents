@@ -9,12 +9,13 @@ import { roomRoutes } from './room-routes.ts';
 import { staffRoutes } from './staff.ts';
 import { writeRoutes } from './write-routes.ts';
 
-/** Every route that needs a session. A locked session reaches only lock, unlock and sign-out; every other route answers sessionLocked. */
+/** Every route that needs a session, the Release Log's among them. A locked session reaches only lock, unlock and sign-out; every other route answers sessionLocked. */
 export function sessionRoutes(
   app: App,
   db: Kysely<DB>,
   credentials: Credentials,
   release: string,
+  releaseLog: (signedIn: App) => void,
   verifyReadLimitSeconds?: number,
 ): void {
   const limits = credentials.policy;
@@ -39,6 +40,7 @@ export function sessionRoutes(
     passwordChangeRoute(signedIn, db, credentials);
     preferenceRoutes(signedIn, db);
     readRoutes(signedIn, db, verifyReadLimitSeconds);
+    releaseLog(signedIn);
     staffRoutes(signedIn, db, limits);
     writeRoutes(signedIn, db, credentials, release);
     roomRoutes(signedIn, db, credentials, release);

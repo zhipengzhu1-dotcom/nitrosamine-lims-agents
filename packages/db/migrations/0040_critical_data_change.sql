@@ -17,6 +17,7 @@ create table lims.picklist_reason (
   position  integer not null check (position > 0),
   label     text    not null check (label ~ '\S'),
   needs_text boolean not null generated always as (label = 'Other') stored,
+  data_class lims.data_class not null default lims.current_data_class(),
   unique (step, position),
   unique (step, label)
 );
@@ -39,12 +40,13 @@ create table lims.critical_data_change (
   proposed_by         uuid        not null references lims.person,
   proposed_at         timestamptz not null default clock_timestamp(),
   proposed_on_version uuid        not null,
+  data_class          lims.data_class not null default lims.current_data_class(),
   primary key (lab_id, id),
   unique (lab_id, id, test_id),
   constraint critical_data_change_values_differ_check check (new_value <> old_value),
   foreign key (lab_id, test_id) references lims.test,
   foreign key (lab_id, result_id) references lims.result,
-  foreign key (lab_id, proposed_on_version) references lims.record_version
+  foreign key (proposed_on_version) references lims.record_version
 );
 
 create type lims.change_outcome as enum ('Approved', 'Rejected', 'Withdrawn');
@@ -61,6 +63,7 @@ create table lims.critical_data_change_decision (
   reason_id    uuid                references lims.picklist_reason,
   reason_text  text                check (reason_text ~ '\S'),
   signature_id uuid,
+  data_class   lims.data_class     not null default lims.current_data_class(),
   primary key (lab_id, id),
   unique (lab_id, change_id),
   constraint decision_signed_only_if_approved_check check ((outcome = 'Approved') = (signature_id is not null)),
@@ -295,10 +298,12 @@ language sql stable as $$
   where c.lab_id = p_lab_id and c.id = p_change_id
 $$;
 
+-- 0039's Record Version rules, with a Critical Data Change among the records versioned.
 alter table lims.record_version
   drop constraint record_version_record_table_check,
   add constraint record_version_record_table_check check (
-    record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'critical_data_change')
+    record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'release_log_entry',
+                     'document_version', 'critical_data_change')
   );
 
 create or replace function lims.save_record_version(p_lab_id uuid, p_table text, p_record_id uuid) returns void
@@ -310,15 +315,17 @@ begin
   bytes := convert_to((case p_table
     when 'test' then test_content(p_lab_id, p_record_id)
     when 'test_report' then test_report_content(p_lab_id, p_record_id)
+    when 'release_log_entry' then release_log_entry_content(p_record_id)
     when 'system_incident' then incident_content(p_record_id)
     when 'equipment' then (select equipment_content(e) from equipment e where e.lab_id = p_lab_id and e.id = p_record_id)
     when 'equipment_event' then
       (select equipment_event_content(v) from equipment_event v where v.lab_id = p_lab_id and v.id = p_record_id)
+    when 'document_version' then document_version_content(p_record_id)
     when 'critical_data_change' then critical_data_change_content(p_lab_id, p_record_id)
   end)::text, 'UTF8');
   if bytes is null then return; end if;
   select * into latest from record_version
-    where lab_id = p_lab_id and record_table = p_table and record_id = p_record_id
+    where lab_id is not distinct from p_lab_id and record_table = p_table and record_id = p_record_id
     order by version desc limit 1;
   if latest.content_hash = sha256(bytes) then return; end if;
   insert into record_version (lab_id, record_table, record_id, version, canonical_form, content)
@@ -363,7 +370,7 @@ declare
 begin
   select * into signed from record_version where lab_id = new.lab_id and id = new.record_version_id;
   if signed.id is null then
-    return new; -- signature_record_version_fkey refuses it
+    return new; -- a company record, which takes neither rule; signature_in_record_lab refuses another Lab's
   end if;
   if signed.record_table = 'critical_data_change' and new.meaning <> 'Approved' then
     raise exception 'a Critical Data Change is signed only Approved' using errcode = 'LA010';
@@ -376,6 +383,66 @@ end $$;
 
 create trigger change_signing before insert on lims.signature
   for each row execute function lims.check_change_signing();
+
+-- 0039's approval rule, with a Critical Data Change among the records signed Approved: its Approved is a Reviewer's, as
+-- decide_critical_data_change holds. The Release Log, Equipment and Document version rules are 0039's, unchanged.
+create or replace function lims.apply_release_log_entry() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  v        record_version;
+  e        release_log_entry;
+  approver text;
+begin
+  select * into v from record_version where id = new.record_version_id;
+  if v.record_table not in ('release_log_entry', 'equipment', 'document_version', 'critical_data_change')
+     and new.meaning = 'Approved' then
+    raise exception 'only a Release Log entry, Equipment, a Document version or a Critical Data Change is signed Approved'
+      using errcode = 'LA011';
+  end if;
+  if v.record_table = 'equipment' and new.meaning = 'Approved' and new.role::text <> 'QA' then
+    raise exception 'Equipment is signed Approved only by QA, not %', new.role using errcode = 'LA010';
+  end if;
+  if v.record_table <> 'release_log_entry' then return null; end if;
+  if new.meaning <> 'Approved' then
+    raise exception 'a Release Log entry is signed Approved, not %', new.meaning using errcode = 'LA011';
+  end if;
+  -- The row lock makes a second approval of the entry wait for the first, and then see it.
+  select * into e from release_log_entry where id = v.record_id for no key update;
+  approver := case when e.statement_version is not null then 'QA' else 'PlatformOperator' end;
+  if new.role::text <> approver then
+    raise exception 'a Release Log entry % is approved by %, not %',
+      case when e.statement_version is not null then 'bringing a signature statement into force' else 'of the system' end,
+      approver, new.role using errcode = 'LA011';
+  end if;
+  if exists (select from signature g join record_version x on x.id = g.record_version_id
+              where x.record_table = 'release_log_entry' and x.record_id = e.id and g.meaning = 'Approved'
+                and g.id <> new.id) then
+    raise exception 'the Release Log entry is already approved' using errcode = 'LA011';
+  end if;
+  if e.sets_data_class is not null then
+    perform set_this_transaction('lims.release_log', e.id::text);
+    update deployment set data_class = e.sets_data_class, set_by_entry_id = e.id;
+    perform set_this_transaction('lims.release_log', '');
+  end if;
+  if e.statement_version is not null then
+    if e.statement_version <> (select max(version) + 1 from signature_statement) then
+      raise exception 'the signature statement version % does not follow the version in force', e.statement_version
+        using errcode = 'LA011';
+    end if;
+    insert into signature_statement (version, statement) values (e.statement_version, e.statement);
+  end if;
+  return null;
+end $$;
+
+-- The picklist reasons are change-control configuration that migrations write, as the signing roles are, so the
+-- real-data gate does not read them; otherwise the reasons a migration wrote under fictional would hold the deployment
+-- there. 0038's list, with picklist_reason.
+create or replace function lims.gate_exempt_tables() returns text[]
+language sql immutable as $$
+  select array['access_event', 'credential_link', 'deployment', 'identity_verification', 'lab', 'membership', 'person',
+               'picklist_reason', 'reauthentication', 'record_version', 'release_log_entry', 'service_identity',
+               'signature', 'signature_statement', 'signing_role']
+$$;
 
 -- No Test step signs while a Critical Data Change on one of the Test's Results is pending: neither the Test nor the
 -- Test Report built on it. Holds the Lab's chain before the check, as a proposal does, so of a proposal and a signing at

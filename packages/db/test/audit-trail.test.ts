@@ -11,6 +11,7 @@ const DATABASE = checkoutDatabase('lims_test');
 
 const app = createDb(databaseUrl(server, DATABASE, 'lims_app'));
 const superuser = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+const service = createDb(databaseUrl(server, DATABASE)).withSchema('lims');
 let labId: string;
 
 before(async () => {
@@ -20,7 +21,7 @@ before(async () => {
   await admin.end();
   await migrate(server, DATABASE);
   await superuser.connect();
-  ({ labId } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Set up the test Lab' }, (tx) =>
+  ({ labId } = await audited(service, { actor: 'svc:test', role: 'system', reason: 'Set up the test Lab' }, (tx) =>
     tx
       .insertInto('lab')
       .values({ code: 'TL', name: 'Test Lab', timeZone: 'UTC' })
@@ -31,6 +32,7 @@ before(async () => {
 
 after(async () => {
   await app.destroy();
+  await service.destroy();
   await superuser.end();
 });
 
@@ -66,7 +68,7 @@ it('an audited write records who made it, in which role, why, and the old and ne
 });
 
 it('an Audit Trail row snapshot keeps the stored column names and leaves out the password hash', async () => {
-  const { id } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a person' }, (tx) =>
+  const { id } = await audited(service, { actor: 'svc:test', role: 'system', reason: 'Add a person' }, (tx) =>
     tx
       .insertInto('person')
       .values({ username: 'snap.shot', displayName: 'Snap Shot', passwordHash: 'not-a-real-hash' })
@@ -82,6 +84,7 @@ it('an Audit Trail row snapshot keeps the stored column names and leaves out the
   assert.ok(row && typeof row === 'object' && !Array.isArray(row), 'the snapshot is a row object');
   assert.deepEqual(Object.keys(row).sort(), [
     'customer_id',
+    'data_class',
     'display_name',
     'failed_logins',
     'id',
@@ -262,12 +265,15 @@ describe('chain verification reports every break in a chain, each once, in entry
   ];
   for (const [i, c] of cases.entries())
     it(c.name, async () => {
-      const { labId: chain } = await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a Lab' }, (tx) =>
-        tx
-          .insertInto('lab')
-          .values({ code: `K${String.fromCodePoint(65 + i)}`, name: 'Broken Lab', timeZone: 'UTC' })
-          .returning('labId')
-          .executeTakeFirstOrThrow(),
+      const { labId: chain } = await audited(
+        service,
+        { actor: 'svc:test', role: 'system', reason: 'Add a Lab' },
+        (tx) =>
+          tx
+            .insertInto('lab')
+            .values({ code: `K${String.fromCodePoint(65 + i)}`, name: 'Broken Lab', timeZone: 'UTC' })
+            .returning('labId')
+            .executeTakeFirstOrThrow(),
       );
       for (const n of [2, 3, 4, 5, 6])
         await audited(app, { actor: 'person:lena', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
@@ -298,12 +304,12 @@ const transactionIds = (customers: string[]) =>
 
 it('every entry of one audited write carries one transaction ID, and the next audited write draws another', async () => {
   const ctx = { actor: 'svc:test', role: 'system', reason: 'Add Customers together' };
-  await audited(app, ctx, async (tx) => {
+  await audited(service, ctx, async (tx) => {
     await tx.insertInto('customer').values({ name: 'Together One' }).execute();
     await tx.updateTable('lab').set({ name: 'Test Lab, renamed together' }).where('labId', '=', labId).execute();
     await tx.insertInto('customer').values({ name: 'Together Two' }).execute();
   });
-  await audited(app, ctx, (tx) => tx.insertInto('customer').values({ name: 'Apart' }).execute());
+  await audited(service, ctx, (tx) => tx.insertInto('customer').values({ name: 'Apart' }).execute());
 
   const ids = new Map(
     (await transactionIds(['Together One', 'Together Two', 'Apart'])).map((e) => [e.name, e.transactionId]),
@@ -321,7 +327,7 @@ it('every entry of one audited write carries one transaction ID, and the next au
 });
 
 it('changing the transaction ID stored on an entry breaks its chain at that entry', async () => {
-  await audited(app, { actor: 'svc:test', role: 'system', reason: 'Add a Customer to regroup' }, (tx) =>
+  await audited(service, { actor: 'svc:test', role: 'system', reason: 'Add a Customer to regroup' }, (tx) =>
     tx.insertInto('customer').values({ name: 'Regrouped Ltd' }).execute(),
   );
   const verify = async () =>
@@ -346,7 +352,7 @@ it('changing the transaction ID stored on an entry breaks its chain at that entr
 
 it('a transaction that locks the company chain after a Lab chain is refused, so it cannot deadlock', async () => {
   await assert.rejects(
-    audited(app, { actor: 'svc:test', role: 'system', reason: 'Write a Lab, then the company' }, async (tx) => {
+    audited(service, { actor: 'svc:test', role: 'system', reason: 'Write a Lab, then the company' }, async (tx) => {
       await tx.updateTable('lab').set({ name: 'Test Lab, out of order' }).where('labId', '=', labId).execute();
       await tx.insertInto('customer').values({ name: 'Out Of Order Ltd' }).execute();
     }),
@@ -375,14 +381,14 @@ it('two transactions that write the company chain and a Lab chain in opposite or
     companyFirstHolds = resolve;
   });
   const ctx = { actor: 'svc:test', role: 'system', reason: 'Write two chains at once' };
-  const companyFirst = audited(app, ctx, async (tx) => {
+  const companyFirst = audited(service, ctx, async (tx) => {
     await tx.insertInto('customer').values({ name: 'Company First Ltd' }).execute();
     companyFirstHolds();
     await waiting();
     await tx.updateTable('lab').set({ name: 'Test Lab, company first' }).where('labId', '=', labId).execute();
   });
   const labFirst = companyLocked.then(() =>
-    audited(app, ctx, async (tx) => {
+    audited(service, ctx, async (tx) => {
       await sql`select lims.lock_chains('company', ${labId})`.execute(tx);
       await tx.updateTable('lab').set({ name: 'Test Lab, Lab first' }).where('labId', '=', labId).execute();
       await tx.insertInto('customer').values({ name: 'Lab First Ltd' }).execute();
@@ -396,11 +402,11 @@ it('a transaction ID left on the connection by an earlier transaction is never t
   const forged = '11111111-1111-4111-8111-111111111111';
   const ctx = { actor: 'svc:test', role: 'system', reason: 'Leave a transaction ID on the connection' };
   await sql`select 1`.execute(app);
-  await audited(app, ctx, async (tx) => {
+  await audited(service, ctx, async (tx) => {
     await sql`select set_config('lims.transaction', ${forged}, false)`.execute(tx);
     await tx.insertInto('customer').values({ name: 'Left Behind One' }).execute();
   });
-  await audited(app, ctx, (tx) => tx.insertInto('customer').values({ name: 'Left Behind Two' }).execute());
+  await audited(service, ctx, (tx) => tx.insertInto('customer').values({ name: 'Left Behind Two' }).execute());
   const ids = (await transactionIds(['Left Behind One', 'Left Behind Two'])).map((e) => e.transactionId);
   assert.equal(ids.length, 2);
   assert.ok(!ids.includes(forged), 'the value set on the connection is not an ID');
@@ -413,7 +419,7 @@ it('a transaction that locks a Lab chain after a Lab with a higher ID is refused
   for (const code of ['TA', 'TB'])
     labs.push(
       (
-        await audited(app, ctx, (tx) =>
+        await audited(service, ctx, (tx) =>
           tx
             .insertInto('lab')
             .values({ code, name: `Lab ${code}`, timeZone: 'UTC' })
@@ -425,13 +431,13 @@ it('a transaction that locks a Lab chain after a Lab with a higher ID is refused
   const [low, high] = labs.sort();
   assert.ok(low && high);
   await assert.rejects(
-    audited(app, { ...ctx, reason: 'Rename two Labs, the higher ID first' }, async (tx) => {
+    audited(service, { ...ctx, reason: 'Rename two Labs, the higher ID first' }, async (tx) => {
       await tx.updateTable('lab').set({ name: 'Higher first' }).where('labId', '=', high).execute();
       await tx.updateTable('lab').set({ name: 'Lower second' }).where('labId', '=', low).execute();
     }),
     refusedWith('LA004'),
   );
-  await audited(app, { ...ctx, reason: 'Rename two Labs, declared first' }, async (tx) => {
+  await audited(service, { ...ctx, reason: 'Rename two Labs, declared first' }, async (tx) => {
     await sql`select lims.lock_chains(${high}, ${low})`.execute(tx);
     await tx.updateTable('lab').set({ name: 'Higher first' }).where('labId', '=', high).execute();
     await tx.updateTable('lab').set({ name: 'Lower second' }).where('labId', '=', low).execute();
@@ -442,23 +448,27 @@ it('a chain or a Lab that does not exist is refused, and a number is taken only 
   const ctx = { actor: 'svc:test', role: 'system', reason: 'Probe what does not exist' };
   const nowhere = '22222222-2222-4222-8222-222222222222';
   await assert.rejects(
-    audited(app, ctx, (tx) => sql`select lims.lock_chains(${nowhere})`.execute(tx)),
+    audited(service, ctx, (tx) => sql`select lims.lock_chains(${nowhere})`.execute(tx)),
     refusedWith('LA005'),
   );
   await assert.rejects(
-    audited(app, ctx, (tx) => sql`select * from lims.take_number('Sample', ${nowhere})`.execute(tx)),
+    audited(service, ctx, (tx) => sql`select * from lims.take_number('Sample', ${nowhere})`.execute(tx)),
     refusedWith('LA005'),
   );
   await assert.rejects(sql`select * from lims.take_number('Sample', ${labId})`.execute(app), refusedWith('LA001'));
 });
 
 it("one transaction keeps one ID when it changes the session's time zone and date style between writes", async () => {
-  await audited(app, { actor: 'svc:test', role: 'system', reason: 'Change display settings mid-write' }, async (tx) => {
-    await tx.insertInto('customer').values({ name: 'Before The Zone Change' }).execute();
-    await sql`set local timezone = 'Asia/Tokyo'`.execute(tx);
-    await sql`set local datestyle = 'SQL, DMY'`.execute(tx);
-    await tx.insertInto('customer').values({ name: 'After The Zone Change' }).execute();
-  });
+  await audited(
+    service,
+    { actor: 'svc:test', role: 'system', reason: 'Change display settings mid-write' },
+    async (tx) => {
+      await tx.insertInto('customer').values({ name: 'Before The Zone Change' }).execute();
+      await sql`set local timezone = 'Asia/Tokyo'`.execute(tx);
+      await sql`set local datestyle = 'SQL, DMY'`.execute(tx);
+      await tx.insertInto('customer').values({ name: 'After The Zone Change' }).execute();
+    },
+  );
   const ids = (await transactionIds(['Before The Zone Change', 'After The Zone Change'])).map((e) => e.transactionId);
   assert.equal(ids.length, 2);
   assert.equal(ids[0], ids[1]);

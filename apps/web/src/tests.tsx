@@ -141,6 +141,8 @@ export function TestPage({
     await Promise.all([reload(), reloadTrail(), afterStep?.()]);
   };
   const [changeAction, otherChangeAction] = useChangeActions(view, refresh);
+  // oxlint-disable-next-line react-perf/jsx-no-new-array-as-prop -- the rail is not memoized and each action is rebuilt per render, so a stable array would save nothing
+  const secondary = otherChangeAction ? [otherChangeAction] : [];
   const action = view?.next
     ? stepAction(
         view.next,
@@ -155,7 +157,7 @@ export function TestPage({
       me={me}
       active="tests"
       action={action}
-      secondary={otherChangeAction}
+      secondary={secondary}
       notice={view && unsignedNotice(view.signatures)}
       railKey={id}
     >

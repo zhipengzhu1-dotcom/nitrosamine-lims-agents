@@ -19,6 +19,14 @@ export type AuditExportFormat = "CSV" | "JSON";
 
 export type ChangeOutcome = "Approved" | "Rejected" | "Withdrawn";
 
+export type DataClass = "fictional" | "real";
+
+export type DemoException = "Anchoring" | "DemoLogin" | "FileVault" | "PlaintextAtCloudflare" | "TwoRole";
+
+export type DocumentStatus = "Abandoned" | "Approved" | "Draft" | "Effective" | "InReview" | "Retired" | "Superseded";
+
+export type DocumentType = "ExternalDocument" | "Form" | "Method" | "MethodProtocol" | "MethodReport" | "Policy" | "QualityManual" | "SOP" | "WorkInstruction" | "Worksheet";
+
 export type EquipmentEventKind = "Cleaning" | "FirmwareChange" | "Maintenance" | "Note" | "Repair" | "SoftwareChange" | "Suspect";
 
 export type FitnessStatus = "Expired" | "InUse" | "Quarantined" | "Retired" | "Suspended";
@@ -49,6 +57,8 @@ export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type Meaning = "Acknowledged" | "Approved" | "Authored" | "Performed" | "Released" | "Reviewed" | "Verified";
 
+export type ReleaseLogKind = "ConfigurationChange" | "HostMove" | "Release";
+
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "PlatformOperator" | "QA" | "Reviewer" | "SampleCustodian";
 
 export type SignInFailure = "AccountLocked" | "AlreadyEnrolled" | "CodeAlreadyUsed" | "NoAuthenticator" | "NoCredential" | "NoEnrolmentGrant" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherPersonSignedIn" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongCode" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
@@ -59,6 +69,7 @@ export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export interface AccessEvent {
   at: Generated<Timestamp>;
+  dataClass: Generated<DataClass>;
   failureReason: SignInFailure | null;
   id: Generated<string>;
   kind: AccessEventKind;
@@ -93,6 +104,7 @@ export interface AuditEntry {
 
 export interface AuditExport {
   customerId: string;
+  dataClass: Generated<DataClass>;
   dataSha256: Buffer;
   entryCount: number;
   format: AuditExportFormat;
@@ -113,6 +125,7 @@ export interface Authenticator {
 
 export interface ChainVerification {
   chain: string;
+  dataClass: Generated<DataClass>;
   head: Buffer;
   id: Generated<string>;
   recomputedFrom: Int8;
@@ -132,6 +145,7 @@ export interface CommitKey {
 }
 
 export interface CredentialLink {
+  dataClass: Generated<DataClass>;
   expiresAt: Generated<Timestamp>;
   id: Generated<string>;
   issuedAt: Generated<Timestamp>;
@@ -141,6 +155,7 @@ export interface CredentialLink {
 }
 
 export interface CriticalDataChange {
+  dataClass: Generated<DataClass>;
   field: string;
   id: Generated<string>;
   labId: string;
@@ -157,6 +172,7 @@ export interface CriticalDataChange {
 
 export interface CriticalDataChangeDecision {
   changeId: string;
+  dataClass: Generated<DataClass>;
   decidedAt: Generated<Timestamp>;
   decidedBy: Generated<string>;
   id: Generated<string>;
@@ -169,11 +185,43 @@ export interface CriticalDataChangeDecision {
 }
 
 export interface Customer {
+  dataClass: Generated<DataClass>;
   id: Generated<string>;
   name: string;
 }
 
+export interface Deployment {
+  dataClass: Generated<DataClass>;
+  setByEntryId: string | null;
+  single: Generated<boolean>;
+}
+
+export interface Document {
+  createdAt: Generated<Timestamp>;
+  dataClass: Generated<DataClass>;
+  documentType: DocumentType;
+  id: Generated<string>;
+  labId: string;
+  number: ColumnType<string, never, never>;
+}
+
+export interface DocumentVersion {
+  abandonReason: string | null;
+  authorId: string;
+  body: string;
+  dataClass: Generated<DataClass>;
+  documentId: string;
+  effectiveDate: Timestamp;
+  id: Generated<string>;
+  labId: string;
+  savedAt: Generated<Timestamp>;
+  status: Generated<DocumentStatus>;
+  title: string;
+  version: number;
+}
+
 export interface EnrolmentGrant {
+  dataClass: Generated<DataClass>;
   expiresAt: Generated<Timestamp>;
   id: Generated<string>;
   issuedAt: Generated<Timestamp>;
@@ -185,6 +233,7 @@ export interface EnrolmentGrant {
 
 export interface Equipment {
   assetNumber: string | null;
+  dataClass: Generated<DataClass>;
   firmwareVersion: string | null;
   fitnessStatus: Generated<FitnessStatus>;
   id: Generated<string>;
@@ -201,6 +250,7 @@ export interface Equipment {
 }
 
 export interface EquipmentEvent {
+  dataClass: Generated<DataClass>;
   equipmentId: string;
   id: Generated<string>;
   kind: EquipmentEventKind;
@@ -214,6 +264,7 @@ export interface IdentityVerification {
   checkedAt: Generated<Timestamp>;
   checkedBy: string;
   checkedInLabId: string;
+  dataClass: Generated<DataClass>;
   evidence: string;
   id: Generated<string>;
   printedName: string;
@@ -229,12 +280,14 @@ export interface IncidentBreak {
 
 export interface Lab {
   code: string;
+  dataClass: Generated<DataClass>;
   labId: Generated<string>;
   name: string;
   timeZone: string;
 }
 
 export interface Membership {
+  dataClass: Generated<DataClass>;
   labId: string;
   personId: string;
   role: Role;
@@ -242,6 +295,7 @@ export interface Membership {
 
 export interface Method {
   code: string;
+  dataClass: Generated<DataClass>;
   id: Generated<string>;
   title: string;
   version: string;
@@ -249,6 +303,7 @@ export interface Method {
 
 export interface Person {
   customerId: string | null;
+  dataClass: Generated<DataClass>;
   displayName: string;
   failedLogins: Generated<number>;
   id: Generated<string>;
@@ -260,6 +315,7 @@ export interface Person {
 }
 
 export interface PicklistReason {
+  dataClass: Generated<DataClass>;
   id: Generated<string>;
   label: string;
   needsText: Generated<boolean>;
@@ -270,6 +326,7 @@ export interface PicklistReason {
 export interface Reauthentication {
   at: Generated<Timestamp>;
   authenticator: string;
+  dataClass: Generated<DataClass>;
   id: Generated<string>;
   labId: string;
   meaning: Meaning;
@@ -281,16 +338,38 @@ export interface RecordVersion {
   canonicalForm: number;
   content: Buffer;
   contentHash: Generated<Buffer>;
+  dataClass: Generated<DataClass>;
   id: Generated<string>;
-  labId: string;
+  labId: string | null;
   recordId: string;
   recordTable: string;
   savedAt: Generated<Timestamp>;
   version: number;
 }
 
+export interface ReleaseLogEntry {
+  ciResult: string | null;
+  ciRun: string | null;
+  dataClass: Generated<DataClass>;
+  fileVaultPersonalKey: boolean | null;
+  id: Generated<string>;
+  imageDigests: string[] | null;
+  kind: ReleaseLogKind;
+  lapsesExceptions: Generated<ArrayType<DemoException>>;
+  recordedAt: Generated<Timestamp>;
+  recordsExceptions: Generated<ArrayType<DemoException>>;
+  release: string | null;
+  setsDataClass: DataClass | null;
+  statement: Buffer | null;
+  statementVersion: number | null;
+  summary: string;
+  title: string;
+  zapBaselineResult: string | null;
+}
+
 export interface Result {
   analyte: string;
+  dataClass: Generated<DataClass>;
   enteredBy: string;
   id: Generated<string>;
   injectionSequenceRef: string;
@@ -303,12 +382,14 @@ export interface Result {
 }
 
 export interface Room {
+  dataClass: Generated<DataClass>;
   id: Generated<string>;
   labId: string;
   name: string;
 }
 
 export interface Sample {
+  dataClass: Generated<DataClass>;
   description: string;
   id: Generated<string>;
   labId: string;
@@ -316,6 +397,14 @@ export interface Sample {
   receivedAt: Timestamp | null;
   receivedTimeZone: ColumnType<string | null, never, never>;
   submissionId: string;
+}
+
+export interface ServiceIdentity {
+  createdByEntryId: string;
+  dataClass: Generated<DataClass>;
+  name: string;
+  retiredByEntryId: string | null;
+  scope: string[];
 }
 
 export interface Session {
@@ -335,6 +424,7 @@ export interface Signature {
   authenticator: string | null;
   canonicalForm: number;
   contentHash: Buffer;
+  dataClass: Generated<DataClass>;
   id: Generated<string>;
   labId: string;
   meaning: Meaning;
@@ -353,18 +443,21 @@ export interface Signature {
 
 export interface SignatureStatement {
   approvedAt: Generated<Timestamp>;
+  dataClass: Generated<DataClass>;
   statement: Buffer;
   statementHash: Generated<Buffer>;
   version: number;
 }
 
 export interface SigningRole {
+  dataClass: Generated<DataClass>;
   meaning: Meaning;
   role: Role;
 }
 
 export interface Submission {
   customerId: string;
+  dataClass: Generated<DataClass>;
   id: Generated<string>;
   number: string;
   submittedBy: string;
@@ -377,6 +470,7 @@ export interface SystemIncident {
   correctiveAction: string | null;
   correctiveActionAt: Timestamp | null;
   correctiveActionBy: string | null;
+  dataClass: Generated<DataClass>;
   errorClass: string | null;
   fingerprint: Buffer | null;
   firstFailure: Int8 | null;
@@ -405,6 +499,7 @@ export interface SystemIncident {
 
 export interface Test {
   assigneeId: string | null;
+  dataClass: Generated<DataClass>;
   gxpClass: Generated<string>;
   id: Generated<string>;
   labId: string;
@@ -414,6 +509,7 @@ export interface Test {
 }
 
 export interface TestReport {
+  dataClass: Generated<DataClass>;
   id: Generated<string>;
   labId: string;
   number: string;
@@ -421,6 +517,7 @@ export interface TestReport {
 }
 
 export interface TrainingRecord {
+  dataClass: Generated<DataClass>;
   labId: string;
   methodId: string;
   personId: string;
@@ -428,6 +525,7 @@ export interface TrainingRecord {
 
 export interface Workstation {
   browserPolicy: string;
+  dataClass: Generated<DataClass>;
   deviceTokenHash: Buffer | null;
   id: Generated<string>;
   labId: string;
@@ -446,6 +544,9 @@ export interface DB {
   criticalDataChange: CriticalDataChange;
   criticalDataChangeDecision: CriticalDataChangeDecision;
   customer: Customer;
+  deployment: Deployment;
+  document: Document;
+  documentVersion: DocumentVersion;
   enrolmentGrant: EnrolmentGrant;
   equipment: Equipment;
   equipmentEvent: EquipmentEvent;
@@ -458,9 +559,11 @@ export interface DB {
   picklistReason: PicklistReason;
   reauthentication: Reauthentication;
   recordVersion: RecordVersion;
+  releaseLogEntry: ReleaseLogEntry;
   result: Result;
   room: Room;
   sample: Sample;
+  serviceIdentity: ServiceIdentity;
   session: Session;
   signature: Signature;
   signatureStatement: SignatureStatement;

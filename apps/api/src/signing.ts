@@ -12,7 +12,8 @@ export type Signable =
   | 'system_incident'
   | 'equipment'
   | 'equipment_event'
-  | 'critical_data_change';
+  | 'critical_data_change'
+  | 'document_version';
 
 /** The Record Version the signer saw: its id and the hash the sheet showed. */
 export interface Seen {

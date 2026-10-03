@@ -44,7 +44,7 @@ async function dropDatabase(database: string): Promise<void> {
 before(async () => {
   await dropDatabase(DATABASE);
   await migrate(server, DATABASE);
-  await audited(app, { ...svc, reason: 'Set up the Lab' }, async (tx) => {
+  await audited(superuser, { ...svc, reason: 'Set up the Lab' }, async (tx) => {
     ({ id: fixture.customerId } = await tx
       .insertInto('customer')
       .values({ name: 'Versions Customer (fictional)' })
@@ -80,7 +80,7 @@ after(async () => {
 
 async function submitTest(): Promise<{ sampleId: string; testId: string; number: string }> {
   const number = `RV-S${String(++sampleCount).padStart(5, '0')}`;
-  return audited(app, { ...svc, reason: 'submit' }, async (tx) => {
+  return audited(superuser, { ...svc, reason: 'submit' }, async (tx) => {
     const { id: sampleId } = await tx
       .insertInto('sample')
       .values({ labId: fixture.labId, submissionId: fixture.submissionId, number, description: 'Tablets' })
@@ -161,7 +161,7 @@ describe('the database writes a Record Version whenever a signable record change
       'canonical form 1 is these bytes, so a change to the rendering is a new form, not a silent change of every hash',
     );
 
-    await audited(app, { ...svc, reason: 'receive' }, (tx) =>
+    await audited(superuser, { ...svc, reason: 'receive' }, (tx) =>
       tx.updateTable('sample').set({ receivedAt: '2026-09-30T08:15:00.123456Z' }).where('id', '=', sampleId).execute(),
     );
     const after = await versions(app, 'test', testId);
@@ -178,7 +178,7 @@ describe('the database writes a Record Version whenever a signable record change
 
   it('a change that leaves the canonical content as it was, such as a state move, writes no Record Version', async () => {
     const { testId } = await submitTest();
-    await audited(app, { ...svc, reason: 'receive' }, (tx) =>
+    await audited(superuser, { ...svc, reason: 'receive' }, (tx) =>
       tx.updateTable('test').set({ state: 'Ready' }).where('id', '=', testId).execute(),
     );
     assert.deepEqual(
@@ -189,7 +189,7 @@ describe('the database writes a Record Version whenever a signable record change
 
   it('a Result removed from a Test, and a Test Report issued on it, each write the versions that changed', async () => {
     const { testId } = await submitTest();
-    const { id: reportId } = await audited(app, { ...svc, reason: 'enterResult and release' }, async (tx) => {
+    const { id: reportId } = await audited(superuser, { ...svc, reason: 'enterResult and release' }, async (tx) => {
       await tx
         .insertInto('result')
         .values({ labId: fixture.labId, testId, enteredBy: fixture.personId, ...result })
@@ -255,7 +255,7 @@ describe('the database writes a Record Version whenever a signable record change
         .where('id', '=', fixture.customerId)
         .execute(),
     );
-    await audited(app, { ...svc, reason: 'Move the Submission to another Customer' }, async (tx) => {
+    await audited(superuser, { ...svc, reason: 'Move the Submission to another Customer' }, async (tx) => {
       const other = await tx
         .insertInto('customer')
         .values({ name: 'Other Customer (fictional)' })
@@ -276,7 +276,7 @@ describe('the database writes a Record Version whenever a signable record change
 
   it('two transactions that change one Test at the same time take turns, so the versions are numbered in order', async () => {
     const { sampleId, testId } = await submitTest();
-    await audited(app, { ...svc, reason: 'enterResult' }, (tx) =>
+    await audited(superuser, { ...svc, reason: 'enterResult' }, (tx) =>
       tx
         .insertInto('result')
         .values({ labId: fixture.labId, testId, enteredBy: fixture.personId, ...result })
@@ -287,7 +287,7 @@ describe('the database writes a Record Version whenever a signable record change
       await sql`select pg_sleep(0.4)`.execute(tx);
     });
     await sql`select pg_sleep(0.1)`.execute(app);
-    const quick = audited(app, { ...svc, reason: 'Describe the Sample' }, (tx) =>
+    const quick = audited(superuser, { ...svc, reason: 'Describe the Sample' }, (tx) =>
       tx.updateTable('sample').set({ description: 'Coated tablets' }).where('id', '=', sampleId).execute(),
     );
     await Promise.all([slow, quick]);

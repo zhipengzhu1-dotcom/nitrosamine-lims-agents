@@ -36,7 +36,10 @@ type CompanyTable =
   | 'signatureStatement'
   | 'systemIncident'
   | 'chainVerification'
-  | 'picklistReason';
+  | 'picklistReason'
+  | 'releaseLogEntry'
+  | 'serviceIdentity'
+  | 'deployment';
 type LabTable = Exclude<keyof DB, CompanyTable | 'accessEvent' | 'auditEntry' | 'session'>;
 
 function inLab(q: Kysely<DB>, labId: string) {
@@ -78,6 +81,8 @@ function inLab(q: Kysely<DB>, labId: string) {
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Kysely cannot type an update of a generic Lab table; ofLab filters it
       (q.updateTable(table) as unknown as UpdateQueryBuilder<DB, T, T, UpdateResult>).where(ofLab(table)),
     company,
+    /** Reads the Record Versions of company records, which carry no Lab. */
+    companyVersions: () => q.selectFrom('recordVersion').where('labId', 'is', null),
   };
 }
 
@@ -323,13 +328,23 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
       if (!recomputed) throw new Error('the break range read returned no row');
       return recomputed;
     },
-    /** One audited transaction; a write a re-authentication enables holds that person's row before anything else. */
-    write: <R>(reason: string, role: Role, fn: (q: WriteQueries) => Promise<R>, reauthenticated?: Reauthenticated) =>
+    /**
+     * One audited transaction. A write a re-authentication enables holds that person's row before anything else, and
+     * a write that changes the data class declares so before that, which takes no lock.
+     */
+    write: <R>(
+      reason: string,
+      role: Role,
+      fn: (q: WriteQueries) => Promise<R>,
+      reauthenticated?: Reauthenticated,
+      declaresDataClassChange = false,
+    ) =>
       auditedAfterReauthentication(
         db,
         { actor: `person:${ctx.person.username}`, role, reason },
         reauthenticated,
         (tx) => fn(inWrite(tx, labId)),
+        declaresDataClassChange,
       ),
   };
 }

@@ -2,6 +2,7 @@ import type * as db from '@lims/db';
 import { type Static, type TObject, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
 import { type ChangeStepName, changeStepNames, reasonSteps } from './changes.ts';
+import { type DocumentStepName, documentStepNames } from './documents.ts';
 import type { EquipmentStepName } from './equipment.ts';
 import type { IncidentStepName } from './incidents.ts';
 import { type Step, type StepName, stepNames, steps } from './steps.ts';
@@ -154,6 +155,8 @@ export const auditedTable = Type.Enum({
   test: 'test',
   result: 'result',
   test_report: 'test_report',
+  document: 'document',
+  document_version: 'document_version',
   record_version: 'record_version',
   signature: 'signature',
   audit_export: 'audit_export',
@@ -595,6 +598,72 @@ const incidentRow = Type.Object({
   chain: systemIncident.properties.chain,
 });
 export type IncidentRow = Static<typeof incidentRow>;
+/** The kind of a controlled Document, which its number names with a short code. */
+const documentTypeNames = {
+  QualityManual: 'QualityManual',
+  Policy: 'Policy',
+  SOP: 'SOP',
+  WorkInstruction: 'WorkInstruction',
+  Method: 'Method',
+  MethodProtocol: 'MethodProtocol',
+  MethodReport: 'MethodReport',
+  Form: 'Form',
+  Worksheet: 'Worksheet',
+  ExternalDocument: 'ExternalDocument',
+} as const satisfies { [K in db.DocumentType]: K };
+const documentType = Type.Enum(documentTypeNames);
+export type DocumentType = Static<typeof documentType>;
+export const documentTypes: readonly DocumentType[] = Object.values(documentTypeNames);
+/** Where a Document version stands, from Draft through its three Signatures to Effective, and on to Superseded. */
+const documentStatus = Type.Enum({
+  Draft: 'Draft',
+  InReview: 'InReview',
+  Approved: 'Approved',
+  Effective: 'Effective',
+  Superseded: 'Superseded',
+  Retired: 'Retired',
+  Abandoned: 'Abandoned',
+} as const satisfies { [K in db.DocumentStatus]: K });
+export type DocumentStatus = Static<typeof documentStatus>;
+const documentVersion = Type.Object({
+  id: uuid,
+  version: Type.Integer({ minimum: 1 }),
+  status: documentStatus,
+  title: Type.String(),
+  body: Type.String(),
+  author: recorder,
+  /** The Lab day it takes effect, written on the Draft and covered by every Signature. */
+  effectiveDate: calendarDate,
+  abandonReason: nullable(Type.String()),
+  /** Its Signatures in the order given, each with the Record Version it was given on. */
+  signatures: Type.Array(signature),
+});
+export type DocumentVersion = Static<typeof documentVersion>;
+/** A Document of the vault with every version, newest first. */
+const documentView = Type.Object({
+  id: uuid,
+  number: Type.String(),
+  documentType: documentType,
+  versions: Type.Array(documentVersion),
+  /** The latest Record Version of the newest version, which a signing on sight of this screen binds. */
+  recordVersion: nullable(recordVersionRef),
+  statement: signatureStatement,
+  /** The steps the person asking may take on the newest version now, from the step registry. */
+  steps: Type.Array(Type.Enum(documentStepNames)),
+});
+export type DocumentView = Static<typeof documentView>;
+/** One line of the vault: a Document's number and its newest version. */
+const documentRow = Type.Object({
+  id: uuid,
+  number: Type.String(),
+  documentType: documentType,
+  version: Type.Integer({ minimum: 1 }),
+  title: Type.String(),
+  status: documentStatus,
+});
+export type DocumentRow = Static<typeof documentRow>;
+const documentTitle = Type.String({ minLength: 1, maxLength: 200, pattern: '\\S' });
+const documentBody = Type.String({ minLength: 1, maxLength: 20000, pattern: '\\S' });
 
 const fitnessStatus = Type.Enum({
   Quarantined: 'Quarantined',
@@ -718,6 +787,7 @@ export const refusalKinds = [
   'recordChanged',
   'signingRefused',
   'changePending',
+  'realDataRefused',
   'keyReused',
   'notFound',
   'failure',
@@ -758,6 +828,86 @@ const signingBody = Type.Object(
   closed,
 );
 export type SigningBody = Static<typeof signingBody>;
+export const dataClasses = ['fictional', 'real'] as const;
+export type DataClass = (typeof dataClasses)[number];
+const dataClass = Type.Enum(dataClasses);
+/** The one deployment's data class, public, so every screen can say "fictional data only" while it holds. */
+const deployment = Type.Object({ dataClass });
+export const releaseLogKinds = ['Release', 'ConfigurationChange', 'HostMove'] as const;
+export type ReleaseLogKind = (typeof releaseLogKinds)[number];
+export const demoExceptions = ['TwoRole', 'Anchoring', 'FileVault', 'PlaintextAtCloudflare', 'DemoLogin'] as const;
+export type DemoException = (typeof demoExceptions)[number];
+const demoException = Type.Enum(demoExceptions);
+export const ciResults = ['Passed', 'Failed'] as const;
+export const zapBaselineResults = ['Passed', 'Warned', 'Failed'] as const;
+/** An image and the sha256 digest a Release ships it at, as `name@sha256:<64 hex>`. */
+const imageDigest = Type.String({ pattern: '^[^@\\s]+@sha256:[0-9a-f]{64}$', maxLength: 400 });
+/** A Service Identity's name and the `table:OP` pairs it may write, as the Release Log entry that declared it reads. */
+const serviceIdentity = Type.Object({ name: Type.String(), scope: Type.Array(Type.String()) });
+/** The Approved Signature on a Release Log entry: who signed, in which role, with what meaning, when (UTC, a company record's time) and with what authenticator, as written (`Password`, `PasswordAndCode`, or `Seed` for the seed's own approvals). */
+const releaseLogApproval = Type.Object({
+  signer: Type.String(),
+  username: Type.String(),
+  role,
+  meaning,
+  signedAt: instant,
+  authenticator: Type.String(),
+});
+export type ReleaseLogApproval = Static<typeof releaseLogApproval>;
+/** A Release Log entry as recorded, with its Service Identities, its Approved Signature once signed, and the Record Version a signer sees. */
+const releaseLogEntry = Type.Object({
+  id: uuid,
+  kind: Type.Enum(releaseLogKinds),
+  title: Type.String(),
+  summary: Type.String(),
+  release: nullable(Type.String()),
+  imageDigests: nullable(Type.Array(Type.String())),
+  ciRun: nullable(Type.String()),
+  ciResult: nullable(Type.Enum(ciResults)),
+  zapBaselineResult: nullable(Type.Enum(zapBaselineResults)),
+  setsDataClass: nullable(dataClass),
+  fileVaultPersonalKey: nullable(Type.Boolean()),
+  recordsExceptions: Type.Array(demoException),
+  lapsesExceptions: Type.Array(demoException),
+  statementVersion: nullable(Type.Integer({ minimum: 1 })),
+  statement: nullable(Type.String()),
+  identities: Type.Array(serviceIdentity),
+  recordedAt: instant,
+  approval: nullable(releaseLogApproval),
+  recordVersion: recordVersionRef,
+});
+export type ReleaseLogEntry = Static<typeof releaseLogEntry>;
+const releaseLog = Type.Object({ entries: Type.Array(releaseLogEntry), statement: signatureStatement });
+const serviceIdentityDeclaration = Type.Object(
+  {
+    name: Type.String({ pattern: '^svc:.+$', maxLength: 200 }),
+    scope: Type.Array(Type.String({ pattern: '^[a-z_]+:(INSERT|UPDATE|DELETE)$', maxLength: 200 }), { minItems: 1 }),
+  },
+  closed,
+);
+/** What an operator or QA records: the entry's declarations, its Service Identities and the reason. The database binds the pairs (a Release needs its release and its validation evidence, a data class its FileVault fact, a statement its version). */
+const releaseLogEntryDraft = Type.Object(
+  {
+    kind: Type.Enum(releaseLogKinds),
+    title: text,
+    summary: Type.String({ minLength: 1, maxLength: 4000 }),
+    release: Type.Optional(text),
+    imageDigests: Type.Optional(Type.Array(imageDigest, { minItems: 1, maxItems: 50 })),
+    ciRun: Type.Optional(text),
+    ciResult: Type.Optional(Type.Enum(ciResults)),
+    zapBaselineResult: Type.Optional(Type.Enum(zapBaselineResults)),
+    setsDataClass: Type.Optional(dataClass),
+    fileVaultPersonalKey: Type.Optional(Type.Boolean()),
+    recordsExceptions: Type.Optional(Type.Array(demoException)),
+    lapsesExceptions: Type.Optional(Type.Array(demoException)),
+    statementVersion: Type.Optional(Type.Integer({ minimum: 1 })),
+    statement: Type.Optional(Type.String({ minLength: 1, maxLength: 4000 })),
+    identities: Type.Optional(Type.Array(serviceIdentityDeclaration)),
+    reason: text,
+  },
+  closed,
+);
+export type ReleaseLogEntryDraft = Static<typeof releaseLogEntryDraft>;
 const reauthentication = Type.Object({ password: text, code }, closed);
 /** A signed-in password change: the current password and, under the decided login, a fresh code, then the new password. */
 const passwordChange = Type.Object({ password: text, code, newPassword: text }, closed);
@@ -857,6 +1007,15 @@ export const routes = {
   registerRoom: route('POST', '/api/rooms', { body: roomRegistration }, room),
   registerWorkstation: route('POST', '/api/workstations', { body: workstationRegistration }, workstation),
   enrolWorkstation: route('POST', '/api/workstations/enrol', { body: enrolment }, workstation),
+  deployment: route('GET', '/api/deployment', {}, deployment),
+  releaseLog: route('GET', '/api/release-log', {}, releaseLog),
+  recordReleaseLogEntry: route('POST', '/api/release-log', { body: releaseLogEntryDraft }, releaseLogEntry),
+  approveReleaseLogEntry: route(
+    'POST',
+    '/api/release-log/approvals',
+    { body: Type.Object({ entryId: uuid, ...signingBody.properties }, closed) },
+    releaseLogEntry,
+  ),
   me: route('GET', '/api/me', {}, signedIn),
   setPreferences: route('POST', '/api/me/preferences', { body: preferences }, preferences),
   /** Reads how long the session has left without counting as activity, for the web's countdown. */
@@ -933,6 +1092,21 @@ export const routes = {
   /** The System Incidents not yet Closed, newest first, for Admin and QA. */
   incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
   incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
+  /** The Lab's Documents, by number. */
+  documents: route('GET', '/api/documents', {}, Type.Array(documentRow)),
+  document: route('GET', '/api/documents/:id', { params: Type.Object({ id: uuid }) }, documentView),
+  /** A new Document, numbered by the database, with its first version as a Draft by the person asking. */
+  createDocument: route(
+    'POST',
+    '/api/documents',
+    {
+      body: Type.Object(
+        { documentType: documentType, title: documentTitle, body: documentBody, effectiveDate: calendarDate },
+        closed,
+      ),
+    },
+    documentView,
+  ),
   /** Every break inside a chain verification System Incident's range, as this Lab's chain or the company chain reads now. */
   incidentBreaks: route('GET', '/api/incidents/:reference/breaks', { params: byReference }, incidentBreaks),
   /** The Lab's Equipment, by name, for its staff. */
@@ -1010,6 +1184,29 @@ export function incidentStepRoute<K extends IncidentStepName>(name: K) {
     closed,
   );
   return route('POST', `/api/incident-steps/${name}`, { body }, systemIncident);
+}
+
+const documentStepInputs = {
+  signAuthored: Type.Object({}, closed),
+  signReviewed: Type.Object({}, closed),
+  signApproved: Type.Object({}, closed),
+  abandon: Type.Object({ reason: reasonText }, closed),
+} satisfies { [K in DocumentStepName]: TObject };
+/** What each Document step takes, as its route validates it. */
+export type DocumentStepInputs = { [K in DocumentStepName]: Static<(typeof documentStepInputs)[K]> };
+export interface DocumentStepBody<K extends DocumentStepName> {
+  documentId: string;
+  input: DocumentStepInputs[K];
+  signature?: SigningBody;
+}
+
+/** The route of one step on a Document's newest version: the body names the Document, the input, and a signature when the step signs. */
+export function documentStepRoute<K extends DocumentStepName>(name: K) {
+  const body = Type.Object(
+    { documentId: uuid, input: documentStepInputs[name], signature: Type.Optional(signingBody) },
+    closed,
+  );
+  return route('POST', `/api/document-steps/${name}`, { body }, documentView);
 }
 
 const equipmentStepInputs = {

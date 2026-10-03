@@ -124,6 +124,32 @@ export const auditedRecords: { readonly [T in AuditedTable]: RecordSpec } = {
     label: (row) => text(row.number),
     fields: { number: { label: 'Number' }, test_id: { label: 'Test', ref: 'test' } },
   },
+  document: {
+    kind: 'Document',
+    chain: 'lab',
+    label: (row) => text(row.number),
+    fields: {
+      number: { label: 'Number' },
+      document_type: { label: 'Type' },
+      created_at: { label: 'Created at', shows: 'instant' },
+    },
+  },
+  document_version: {
+    kind: 'Document version',
+    chain: 'lab',
+    label: (row, labelOf) => `${labelOf('document', row.document_id)} version ${text(row.version)}`,
+    fields: {
+      document_id: { label: 'Document', ref: 'document' },
+      version: { label: 'Version' },
+      status: { label: 'Status', movedByStep: true },
+      title: { label: 'Title' },
+      body: { label: 'Body' },
+      author_id: { label: 'Author', ref: 'person' },
+      effective_date: { label: 'Effective Date' },
+      abandon_reason: { label: 'Abandon reason', movedByStep: true },
+      saved_at: { label: 'Saved at', shows: 'instant' },
+    },
+  },
   record_version: {
     kind: 'Record Version',
     chain: 'lab',
@@ -288,7 +314,7 @@ function referenceOf(field: FieldSpec, row: RowSnapshot): AuditedTable | null {
 export const actorUsername = (actor: string): string | null =>
   actor.startsWith('person:') ? actor.slice('person:'.length) : null;
 
-const UNLISTED = new Set(['id', 'lab_id']);
+const UNLISTED = new Set(['id', 'lab_id', 'data_class']);
 
 /** One row of an audited record as it stood at one instant. */
 export interface RowImage {
