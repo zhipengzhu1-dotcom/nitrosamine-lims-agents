@@ -396,7 +396,7 @@ describe('a Critical Data Change is decided once: withdrawn by its proposer, app
     );
     await refusedWith(
       approve(changeId, test.testId),
-      'the Test changed after the Critical Data Change was proposed',
+      'the Test changed after the Critical Data Change was proposed, so the proposer withdraws it and proposes it again',
       'LA019',
     );
   });
@@ -973,9 +973,13 @@ describe("a refusal only the database sees reaches the bench as the registry's o
       (tx) => tx.updateTable('result').set({ notebookRef: 'NB-RD-0001-013' }).where('id', '=', test.resultId).execute(),
     );
     const approval = await approvalOf(as.rui, test.testId, rui);
-    refusedOver(
-      await as.rui.call(changeStepRoute('approveChange'), { testId: test.testId, ...approval }),
-      'recordChanged',
+    assert.equal(
+      refusedOver(
+        await as.rui.call(changeStepRoute('approveChange'), { testId: test.testId, ...approval }),
+        'recordChanged',
+      ),
+      'The Critical Data Change was refused: the Test changed after the Critical Data Change was proposed, so the ' +
+        'proposer withdraws it and proposes it again.',
     );
   });
 });

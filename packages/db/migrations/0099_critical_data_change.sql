@@ -203,7 +203,8 @@ begin
                 where v.lab_id = change.lab_id and v.record_table = 'test' and v.record_id = change.test_id
                   and v.version > (select version from record_version
                                     where lab_id = change.lab_id and id = change.proposed_on_version)) then
-      raise exception 'the Test changed after the Critical Data Change was proposed' using errcode = 'LA019';
+      raise exception 'the Test changed after the Critical Data Change was proposed, so the proposer withdraws it and proposes it again'
+        using errcode = 'LA019';
     end if;
   else
     perform check_picklist_reason(case new.outcome when 'Rejected' then 'rejectChange' else 'withdrawChange' end,
