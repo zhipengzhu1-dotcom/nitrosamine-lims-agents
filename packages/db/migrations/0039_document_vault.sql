@@ -233,8 +233,9 @@ create trigger refuse_truncate before truncate on lims.document_version
 
 alter table lims.record_version
   drop constraint record_version_record_table_check,
-  add constraint record_version_record_table_check
-    check (record_table in ('test', 'test_report', 'system_incident', 'document_version'));
+  add constraint record_version_record_table_check check (
+    record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'document_version')
+  );
 
 create or replace function lims.save_record_version(p_lab_id uuid, p_table text, p_record_id uuid) returns void
 language plpgsql security definer set search_path = lims, pg_temp as $$
@@ -246,6 +247,9 @@ begin
     when 'test' then test_content(p_lab_id, p_record_id)
     when 'test_report' then test_report_content(p_lab_id, p_record_id)
     when 'system_incident' then incident_content(p_record_id)
+    when 'equipment' then (select equipment_content(e) from equipment e where e.lab_id = p_lab_id and e.id = p_record_id)
+    when 'equipment_event' then
+      (select equipment_event_content(v) from equipment_event v where v.lab_id = p_lab_id and v.id = p_record_id)
     when 'document_version' then document_version_content(p_record_id)
   end)::text, 'UTF8');
   if bytes is null then return; end if;
@@ -260,7 +264,8 @@ end $$;
 select set_config('lims.actor', 'svc:migrate', true), set_config('lims.role', 'system', true),
        set_config('lims.reason', 'Document versions are signed Authored by their author and Approved by QA', true);
 insert into lims.signing_role (role, meaning) values
-  ('LabManager', 'Authored'), ('Analyst', 'Authored'), ('Reviewer', 'Authored'), ('QA', 'Authored'), ('QA', 'Approved');
+  ('LabManager', 'Authored'), ('Analyst', 'Authored'), ('Reviewer', 'Authored'), ('QA', 'Authored'), ('QA', 'Approved')
+  on conflict do nothing;
 
 -- Authored is a Signature Meaning of a Document version only, and QA signs Approved only on one; another record kind
 -- may be signed Approved in another role. A Document version is signed Authored, Reviewed or Approved, each by a

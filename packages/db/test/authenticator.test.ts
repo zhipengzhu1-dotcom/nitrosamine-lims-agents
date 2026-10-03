@@ -41,10 +41,20 @@ before(async () => {
   await admin.end();
   await migrate(server, DATABASE);
   await app.connect();
-  await write(
-    `insert into lims.person (id, username, display_name, password_hash) values ($1, 'auth.person', 'A', 'x')`,
-    [person],
-  );
+  // The superuser adds the test person, because the app role cannot choose a person's id.
+  const superuser = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+  await superuser.connect();
+  try {
+    await superuser.query('begin');
+    await superuser.query(AS_ADMIN);
+    await superuser.query(
+      `insert into lims.person (id, username, display_name, password_hash) values ($1, 'auth.person', 'A', 'x')`,
+      [person],
+    );
+    await superuser.query('commit');
+  } finally {
+    await superuser.end();
+  }
   await write('insert into lims.authenticator (person_id, secret_ciphertext) values ($1, $2)', [person, secret]);
   await write('update lims.authenticator set last_used_step = 100 where person_id = $1', [person]);
 });

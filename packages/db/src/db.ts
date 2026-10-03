@@ -10,6 +10,8 @@ export type {
   AuditExportFormat,
   DocumentStatus,
   DocumentType,
+  EquipmentEventKind,
+  FitnessStatus,
   ImpactAnswer,
   IncidentKind,
   IncidentState,

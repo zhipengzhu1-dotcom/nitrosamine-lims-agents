@@ -21,6 +21,10 @@ export type DocumentStatus = "Abandoned" | "Approved" | "Draft" | "Effective" | 
 
 export type DocumentType = "ExternalDocument" | "Form" | "Method" | "MethodProtocol" | "MethodReport" | "Policy" | "QualityManual" | "SOP" | "WorkInstruction" | "Worksheet";
 
+export type EquipmentEventKind = "Cleaning" | "FirmwareChange" | "Maintenance" | "Note" | "Repair" | "SoftwareChange" | "Suspect";
+
+export type FitnessStatus = "Expired" | "InUse" | "Quarantined" | "Retired" | "Suspended";
+
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
@@ -175,6 +179,33 @@ export interface EnrolmentGrant {
   usedAt: Timestamp | null;
 }
 
+export interface Equipment {
+  assetNumber: string | null;
+  firmwareVersion: string | null;
+  fitnessStatus: Generated<FitnessStatus>;
+  id: Generated<string>;
+  kind: string;
+  labId: string;
+  manufacturer: string;
+  model: string;
+  name: string;
+  registeredAt: Generated<Timestamp>;
+  responsiblePersonId: string;
+  roomId: string;
+  serial: string;
+  softwareVersion: string | null;
+}
+
+export interface EquipmentEvent {
+  equipmentId: string;
+  id: Generated<string>;
+  kind: EquipmentEventKind;
+  labId: string;
+  note: string;
+  recordedAt: Generated<Timestamp>;
+  recordedBy: string;
+}
+
 export interface IdentityVerification {
   checkedAt: Generated<Timestamp>;
   checkedBy: string;
@@ -182,6 +213,14 @@ export interface IdentityVerification {
   evidence: string;
   id: Generated<string>;
   printedName: string;
+}
+
+export interface IncidentBreak {
+  fingerprint: Buffer;
+  incidentId: string;
+  kind: string;
+  seq: Int8;
+  through: Int8;
 }
 
 export interface Lab {
@@ -396,7 +435,10 @@ export interface DB {
   document: Document;
   documentVersion: DocumentVersion;
   enrolmentGrant: EnrolmentGrant;
+  equipment: Equipment;
+  equipmentEvent: EquipmentEvent;
   identityVerification: IdentityVerification;
+  incidentBreak: IncidentBreak;
   lab: Lab;
   membership: Membership;
   method: Method;

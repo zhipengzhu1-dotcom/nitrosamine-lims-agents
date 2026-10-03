@@ -3,6 +3,8 @@ import {
   type ChainVerdict,
   decimalPattern,
   type DocumentStatus,
+  type FitnessStatus,
+  labStaff,
   mayTake,
   type IncidentState,
   type Lab,
@@ -27,13 +29,17 @@ import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } fr
 import { CodeField, useLoginPolicy } from './form.tsx';
 import { reducedMotion } from './motion.ts';
 
-export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room' | 'choice';
+export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room' | 'choice' | 'pick';
 export interface Field<N extends string = string> {
   name: N;
   label: string;
   kind: FieldKind;
   /** The words a `choice` field offers, as the LIMS records them. */
   options?: readonly string[];
+  /** The records a `pick` field offers: the id it sends and the words it shows. */
+  picks?: readonly { value: string; text: string }[];
+  /** A text field the person may leave empty. */
+  optional?: true;
 }
 
 /** The web's only per-step table: what each step asks for. Role, states and Signature Meaning come from the registry. */
@@ -99,9 +105,13 @@ const closedLook = {
     </>
   ),
 } as const;
+const intactLook = { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> } as const;
+const brokenLook = { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> } as const;
 const markLook = {
-  Intact: { tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
-  Broken: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
+  Intact: intactLook,
+  Broken: brokenLook,
+  'As recorded': intactLook,
+  'Changed since opened': brokenLook,
   Unsigned: unsignedLook,
   'Signatures unsigned': unsignedLook,
   Open: unsignedLook,
@@ -131,23 +141,78 @@ const markLook = {
   Retired: { tone: 'plain', glyph: <path d="M3 8h10" /> },
   Abandoned: { tone: 'bad', glyph: <path d="M4 4l8 8M12 4l-8 8" /> },
 } as const satisfies Record<
-  ChainVerdict | IncidentState | DocumentStatus | 'Unsigned' | 'Signatures unsigned',
+  | ChainVerdict
+  | IncidentState
+  | DocumentStatus
+  | 'Unsigned'
+  | 'Signatures unsigned'
+  | 'As recorded'
+  | 'Changed since opened',
   unknown
 >;
 
+const fitnessLook: { [S in FitnessStatus]: { word: string; tone: 'ok' | 'bad' | 'done'; glyph: ReactNode } } = {
+  Quarantined: {
+    word: 'Quarantined',
+    tone: 'bad',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M5 8h6" />
+      </>
+    ),
+  },
+  InUse: { word: 'In use', tone: 'ok', glyph: <path d="M3 8.5l3.5 3.5L13 4.5" /> },
+  Suspended: {
+    word: 'Suspended',
+    tone: 'bad',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M6.5 5.5v5M9.5 5.5v5" />
+      </>
+    ),
+  },
+  Expired: {
+    word: 'Expired',
+    tone: 'bad',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M8 5v3.5l2.5 1.5" />
+      </>
+    ),
+  },
+  Retired: {
+    word: 'Retired',
+    tone: 'done',
+    glyph: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="M4 12l8-8" />
+      </>
+    ),
+  },
+};
+
 /**
- * A Test state with its track, or a mark with its glyph: a chain verdict, a System Incident's state, a Document
- * version's status, an unsigned Signature, or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
+ * A Test state with its track, a Fitness Status, or a mark with its glyph: a chain verdict, a System Incident's state,
+ * a Document version's status, whether the breaks in its range are still the ones it recorded, an unsigned Signature,
+ * or a record with an unsigned Signature. `fresh` marks a state the server has just confirmed on this page:
  * the word and glyph are final, and an accent plays around them.
  */
 export function Status(
-  props: { state: TestState; fresh?: boolean } | { mark: keyof typeof markLook; fresh?: boolean },
+  props:
+    | { state: TestState; fresh?: boolean }
+    | { mark: keyof typeof markLook; fresh?: boolean }
+    | { fitness: FitnessStatus; fresh?: boolean },
 ) {
-  if ('mark' in props) {
-    const { tone, glyph } = markLook[props.mark];
+  if ('mark' in props || 'fitness' in props) {
+    const { word, tone, glyph } =
+      'mark' in props ? { word: words(props.mark), ...markLook[props.mark] } : fitnessLook[props.fitness];
     return (
       <span className={`status status--${tone} ${props.fresh ? 'status--fresh' : ''}`}>
-        {words(props.mark)}
+        {word}
         <svg className="glyph" viewBox="0 0 16 16" aria-hidden>
           {glyph}
         </svg>
@@ -234,7 +299,8 @@ export const modules = [
   {
     key: 'equipment',
     name: 'Equipment',
-    holds: 'Each instrument, balance and storage unit with its Check Plan, Checks, Excursions and Equipment Logbook.',
+    holds: '',
+    roles: labStaff,
   },
   {
     key: 'inventory',
@@ -549,7 +615,7 @@ function Rail({
                     ))}
                     {shown.fields.map((f) => (
                       <p key={f.name}>
-                        {f.label}: <b>{values[f.name] || '(not entered)'}</b>
+                        {f.label}: <b>{entered(f, values[f.name])}</b>
                       </p>
                     ))}
                   </section>
@@ -749,11 +815,26 @@ function SessionCountdown({ id }: { id?: string }) {
   );
 }
 
+/** A field's entry as the signer reads it before signing: a pick by the words it showed, not the id it sends. */
+const entered = (field: Field, value: string | undefined) =>
+  (value && (field.picks?.find((p) => p.value === value)?.text ?? value)) || '(not entered)';
+
 function FieldInput({ field, value, onChange }: { field: Field; value: string; onChange: (v: string) => void }) {
   const change = (e: { target: { value: string } }) => onChange(e.target.value);
   if (field.kind === 'method' || field.kind === 'analyst')
     return <LookupSelect field={field} value={value} onChange={change} />;
   if (field.kind === 'room') return <RoomSelect value={value} onChange={change} />;
+  if (field.kind === 'pick')
+    return (
+      <select required value={value} onChange={change}>
+        <option value="">Choose…</option>
+        {field.picks?.map((p) => (
+          <option key={p.value} value={p.value}>
+            {p.text}
+          </option>
+        ))}
+      </select>
+    );
   if (field.kind === 'choice')
     return (
       <select required value={value} onChange={change}>
@@ -765,7 +846,7 @@ function FieldInput({ field, value, onChange }: { field: Field; value: string; o
         ))}
       </select>
     );
-  const props = { required: true, value, onChange: change };
+  const props = { required: !field.optional, value, onChange: change };
   if (field.kind === 'date') return <input type="date" {...props} />;
   if (field.kind === 'decimal') return <input inputMode="decimal" pattern={decimalPattern} {...props} />;
   return <input {...props} />;
