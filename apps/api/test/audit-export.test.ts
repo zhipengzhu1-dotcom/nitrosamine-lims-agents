@@ -15,7 +15,17 @@ import {
 } from '@lims/domain';
 import { sql } from 'kysely';
 import { Value } from 'typebox/value';
-import { type Account, type Client, labZoneMoveReason, ok, refusedWith, signatureOf, startApi } from './harness.ts';
+import {
+  type Account,
+  type Client,
+  labZoneMoveReason,
+  ok,
+  onLabClock,
+  refusedWith,
+  signatureOf,
+  startApi,
+  toMillis,
+} from './harness.ts';
 
 const api = await startApi('lims_api_audit_export_test');
 const write = <T>(reason: string, fn: Parameters<typeof audited<T>>[2]) =>
@@ -492,10 +502,19 @@ it("each change of the Lab time zone is in the export with its actor, reason and
     { old: 'Asia/Tokyo', new: before, ...zoneMover },
   ]);
   assert.equal(zoneChanges[0]?.old, null, "the Lab's insert sets its first zone");
-  for (const e of labEntries.slice(-2)) {
-    assert.match(e.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, 'the change in UTC to the microsecond');
-    assert.match(e.atLab ?? '', /[+-]\d{2}:\d{2}$/, "the change on the Lab's clock");
+  const [toTokyo, back] = labEntries.slice(-2);
+  for (const [e, zone] of [
+    [toTokyo, 'Asia/Tokyo'],
+    [back, before],
+  ] as const) {
+    assert.match(e?.at ?? '', /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, 'the change in UTC to the microsecond');
+    assert.equal(
+      toMillis(e?.atLab ?? null),
+      toMillis(onLabClock(e?.at ?? '', zone)),
+      `the change to ${zone} on the Lab clock of the zone it sets`,
+    );
   }
+  assert.match(toTokyo?.atLab ?? '', /\+09:00$/, 'the move to Tokyo on the Tokyo clock');
   assert.deepEqual(
     data.chains.map((c) => [c.chain, c.verdict]),
     [
@@ -506,7 +525,10 @@ it("each change of the Lab time zone is in the export with its actor, reason and
   const pdf = fileText(answer.files[1]);
   assert.ok(pdf.includes(`Time zone: ${before} -> Asia/Tokyo`), 'the PDF shows the move');
   assert.ok(pdf.includes(`Reason: ${labZoneMoveReason}`), 'the PDF shows its reason');
-  assert.ok(pdf.includes('The Lab entries show each change of the Lab time zone.'), 'the PDF header points to them');
+  assert.ok(
+    pdf.includes('Entries on the Lab record show each change of its Lab time zone.'),
+    'the PDF header points to them',
+  );
 });
 
 it('an export that finds a chain break names, in its data file and its PDF, the one System Incident that Verify chain and a second export name, requested by the exporting QA', async () => {
