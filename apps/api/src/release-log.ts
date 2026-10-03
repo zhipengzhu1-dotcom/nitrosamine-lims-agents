@@ -10,10 +10,10 @@ import {
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
-import { type Login, reauthenticate, sourceAddressOf } from './auth.ts';
+import { type Credentials, type Login, loginOf, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type Scope } from './scope.ts';
-import { statementInForce } from './steps.ts';
+import { proveReauthentication, statementInForce } from './signing.ts';
 
 /** Anchoring of the Audit Trail is not built, so the gate reads it as not live until the build that makes it a record. */
 const ANCHORING_LIVE = false;
@@ -100,7 +100,7 @@ function signingRefused(error: unknown): never {
 }
 
 /** The version a new signature statement must take: the one after the statement in force, so versions never skip or collide. */
-const nextStatementVersion = async (scope: Scope) => (await statementInForce(scope)).version + 1;
+const nextStatementVersion = async (scope: Scope) => (await statementInForce(scope.company)).version + 1;
 
 async function seenEntryVersion(scope: Scope, entryId: string, signing: SigningBody) {
   const latest = await scope
@@ -112,7 +112,7 @@ async function seenEntryVersion(scope: Scope, entryId: string, signing: SigningB
     .executeTakeFirstOrThrow();
   if (latest.version !== signing.recordVersion.version || latest.contentHash !== signing.recordVersion.contentHash)
     refuse('recordChanged', 'The Release Log entry changed since this screen loaded it. Read it again before signing.');
-  if ((await statementInForce(scope)).version !== signing.statementVersion)
+  if ((await statementInForce(scope.company)).version !== signing.statementVersion)
     refuse(
       'signingRefused',
       'The Signature Statement changed since this screen loaded it. Read it again before signing.',
@@ -129,7 +129,8 @@ export function deploymentRoute(app: App, db: Kysely<DB>): void {
 }
 
 /** Lists, records and approves Release Log entries; every effect of an entry takes hold only in the Approved Signature's transaction, in the database. */
-export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release: string): void {
+export function releaseLogRoutes(app: App, db: Kysely<DB>, credentials: Credentials, release: string): void {
+  const login = loginOf(credentials.policy);
   const asStaff = (actor: ActorContext) => {
     if (actor.person.customerId !== null) refuse('role', 'The Release Log is read by staff.');
     return labScope(db, actor);
@@ -141,7 +142,7 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
       const scope = asStaff(req.actor);
       return {
         entries: await listed(scope).orderBy('recordedAt').execute(),
-        statement: await statementInForce(scope),
+        statement: await statementInForce(scope.company),
       };
     },
   });
@@ -230,8 +231,9 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
         await gateReal(scope, login, entry.fileVaultPersonalKey ?? false, req.actor.person.id);
       const reauthenticated = await reauthenticate(
         db,
+        credentials,
         { actor: req.actor, session: req.sessionKey },
-        { username: signing.username, password: signing.password },
+        { username: signing.username, password: signing.password, code: signing.code },
         role,
         sourceAddressOf(req),
         'ReauthenticationFailed',
@@ -243,16 +245,8 @@ export function releaseLogRoutes(app: App, db: Kysely<DB>, login: Login, release
         async (q) => {
           // The approval writes this Lab's chain (the proof, the Signature) before the company chain its effects write.
           await sql`select lims.lock_chains('company', ${req.sessionKey.labId}::text)`.execute(q.company);
-          const proof = await q
-            .insert('reauthentication', {
-              sessionId,
-              personId: req.actor.person.id,
-              meaning: 'Approved',
-              authenticator: 'Password',
-            })
-            .returning('id')
-            .executeTakeFirstOrThrow();
-          await sql`select lims.sign(${proof.id}, ${sessionId}, 'release_log_entry', ${entry.id}, ${seen.id},
+          const proof = await proveReauthentication(q, req.actor, sessionId, 'Approved', reauthenticated);
+          await sql`select lims.sign(${proof}, ${sessionId}, 'release_log_entry', ${entry.id}, ${seen.id},
                                      decode(${seen.contentHash}, 'hex'), ${signing.statementVersion}, 'Approved', ${release})`
             .execute(q.company)
             .catch(signingRefused);

@@ -32,21 +32,21 @@ async function fresh(database: string): Promise<void> {
 }
 
 /** Every migration before the Release Log, copied out so `migrate` stops short of it. */
-async function migrationsBefore0028(): Promise<URL> {
+async function migrationsBefore0038(): Promise<URL> {
   const migrations = new URL('../migrations/', import.meta.url);
-  const before0028 = await mkdtemp(`${tmpdir()}/lims-before-0028-`);
+  const before0038 = await mkdtemp(`${tmpdir()}/lims-before-0038-`);
   for (const name of await readdir(migrations))
-    if (name.endsWith('.sql') && name < '0028_') await copyFile(new URL(name, migrations), `${before0028}/${name}`);
-  return pathToFileURL(`${before0028}/`);
+    if (name.endsWith('.sql') && name < '0038_') await copyFile(new URL(name, migrations), `${before0038}/${name}`);
+  return pathToFileURL(`${before0038}/`);
 }
 
 /**
  * A database of its own holding only what an approval needs: one Lab, one Platform Operator with a password and a
- * session. Nothing the gate reads as a fictional record, so the class can become real. With `peopleBefore0028`, the
- * Lab and the operator are written before 0028 runs, as the hosted demo's were; the operator then holds
+ * session. Nothing the gate reads as a fictional record, so the class can become real. With `peopleBefore0038`, the
+ * Lab and the operator are written before 0038 runs, as the hosted demo's were; the operator then holds
  * PlatformOperator only because this fixture grants it as the database owner, which no HTTP route can.
  */
-async function deployment(name: string, { peopleBefore0028 = false } = {}) {
+async function deployment(name: string, { peopleBefore0038 = false } = {}) {
   const database = checkoutDatabase(name);
   const owner = new pg.Client({ connectionString: databaseUrl(server, database) });
   const app = new pg.Client({ connectionString: databaseUrl(server, database, 'lims_app') });
@@ -54,7 +54,7 @@ async function deployment(name: string, { peopleBefore0028 = false } = {}) {
   const lab = randomUUID();
   const operator = { id: randomUUID(), username: 'class.operator', session: randomUUID() };
   await fresh(database);
-  await migrate(server, database, peopleBefore0028 ? await migrationsBefore0028() : undefined);
+  await migrate(server, database, peopleBefore0038 ? await migrationsBefore0038() : undefined);
   await owner.connect();
   await owner.query('begin');
   await owner.query(AS_SERVICE('svc:test'));
@@ -76,7 +76,7 @@ async function deployment(name: string, { peopleBefore0028 = false } = {}) {
     Buffer.alloc(32, 9),
   ]);
   await owner.query('commit');
-  if (peopleBefore0028) await migrate(server, database);
+  if (peopleBefore0038) await migrate(server, database);
   await app.connect();
   await other.connect();
 
@@ -239,7 +239,7 @@ type Deployment = Awaited<ReturnType<typeof deployment>>;
 async function inDeployment(
   name: string,
   body: (d: Deployment) => Promise<void>,
-  options?: { peopleBefore0028?: boolean },
+  options?: { peopleBefore0038?: boolean },
 ): Promise<void> {
   const d = await deployment(name, options);
   try {
@@ -654,7 +654,7 @@ describe('only the seed records a re-authentication with the Seed authenticator,
 });
 
 describe('a database that held people before the Release Log keeps signing in until its service identities entry is approved', () => {
-  const people = { peopleBefore0028: true };
+  const people = { peopleBefore0038: true };
   const migrationEntry = async (d: Deployment) =>
     (await d.owner.query<{ id: string }>('select id from lims.release_log_entry')).rows[0]?.id ??
     assert.fail('the migration recorded an entry');

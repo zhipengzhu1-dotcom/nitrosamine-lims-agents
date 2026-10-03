@@ -4,14 +4,14 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { routes, SESSION_ENDED } from '@lims/domain';
 import { audited } from '@lims/db';
 import { sql } from 'kysely';
-import { endLapsedSessions, LOCKOUT_AFTER_FAILURES, SESSION_LIMITS } from '../src/auth.ts';
-import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
+import { endLapsedSessions, LOGIN } from '../src/auth.ts';
+import { type Account, Client, ok, refusedWith, startApi, HARNESS_LOGIN } from './harness.ts';
 
 const api = await startApi('lims_api_session_expiry_test');
-const { idleMs, absoluteMs } = SESSION_LIMITS.decided;
+const { idleMs, absoluteMs } = LOGIN.decided;
 const MINUTE_MS = 60_000;
 
-const sweep = () => endLapsedSessions(api.db, SESSION_LIMITS.decided);
+const sweep = () => endLapsedSessions(api.db, LOGIN.decided);
 
 const sessionOf = (account: Account) =>
   api.superuser
@@ -109,7 +109,7 @@ it('running the sweep again writes no second expiry Access Event for the same se
 
 const lockOut = async (account: Account) => {
   const stranger = new Client(api.base);
-  for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
+  for (let i = 0; i < HARNESS_LOGIN.lockoutAfter; i++)
     refusedWith(
       await stranger.call(routes.login, { username: account.username, password: 'not-the-password', labId: api.labId }),
       'badCredentials',
@@ -285,7 +285,7 @@ it("a locked person's session that lapsed before the lock ends at its own end, w
 });
 
 it('with the decided login the idle limit is 15 minutes, with the demo login 8 hours, and the absolute limit is 12 hours in both', async () => {
-  const demo = await api.startAnotherApi({ login: 'demo' });
+  const demo = await api.startAnotherApi({ login: LOGIN.demo });
   for (const [login, base, idle] of [
     ['decided', api.base, 15 * MINUTE_MS],
     ['demo', demo.base, 8 * 60 * MINUTE_MS],
@@ -324,7 +324,7 @@ it('the sweep refuses limits other than the decided or demo ones, so no caller e
 });
 
 it('the sweep takes every login configuration the API offers', async () => {
-  for (const limits of Object.values(SESSION_LIMITS)) await endLapsedSessions(api.db, limits);
+  for (const limits of Object.values(LOGIN)) await endLapsedSessions(api.db, limits);
 });
 
 it("the API's database role cannot move or end a session itself, so it cannot choose when an expiry is stamped or skip it", async () => {

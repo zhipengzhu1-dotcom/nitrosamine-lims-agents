@@ -6,7 +6,7 @@ import {
   type AuditExport,
   type AuditExportFormat,
   auditExportData,
-  type ChainVerification,
+  type ChainReading,
   REDACTED,
   routes,
   type StepInput,
@@ -15,7 +15,17 @@ import {
 } from '@lims/domain';
 import { sql } from 'kysely';
 import { Value } from 'typebox/value';
-import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
+import {
+  type Account,
+  type Client,
+  labZoneMoveReason,
+  ok,
+  onLabClock,
+  refusedWith,
+  signatureOf,
+  startApi,
+  toMillis,
+} from './harness.ts';
 
 const api = await startApi('lims_api_audit_export_test');
 const write = <T>(reason: string, fn: Parameters<typeof audited<T>>[2]) =>
@@ -449,6 +459,78 @@ it('a CSV cell a spreadsheet would run as a formula starts with an apostrophe', 
   assert.ok(!/(^|,)"?=HYPERLINK/m.test(csv), 'no cell starts with the formula');
 });
 
+it("each change of the Lab time zone is in the export with its actor, reason and time, none of another Lab's, and both chains still verify intact", async () => {
+  await submitted(as.cora);
+  const { labId: zurichId } = await write('Add a second test Lab', (tx) =>
+    tx
+      .insertInto('lab')
+      .values({ code: 'ZH', name: 'Zurich Lab (fictional)', timeZone: 'Europe/Zurich' })
+      .returning('labId')
+      .executeTakeFirstOrThrow(),
+  );
+  await audited(api.superuser, { actor: 'svc:migrate', role: 'system', reason: labZoneMoveReason }, (tx) =>
+    tx.updateTable('lab').set({ timeZone: 'UTC' }).where('labId', '=', zurichId).execute(),
+  );
+  const { timeZone: before } = await api.db
+    .selectFrom('lab')
+    .select('timeZone')
+    .where('labId', '=', api.labId)
+    .executeTakeFirstOrThrow();
+  await api.moveLabZone('Asia/Tokyo');
+  await api.moveLabZone(before);
+  const answer = await generate(northwindId);
+  const data = dataOf(answer);
+  const labEntries = data.entries.filter((e) => e.record.table === 'lab');
+  assert.ok(
+    labEntries.every((e) => e.chain === 'lab' && e.record.id === api.labId),
+    "only this Lab's own record, never the Zurich Lab's",
+  );
+  const zoneChanges = labEntries.flatMap((e) =>
+    e.changes
+      .filter((c) => c.field === 'time_zone')
+      .map((c) => ({
+        old: c.old?.text ?? null,
+        new: c.new?.text ?? null,
+        actor: e.actor.label,
+        role: e.actor.role,
+        reason: e.reason,
+      })),
+  );
+  const zoneMover = { actor: 'svc:migrate', role: 'system', reason: labZoneMoveReason };
+  assert.deepEqual(zoneChanges.slice(-2), [
+    { old: before, new: 'Asia/Tokyo', ...zoneMover },
+    { old: 'Asia/Tokyo', new: before, ...zoneMover },
+  ]);
+  assert.equal(zoneChanges[0]?.old, null, "the Lab's insert sets its first zone");
+  const [toTokyo, back] = labEntries.slice(-2);
+  for (const [e, zone] of [
+    [toTokyo, 'Asia/Tokyo'],
+    [back, before],
+  ] as const) {
+    assert.match(e?.at ?? '', /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/, 'the change in UTC to the microsecond');
+    assert.equal(
+      toMillis(e?.atLab ?? null),
+      toMillis(onLabClock(e?.at ?? '', zone)),
+      `the change to ${zone} on the Lab clock of the zone it sets`,
+    );
+  }
+  assert.match(toTokyo?.atLab ?? '', /\+09:00$/, 'the move to Tokyo on the Tokyo clock');
+  assert.deepEqual(
+    data.chains.map((c) => [c.chain, c.verdict]),
+    [
+      ['lab', 'Intact'],
+      ['company', 'Intact'],
+    ],
+  );
+  const pdf = fileText(answer.files[1]);
+  assert.ok(pdf.includes(`Time zone: ${before} -> Asia/Tokyo`), 'the PDF shows the move');
+  assert.ok(pdf.includes(`Reason: ${labZoneMoveReason}`), 'the PDF shows its reason');
+  assert.ok(
+    pdf.includes('Entries on the Lab record show each change of its Lab time zone.'),
+    'the PDF header points to them',
+  );
+});
+
 it('an export that finds a chain break names, in its data file and its PDF, the one System Incident that Verify chain and a second export name, requested by the exporting QA', async () => {
   await submitted(as.cora);
   const { seq } = await api.db
@@ -479,7 +561,7 @@ it('an export that finds a chain break names, in its data file and its PDF, the 
     'the PDF names the break and its System Incident, in its state',
   );
 
-  const incidentOf = (chains: ChainVerification[]) => chains[0]?.breaks[0]?.incident;
+  const incidentOf = (chains: ChainReading[]) => chains[0]?.breaks[0]?.incident;
   assert.equal(incidentOf(dataOf(await generate(northwindId)).chains), incident, 'a second export');
   assert.equal(incidentOf(ok(await as.quinn.call(routes.verifyAuditTrail)).chains), incident, 'Verify chain');
   const opened = await api.db

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type ReleaseLogEntry, type ReleaseLogEntryDraft, routes, type SigningBody } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
+import { LOGIN, loginOf } from '../src/auth.ts';
+import { type Account, Client, HARNESS_LOGIN, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_release_log_test');
 const ada = api.person('ada');
@@ -277,12 +278,12 @@ describe('recording a Release Log entry', () => {
       /No one holds Admin together with another role; ada\.admin does/,
     ])
       assert.match(message, condition);
-    assert.doesNotMatch(message, /login runs/, 'the harness runs the decided login');
+    assert.match(message, /it runs as demo/, 'the harness runs the demo login with the decided session limits');
     assert.equal(ok(await new Client(api.base).call(routes.deployment)).dataClass, 'fictional');
   });
 
   it('names the demo login when the API runs it', async () => {
-    const { base } = await api.startAnotherApi({ login: 'demo' });
+    const { base } = await api.startAnotherApi({ login: LOGIN.demo });
     const demo = new Client(base);
     ok(await demo.call(routes.login, { username: ada.username, password: ada.password, labId: api.labId }));
     const message = refusedWith(
@@ -291,6 +292,13 @@ describe('recording a Release Log entry', () => {
     );
     assert.match(message, /it runs as demo/);
     assert.doesNotMatch(message, /The host holds a personal FileVault key/);
+  });
+
+  it('reads a login as decided only while every value is the decided one', () => {
+    assert.equal(loginOf(LOGIN.decided), 'decided');
+    assert.equal(loginOf(LOGIN.demo), 'demo');
+    assert.equal(loginOf(HARNESS_LOGIN), 'demo');
+    assert.equal(loginOf({ ...LOGIN.decided, lockoutAfter: 6 }), 'demo');
   });
 });
 

@@ -20,8 +20,12 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 2 | Identity Verification | [#100](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/100) |
 | 2 | Unlock | |
 | 2 | Admin constraint | [#100](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/100) |
-| 2 | Decided login (TOTP, password rules, lockout 5, pepper) behind the data class; TOTP covers sign-in, signing and the Lab switch, which until then re-authenticates with user ID and password only ([#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98)) | |
+| 2 | Decided login (TOTP, password rules, lockout 5, pepper) behind the data class; TOTP covers sign-in, signing and the Lab switch, which until then re-authenticates with user ID and password only ([#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98)) | [#96](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/96); TOTP also covers unlock and the password change |
+| 2 | Authenticator revocation and replacement behind a new Identity Verification and enrolment grant ([#13](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13)) | |
+| 2 | Breach-list check at every sign-in ([#13](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13)) | |
+| 2 | First-Admin bootstrap under the decided login: a real deploy issues the first enrolment grant as the database owner under the owner's own actor, never under the e2e walk's `person:bea.admin`, so the Audit Trail names the person who granted it ([#96](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/96)) | |
 | 2 | Release Log, service identities, real-data gate and banner | [#102](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/102) |
+| 2 | Close System Incidents with QA's impact answer (QA answers whether the incident could have affected results or records, the Admin records the immediate and corrective actions, signs Acknowledged and closes it; the database allows only Open → Acknowledged → Closed) | Partly: [#104](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/104) built the answer, the actions, the Acknowledged signing and the close. Unbuilt: the linked Data Integrity Deviation a Yes answer opens ([#149](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/149), once Deviations exist) |
 | 3 | Critical Data Change | |
 | 3 | Return | |
 | 3 | Holds | |
@@ -36,7 +40,7 @@ The real-data gate ([ADR 0002](adr/0002-react-spa-fastify-postgres-hosted-on-the
 | 4 | Authorisations | |
 | 4 | Appointments | |
 | 4 | Competence Assessments | |
-| 7 | Equipment | |
+| 7 | Equipment | Partly: [#129](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/129) built registration (Quarantined until QA signs Approved), the Fitness Status, marking suspect, Equipment Events signed Performed, moves between Rooms, retirement and the Logbook. Unbuilt: Expired from a Calibration due date ([#130](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/130)), and a storage location refusing placements while it is unfit |
 | 7 | Rooms | |
 | 7 | Check Plans | |
 | 7 | Checks | |

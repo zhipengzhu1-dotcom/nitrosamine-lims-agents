@@ -473,3 +473,312 @@ it("one transaction keeps one ID when it changes the session's time zone and dat
   assert.equal(ids.length, 2);
   assert.equal(ids[0], ids[1]);
 });
+
+const zeros = sql`decode(repeat('00', 32), 'hex')`;
+const breaksOf = async (chain: string, every = false) =>
+  (
+    await sql<{ seq: number; kind: string; fingerprint: string }>`
+      select b.seq::int, b.kind, encode(b.fingerprint, 'hex') as fingerprint
+      from ${every ? sql`lims.chain_breaks(${chain}, 0, ${zeros})` : sql`lims.chain_breaks(${chain})`} as b`.execute(
+      app,
+    )
+  ).rows;
+const latestVerificationOf = async (chain: string) =>
+  (await sql<{ through: string }>`select through::text from lims.latest_chain_verification(${chain})`.execute(app))
+    .rows[0]?.through ?? null;
+const asReplica = async (statement: string, values: unknown[]) => {
+  await superuser.query('begin');
+  await superuser.query('set local session_replication_role = replica');
+  await superuser.query(statement, values);
+  await superuser.query('commit');
+};
+const rehash = (chain: string, seq: number) =>
+  asReplica(
+    `update lims.audit_entry e set hash = sha256(e.prev_hash || lims.audit_entry_bytes(e)) where chain = $1 and seq = $2`,
+    [chain, seq],
+  );
+
+describe('a verification resumes from the latest Chain Verification the company chain records', () => {
+  let chain: string;
+  let qa: string;
+  before(async () => {
+    const owner = { actor: 'svc:test', role: 'system', reason: 'Set up a Lab whose chain is verified' };
+    ({ labId: chain } = await audited(app, owner, (tx) =>
+      tx
+        .insertInto('lab')
+        .values({ code: 'CV', name: 'Verified Lab', timeZone: 'UTC' })
+        .returning('labId')
+        .executeTakeFirstOrThrow(),
+    ));
+    await superuser.query('begin');
+    await superuser.query('set local session_replication_role = replica');
+    ({ id: qa } =
+      (
+        await superuser.query<{ id: string }>(
+          `insert into lims.person (username, display_name) values ('cv.qa', 'CV QA') returning id`,
+        )
+      ).rows[0] ?? assert.fail('the QA'));
+    await superuser.query('commit');
+    const rename = (name: string) =>
+      audited(app, { actor: 'person:cv.qa', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
+        tx.updateTable('lab').set({ name }).where('labId', '=', chain).execute(),
+      );
+    for (const n of [2, 3, 4, 5, 6]) await rename(`Verified Lab ${n}`);
+  });
+  const record = (through: number) =>
+    audited(app, { actor: 'person:cv.qa', role: 'QA', reason: 'Verify chain' }, (tx) =>
+      tx
+        .insertInto('chainVerification')
+        .values({
+          chain,
+          through: String(through),
+          head: sql`(select hash from lims.audit_entry where chain = ${chain} and seq = ${through})`,
+          recomputedFrom: '1',
+          verifiedBy: qa,
+        })
+        .execute(),
+    );
+
+  it('a changed entry behind the Chain Verification is found only by a recompute from the first entry; one after it is found either way, with one fingerprint', async () => {
+    assert.equal(await latestVerificationOf(chain), null);
+    await record(4);
+    assert.equal(await latestVerificationOf(chain), '4');
+    await asReplica(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 2`, [chain]);
+    assert.deepEqual(await breaksOf(chain), []);
+    assert.deepEqual(
+      (await breaksOf(chain, true)).map((b) => [b.seq, b.kind]),
+      [[2, 'Changed']],
+    );
+    await asReplica(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 5`, [chain]);
+    const [resumed, every] = [await breaksOf(chain), await breaksOf(chain, true)];
+    assert.deepEqual(resumed, every.slice(1));
+    assert.deepEqual(
+      resumed.map((b) => [b.seq, b.kind]),
+      [[5, 'Changed']],
+    );
+  });
+
+  it('a Chain Verification written behind the capture trigger, with no entry on the company chain, is not resumed from', async () => {
+    await asReplica(
+      `insert into lims.chain_verification (chain, through, head, recomputed_from, verified_by)
+       select $1, 6, hash, 1, $2 from lims.audit_entry where chain = $1 and seq = 6`,
+      [chain, qa],
+    );
+    assert.equal(await latestVerificationOf(chain), '4', 'the forged row is passed over for the recorded one');
+    assert.deepEqual(
+      (await breaksOf(chain)).map((b) => [b.seq, b.kind]),
+      [
+        [5, 'Changed'],
+        [6, 'Contradicted'],
+      ],
+      'the forged row is reported as a break at its entry',
+    );
+  });
+
+  it('a Chain Verification whose entries are no longer all present is not resumed from, so the missing run is found', async () => {
+    await asReplica(`delete from lims.audit_entry where chain = $1 and seq = 3`, [chain]);
+    assert.equal(await latestVerificationOf(chain), null);
+    assert.deepEqual(
+      (await breaksOf(chain)).map((b) => [b.seq, b.kind]),
+      [
+        [2, 'Changed'],
+        [3, 'Missing'],
+        [5, 'Changed'],
+        [6, 'Contradicted'],
+      ],
+    );
+  });
+});
+
+/** The entries of `chain` from `from` as a consistent forgery: each relinked to the one before and rehashed in order, and the head moved onto the last. */
+const rewrittenForward = async (chain: string, from: number) => {
+  const { rows } = await superuser.query<{ last: number }>(
+    'select max(seq)::int as last from lims.audit_entry where chain = $1',
+    [chain],
+  );
+  const last = rows[0]?.last ?? assert.fail('the last entry');
+  for (let seq = from; seq <= last; seq++)
+    await asReplica(
+      `update lims.audit_entry e set prev_hash = p.hash, hash = sha256(p.hash || lims.audit_entry_bytes(e))
+         from lims.audit_entry p where p.chain = e.chain and p.seq = e.seq - 1 and e.chain = $1 and e.seq = $2`,
+      [chain, seq],
+    );
+  await asReplica(
+    `update lims.audit_chain c set head = e.hash, seq = e.seq
+       from lims.audit_entry e where e.chain = c.chain and e.seq = $2 and c.chain = $1`,
+    [chain, last],
+  );
+};
+
+describe('a Chain Verification is resumed from only while its own entry and its record on the company chain still hold', () => {
+  let qa: string;
+  before(async () => {
+    await superuser.query('begin');
+    await superuser.query('set local session_replication_role = replica');
+    ({ id: qa } =
+      (
+        await superuser.query<{ id: string }>(
+          `insert into lims.person (username, display_name) values ('cb.qa', 'CB QA') returning id`,
+        )
+      ).rows[0] ?? assert.fail('the QA'));
+    await superuser.query('commit');
+  });
+  const verifiedLab = async (code: string, through: number) => {
+    const { labId: chain } = await audited(
+      app,
+      { actor: 'svc:test', role: 'system', reason: 'Set up a Lab whose chain is verified' },
+      (tx) =>
+        tx
+          .insertInto('lab')
+          .values({ code, name: `Lab ${code}`, timeZone: 'UTC' })
+          .returning('labId')
+          .executeTakeFirstOrThrow(),
+    );
+    for (const n of [2, 3, 4, 5, 6])
+      await audited(app, { actor: 'person:cb.qa', role: 'LabManager', reason: 'Rename the Lab' }, (tx) =>
+        tx
+          .updateTable('lab')
+          .set({ name: `Lab ${code} ${n}` })
+          .where('labId', '=', chain)
+          .execute(),
+      );
+    await audited(app, { actor: 'person:cb.qa', role: 'QA', reason: 'Verify chain' }, (tx) =>
+      tx
+        .insertInto('chainVerification')
+        .values({
+          chain,
+          through: String(through),
+          head: sql`(select hash from lims.audit_entry where chain = ${chain} and seq = ${through})`,
+          recomputedFrom: '1',
+          verifiedBy: qa,
+        })
+        .execute(),
+    );
+    assert.equal(await latestVerificationOf(chain), String(through));
+    return chain;
+  };
+
+  it('a Chain Verification whose entry was changed and given a new hash is not resumed from, so the resumed breaks are those of a recompute from the first entry', async () => {
+    const chain = await verifiedLab('CB', 4);
+    await asReplica(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 4`, [chain]);
+    await rehash(chain, 4);
+    assert.equal(await latestVerificationOf(chain), null);
+    const resumed = await breaksOf(chain);
+    assert.deepEqual(
+      resumed.filter((b) => b.kind !== 'Contradicted'),
+      await breaksOf(chain, true),
+    );
+    assert.deepEqual(
+      resumed.map((b) => [b.seq, b.kind]),
+      [
+        [4, 'Contradicted'],
+        [5, 'Changed'],
+      ],
+    );
+  });
+
+  it('a Chain Verification whose entry was changed but kept its hash is not resumed from, so the change is found', async () => {
+    const chain = await verifiedLab('CK', 4);
+    await asReplica(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 4`, [chain]);
+    assert.equal(await latestVerificationOf(chain), null);
+    assert.deepEqual(
+      (await breaksOf(chain)).map((b) => [b.seq, b.kind]),
+      [
+        [4, 'Changed'],
+        [4, 'Contradicted'],
+      ],
+    );
+  });
+
+  it('a consistent rewrite from behind a Chain Verification, every entry after it rehashed and the head moved, is found by no walk, so the Chain Verification the Audit Trail no longer matches is reported as a break', async () => {
+    const chain = await verifiedLab('CF', 4);
+    await asReplica(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 2`, [chain]);
+    await rewrittenForward(chain, 2);
+    assert.deepEqual(
+      await breaksOf(chain, true),
+      [],
+      'a recompute from the first entry finds the rewritten chain consistent',
+    );
+    assert.equal(await latestVerificationOf(chain), null);
+    assert.deepEqual(
+      (await breaksOf(chain)).map((b) => [b.seq, b.kind]),
+      [[4, 'Contradicted']],
+    );
+  });
+
+  it('a rewrite behind many Chain Verifications is one break, at the latest one it contradicts, however many name its entries', async () => {
+    const chain = await verifiedLab('CD', 4);
+    const verifiedBy = qa;
+    await audited(app, { actor: 'person:cb.qa', role: 'QA', reason: 'Verify chain' }, (tx) =>
+      tx
+        .insertInto('chainVerification')
+        .values(
+          [4, 4, 5].map((through) => ({
+            chain,
+            through: String(through),
+            head: sql<Buffer>`(select hash from lims.audit_entry where chain = ${chain} and seq = ${through})`,
+            recomputedFrom: '1',
+            verifiedBy,
+          })),
+        )
+        .execute(),
+    );
+    await asReplica(`update lims.audit_entry set reason = 'Routine update' where chain = $1 and seq = 2`, [chain]);
+    await rewrittenForward(chain, 2);
+    assert.deepEqual(
+      (await breaksOf(chain)).map((b) => [b.seq, b.kind]),
+      [[5, 'Contradicted']],
+    );
+    assert.deepEqual(await breaksOf(chain), await breaksOf(chain), 'the break keeps its fingerprint');
+  });
+
+  it('a Chain Verification whose record is an old company entry rewritten into one and rehashed is not resumed from, and is reported as a break', async () => {
+    const chain = await verifiedLab('CG', 2);
+    await asReplica(
+      `insert into lims.chain_verification (chain, through, head, recomputed_from, verified_by)
+       select $1, 5, hash, 1, $2 from lims.audit_entry where chain = $1 and seq = 5`,
+      [chain, qa],
+    );
+    const { rows } = await superuser.query<{ seq: number }>(
+      `select min(seq)::int as seq from lims.audit_entry where chain = 'company' and table_name = 'customer'`,
+    );
+    const old = rows[0]?.seq ?? assert.fail('an old company entry');
+    await asReplica(
+      `update lims.audit_entry e set table_name = 'chain_verification', op = 'INSERT', new_row = to_jsonb(c)
+       from lims.chain_verification c where c.chain = $1 and c.through = 5 and e.chain = 'company' and e.seq = $2`,
+      [chain, old],
+    );
+    await rehash('company', old);
+    assert.equal(await latestVerificationOf(chain), '2', 'the forged record is passed over for the recorded one');
+    assert.deepEqual(
+      (await breaksOf(chain)).map((b) => [b.seq, b.kind]),
+      [[5, 'Contradicted']],
+    );
+  });
+
+  it('an entry behind a Chain Verification renumbered 0 still makes it untrusted, so the missing entry is found', async () => {
+    const chain = await verifiedLab('CZ', 4);
+    await asReplica(`update lims.audit_entry set seq = 0 where chain = $1 and seq = 3`, [chain]);
+    assert.equal(await latestVerificationOf(chain), null);
+    assert.deepEqual(
+      (await breaksOf(chain)).filter((b) => b.seq > 0).map((b) => [b.seq, b.kind]),
+      [[3, 'Missing']],
+    );
+  });
+
+  it('a Chain Verification whose record sits on a Lab chain, not the company chain, is not resumed from', async () => {
+    const chain = await verifiedLab('CR', 2);
+    await asReplica(
+      `insert into lims.chain_verification (chain, through, head, recomputed_from, verified_by)
+       select $1, 5, hash, 1, $2 from lims.audit_entry where chain = $1 and seq = 5`,
+      [chain, qa],
+    );
+    await asReplica(
+      `update lims.audit_entry e set table_name = 'chain_verification', op = 'INSERT', new_row = to_jsonb(c)
+       from lims.chain_verification c where c.chain = $1 and c.through = 5 and e.chain = $1 and e.seq = 6`,
+      [chain],
+    );
+    await rehash(chain, 6);
+    assert.equal(await latestVerificationOf(chain), '2', 'the row recorded only on its own Lab chain is passed over');
+  });
+});

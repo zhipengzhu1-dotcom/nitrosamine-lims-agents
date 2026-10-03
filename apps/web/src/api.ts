@@ -12,7 +12,7 @@ import {
   type SessionClock,
   type SignedInView,
 } from '@lims/domain';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { setPersonReducesMotion } from './motion.ts';
 
 export class Refused extends Error {
@@ -192,7 +192,8 @@ export async function lock(mode: LockMode): Promise<void> {
 }
 
 /** Unlocks the session with the same person's password and restarts its countdown. */
-export const unlock = (password: string) => startSession(() => api(routes.unlock, { password }));
+export const unlock = (credentials: RouteInput<typeof routes.unlock>[0]) =>
+  startSession(() => api(routes.unlock, credentials));
 
 let actorChanged = (_me: ActorContext) => {};
 /** Registers the one listener that shows the person the session the server answered with after a Lab switch. */
@@ -246,11 +247,15 @@ export function useApi<R extends Route>(
   useEffect(() => {
     for (const settle of waiting.current.splice(0)) settle();
   }, [state]);
-  const reload = () =>
-    new Promise<void>((settle) => {
-      waiting.current.push(settle);
-      setVersion((v) => v + 1);
-    });
+  // One function for the component's life, so that an effect may depend on it without running again every render.
+  const reload = useCallback(
+    () =>
+      new Promise<void>((settle) => {
+        waiting.current.push(settle);
+        setVersion((v) => v + 1);
+      }),
+    [],
+  );
   return state.path === path ? { ...state, reload } : { reload };
 }
 

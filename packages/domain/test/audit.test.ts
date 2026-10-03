@@ -5,13 +5,16 @@ import {
   type BreakKind,
   breakReport,
   type ChainBreakFound,
-  chainVerification,
-  type ChainVerification,
+  chainReading,
+  type ChainReading,
   currentLabel,
   describeTrail,
+  fromTheFirstEntry,
   instant,
+  instantKey,
   type RowImage,
   referencedRecords,
+  type Resumed,
   storedInstants,
   type TimedEntry,
 } from '../src/index.ts';
@@ -37,7 +40,7 @@ describe('a recomputed chain reads as how far it is intact, and names each break
     name: string;
     last: string;
     breaks: ChainBreakFound[];
-    expected: Omit<ChainVerification, 'chain'>;
+    expected: Omit<ChainReading, 'chain' | keyof Resumed>;
   }[] = [
     {
       name: 'an untouched chain is intact through its last entry',
@@ -119,10 +122,16 @@ describe('a recomputed chain reads as how far it is intact, and names each break
     },
   ];
   for (const c of cases)
-    it(c.name, () => assert.deepEqual(chainVerification('lab', c.last, c.breaks), { chain: 'lab', ...c.expected }));
+    it(c.name, () =>
+      assert.deepEqual(chainReading('lab', c.last, c.breaks), {
+        chain: 'lab',
+        ...fromTheFirstEntry,
+        ...c.expected,
+      }),
+    );
 
   it('a break reads as where the chain fails and its System Incident in its state', () => {
-    const [closed, head] = chainVerification('lab', '12', [
+    const [closed, head] = chainReading('lab', '12', [
       { ...open('3', 'RF000001'), incidentState: 'Closed' },
       open('13', 'RF000002', 'HeadMoved'),
     ]).breaks;
@@ -361,5 +370,26 @@ describe('a stored value reads in glossary words, not as the database stores it'
     ));
 
   it('collects each stored instant once, from old and new rows', () =>
-    assert.deepEqual(storedInstants([version, locked]), [signedAt]));
+    assert.deepEqual(storedInstants([version, locked]), [{ stored: signedAt, zone: null }]));
+
+  const signature = entry({
+    table: 'signature',
+    op: 'INSERT',
+    newRow: { id: 'sig1', signed_at: signedAt, signed_time_zone: 'America/New_York' },
+  });
+  const keptZone = { at: rendered.at, atLab: at('2026-10-01T19:50:10.383672-04:00') };
+  const labZoneNow = { at: rendered.at, atLab: at('2026-10-02T08:50:10.383672+09:00') };
+
+  it('a Signed at reads on the Lab time zone its Signature kept, not on the zone the Lab holds now', () => {
+    const wanted = storedInstants([signature]);
+    const instants = new Map([
+      [signedAt, labZoneNow],
+      [instantKey({ stored: signedAt, zone: 'America/New_York' }), keptZone],
+    ]);
+    const [described] = describeTrail([signature], [], LAB, instants);
+    assert.deepEqual(
+      [wanted, described?.changes.find((c) => c.field === 'signed_at')?.new?.instant],
+      [[{ stored: signedAt, zone: 'America/New_York' }], keptZone],
+    );
+  });
 });

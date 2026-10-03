@@ -202,7 +202,7 @@ begin
   return out;
 end $$;
 
--- Only a Release Log entry is signed Approved, so these index the approvals the scope check and the gate look up.
+-- These index the Approved Signatures, on Release Log entries and Equipment, that the scope check and the gate look up.
 create index signature_approved_idx on lims.signature (record_version_id) where meaning = 'Approved';
 create index record_version_record_idx on lims.record_version (record_table, record_id);
 
@@ -311,8 +311,8 @@ create trigger service_identity_through_release_log before insert or update on l
 
 -- Approving a Release Log entry applies what it declares, in the signing transaction. A statement entry takes QA's
 -- Approved and any other the owner's, as Platform Operator; an entry is approved once, and is signed with no other
--- Signature Meaning, and no other record is signed Approved. A statement entry brings in the version after the one in
--- force.
+-- Signature Meaning, and no record but Equipment (0037) is otherwise signed Approved. A statement entry brings in the
+-- version after the one in force.
 create function lims.apply_release_log_entry() returns trigger
 language plpgsql security definer set search_path = lims, pg_temp as $$
 declare
@@ -321,8 +321,8 @@ declare
   approver text;
 begin
   select * into v from record_version where id = new.record_version_id;
-  if v.record_table <> 'release_log_entry' and new.meaning = 'Approved' then
-    raise exception 'only a Release Log entry is signed Approved' using errcode = 'LA011';
+  if v.record_table not in ('release_log_entry', 'equipment') and new.meaning = 'Approved' then
+    raise exception 'only a Release Log entry or Equipment is signed Approved' using errcode = 'LA011';
   end if;
   if v.record_table <> 'release_log_entry' then return null; end if;
   if new.meaning <> 'Approved' then
@@ -359,7 +359,8 @@ end $$;
 create trigger take_effect_on_approval after insert on lims.signature
   for each row execute function lims.apply_release_log_entry();
 
-insert into lims.signing_role (role, meaning) values ('PlatformOperator', 'Approved'), ('QA', 'Approved');
+insert into lims.signing_role (role, meaning) values ('PlatformOperator', 'Approved'), ('QA', 'Approved')
+  on conflict do nothing;
 
 -- A Release Log entry is a company record: its Record Versions carry no Lab, and a Signature on one references the
 -- version alone (the Signature keeps the Lab its signer acted in).
@@ -373,7 +374,8 @@ alter table lims.record_version
   add primary key (id),
   add unique (id, content_hash, canonical_form),
   add unique nulls not distinct (lab_id, record_table, record_id, version),
-  add constraint record_version_record_table_check check (record_table in ('test', 'test_report', 'release_log_entry')),
+  add constraint record_version_record_table_check check (
+    record_table in ('test', 'test_report', 'system_incident', 'equipment', 'equipment_event', 'release_log_entry')),
   add constraint record_version_company_check check ((lab_id is null) = (record_table = 'release_log_entry'));
 alter table lims.signature
   add constraint signature_record_version_fkey foreign key (record_version_id, content_hash, canonical_form)
@@ -418,6 +420,10 @@ begin
     when 'test' then test_content(p_lab_id, p_record_id)
     when 'test_report' then test_report_content(p_lab_id, p_record_id)
     when 'release_log_entry' then release_log_entry_content(p_record_id)
+    when 'system_incident' then incident_content(p_record_id)
+    when 'equipment' then (select equipment_content(e) from equipment e where e.lab_id = p_lab_id and e.id = p_record_id)
+    when 'equipment_event' then
+      (select equipment_event_content(v) from equipment_event v where v.lab_id = p_lab_id and v.id = p_record_id)
   end)::text, 'UTF8');
   if bytes is null then return; end if;
   select * into latest from record_version
@@ -536,7 +542,7 @@ grant execute on function lims.current_data_class(), lims.fictional_records(), l
 -- and every Signature on them copies it. Only the transaction that seeds an empty database, or the database owner,
 -- writes Seed (0015's exemption), and only on the fictional data class.
 alter table lims.reauthentication drop constraint reauthentication_authenticator_check,
-  add constraint reauthentication_authenticator_check check (authenticator in ('Password', 'Seed'));
+  add constraint reauthentication_authenticator_check check (authenticator in ('Password', 'PasswordAndCode', 'Seed'));
 create function lims.seed_authenticator_only_seeding() returns trigger language plpgsql as $$
 begin
   if new.authenticator = 'Seed' and not (lims.seeding_or_owner() and lims.current_data_class() = 'fictional') then
@@ -642,7 +648,13 @@ begin
                   and not written_here(v.xmin)) then
       raise exception 'the % signed is not the record shown, nor one this signing created', p_record_table using errcode = 'LA010';
     end if;
-    if not exists (select from test_report r
+    if signed.record_table = 'equipment_event' then
+      if not exists (select from equipment_event v
+                      where v.lab_id = signed.lab_id and v.id = signed.record_id
+                        and seen.record_table = 'equipment' and v.equipment_id = seen.record_id) then
+        raise exception 'the Equipment Event signed is not recorded on the Equipment shown' using errcode = 'LA010';
+      end if;
+    elsif not exists (select from test_report r
                     where r.lab_id = signed.lab_id and r.id = signed.record_id and signed.record_table = 'test_report'
                       and seen.record_table = 'test' and r.test_id = seen.record_id) then
       raise exception 'the % signed is not built on the Test shown',

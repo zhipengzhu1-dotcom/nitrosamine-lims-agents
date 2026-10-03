@@ -4,9 +4,17 @@ import { it } from 'node:test';
 import { audited, type Json, type JsonObject } from '@lims/db';
 import { sql } from 'kysely';
 import { routes, type StepInput, type StepName, stepNames, type SigningBody, stepRoute, steps } from '@lims/domain';
-import { LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
 import { labScope } from '../src/scope.ts';
-import { type Account, type Client, ok, refusedWith, signatureOf, startApi, TEST_RELEASE } from './harness.ts';
+import {
+  type Account,
+  type Client,
+  ok,
+  refusedWith,
+  signatureOf,
+  startApi,
+  TEST_RELEASE,
+  HARNESS_LOGIN,
+} from './harness.ts';
 
 const api = await startApi('lims_api_steps_test');
 const [cora, samir, lena, ana, theo, rui, quinn] = [
@@ -567,11 +575,11 @@ it(`every Signature of the chain is written by the signing function and records 
   );
 });
 
-it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and writes a lockout Access Event with the session and the step's role`, async () => {
+it(`the ${HARNESS_LOGIN.lockoutAfter}th wrong signing password locks the account and writes a lockout Access Event with the session and the step's role`, async () => {
   const signer = await api.addPerson('lou.analyst', ['Analyst'], { trained: true });
   const client = await api.login(signer);
   const id = await submitTestTo('Assigned', signer);
-  for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
+  for (let i = 0; i < HARNESS_LOGIN.lockoutAfter; i++)
     refusedWith(
       await client.call(stepRoute('enterResult'), {
         commitKey: randomUUID(),
@@ -595,7 +603,7 @@ it(`the ${LOCKOUT_AFTER_FAILURES}th wrong signing password locks the account and
     .executeTakeFirstOrThrow();
   assert.deepEqual(events, [
     { kind: 'SignInSucceeded', sessionId: session.id, roles: ['Analyst'] },
-    ...Array.from({ length: LOCKOUT_AFTER_FAILURES }, () => ({
+    ...Array.from({ length: HARNESS_LOGIN.lockoutAfter }, () => ({
       kind: 'ReauthenticationFailed',
       sessionId: session.id,
       roles: ['Analyst'],

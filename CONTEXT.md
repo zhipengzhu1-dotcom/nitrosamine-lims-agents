@@ -10,6 +10,10 @@ The company's R&D laboratory, which tests mainly APIs for nitrosamine impurities
 One of the company's testing laboratories. Tests, equipment, stock and reports belong to exactly one Lab; methods, controlled company documents, people and Customers belong to the company.
 _Avoid_: Site, tenant, location
 
+**Lab time zone**:
+The time zone in which a Lab's own records show their wall-clock time, beside the UTC time. It is configuration of the LIMS, not an action a person takes, and each change to it shows in the Lab's Audit Trail. A Signature and a Received keep the Lab time zone that was in force when they were written, so a later change does not move their wall-clock time.
+_Avoid_: Site time, local time
+
 ### People and parties
 
 **Customer**:
@@ -71,6 +75,10 @@ _Avoid_: Full name, signing name
 **One-time link**:
 The link through which a person sets their own password, so that the Admin never sees or sets it. It works once and expires; the LIMS keeps only a hash of it.
 _Avoid_: Invitation, reset email, activation code
+
+**Enrolment grant**:
+The second person at an authenticator enrolment: a one-time token, carried by an enrolment link, that an Admin issues for a person, so that no one person holds both the password and the authenticator of another. The issuer is never the person, the Admin who created the account, or an Admin who issued one of its one-time links, and the Admin who issues it issues no one-time link for that person afterwards; the database refuses each. It works once and expires; the LIMS keeps only a hash of it.
+_Avoid_: Invitation, second-factor reset, approval
 
 ### Sample chain
 
@@ -411,8 +419,12 @@ A record that pauses a Test or Sample for a stated reason (a Deviation, a receip
 _Avoid_: On hold (as a status), suspension, quarantine
 
 **System Incident**:
-A record that the LIMS itself failed or misbehaved (an unexpected failure answered with a reference the person can quote, an alarm, a break that chain verification finds, a missed backup or anchor, a failed restore drill, a clock step), or that someone may be attacking sign-in (a lockout, a burst of failed sign-ins from one address or against one unknown user ID, repeated attempts against a locked account), closed once its immediate and corrective actions are recorded and acknowledged. Each break that chain verification finds is one System Incident, however often it is verified and whatever state the incident is in; a break at another entry is another, and so is a break tampered with again (a run of missing entries that grows, an entry changed a second time, a chain head moved again). Past the first 100 breaks of a chain, one more System Incident records every break after them, with their count. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
+A record that the LIMS itself failed or misbehaved (an unexpected failure answered with a reference the person can quote, an alarm, a break that chain verification finds, a missed backup or anchor, a failed restore drill, a clock step), or that someone may be attacking sign-in (a lockout, a burst of failed sign-ins from one address or against one unknown user ID, repeated attempts against a locked account), closed once its immediate and corrective actions are recorded and acknowledged. Each break that chain verification finds is one System Incident, however often it is verified and whatever state the incident is in; a break at another entry is another, and so is a break tampered with again (a run of missing entries that grows, an entry changed a second time, a chain head moved again). Past the first 100 breaks of a chain, one more System Incident records every break after them, with their count. A System Incident that records a break stores every break it covers as the verification read it (its entry, kind, last entry and fingerprint), written once with the incident and bound by its Acknowledged Signature, so that it can always say which entries were broken when it opened. It becomes a linked Data Integrity Deviation when QA judges it could have affected results or records; a broken or unanchored audit chain, or a clock step during audited writes, always does.
 _Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failures)
+
+**Chain Verification**:
+The record that a verification of an Audit Trail chain found it intact through an entry: the chain, that entry and its hash, who verified and when, and the first entry recomputed. Verify chain resumes from the latest one the company chain records, so it recomputes only the entries written since, unless a System Incident records a break at or before it, the Audit Trail no longer matches it, or an entry before it is missing. A Chain Verification the Audit Trail no longer matches, because its entry no longer carries its hash and links on, or its record on the company chain is gone or rewritten, is reported as a Contradicted break at its entry, with its System Incident, so a rewrite that re-hashes the chain past it still leaves a witness. Only the latest such Chain Verification after the point the verification started from is reported, so one rewrite is one break: Verify chain checks those after the one it resumed from, and Recompute every entry checks them all. Recompute every entry starts from the chain's first entry, and QA uses it when a break behind a Chain Verification is suspected.
+_Avoid_: Checkpoint, anchor (the off-server copy of a chain head)
 
 **Training Record**:
 Evidence that a person is trained on one Document version, at the Training Level set for their role: Read and Understood is the person's own Acknowledged signature; Demonstrated adds a passing Training Run. It belongs to the person, never expires by time, and stops being current when a newer version that requires training for their role takes effect.
@@ -513,11 +525,11 @@ The permanent, system-generated history of every change to records, accounts and
 _Avoid_: Log, history, change log
 
 **Access Event**:
-The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock (succeeded or failed), lockout, takeover, Lab switch, failed Re-authentication at signing, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. A lockout is stamped at the instant the lock landed, and each of the person's sessions still live then ends at that instant. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
+The Audit Trail record of one sign-in (succeeded or failed), sign-out, idle or absolute expiry, lock, unlock (succeeded or failed), lockout, takeover, Lab switch, failed Re-authentication at signing, or credential event (a password changed or reset, an authenticator enrolled or revoked). It never holds a secret. A failed sign-in, Lab switch, Re-authentication or unlock records why it failed, in one vocabulary shared by all four, such as a wrong password, a wrong code or a locked account. An expiry carries the instant the session ended (its last request plus the idle limit, or its sign-in plus the absolute limit), not the time the LIMS noticed. A lockout is stamped at the instant the lock landed, and each of the person's sessions still live then ends at that instant; a lockout recorded before lockouts were stamped this way does not say which sessions it ended. An attempt against an unknown user ID is recorded too, in a form that lets repeats be recognised but never as the text typed.
 _Avoid_: Login log, session log, access log
 
 **Audit Export**:
-The Audit Trail of one Customer's Submissions, Samples, Tests and their records, with the shared records they use, which QA generates to answer that Customer's audit. Another Customer's identifiers are redacted wherever they appear. It comes as a searchable data file (JSON or CSV) with a PDF of the same entries, each entry in glossary words beside its raw values. Generating one is itself recorded in the Audit Trail with the hash of each file handed out. Customers never see the Audit Trail any other way.
+The Audit Trail of one Customer's Submissions, Samples, Tests and their records, with the shared records they use and the Lab's own entries, such as each change of its Lab time zone, which QA generates to answer that Customer's audit. Another Customer's identifiers are redacted wherever they appear. It comes as a searchable data file (JSON or CSV) with a PDF of the same entries, each entry in glossary words beside its raw values. Generating one is itself recorded in the Audit Trail with the hash of each file handed out. Customers never see the Audit Trail any other way.
 _Avoid_: Audit report, trail dump, audit log export
 
 **Lab switch**:

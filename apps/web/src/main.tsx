@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { type LockMode, onActorChanged, onLocked, onSignedOut, resume } from './api.ts';
 import { Placeholder } from './placeholder.tsx';
 import { ReportPage } from './report.tsx';
-import { LabSwitchPage, LockScreen, PreferencesPage, SignIn, WelcomePage } from './signin.tsx';
+import { AuthenticatorPage, LabSwitchPage, LockScreen, PreferencesPage, SignIn, WelcomePage } from './signin.tsx';
 import { TestPage, Worklist } from './tests.tsx';
 import { AuditExportPage, TrailPage } from './trail.tsx';
 import { type Module, modules } from './rail.tsx';
@@ -17,23 +17,35 @@ type Route =
   | { page: 'switchLab' }
   | { page: 'preferences' }
   | { page: 'welcome'; token: string }
+  /** `grant` is the enrolment grant's token from the link an Admin gave, or null when the page was opened without one. */
+  | { page: 'authenticator'; grant: string | null }
   | { page: 'trail'; table: AuditedTable; id: string }
   | { page: 'auditExport' }
-  /** A rail module; `accessEventsOf` names the person whose Access Events the Staff module shows, or null for the module itself. */
-  | { page: 'module'; module: Module; accessEventsOf: string | null };
+  /**
+   * A rail module; `open` names the record open beside it: the person whose Access Events the Staff module shows, the
+   * System Incident's reference, or the Equipment's id. `before` is the Access Event whose earlier ones the Staff module
+   * lists.
+   */
+  | { page: 'module'; module: Module; open: string | null; before: string | null };
 
 function parse(hash: string): Route {
-  const [, a, id, b] = hash.split('/');
+  const [path, query] = hash.split('?');
+  const [, a, id, b] = (path ?? '').split('/');
   if (a === 'tests' && id && b === 'beside') return { page: 'tests', open: id };
   if (a === 'tests' && id) return b === 'report' ? { page: 'report', id } : { page: 'test', id };
   if (a === 'switch-lab') return { page: 'switchLab' };
   if (a === 'preferences') return { page: 'preferences' };
   if (a === 'welcome' && id) return { page: 'welcome', token: id };
+  if (a === 'authenticator') return { page: 'authenticator', grant: new URLSearchParams(query).get('grant') };
   if (a === 'trails' && isAuditedTable(id) && b) return { page: 'trail', table: id, id: b };
   if (a === 'audit-export') return { page: 'auditExport' };
   const module = modules.find((m) => m.key === a && m.key !== 'tests');
   if (!module) return { page: 'tests', open: null };
-  return { page: 'module', module, accessEventsOf: module.key === 'staff' && id && b === 'access-events' ? id : null };
+  if (module.key === 'incidents' || module.key === 'equipment')
+    return { page: 'module', module, open: id || null, before: null };
+  if (module.key === 'staff' && id && b === 'access-events')
+    return { page: 'module', module, open: id, before: new URLSearchParams(query).get('before') || null };
+  return { page: 'module', module, open: null, before: null };
 }
 
 function useRoute(): Route {
@@ -63,6 +75,7 @@ function App() {
   }, []);
 
   if (route.page === 'welcome') return <WelcomePage token={route.token} />;
+  if (route.page === 'authenticator') return <AuthenticatorPage grant={route.grant} />;
   if (locked)
     return (
       <LockScreen
@@ -81,7 +94,8 @@ function App() {
   return <Fragment key={`${me.lab.id}:${me.person.id}`}>{page(route, me)}</Fragment>;
 }
 
-function page(route: Route, me: ActorContext) {
+/** The signed-in pages; the welcome and authenticator pages render before any session, so `App` returns them first. */
+function page(route: Exclude<Route, { page: 'welcome' | 'authenticator' }>, me: ActorContext) {
   switch (route.page) {
     case 'tests':
       return <Worklist me={me} open={route.open} />;
@@ -97,15 +111,14 @@ function page(route: Route, me: ActorContext) {
       return <TrailPage key={`${route.table}/${route.id}`} me={me} table={route.table} id={route.id} />;
     case 'auditExport':
       return <AuditExportPage me={me} />;
-    case 'welcome':
-      return <WelcomePage token={route.token} />;
     case 'module':
       return (
         <Placeholder
-          key={`${route.module.key}/${route.accessEventsOf}`}
+          key={`${route.module.key}/${route.open}/${route.before}`}
           me={me}
           module={route.module}
-          accessEventsOf={route.accessEventsOf}
+          open={route.open}
+          before={route.before}
         />
       );
   }

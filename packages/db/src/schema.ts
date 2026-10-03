@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type AccessEventKind = "AbsoluteExpiry" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "PasswordSet" | "ReauthenticationFailed" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
+export type AccessEventKind = "AbsoluteExpiry" | "AuthenticatorEnrolled" | "EnrolmentGrantIssued" | "IdleExpiry" | "LabSwitch" | "LabSwitchFailed" | "Lock" | "Lockout" | "PasswordChanged" | "PasswordSet" | "ReauthenticationFailed" | "SignInFailed" | "SignInSucceeded" | "SignOut" | "Takeover" | "Unlock" | "UnlockFailed";
 
 export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
   ? U[]
@@ -21,9 +21,15 @@ export type DataClass = "fictional" | "real";
 
 export type DemoException = "Anchoring" | "DemoLogin" | "FileVault" | "PlaintextAtCloudflare" | "TwoRole";
 
+export type EquipmentEventKind = "Cleaning" | "FirmwareChange" | "Maintenance" | "Note" | "Repair" | "SoftwareChange" | "Suspect";
+
+export type FitnessStatus = "Expired" | "InUse" | "Quarantined" | "Retired" | "Suspended";
+
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
+
+export type ImpactAnswer = "No" | "Yes";
 
 export type IncidentKind = "ChainVerifyFailure" | "Lockout" | "RepeatedSignInOnLockedAccount" | "SignInBurstFromAddress" | "SignInBurstOnUnknownUserId" | "UnexpectedFailure" | "UnraisableLogLine";
 
@@ -49,7 +55,7 @@ export type ReleaseLogKind = "ConfigurationChange" | "HostMove" | "Release";
 
 export type Role = "Admin" | "Analyst" | "Customer" | "LabManager" | "PlatformOperator" | "QA" | "Reviewer" | "SampleCustodian";
 
-export type SignInFailure = "AccountLocked" | "NoCredential" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
+export type SignInFailure = "AccountLocked" | "AlreadyEnrolled" | "CodeAlreadyUsed" | "NoAuthenticator" | "NoCredential" | "NoEnrolmentGrant" | "NoLab" | "NoLabChosen" | "NoMembership" | "NotInWorkstationLab" | "OtherPersonSignedIn" | "OtherUserId" | "SessionEnded" | "UnknownUserId" | "WrongCode" | "WrongPassword" | "WrongPasswordOnLockedAccount" | "WrongUserId";
 
 export type TestState = "Assigned" | "Ready" | "Reported" | "Requested" | "Reviewed" | "SubmittedForReview";
 
@@ -104,6 +110,24 @@ export interface AuditExport {
   requestedRole: Generated<Role>;
 }
 
+export interface Authenticator {
+  enrolledAt: Generated<Timestamp>;
+  lastUsedStep: Int8 | null;
+  personId: string;
+  secretCiphertext: Buffer;
+}
+
+export interface ChainVerification {
+  chain: string;
+  dataClass: Generated<DataClass>;
+  head: Buffer;
+  id: Generated<string>;
+  recomputedFrom: Int8;
+  through: Int8;
+  verifiedAt: Generated<Timestamp>;
+  verifiedBy: string;
+}
+
 export interface CommitKey {
   committedAt: Generated<Timestamp>;
   key: string;
@@ -136,6 +160,46 @@ export interface Deployment {
   single: Generated<boolean>;
 }
 
+export interface EnrolmentGrant {
+  dataClass: Generated<DataClass>;
+  expiresAt: Generated<Timestamp>;
+  id: Generated<string>;
+  issuedAt: Generated<Timestamp>;
+  issuedBy: string;
+  personId: string;
+  tokenHash: Buffer;
+  usedAt: Timestamp | null;
+}
+
+export interface Equipment {
+  assetNumber: string | null;
+  dataClass: Generated<DataClass>;
+  firmwareVersion: string | null;
+  fitnessStatus: Generated<FitnessStatus>;
+  id: Generated<string>;
+  kind: string;
+  labId: string;
+  manufacturer: string;
+  model: string;
+  name: string;
+  registeredAt: Generated<Timestamp>;
+  responsiblePersonId: string;
+  roomId: string;
+  serial: string;
+  softwareVersion: string | null;
+}
+
+export interface EquipmentEvent {
+  dataClass: Generated<DataClass>;
+  equipmentId: string;
+  id: Generated<string>;
+  kind: EquipmentEventKind;
+  labId: string;
+  note: string;
+  recordedAt: Generated<Timestamp>;
+  recordedBy: string;
+}
+
 export interface IdentityVerification {
   checkedAt: Generated<Timestamp>;
   checkedBy: string;
@@ -144,6 +208,14 @@ export interface IdentityVerification {
   evidence: string;
   id: Generated<string>;
   printedName: string;
+}
+
+export interface IncidentBreak {
+  fingerprint: Buffer;
+  incidentId: string;
+  kind: string;
+  seq: Int8;
+  through: Int8;
 }
 
 export interface Lab {
@@ -254,6 +326,7 @@ export interface Sample {
   labId: string;
   number: string;
   receivedAt: Timestamp | null;
+  receivedTimeZone: ColumnType<string | null, never, never>;
   submissionId: string;
 }
 
@@ -293,6 +366,7 @@ export interface Signature {
   role: Role;
   sessionId: string | null;
   signedAt: Generated<Timestamp>;
+  signedTimeZone: ColumnType<string, never, never>;
   statementHash: Buffer | null;
   statementVersion: number | null;
   username: ColumnType<string, never, never>;
@@ -324,11 +398,20 @@ export interface SystemIncident {
   breakCount: number | null;
   chain: string | null;
   constraintName: string | null;
+  correctiveAction: string | null;
+  correctiveActionAt: Timestamp | null;
+  correctiveActionBy: string | null;
   dataClass: Generated<DataClass>;
   errorClass: string | null;
   fingerprint: Buffer | null;
   firstFailure: Int8 | null;
   id: Generated<string>;
+  immediateAction: string | null;
+  immediateActionAt: Timestamp | null;
+  immediateActionBy: string | null;
+  impactAnswer: ImpactAnswer | null;
+  impactAnsweredAt: Timestamp | null;
+  impactAnsweredBy: string | null;
   kind: IncidentKind;
   lastFailure: Int8 | null;
   loggedAt: Timestamp | null;
@@ -385,11 +468,17 @@ export interface DB {
   accessEvent: AccessEvent;
   auditEntry: AuditEntry;
   auditExport: AuditExport;
+  authenticator: Authenticator;
+  chainVerification: ChainVerification;
   commitKey: CommitKey;
   credentialLink: CredentialLink;
   customer: Customer;
   deployment: Deployment;
+  enrolmentGrant: EnrolmentGrant;
+  equipment: Equipment;
+  equipmentEvent: EquipmentEvent;
   identityVerification: IdentityVerification;
+  incidentBreak: IncidentBreak;
   lab: Lab;
   membership: Membership;
   method: Method;

@@ -3,7 +3,7 @@ import { type DB, postgresFault } from '@lims/db';
 import { type ActorContext, administrationApart, routes, staffRefusal } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
-import { hashToken, sessionEnd, type SessionLimits } from './auth.ts';
+import { hashToken, sessionEnd, type SessionLimits, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type LabQueries, type Scope, type WriteQueries } from './scope.ts';
 
@@ -26,6 +26,7 @@ async function staffOf(q: LabQueries, labId: string, only?: string) {
       'person.username',
       'person.displayName as printedName',
       sql<boolean>`person.password_hash is not null`.as('credentialSet'),
+      sql<boolean>`exists (select from lims.authenticator a where a.person_id = person.id)`.as('authenticatorEnrolled'),
       'iv.checkedAt as identityVerifiedAt',
       'checker.displayName as identityVerifiedBy',
       'iv.evidence as identityEvidence',
@@ -53,35 +54,102 @@ function heldApart(error: unknown): never {
   throw new Error('granting a Membership failed', { cause: error });
 }
 
-/** A fresh one-time link for the person; the LIMS keeps only its hash, and only the newest link counts. */
+/** What the database says when the acting Admin issued the person's enrolment grant. */
+function notTheGrantIssuer(error: unknown): never {
+  if (postgresFault(error)?.sqlstate === 'LA016')
+    refuse('guard', 'A one-time link comes from an Admin who did not issue the person’s enrolment grant.');
+  throw new Error('issuing a one-time link failed', { cause: error });
+}
+
+/**
+ * A fresh one-time link for the person, never from the Admin who issued their enrolment grant; the LIMS keeps only its
+ * hash, and only the newest link counts.
+ */
 async function issueLink(q: WriteQueries, personId: string) {
   const token = randomBytes(32).toString('base64url');
   const { expiresAt } = await q.company
     .insertInto('credentialLink')
     .values({ personId, tokenHash: hashToken(token) })
     .returning('expiresAt')
-    .executeTakeFirstOrThrow();
+    .executeTakeFirstOrThrow()
+    .catch(notTheGrantIssuer);
+  return { token, expiresAt };
+}
+
+/** What the database says when the issuer is the person, the Admin who created the account or one who issued its one-time link. */
+function secondAdmin(error: unknown): never {
+  if (postgresFault(error)?.sqlstate === 'LA016')
+    refuse(
+      'guard',
+      'An enrolment grant comes from a second Admin: not the person, and not an Admin who created the account or issued its one-time link.',
+    );
+  throw new Error('issuing an enrolment grant failed', { cause: error });
+}
+
+/**
+ * A fresh enrolment grant for the person from the acting Admin, whom the database holds to be a second Admin; the
+ * LIMS keeps only its hash, only the newest grant counts, and the issue is an Access Event on the person.
+ */
+async function issueEnrolmentGrant(q: WriteQueries, actor: ActorContext, personId: string, sourceAddress: string) {
+  const token = randomBytes(32).toString('base64url');
+  const { expiresAt } = await q.company
+    .insertInto('enrolmentGrant')
+    .values({ personId, issuedBy: actor.person.id, tokenHash: hashToken(token) })
+    .returning('expiresAt')
+    .executeTakeFirstOrThrow()
+    .catch(secondAdmin);
+  const roles = await q.from('membership').select('role').where('personId', '=', personId).orderBy('role').execute();
+  await q.accessEvent({
+    kind: 'EnrolmentGrantIssued',
+    subjectId: personId,
+    roles: roles.map((m) => m.role),
+    sourceAddress,
+  });
   return { token, expiresAt };
 }
 
 const LISTED_ACCESS_EVENTS = 100;
 
 /**
- * The person's newest Access Events that this Lab sees, each Lockout listing the sessions here that it ended, at its
- * instant, whether or not a request or the sweep has ended them yet.
+ * A page of a person's Access Events as this Lab's Admin reads them: the newest, or the newest before `before`, one of
+ * theirs that this Lab sees. Each Lockout lists the sessions here that it ended, at its instant, whether or not a
+ * request or the sweep has ended them yet. A Lockout not stamped at a lock instant its person's Audit Trail holds was
+ * recorded before sessions ended there (#207), so it lists null rather than claim it ended none. The Audit Trail keeps
+ * that instant after an unlock clears the lock.
  */
-async function accessEventsOf(scope: Scope, personId: string, limits: SessionLimits) {
-  const rows = await scope
-    .accessEvents()
-    .select([
-      'id',
-      'kind',
-      'at',
-      'workstationId',
-      sql<string | null>`host(source_address)`.as('sourceAddress'),
-      'failureReason',
-    ])
-    .where('subjectId', '=', personId)
+async function accessEventsOf(
+  db: Kysely<DB>,
+  actor: ActorContext,
+  limits: SessionLimits,
+  personId: string,
+  before: string | null,
+) {
+  const scope = adminScope(db, actor);
+  const person = await onePerson(scope, actor.lab.id, personId);
+  const theirs = scope.accessEvents().where('subjectId', '=', personId);
+  let page = theirs.select([
+    'id',
+    'kind',
+    'at',
+    'workstationId',
+    sql<string | null>`host(source_address)`.as('sourceAddress'),
+    'failureReason',
+    sql<boolean>`access_event.kind = 'Lockout' and exists (
+      select from lims.audit_entry a
+       where a.chain = 'company' and a.table_name = 'person' and a.op = 'UPDATE'
+         and a.new_row ->> 'id' = access_event.subject_id::text
+         and (a.new_row ->> 'locked_at')::timestamptz = access_event.at)`.as('atLockInstant'),
+  ]);
+  if (before !== null) {
+    const cursor = theirs.where('id', '=', before);
+    if (!(await cursor.select('id').executeTakeFirst()))
+      refuse('notFound', 'This person has no such Access Event in this Lab.');
+    // The database reads the cursor's instant, which a JavaScript Date would cut to milliseconds. The `<=` bound repeats
+    // the `or` so that an index on `at` can start its scan at the cursor.
+    const at = cursor.select('at');
+    page = page.where((eb) => eb.and([eb('at', '<=', at), eb.or([eb('at', '<', at), eb('id', '>', before)])]));
+  }
+  const rows = await page
     .orderBy('at', 'desc')
     .orderBy('id')
     .limit(LISTED_ACCESS_EVENTS + 1)
@@ -110,23 +178,30 @@ async function accessEventsOf(scope: Scope, personId: string, limits: SessionLim
       failureReason: e.failureReason,
     };
     if (e.kind !== 'Lockout') return Object.assign(listed, { kind: e.kind });
-    const endedSessions = ended
-      .filter((s) => s.lockoutId === e.id)
-      .map((s) => ({ id: s.id, signedInAt: s.signedInAt, workstation: workstation(s.workstationId) }));
+    const endedSessions = e.atLockInstant
+      ? ended
+          .filter((s) => s.lockoutId === e.id)
+          .map((s) => ({ id: s.id, signedInAt: s.signedInAt, workstation: workstation(s.workstationId) }))
+      : null;
     return Object.assign(listed, { kind: e.kind, endedSessions });
   });
-  return { events, earlierNotListed: rows.length > LISTED_ACCESS_EVENTS };
+  return {
+    person: { id: person.id, printedName: person.printedName, username: person.username },
+    events,
+    earlier: rows.length > LISTED_ACCESS_EVENTS ? (events.at(-1)?.id ?? null) : null,
+  };
 }
 
 /** The Admin's staff-account routes: each write is audited under the Admin with the step's name or the reason given. */
 export function staffRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): void {
   app.route({
     ...routes.accessEvents,
-    handler: async (req) => {
-      const scope = adminScope(db, req.actor);
-      const { id, printedName, username } = await onePerson(scope, req.actor.lab.id, req.params.id);
-      return { person: { id, printedName, username }, ...(await accessEventsOf(scope, id, limits)) };
-    },
+    handler: (req) => accessEventsOf(db, req.actor, limits, req.params.id, null),
+  });
+
+  app.route({
+    ...routes.earlierAccessEvents,
+    handler: (req) => accessEventsOf(db, req.actor, limits, req.params.id, req.params.before),
   });
 
   app.route({
@@ -205,13 +280,27 @@ export function staffRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): vo
   });
 
   app.route({
+    ...routes.issueEnrolmentGrant,
+    handler: async (req) => {
+      const { personId } = req.body;
+      const labId = req.actor.lab.id;
+      return adminScope(db, req.actor).write('Issue an enrolment grant', 'Admin', async (q) => {
+        const person = await onePerson(q, labId, personId);
+        if (person.authenticatorEnrolled)
+          refuse('state', `The person ${person.printedName} has already enrolled an authenticator.`);
+        return { person, grant: await issueEnrolmentGrant(q, req.actor, personId, sourceAddressOf(req)) };
+      });
+    },
+  });
+
+  app.route({
     ...routes.grantMembership,
     handler: async (req) => {
       const { personId, role, reason } = req.body;
       const labId = req.actor.lab.id;
       return adminScope(db, req.actor).write(reason, 'Admin', async (q) => {
         // The person first, then the deployment the Membership's data class reads, then the chain: the order an
-        // approval setting the data class takes them in, so the two never wait on each other (0015, 0028).
+        // approval setting the data class takes them in, so the two never wait on each other (0015, 0038).
         await q.company.selectFrom('person').select('id').where('id', '=', personId).forUpdate().execute();
         const person = await onePerson(q, labId, personId);
         if (person.roles.includes(role))

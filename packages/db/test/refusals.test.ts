@@ -13,6 +13,11 @@ const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) }
 const app = new pg.Client({ connectionString: databaseUrl(server, DATABASE, 'lims_app') });
 
 type Row = Record<string, unknown>;
+type Literal = { literal: string };
+/** A column value written as the SQL given, for a value the fixture can only read from the database. */
+const literal = (text: string): Literal => ({ literal: text });
+const isLiteral = (value: unknown): value is Literal =>
+  typeof value === 'object' && value !== null && 'literal' in value;
 
 const id = {
   customer: randomUUID(),
@@ -31,6 +36,8 @@ const id = {
   session: randomUUID(),
   otherSession: randomUUID(),
   systemIncident: randomUUID(),
+  chainIncident: randomUUID(),
+  openingIncident: randomUUID(),
   commitKey: randomUUID(),
   transaction: randomUUID(),
   accessEvent: randomUUID(),
@@ -45,12 +52,18 @@ const id = {
   admin: randomUUID(),
   operator: randomUUID(),
   verified: randomUUID(),
+  chainVerification: randomUUID(),
   identityVerification: randomUUID(),
   credentialLink: randomUUID(),
+  secondAdmin: randomUUID(),
+  enrolmentGrant: randomUUID(),
   room: randomUUID(),
   otherLabRoom: randomUUID(),
   workstation: randomUUID(),
   lockedOut: randomUUID(),
+  equipment: randomUUID(),
+  equipmentEvent: randomUUID(),
+  manager: randomUUID(),
   entry: randomUUID(),
   probeEntry: randomUUID(),
   operatorSession: randomUUID(),
@@ -74,13 +87,24 @@ const oneBreak = (entry: number) => ({
   break_count: 1,
   fingerprint: Buffer.alloc(32, 7),
 });
+/** The break at `entry` as its System Incident stores it: the one row the incident's fingerprint is. */
+const breakRow = (entry: number) => ({
+  incident_id: id.chainIncident,
+  seq: entry,
+  kind: 'Changed',
+  through: entry,
+  fingerprint: Buffer.alloc(32, 7),
+});
 const zeros = Buffer.alloc(32);
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest();
 const fixtureContent = Buffer.from('{"id":"fixture"}');
 /** Signature statement 1's hash, read from the migrated database before the fixtures are written. */
 let statementHash: Buffer = zeros;
 
-const fixture: [string, Row][] = [
+type Fixture = [Table, Row];
+/** Rows written in one transaction, because a break is recorded only in the transaction that opens its incident, in one statement. */
+const isGroup = (f: Fixture | Fixture[]): f is Fixture[] => Array.isArray(f[0]);
+const fixture: (Fixture | Fixture[])[] = [
   ['lims.customer', { id: id.customer, name: 'Refusal Customer (fictional)' }],
   [
     'lims.person',
@@ -100,6 +124,9 @@ const fixture: [string, Row][] = [
       password_hash: 'not-a-real-hash',
     },
   ],
+  // A second Admin, who created no account and issued no one-time link, so an enrolment grant can come from them.
+  ['lims.person', { id: id.secondAdmin, username: 'refusal.second', display_name: 'Second Admin' }],
+  ['lims.person', { id: id.manager, username: 'refusal.manager', display_name: 'Refusal Manager' }],
   [
     'lims.person',
     {
@@ -107,10 +134,8 @@ const fixture: [string, Row][] = [
       username: 'refusal.locked',
       display_name: 'Locked Person',
       password_hash: 'not-a-real-hash',
-      locked_at: '2026-10-01T12:00:00Z',
     },
   ],
-  ['lims.access_event', { kind: 'Lockout', subject_id: id.lockedOut, source_address: '192.0.2.1', roles: '{}' }],
   ['lims.method', { id: id.method, code: 'RF-MTH-0001', version: '1', title: 'NDMA by LC-MS/MS (fictional)' }],
   [
     'lims.submission',
@@ -123,7 +148,9 @@ const fixture: [string, Row][] = [
   ['lims.membership', { lab_id: id.lab, person_id: id.person, role: 'Analyst' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.otherPerson, role: 'QA' }],
   ['lims.membership', { lab_id: id.otherLab, person_id: id.admin, role: 'Admin' }],
+  ['lims.membership', { lab_id: id.otherLab, person_id: id.secondAdmin, role: 'Admin' }],
   ['lims.membership', { lab_id: id.lab, person_id: id.operator, role: 'PlatformOperator' }],
+  ['lims.membership', { lab_id: id.lab, person_id: id.manager, role: 'LabManager' }],
   [
     'lims.identity_verification',
     {
@@ -144,6 +171,10 @@ const fixture: [string, Row][] = [
     },
   ],
   ['lims.credential_link', { id: id.credentialLink, person_id: id.verified, token_hash: Buffer.alloc(32, 5) }],
+  [
+    'lims.enrolment_grant',
+    { id: id.enrolmentGrant, person_id: id.verified, issued_by: id.secondAdmin, token_hash: Buffer.alloc(32, 11) },
+  ],
   ['lims.training_record', { lab_id: id.lab, person_id: id.person, method_id: id.method }],
   [
     'lims.sample',
@@ -261,18 +292,19 @@ const fixture: [string, Row][] = [
     },
   ],
   [
-    'lims.system_incident',
-    {
-      kind: 'ChainVerifyFailure',
-      reference: 'RF000003',
-      requested_by: id.person,
-      session_lab_id: id.lab,
-      chain: id.lab,
-      first_failure: 7,
-      last_failure: 7,
-      break_count: 1,
-      fingerprint: Buffer.alloc(32, 7),
-    },
+    [
+      'lims.system_incident',
+      {
+        id: id.chainIncident,
+        kind: 'ChainVerifyFailure',
+        reference: 'RF000003',
+        requested_by: id.person,
+        session_lab_id: id.lab,
+        chain: id.lab,
+        ...oneBreak(7),
+      },
+    ],
+    ['lims.incident_break', breakRow(7)],
   ],
   [
     'lims.commit_key',
@@ -295,6 +327,17 @@ const fixture: [string, Row][] = [
       session_lab_id: id.lab,
       session_id: id.session,
       roles: '{Analyst}',
+    },
+  ],
+  [
+    'lims.chain_verification',
+    {
+      id: id.chainVerification,
+      chain: 'company',
+      through: 1,
+      head: literal("(select hash from lims.audit_entry where chain = 'company' and seq = 1)"),
+      recomputed_from: 1,
+      verified_by: id.otherPerson,
     },
   ],
   [
@@ -322,6 +365,24 @@ const fixture: [string, Row][] = [
       previous_session_id: id.otherSession,
       roles: '{Analyst}',
     },
+  ],
+  [
+    'lims.equipment',
+    {
+      lab_id: id.lab,
+      id: id.equipment,
+      kind: 'Balance',
+      name: 'BAL-01 (fictional)',
+      manufacturer: 'Refusal Instruments (fictional)',
+      model: 'RX-5',
+      serial: 'SN-0001',
+      room_id: id.room,
+      responsible_person_id: id.person,
+    },
+  ],
+  [
+    'lims.equipment_event',
+    { lab_id: id.lab, id: id.equipmentEvent, equipment_id: id.equipment, kind: 'Suspect', note: 'Drifts (fictional).' },
   ],
 ];
 const labSwitch: Row = {
@@ -365,7 +426,7 @@ const tables = {
   },
   'lims.person': {
     noun: 'person',
-    row: { username: 'refusal.second', display_name: 'Second Person', password_hash: 'not-a-real-hash' },
+    row: { username: 'refusal.another', display_name: 'Another Person', password_hash: 'not-a-real-hash' },
     notNull: ['id', 'username', 'display_name', 'failed_logins', 'reduced_motion'],
   },
   'lims.identity_verification': {
@@ -382,6 +443,11 @@ const tables = {
     noun: 'one-time link',
     row: { person_id: id.verified, token_hash: Buffer.alloc(32, 6) },
     notNull: ['id', 'person_id', 'token_hash', 'issued_at', 'expires_at'],
+  },
+  'lims.enrolment_grant': {
+    noun: 'enrolment grant',
+    row: { person_id: id.verified, issued_by: id.secondAdmin, token_hash: Buffer.alloc(32, 12) },
+    notNull: ['id', 'person_id', 'issued_by', 'token_hash', 'issued_at', 'expires_at'],
   },
   'lims.method': {
     noun: 'Method',
@@ -520,6 +586,11 @@ const tables = {
     row: { lab_id: id.lab, person_id: id.person, token_hash: Buffer.alloc(32, 2) },
     notNull: ['lab_id', 'id', 'person_id', 'token_hash', 'created_at', 'last_seen_at'],
   },
+  'lims.incident_break': {
+    noun: 'recorded break',
+    row: { ...breakRow(8), incident_id: id.openingIncident },
+    notNull: ['incident_id', 'seq', 'kind', 'through', 'fingerprint'],
+  },
   'lims.system_incident': {
     noun: 'System Incident',
     row: {
@@ -557,6 +628,25 @@ const tables = {
     row: { lab_id: id.lab, name: 'Sample Preparation Room (fictional)' },
     notNull: ['lab_id', 'id', 'name'],
   },
+  'lims.equipment': {
+    noun: 'Equipment',
+    row: {
+      lab_id: id.lab,
+      kind: 'Balance',
+      name: 'BAL-02 (fictional)',
+      manufacturer: 'Refusal Instruments (fictional)',
+      model: 'RX-5',
+      serial: 'SN-0002',
+      room_id: id.room,
+      responsible_person_id: id.person,
+    },
+    notNull: ['id', 'kind', 'name', 'manufacturer', 'model', 'serial', 'room_id', 'fitness_status'],
+  },
+  'lims.equipment_event': {
+    noun: 'Equipment Event',
+    row: { lab_id: id.lab, equipment_id: id.equipment, kind: 'Suspect', note: 'Reads 0.3 mg high (fictional).' },
+    notNull: ['id', 'equipment_id', 'kind', 'note'],
+  },
   'lims.workstation': {
     noun: 'Workstation',
     row: { lab_id: id.lab, name: 'RF-BENCH-02', room_id: id.room, browser_policy: 'Managed Chrome' },
@@ -572,6 +662,17 @@ const tables = {
       roles: '{Analyst}',
     },
     notNull: ['id', 'kind', 'roles', 'at'],
+  },
+  'lims.chain_verification': {
+    noun: 'Chain Verification',
+    row: {
+      chain: 'company',
+      through: 1,
+      head: literal("(select hash from lims.audit_entry where chain = 'company' and seq = 1)"),
+      recomputed_from: 1,
+      verified_by: id.otherPerson,
+    },
+    notNull: ['id', 'chain', 'through', 'head', 'recomputed_from', 'verified_by', 'verified_at'],
   },
   'lims.audit_export': {
     noun: 'Audit Export',
@@ -664,12 +765,16 @@ const auditedTables: Table[] = [
   'lims.system_incident',
   'lims.access_event',
   'lims.audit_export',
+  'lims.chain_verification',
   'lims.identity_verification',
   'lims.credential_link',
+  'lims.enrolment_grant',
   'lims.room',
   'lims.workstation',
   'lims.release_log_entry',
   'lims.service_identity',
+  'lims.equipment',
+  'lims.equipment_event',
 ];
 
 const bare = (table: string) => table.slice(table.indexOf('.') + 1);
@@ -677,8 +782,11 @@ const bare = (table: string) => table.slice(table.indexOf('.') + 1);
 function insert(table: string, row: Row): [string, unknown[]] {
   const columns = Object.keys(row);
   const names = columns.map((column) => pg.escapeIdentifier(column)).join(', ');
-  const params = columns.map((_, i) => `$${i + 1}`).join(', ');
-  return [`insert into ${table} (${names}) values (${params})`, Object.values(row)];
+  const values: unknown[] = [];
+  const params = Object.values(row)
+    .map((value) => (isLiteral(value) ? value.literal : `$${values.push(value)}`))
+    .join(', ');
+  return [`insert into ${table} (${names}) values (${params})`, values];
 }
 
 // The Admin acts, so that an Identity Verification's checker is the actor of its write.
@@ -686,24 +794,77 @@ const AUDIT_CONTEXT = `select set_config('lims.actor', 'person:refusal.admin', t
                               set_config('lims.reason', 'Probe a refusal', true),
                               lims.set_this_transaction('lims.numbering', 'on')`;
 
-/** The stamp lims.sign leaves, so a probe row reaches the constraints behind the sign_only trigger. */
-const signingStamp = (row: Row) =>
-  typeof row.reauthentication_id === 'string'
-    ? client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', row.reauthentication_id])
-    : Promise.resolve();
+/** The role the transaction acts in, as the API sets it from the step registry. */
+const asRole = (role: string) => `select set_config('lims.role', '${role}', true)`;
+
+/** A person who holds `role` acting in it: Other Person holds QA, the Admin holds Admin. */
+const actingAs = (role: 'QA' | 'Admin') =>
+  `select set_config('lims.actor', 'person:${role === 'QA' ? 'refusal.other' : 'refusal.admin'}', true), set_config('lims.role', '${role}', true)`;
+
+/**
+ * What a probe row needs in its transaction before it is written: the stamp lims.sign leaves, so that a Signature
+ * reaches the constraints behind the sign_only trigger, or the chain-verify System Incident a break is opened with,
+ * so that a break reaches the constraints behind the breaks_written_once trigger.
+ */
+const staged = (row: Row) => {
+  if (typeof row.reauthentication_id === 'string')
+    return client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', row.reauthentication_id]);
+  if (row.incident_id === id.openingIncident)
+    return client.query(
+      ...insert('lims.system_incident', {
+        id: id.openingIncident,
+        kind: 'ChainVerifyFailure',
+        reference: 'RF00000W',
+        requested_by: id.person,
+        session_lab_id: id.lab,
+        chain: id.lab,
+        ...oneBreak(8),
+      }),
+    );
+  return Promise.resolve();
+};
+
+/** Refusal Manager, who holds LabManager in the Lab, acting in that role. */
+const asLabManager = `select set_config('lims.actor', 'person:refusal.manager', true), set_config('lims.role', 'LabManager', true)`;
+
+/**
+ * Who a table's triggers demand of a probe row, set after the audit context: the Lab's Lab Manager registers
+ * Equipment, and a member of the Lab's staff (Refusal Person, its Analyst) records an Equipment Event.
+ */
+const actingFor: Partial<Record<Table, string>> = {
+  'lims.equipment': asLabManager,
+  'lims.equipment_event': `select set_config('lims.actor', 'person:refusal.person', true)`,
+};
 
 async function refusalOf(
   statement: string,
   values: unknown[] = [],
   context = true,
   row: Row = {},
+  acting?: string,
   prelude: string[] = [],
 ): Promise<pg.DatabaseError> {
   await client.query('begin');
   try {
     if (context) await client.query(AUDIT_CONTEXT);
-    await signingStamp(row);
+    if (acting) await client.query(acting);
+    await staged(row);
     for (const first of prelude) await client.query(first);
+    await client.query(statement, values);
+  } catch (error) {
+    if (error instanceof pg.DatabaseError) return error;
+    throw error;
+  } finally {
+    await client.query('rollback');
+  }
+  return assert.fail(`the database accepted ${statement}`);
+}
+
+/** Like refusalOf, with triggers off, for a row a trigger would otherwise stamp over or refuse first. */
+async function refusalWithTriggersOff(statement: string, values: unknown[]): Promise<pg.DatabaseError> {
+  await client.query('begin');
+  try {
+    await client.query('set local session_replication_role = replica');
     await client.query(statement, values);
   } catch (error) {
     if (error instanceof pg.DatabaseError) return error;
@@ -716,7 +877,7 @@ async function refusalOf(
 
 function refusalOfRow(table: Table, change: Row = {}, context = true) {
   const row = { ...tables[table].row, ...change };
-  return refusalOf(...insert(table, row), context, row, spec(table).prelude);
+  return refusalOf(...insert(table, row), context, row, actingFor[table], spec(table).prelude);
 }
 
 function assertConstraint(error: pg.DatabaseError, code: string, table: string, constraint: string): void {
@@ -741,13 +902,29 @@ before(async () => {
         'select statement_hash as "statementHash" from lims.signature_statement where version = 1',
       )
     ).rows[0] ?? assert.fail('the migration seeds signature statement 1'));
-  for (const [table, row] of fixture) {
+  for (const group of fixture) {
     await client.query('begin');
     await client.query(AUDIT_CONTEXT);
-    await signingStamp(row);
-    await client.query(...insert(table, row));
+    for (const [table, row] of isGroup(group) ? group : [group]) {
+      const acting = table === 'lims.chain_verification' ? actingAs('QA') : actingFor[table];
+      if (acting) await client.query(acting);
+      await staged(row);
+      await client.query(...insert(table, row));
+    }
     await client.query('commit');
   }
+  await client.query('begin');
+  await client.query(AUDIT_CONTEXT);
+  await client.query('update lims.person set locked_at = clock_timestamp() where id = $1', [id.lockedOut]);
+  await client.query(
+    ...insert('lims.access_event', {
+      kind: 'Lockout',
+      subject_id: id.lockedOut,
+      source_address: '192.0.2.1',
+      roles: '{}',
+    }),
+  );
+  await client.query('commit');
   // A service identity is declared by the entry written with it, so the two go in one transaction.
   await client.query('begin');
   await client.query(AUDIT_CONTEXT);
@@ -793,7 +970,9 @@ it('the base row of every table is accepted, so each refusal below comes from th
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      await signingStamp(tables[table].row);
+      const acting = table === 'lims.chain_verification' ? actingAs('QA') : actingFor[table];
+      if (acting) await client.query(acting);
+      await staged(tables[table].row);
       for (const first of spec(table).prelude ?? []) await client.query(first);
       await client.query(...insert(table, tables[table].row));
     } finally {
@@ -823,6 +1002,7 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.person': { id: id.person },
     'lims.identity_verification': { id: id.identityVerification },
     'lims.credential_link': { id: id.credentialLink },
+    'lims.enrolment_grant': { id: id.enrolmentGrant },
     'lims.method': { id: id.method },
     'lims.submission': { id: id.submission },
     'lims.lab': { lab_id: id.lab },
@@ -839,13 +1019,17 @@ describe('the database refuses a second row with the key of an existing one', ()
     'lims.reauthentication': { id: id.reauthentication },
     'lims.session': { id: id.session },
     'lims.system_incident': { id: id.systemIncident },
+    'lims.incident_break': { incident_id: id.chainIncident, seq: 7 },
     'lims.commit_key': { key: id.commitKey },
     'lims.access_event': { id: id.accessEvent },
     'lims.audit_export': { id: id.auditExport },
+    'lims.chain_verification': { id: id.chainVerification },
     'lims.room': { id: id.room },
     'lims.workstation': { id: id.workstation },
     'lims.release_log_entry': { id: id.entry },
     'lims.service_identity': { name: 'svc:refusal' },
+    'lims.equipment': { id: id.equipment },
+    'lims.equipment_event': { id: id.equipmentEvent },
     'lims.audit_chain': { chain: 'company' },
     'lims.audit_entry': { seq: 1 },
     'public.schema_migration': { name: '0001_roles.sql' },
@@ -899,6 +1083,12 @@ describe('the database refuses a duplicate of a unique value', () => {
       table: 'lims.credential_link',
       change: { token_hash: Buffer.alloc(32, 5) },
       constraint: 'credential_link_token_hash_key',
+    },
+    {
+      name: 'a second enrolment grant with the same token is refused',
+      table: 'lims.enrolment_grant',
+      change: { token_hash: Buffer.alloc(32, 11) },
+      constraint: 'enrolment_grant_token_hash_key',
     },
     {
       name: 'a second Method with the same code and version is refused',
@@ -1074,6 +1264,18 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'credential_link_person_id_fkey',
     },
     {
+      name: 'an enrolment grant for a person who does not exist is refused',
+      table: 'lims.enrolment_grant',
+      change: { person_id: missing },
+      constraint: 'enrolment_grant_person_id_fkey',
+    },
+    {
+      name: 'an enrolment grant issued by a person who does not exist is refused',
+      table: 'lims.enrolment_grant',
+      change: { issued_by: missing },
+      constraint: 'enrolment_grant_issued_by_fkey',
+    },
+    {
       name: 'a Submission for a Customer that does not exist is refused',
       table: 'lims.submission',
       change: { customer_id: missing },
@@ -1087,6 +1289,12 @@ describe('the database refuses a reference to a row that does not exist', () => 
     },
     noLab('lims.membership', 'Lab membership'),
     noLab('lims.audit_export', 'Audit Export'),
+    {
+      name: 'a Chain Verification by a person who does not exist is refused',
+      table: 'lims.chain_verification',
+      change: { verified_by: missing },
+      constraint: 'chain_verification_verified_by_fkey',
+    },
     {
       name: 'an Audit Export for a Customer that does not exist is refused',
       table: 'lims.audit_export',
@@ -1165,7 +1373,6 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'test_report_lab_id_test_id_fkey',
     },
     noLab('lims.record_version', 'Record Version'),
-    noLab('lims.signature', 'Signature'),
     {
       name: 'a Signature on a Record Version that does not exist is refused',
       table: 'lims.signature',
@@ -1292,6 +1499,34 @@ describe('the database refuses a reference to a row that does not exist', () => 
       constraint: 'system_incident_session_lab_id_fkey',
     },
     {
+      name: "a System Incident whose QA's answer names a person who does not exist is refused",
+      table: 'lims.system_incident',
+      change: { impact_answer: 'Yes', impact_answered_by: missing, impact_answered_at: '2026-09-30T00:00:00Z' },
+      constraint: 'system_incident_impact_answered_by_fkey',
+    },
+    {
+      name: 'a System Incident whose immediate action names a person who does not exist is refused',
+      table: 'lims.system_incident',
+      change: { immediate_action: 'Reran.', immediate_action_by: missing, immediate_action_at: '2026-09-30T00:00:00Z' },
+      constraint: 'system_incident_immediate_action_by_fkey',
+    },
+    {
+      name: 'a System Incident whose corrective action names a person who does not exist is refused',
+      table: 'lims.system_incident',
+      change: {
+        corrective_action: 'Added a check.',
+        corrective_action_by: missing,
+        corrective_action_at: '2026-09-30T00:00:00Z',
+      },
+      constraint: 'system_incident_corrective_action_by_fkey',
+    },
+    {
+      name: 'a recorded break of a System Incident that does not exist is refused',
+      table: 'lims.incident_break',
+      change: { incident_id: missing },
+      constraint: 'incident_break_incident_id_fkey',
+    },
+    {
       name: 'an Access Event about a person who does not exist is refused',
       table: 'lims.access_event',
       change: { subject_id: missing },
@@ -1350,7 +1585,54 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { [column]: value },
       constraint,
     }));
+  const impactCases: [string, Row][] = [
+    ['an answer with no answering person', { impact_answer: 'Yes', impact_answered_at: '2026-09-30T00:00:00Z' }],
+    [
+      'an answering person with no answer',
+      { impact_answered_by: id.person, impact_answered_at: '2026-09-30T00:00:00Z' },
+    ],
+    [
+      'a No answer on a chain-verify System Incident',
+      {
+        kind: 'ChainVerifyFailure',
+        step: null,
+        error_class: null,
+        chain: 'company',
+        ...oneBreak(3),
+        impact_answer: 'No',
+        impact_answered_by: id.person,
+        impact_answered_at: '2026-09-30T00:00:00Z',
+      },
+    ],
+  ];
   refusesEach('23514', [
+    ...each(
+      'a Chain Verification of a chain the Audit Trail does not name is refused',
+      'lims.chain_verification',
+      'chain',
+      ['Company', 'lab', 'not-a-uuid'],
+      'chain_verification_chain_check',
+    ),
+    {
+      name: 'a Chain Verification through no entry is refused',
+      table: 'lims.chain_verification',
+      change: { through: 0 },
+      constraint: 'chain_verification_through_check',
+    },
+    ...each(
+      'a Chain Verification whose hash is not 32 bytes is refused',
+      'lims.chain_verification',
+      'head',
+      [Buffer.alloc(31), Buffer.alloc(33)],
+      'chain_verification_head_check',
+    ),
+    ...each(
+      'a Chain Verification that recomputed from before its first entry or after the entry past the one it verified through is refused',
+      'lims.chain_verification',
+      'recomputed_from',
+      [0, 3],
+      'chain_verification_recomputed_from_check',
+    ),
     {
       name: 'an Audit Export requested under any role but QA is refused',
       table: 'lims.audit_export',
@@ -1388,7 +1670,7 @@ describe('the database refuses a value outside its allowed set', () => {
       'a re-authentication by an authenticator the LIMS does not have is refused',
       'lims.reauthentication',
       'authenticator',
-      ['Totp', 'password', ''],
+      ['Totp', 'Code', 'password', ''],
       'reauthentication_authenticator_check',
     ),
     {
@@ -1426,6 +1708,18 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { kind: 'SignInFailed', failure_reason: 'WrongUserId' },
       constraint: 'access_event_failure_kind_check',
     },
+    {
+      name: 'a failed unlock Access Event without a failure reason is refused',
+      table: 'lims.access_event',
+      change: { kind: 'UnlockFailed', failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_unlock_failure_check',
+    },
+    ...['NoCredential', 'NoLab', 'NoMembership', 'NotInWorkstationLab'].map((reason) => ({
+      name: `a failed unlock Access Event with the ${reason} reason, which no password, code or Lockout gives, is refused`,
+      table: 'lims.access_event' as const,
+      change: { kind: 'UnlockFailed', failure_reason: reason, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_kind_check',
+    })),
     ...each(
       'a Lab code that is not two to four capital letters is refused',
       'lims.lab',
@@ -1448,7 +1742,7 @@ describe('the database refuses a value outside its allowed set', () => {
       'test_gxp_class_check',
     ),
     ...each(
-      'a Record Version of a record other than a Test or a Test Report is refused',
+      'a Record Version of a record other than a Test, a Test Report or a System Incident is refused',
       'lims.record_version',
       'record_table',
       ['result', 'sample'],
@@ -1497,6 +1791,32 @@ describe('the database refuses a value outside its allowed set', () => {
       error_class: null,
     }),
     incidentFacts('an unexpected-failure System Incident that names an account', { subject_id: id.person }),
+    ...impactCases.map(
+      ([what, change]): Case => ({
+        name: `${what} is refused`,
+        table: 'lims.system_incident',
+        change,
+        constraint: 'system_incident_impact_answer_check',
+      }),
+    ),
+    ...(['immediate', 'corrective'] as const).flatMap((action): Case[] => {
+      const partial: [string, Row][] = [
+        [`a blank ${action} action`, { [`${action}_action`]: ' ', [`${action}_action_by`]: id.person }],
+        [`a newline-only ${action} action`, { [`${action}_action`]: '\n\t\n', [`${action}_action_by`]: id.person }],
+        [
+          `an ${action} action longer than 2000 characters`,
+          { [`${action}_action`]: 'x'.repeat(2001), [`${action}_action_by`]: id.person },
+        ],
+        [`an ${action} action with no recording person`, { [`${action}_action`]: 'Done.' }],
+        [`a recording person with no ${action} action`, { [`${action}_action_by`]: id.person }],
+      ];
+      return partial.map(([what, change]) => ({
+        name: `${what} is refused`,
+        table: 'lims.system_incident',
+        change: { [`${action}_action_at`]: '2026-09-30T00:00:00Z', ...change },
+        constraint: `system_incident_${action}_action_check`,
+      }));
+    }),
     incidentFacts('a lockout System Incident that names no account', {
       kind: 'Lockout',
       step: null,
@@ -1590,6 +1910,18 @@ describe('the database refuses a value outside its allowed set', () => {
       constraint: 'system_incident_break_check',
     },
     {
+      name: 'a recorded break of a kind the chain does not find is refused',
+      table: 'lims.incident_break',
+      change: { kind: 'More' },
+      constraint: 'incident_break_kind_check',
+    },
+    {
+      name: 'a recorded break whose last entry is before its first is refused',
+      table: 'lims.incident_break',
+      change: { through: 7 },
+      constraint: 'incident_break_through_check',
+    },
+    {
       name: 'a chain-verify System Incident that records no breaks is refused',
       table: 'lims.system_incident',
       change: {
@@ -1660,7 +1992,11 @@ describe('the database refuses a value outside its allowed set', () => {
     ...(['SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'] as const).map((kind) => ({
       name: `an Access Event of kind ${kind} without a session is refused`,
       table: 'lims.access_event' as const,
-      change: { kind, failure_reason: null, ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }) },
+      change: {
+        kind,
+        failure_reason: kind === 'UnlockFailed' ? 'WrongPassword' : null,
+        ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }),
+      },
       constraint: 'access_event_session_kind_check',
     })),
     ...(['IdleExpiry', 'AbsoluteExpiry'] as const).flatMap((kind) => [
@@ -1731,17 +2067,17 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { failure_reason: 'OtherUserId' },
       constraint: 'access_event_failure_kind_check',
     },
-    {
-      name: 'a failed Lab switch Access Event with a reason only a sign-in has is refused',
-      table: 'lims.access_event',
+    ...['NoLabChosen', 'AlreadyEnrolled', 'OtherPersonSignedIn'].map((reason) => ({
+      name: `a failed Lab switch Access Event with the ${reason} reason, which only a sign-in has, is refused`,
+      table: 'lims.access_event' as const,
       change: {
         kind: 'LabSwitchFailed',
-        failure_reason: 'NoLabChosen',
+        failure_reason: reason,
         session_lab_id: id.lab,
         session_id: id.session,
       },
       constraint: 'access_event_failure_kind_check',
-    },
+    })),
     {
       name: 'a Lab switch Access Event that names no previous session is refused',
       table: 'lims.access_event',
@@ -1841,27 +2177,88 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { used_at: '2000-01-01T00:00:00Z' },
       constraint: 'credential_link_use_check',
     },
+    ...each(
+      'an enrolment grant whose token hash is not 32 bytes is refused',
+      'lims.enrolment_grant',
+      'token_hash',
+      [Buffer.alloc(31, 7), Buffer.alloc(33, 7)],
+      'enrolment_grant_token_hash_check',
+    ),
+    {
+      name: 'an enrolment grant that expires before it is issued is refused',
+      table: 'lims.enrolment_grant',
+      change: { expires_at: '2000-01-01T00:00:00Z' },
+      constraint: 'enrolment_grant_expiry_check',
+    },
+    {
+      name: 'an enrolment grant used outside its life is refused',
+      table: 'lims.enrolment_grant',
+      change: { used_at: '2000-01-01T00:00:00Z' },
+      constraint: 'enrolment_grant_use_check',
+    },
+    {
+      name: 'an enrolment grant a person issues for themselves is refused',
+      table: 'lims.enrolment_grant',
+      change: { issued_by: id.verified },
+      constraint: 'enrolment_grant_second_person_check',
+    },
+    ...each(
+      "a person's count of failed sign-ins below zero is refused",
+      'lims.person',
+      'failed_logins',
+      [-1, -2147483648],
+      'person_failed_logins_check',
+    ),
   ]);
+});
+
+describe('a failed unlock records why, as a failed sign-in does', () => {
+  it('a failed unlock Access Event with each reason a password, a code or a Lockout gives is accepted', async () => {
+    const reasons = [
+      'WrongPassword',
+      'WrongPasswordOnLockedAccount',
+      'AccountLocked',
+      'WrongCode',
+      'NoAuthenticator',
+      'CodeAlreadyUsed',
+    ];
+    for (const reason of reasons) {
+      const row = {
+        ...tables['lims.access_event'].row,
+        kind: 'UnlockFailed',
+        failure_reason: reason,
+        session_lab_id: id.lab,
+        session_id: id.session,
+      };
+      await client.query('begin');
+      try {
+        await client.query(AUDIT_CONTEXT);
+        await client.query(...insert('lims.access_event', row));
+      } finally {
+        await client.query('rollback');
+      }
+    }
+  });
+
+  it('every Access Event rule binds the rows written before it, except the reason that failed unlocks before #245 lack', async () => {
+    const { rows } = await client.query<{ name: string }>(
+      `select conname as name from pg_constraint
+        where conrelid = 'lims.access_event'::regclass and not convalidated order by conname`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.name),
+      ['access_event_unlock_failure_check'],
+    );
+  });
 });
 
 describe('a counter holds at most six digits and is never empty', () => {
   // The counter trigger lets a counter start only at zero, so these rows reach the constraints with triggers off.
-  async function refusalOfCounter(last: number | null): Promise<pg.DatabaseError> {
-    await client.query('begin');
-    try {
-      await client.query('set local session_replication_role = replica');
-      await client.query(`insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', $2)`, [
-        id.otherLab,
-        last,
-      ]);
-    } catch (error) {
-      if (error instanceof pg.DatabaseError) return error;
-      throw error;
-    } finally {
-      await client.query('rollback');
-    }
-    return assert.fail(`the database accepted a counter at ${last}`);
-  }
+  const refusalOfCounter = (last: number | null) =>
+    refusalWithTriggersOff(`insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', $2)`, [
+      id.otherLab,
+      last,
+    ]);
   covered.add('lims.counter.counter_last_check');
   covered.add('lims.counter.counter_last_not_null');
   it('a counter past 999999 or below zero is refused', async () => {
@@ -1952,6 +2349,24 @@ describe('an audited write without an actor, a role and a reason is refused', ()
 
 describe('a Signature, a Record Version, a signature statement, a re-authentication record, an Access Event, an Audit Trail entry, a Commit Key, a System Incident or an Audit Export is never changed or removed, even by the superuser', () => {
   const cases: { name: string; table: Table | 'lims.deployment'; trigger: string; statement: string }[] = [
+    {
+      name: 'updating a Chain Verification is refused',
+      table: 'lims.chain_verification',
+      trigger: 'refuse_change',
+      statement: 'update lims.chain_verification set through = through + 1',
+    },
+    {
+      name: 'deleting a Chain Verification is refused',
+      table: 'lims.chain_verification',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.chain_verification',
+    },
+    {
+      name: 'truncating the Chain Verifications is refused',
+      table: 'lims.chain_verification',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.chain_verification',
+    },
     {
       name: 'updating an Audit Export is refused',
       table: 'lims.audit_export',
@@ -2113,7 +2528,25 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       name: 'truncating the System Incidents is refused',
       table: 'lims.system_incident',
       trigger: 'refuse_truncate',
-      statement: 'truncate lims.system_incident',
+      statement: 'truncate lims.system_incident cascade',
+    },
+    {
+      name: 'updating a recorded break is refused',
+      table: 'lims.incident_break',
+      trigger: 'refuse_change',
+      statement: `update lims.incident_break set kind = 'Missing'`,
+    },
+    {
+      name: 'deleting a recorded break is refused',
+      table: 'lims.incident_break',
+      trigger: 'refuse_change',
+      statement: 'delete from lims.incident_break',
+    },
+    {
+      name: 'truncating the recorded breaks is refused',
+      table: 'lims.incident_break',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.incident_break',
     },
     {
       name: 'updating an Identity Verification is refused',
@@ -2175,6 +2608,12 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
       trigger: 'refuse_truncate',
       statement: 'truncate lims.deployment',
     },
+    {
+      name: 'truncating the enrolment grants is refused',
+      table: 'lims.enrolment_grant',
+      trigger: 'refuse_truncate',
+      statement: 'truncate lims.enrolment_grant',
+    },
   ];
   for (const c of cases) {
     covered.add(`${c.table}.${c.trigger}`);
@@ -2227,17 +2666,469 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
     );
   });
 
-  it('a chain-verify System Incident opened before breaks carried a fingerprint can still move to Closed', async () => {
+  covered.add('lims.incident_break.breaks_written_once');
+  const breakAdded = [
+    '23514',
+    "a chain-verify System Incident's breaks are written once, in one statement, and give its count",
+  ];
+  const breakLater = ['23514', 'a break is recorded in the transaction that opens its System Incident'];
+  it('a break recorded on a System Incident after the transaction that opened it is refused', async () => {
+    const error = await refusalOf(...insert('lims.incident_break', breakRow(9)));
+    assert.deepEqual([error.code, error.message], breakLater);
+  });
+  it('a chain-verify System Incident opened before the LIMS stored its breaks never gains them', async () => {
+    // Opened as before this migration: a count and no rows, which the commit-time check would refuse today.
+    const incident = randomUUID();
+    await client.query('begin');
+    await client.query(AUDIT_CONTEXT);
+    await client.query('set local session_replication_role = replica');
+    await client.query(
+      `insert into lims.system_incident
+         (id, kind, reference, requested_by, chain, first_failure, last_failure, break_count, fingerprint)
+       values ($1, 'ChainVerifyFailure', 'RF00000Y', $2, $3, 4, 4, 1, $4)`,
+      [incident, id.person, id.lab, fp7],
+    );
+    await client.query('commit');
+    const error = await refusalOf(...insert('lims.incident_break', { ...breakRow(4), incident_id: incident }));
+    assert.deepEqual([error.code, error.message], breakLater);
+  });
+  it('a break recorded in a transaction that updates its open System Incident is refused', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('update lims.system_incident set state = state where id = $1', [id.chainIncident]);
+      const error = await client.query(...insert('lims.incident_break', breakRow(9))).then(
+        () => assert.fail('the database recorded the break'),
+        (e: unknown) => e,
+      );
+      assert.ok(error instanceof pg.DatabaseError);
+      assert.deepEqual([error.code, error.message], breakLater);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it('a break recorded on a System Incident that records no chain break is refused', async () => {
+    const error = await refusalOf(...insert('lims.incident_break', { ...breakRow(4), incident_id: id.systemIncident }));
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', 'a break is recorded only on a chain-verify System Incident'],
+    );
+  });
+
+  const int8 = (n: number) => {
+    const bytes = Buffer.alloc(8);
+    bytes.writeBigInt64BE(BigInt(n));
+    return bytes;
+  };
+  /** The fingerprint a More incident records: the digest of its breaks' entries and fingerprints, in entry order. */
+  const digestOf = (breaks: { seq: number; fingerprint: Buffer }[]) =>
+    sha256(Buffer.concat(breaks.flatMap((b) => [int8(b.seq), sha256(b.fingerprint)])));
+  const fp7 = Buffer.alloc(32, 7);
+  /** The statements that open `reference` as a More incident and store `stored` as its breaks, for one transaction. */
+  const moreIncident = (
+    reference: string,
+    { first, last, count, fingerprint }: { first: number; last: number; count: number; fingerprint: Buffer },
+    stored: readonly { seq: number; through?: number }[],
+  ): [string, unknown[]][] => {
+    const incident = randomUUID();
+    return [
+      [
+        `insert into lims.system_incident
+           (id, kind, reference, requested_by, chain, first_failure, last_failure, break_count, fingerprint)
+         values ($1, 'ChainVerifyFailure', $2, $3, $4, $5, $6, $7, $8)`,
+        [incident, reference, id.person, id.lab, first, last, count, fingerprint],
+      ],
+      ...(stored.length === 0
+        ? []
+        : [
+            [
+              `insert into lims.incident_break (incident_id, seq, kind, through, fingerprint)
+               select $1, b.seq, 'Changed', b.through, $2 from unnest($3::bigint[], $4::bigint[]) as b(seq, through)`,
+              [incident, fp7, stored.map((b) => b.seq), stored.map((b) => b.through ?? b.seq)],
+            ] satisfies [string, unknown[]],
+          ]),
+    ];
+  };
+  /** The refusal that committing `statements`, run in one transaction, raises. */
+  async function refusalAtCommit(statements: [string, unknown[]][]): Promise<pg.DatabaseError> {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      for (const [statement, values] of statements) await client.query(statement, values);
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      if (error instanceof pg.DatabaseError) return error;
+      throw error;
+    }
+    return assert.fail('the database committed the System Incident');
+  }
+  covered.add('lims.system_incident.check_incident_breaks');
+  const twoBreaks = {
+    first: 4,
+    last: 5,
+    count: 2,
+    fingerprint: digestOf([
+      { seq: 4, fingerprint: fp7 },
+      { seq: 5, fingerprint: fp7 },
+    ]),
+  };
+  for (const [what, reference, incident, stored, refused] of [
+    ['without the breaks it covers', 'RF00000P', twoBreaks, []],
+    ['whose breaks do not give its count', 'RF00000Q', twoBreaks, [{ seq: 4 }], breakAdded],
+    ['whose breaks do not give its first entry', 'RF00000V', { ...twoBreaks, first: 3 }, [{ seq: 4 }, { seq: 5 }]],
+    [
+      'whose one break does not give its fingerprint',
+      'RF00000X',
+      { first: 4, last: 4, count: 1, fingerprint: Buffer.alloc(32, 9) },
+      [{ seq: 4 }],
+    ],
+    [
+      'whose breaks do not give its range',
+      'RF00000R',
+      {
+        ...twoBreaks,
+        fingerprint: digestOf([
+          { seq: 4, fingerprint: fp7 },
+          { seq: 6, fingerprint: fp7 },
+        ]),
+      },
+      [{ seq: 4 }, { seq: 6 }],
+    ],
+    [
+      'whose breaks do not give its fingerprint',
+      'RF00000S',
+      { ...twoBreaks, fingerprint: Buffer.alloc(32, 9) },
+      [{ seq: 4 }, { seq: 5 }],
+    ],
+  ] as const)
+    it(`a chain-verify System Incident committed ${what} is refused`, async () => {
+      const error = await refusalAtCommit(moreIncident(reference, incident, stored));
+      assert.deepEqual(
+        [error.code, error.message],
+        refused ?? [
+          '23514',
+          'a chain-verify System Incident records every break it covers, which give its count, range and fingerprint',
+        ],
+      );
+    });
+  it('a chain-verify System Incident whose breaks give its count, range and fingerprint commits with them', async () => {
+    await client.query('begin');
+    await client.query(AUDIT_CONTEXT);
+    for (const [statement, values] of moreIncident('RF00000T', twoBreaks, [{ seq: 4 }, { seq: 5 }]))
+      await client.query(statement, values);
+    await client.query('commit');
+    const { rows } = await client.query<{ seq: string }>(
+      `select b.seq::text as seq from lims.incident_break b join lims.system_incident i on i.id = b.incident_id
+        where i.reference = 'RF00000T' order by b.seq`,
+    );
+    assert.deepEqual(rows, [{ seq: '4' }, { seq: '5' }]);
+  });
+
+  const contentHash = async (incident: string) =>
+    (
+      await client.query<{ hash: string }>(`select encode(lims.incident_content_hash($1::uuid), 'hex') as hash`, [
+        incident,
+      ])
+    ).rows[0]?.hash;
+  it("a bypassed change to a recorded break changes its System Incident's content hash, which the Acknowledged Signature binds", async () => {
+    await client.query('begin');
+    try {
+      const before = await contentHash(id.chainIncident);
+      await client.query('set local session_replication_role = replica');
+      await client.query(`update lims.incident_break set kind = 'Missing' where incident_id = $1`, [id.chainIncident]);
+      assert.notEqual(await contentHash(id.chainIncident), before);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it("a System Incident's content binds its recorded breaks through one digest, and a System Incident with none renders as before they were stored", async () => {
+    const { rows } = await client.query<{ digest: string | null; present: boolean }>(
+      `select lims.incident_content(i.id) ->> 'breaksDigest' as digest, lims.incident_content(i.id) ? 'breaksDigest' as present
+         from lims.system_incident i where i.id in ($1, $2) order by i.id = $1 desc`,
+      [id.chainIncident, id.systemIncident],
+    );
+    const breakDigest = sha256(Buffer.concat([int8(7), int8(7), sha256(Buffer.from('Changed')), sha256(fp7)]));
+    assert.deepEqual(rows, [
+      { digest: sha256(breakDigest).toString('hex'), present: true },
+      { digest: null, present: false },
+    ]);
+  });
+
+  it("a chain-verify System Incident opened before breaks carried a fingerprint still takes QA's answer", async () => {
     await client.query('begin');
     try {
       await client.query('set local session_replication_role = replica');
       await client.query(unrecordedBreak, [id.person, id.lab]);
       await client.query('set local session_replication_role = origin');
       await client.query(AUDIT_CONTEXT);
+      await client.query(actingAs('QA'));
       const { rowCount } = await client.query(
-        `update lims.system_incident set state = 'Closed' where reference = 'RF00000M'`,
+        `update lims.system_incident set impact_answer = 'Yes' where reference = 'RF00000M'`,
       );
       assert.equal(rowCount, 1);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  it("a chain-verify System Incident's content carries its break's fingerprint", async () => {
+    const { rows } = await client.query<{ fingerprint: string | null }>(
+      `select lims.incident_content(id) ->> 'fingerprint' as fingerprint from lims.system_incident
+        where reference = 'RF000003'`,
+    );
+    assert.deepEqual(rows, [{ fingerprint: '07'.repeat(32) }]);
+  });
+
+  const stamped =
+    'a System Incident records who recorded each of the three and when from the acting person and the database clock';
+  for (const [what, role, change] of [
+    ["QA's answer", 'QA', "impact_answer = 'Yes'"],
+    ['an immediate action', 'Admin', "immediate_action = 'Reran the entry.'"],
+    ['a corrective action', 'Admin', "corrective_action = 'Added a check.'"],
+  ] as const) {
+    it(`${what} recorded under any role but ${role} is refused`, async () => {
+      for (const other of ['system', role === 'QA' ? 'Admin' : 'QA']) {
+        const error = await refusalOf(
+          `${asRole(other)}; update lims.system_incident set ${change} where id = '${id.systemIncident}'`,
+        );
+        assert.deepEqual(
+          [error.code, error.message],
+          ['LA015', `${what} on a System Incident is recorded by ${role}, not ${other}`],
+          other,
+        );
+      }
+    });
+    it(`${what} recorded by a service identity is refused`, async () => {
+      const error = await refusalOf(
+        `${asRole(role)}; select set_config('lims.actor', 'svc:test', true);
+         update lims.system_incident set ${change} where id = '${id.systemIncident}'`,
+      );
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA015', `${what} on a System Incident is recorded by a person, not svc:test`],
+      );
+    });
+    it(`${what} recorded by a person who holds no ${role} membership is refused`, async () => {
+      const error = await refusalOf(
+        `${asRole(role)}; select set_config('lims.actor', 'person:refusal.person', true);
+         update lims.system_incident set ${change} where id = '${id.systemIncident}'`,
+      );
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA015', `${what} on a System Incident is recorded by a person who holds ${role}, not person:refusal.person`],
+      );
+    });
+  }
+
+  it(stamped, async () => {
+    for (const [fact, role] of [
+      ['impact_answer', 'QA'],
+      ['immediate_action', 'Admin'],
+      ['corrective_action', 'Admin'],
+    ] as const) {
+      const by = fact === 'impact_answer' ? 'impact_answered_by' : `${fact}_by`;
+      const at = fact === 'impact_answer' ? 'impact_answered_at' : `${fact}_at`;
+      await client.query('begin');
+      try {
+        await client.query(AUDIT_CONTEXT);
+        await client.query(actingAs(role));
+        // A hand-written person and instant do not stick: the database writes the actor and its own clock over them.
+        const { rows } = await client.query<Row>(
+          `update lims.system_incident
+              set ${fact} = 'Yes', ${by} = $1, ${at} = '2020-01-01T00:00:00Z'
+            where id = $2
+            returning ${by} as by, ${at} between now() and clock_timestamp() as now, ${at} > '2026-01-01T00:00:00Z' as recent`,
+          [id.person, id.systemIncident],
+        );
+        assert.deepEqual(rows, [{ by: role === 'QA' ? id.otherPerson : id.admin, now: true, recent: true }], fact);
+      } finally {
+        await client.query('rollback');
+      }
+    }
+  });
+
+  it('the app role holds no update on who recorded each of the three or when', async () => {
+    const { rows } = await client.query<{ privilege: string }>(
+      `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
+        where grantee = 'lims_app' and table_schema = 'lims' and table_name = 'system_incident'
+          and privilege_type = 'UPDATE'
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.privilege),
+      ['UPDATE corrective_action', 'UPDATE immediate_action', 'UPDATE impact_answer', 'UPDATE state'],
+    );
+    const error = await refusalOf(
+      `set local role lims_app; update lims.system_incident set impact_answered_at = clock_timestamp() where id = '${id.systemIncident}'`,
+    );
+    assert.equal(error.code, '42501', error.message);
+  });
+
+  /** A System Incident inserted with the given recorded fields, past the triggers, as a past write would have left it. */
+  const incidentIn = async (reference: string, columns: Row) => {
+    const names = Object.keys(columns);
+    await client.query('set local session_replication_role = replica');
+    await client.query(
+      `insert into lims.system_incident (kind, reference, requested_by, session_lab_id, step, error_class${names.map((n) => `, ${pg.escapeIdentifier(n)}`).join('')})
+       values ('UnexpectedFailure', $1, $2, $3, 'enterResult', 'TypeError'${names.map((_, i) => `, $${i + 4}`).join('')})
+       returning id`,
+      [reference, id.person, id.lab, ...Object.values(columns)],
+    );
+    await client.query('set local session_replication_role = origin');
+    await client.query(AUDIT_CONTEXT);
+  };
+  const recordedAll = {
+    impact_answer: 'Yes',
+    impact_answered_by: id.person,
+    impact_answered_at: '2026-09-30T00:00:00Z',
+    immediate_action: 'Reran the entry.',
+    immediate_action_by: id.person,
+    immediate_action_at: '2026-09-30T00:00:00Z',
+    corrective_action: 'Added a check.',
+    corrective_action_by: id.person,
+    corrective_action_at: '2026-09-30T00:00:00Z',
+  };
+  const moveRefused = (name: string, columns: Row, change: string, message: string, values: unknown[] = []) => {
+    it(name, async () => {
+      await client.query('begin');
+      try {
+        await incidentIn('RF00000N', columns);
+        const error = await client
+          .query(`update lims.system_incident set ${change} where reference = 'RF00000N'`, values)
+          .then(
+            () => assert.fail('the database accepted the move'),
+            (e: unknown) => e,
+          );
+        assert.ok(error instanceof pg.DatabaseError, String(error));
+        assert.deepEqual([error.code, error.message], ['LA014', message]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+  };
+  const only = 'a System Incident moves only from Open to Acknowledged to Closed';
+  moveRefused('an Open System Incident moving straight to Closed is refused', recordedAll, "state = 'Closed'", only);
+  moveRefused(
+    'an Acknowledged System Incident moving back to Open is refused',
+    { ...recordedAll, state: 'Acknowledged' },
+    "state = 'Open'",
+    only,
+  );
+  for (const [what, change] of [
+    ['its state', "state = 'Acknowledged'"],
+    ["QA's answer", "impact_answer = 'No'"],
+    ['its immediate action', "immediate_action = 'Changed.'"],
+  ] as const)
+    moveRefused(
+      `a Closed System Incident changing ${what} is refused`,
+      { ...recordedAll, state: 'Closed' },
+      change,
+      'a Closed System Incident never changes',
+    );
+  moveRefused(
+    "a System Incident changing QA's answer once recorded is refused",
+    recordedAll,
+    "impact_answer = 'No'",
+    "QA's answer on a System Incident is recorded once",
+  );
+  moveRefused(
+    'a System Incident changing its immediate action once recorded is refused',
+    recordedAll,
+    "immediate_action = 'Changed.'",
+    "a System Incident's immediate action is recorded once",
+  );
+  moveRefused(
+    'a System Incident changing its corrective action once recorded is refused',
+    recordedAll,
+    "corrective_action = 'Changed.'",
+    "a System Incident's corrective action is recorded once",
+  );
+  for (const [what, held] of [
+    ["QA's answer", { ...recordedAll, impact_answer: null, impact_answered_by: null, impact_answered_at: null }],
+    [
+      'its immediate action',
+      { ...recordedAll, immediate_action: null, immediate_action_by: null, immediate_action_at: null },
+    ],
+    [
+      'its corrective action',
+      { ...recordedAll, corrective_action: null, corrective_action_by: null, corrective_action_at: null },
+    ],
+  ] as const)
+    moveRefused(
+      `a System Incident Acknowledged without ${what} is refused`,
+      held,
+      "state = 'Acknowledged'",
+      "a System Incident is Acknowledged only once QA's answer, its immediate action and its corrective action are recorded",
+    );
+  moveRefused(
+    'a System Incident Acknowledged with no Acknowledged Signature on it is refused',
+    recordedAll,
+    "state = 'Acknowledged'",
+    'a System Incident is Acknowledged only by an Acknowledged Signature on it',
+  );
+
+  /** An Acknowledged Signature over a Record Version of RF00000N holding `content`, written past the triggers. */
+  const acknowledgedOver = async (content: string) => {
+    await client.query('set local session_replication_role = replica');
+    await client.query(
+      `with incident as (select id from lims.system_incident where reference = 'RF00000N'),
+            version as (
+              insert into lims.record_version (lab_id, id, record_table, record_id, version, canonical_form, content)
+              select $1, $2, 'system_incident', id, 1, 1, ${content} from incident
+              returning id, content_hash, canonical_form)
+       insert into lims.signature (lab_id, id, person_id, printed_name, username, role, meaning, record_version_id,
+                                   content_hash, canonical_form, statement_version, statement_hash, authenticator,
+                                   session_id, app_release, reauthentication_id, signed_time_zone)
+       select $1, $3, $4, 'Refusal Person', 'refusal.person', 'Admin', 'Acknowledged', id, content_hash,
+              canonical_form, 1, (select statement_hash from lims.signature_statement where version = 1),
+              'Password', $5, 'test', $6, (select time_zone from lims.lab where lab_id = $1)
+         from version`,
+      [id.lab, randomUUID(), randomUUID(), id.person, id.session, randomUUID()],
+    );
+    await client.query('set local session_replication_role = origin');
+  };
+
+  it('a System Incident with all three records and an Acknowledged Signature over them moves to Acknowledged, then to Closed', async () => {
+    await client.query('begin');
+    try {
+      await incidentIn('RF00000N', recordedAll);
+      await acknowledgedOver("convert_to(lims.incident_content(id)::text, 'UTF8')");
+      const acknowledged = await client.query(
+        `update lims.system_incident set state = 'Acknowledged' where reference = 'RF00000N'`,
+      );
+      assert.equal(acknowledged.rowCount, 1);
+      const closed = await client.query(
+        `update lims.system_incident set state = 'Closed' where reference = 'RF00000N'`,
+      );
+      assert.equal(closed.rowCount, 1);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  it('a System Incident Acknowledged on a Signature over content that is not its current content is refused', async () => {
+    await client.query('begin');
+    try {
+      await incidentIn('RF00000N', {
+        ...recordedAll,
+        corrective_action: null,
+        corrective_action_by: null,
+        corrective_action_at: null,
+      });
+      // Signed before the corrective action was recorded: the Signature binds a version without it.
+      await acknowledgedOver("convert_to(lims.incident_content(id)::text, 'UTF8')");
+      await client.query(asRole('Admin'));
+      await client.query(
+        `update lims.system_incident set corrective_action = 'Added a check.' where reference = 'RF00000N'`,
+      );
+      await assert.rejects(
+        client.query(`update lims.system_incident set state = 'Acknowledged' where reference = 'RF00000N'`),
+        {
+          code: 'LA014',
+          message: 'a System Incident is Acknowledged only by an Acknowledged Signature over its current content',
+        },
+      );
     } finally {
       await client.query('rollback');
     }
@@ -2389,6 +3280,75 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
     }
   });
 
+  covered.add('lims.enrolment_grant.granted_by_a_second_admin');
+  it('an enrolment grant from the person, from someone who is not an Admin, from an Admin who created the account or issued its one-time link, or in another Admin’s name is refused', async () => {
+    const issue = 'insert into lims.enrolment_grant (person_id, issued_by, token_hash) values ($1, $2, $3)';
+    const token = Buffer.alloc(32, 13);
+    await refusedAs(issue, [id.verified, id.person, token], 'LA016', 'an enrolment grant is issued by an Admin');
+    // The fixture's Admin created refusal.verified and issued its one-time link, under their own name.
+    await refusedAs(
+      issue,
+      [id.verified, id.admin, token],
+      'LA016',
+      'an enrolment grant comes from a second Admin: not the one who created the account or issued its one-time link',
+    );
+    // The app role, unlike the owner, issues only in the acting Admin's name.
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('set local role lims_app');
+      await assert.rejects(client.query(issue, [id.verified, id.secondAdmin, token]), {
+        code: 'LA016',
+        message: 'an enrolment grant is issued by the acting Admin',
+      });
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.credential_link.link_not_from_the_grant_issuer');
+  it('a one-time link in the name of the Admin who issued the person’s enrolment grant is refused', async () => {
+    // The fixture's second Admin issued refusal.verified's enrolment grant.
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query("select set_config('lims.actor', 'person:refusal.second', true)");
+      await assert.rejects(
+        client.query('insert into lims.credential_link (person_id, token_hash) values ($1, $2)', [
+          id.verified,
+          Buffer.alloc(32, 14),
+        ]),
+        {
+          code: 'LA016',
+          message: 'a one-time link comes from an Admin who did not issue the person’s enrolment grant',
+        },
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.enrolment_grant.use_grant_once');
+  it('an enrolment grant is only ever marked used, once, even by the superuser', async () => {
+    const once = 'an enrolment grant is only ever marked used, once';
+    await refusedAs('update lims.enrolment_grant set token_hash = $1', [Buffer.alloc(32, 9)], 'LA002', once);
+    await refusedAs('delete from lims.enrolment_grant', [], 'LA002', once);
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('update lims.enrolment_grant set used_at = clock_timestamp() where id = $1', [
+        id.enrolmentGrant,
+      ]);
+      await client.query('savepoint used');
+      await assert.rejects(
+        client.query('update lims.enrolment_grant set used_at = clock_timestamp() where id = $1', [id.enrolmentGrant]),
+        { code: 'LA002', message: once },
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
   covered.add('lims.signature.sign_as_the_person');
   covered.add('lims.signature.signature_printed_name_not_null');
   it('a Signature takes the printed name and username its signer has, whatever the insert says', async () => {
@@ -2396,7 +3356,7 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      await signingStamp(forged);
+      await staged(forged);
       const [statement, values] = insert('lims.signature', forged);
       const { rows } = await client.query<Row>(`${statement} returning printed_name, username`, values);
       assert.deepEqual(rows, [{ printed_name: 'Refusal Person', username: 'refusal.person' }]);
@@ -2436,7 +3396,7 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
          values ($1, $2, $3, $4, 'Reviewed', 'Password')`,
         [id.lab, proof, session, signer],
       );
-      await signingStamp(signed);
+      await staged(signed);
       await client.query(...insert('lims.signature', signed));
       await assert.rejects(client.query('delete from lims.person where id = $1', [signer]), (error: unknown) => {
         assert.ok(error instanceof pg.DatabaseError);
@@ -2449,7 +3409,9 @@ describe('staff accounts keep their identity, and Admin stays apart from the wor
   });
 });
 
-it('every lims table is captured in the Audit Trail except the sessions, the Commit Keys, the counters and the Audit Trail itself', async () => {
+// A System Incident's recorded breaks are bound by its fingerprint and its content hash, and copying them into each of
+// its Audit Trail entries is what their own table avoids (#250).
+it('every lims table is captured in the Audit Trail except the sessions, the authenticators, the Commit Keys, the counters, the recorded breaks and the Audit Trail itself', async () => {
   const { rows } = await client.query<{ name: string }>(
     `select 'lims.' || c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'lims' and c.relkind = 'r'
@@ -2458,7 +3420,15 @@ it('every lims table is captured in the Audit Trail except the sessions, the Com
   );
   assert.deepEqual(
     rows.map((row) => row.name),
-    ['lims.audit_chain', 'lims.audit_entry', 'lims.commit_key', 'lims.counter', 'lims.session'],
+    [
+      'lims.audit_chain',
+      'lims.audit_entry',
+      'lims.authenticator',
+      'lims.commit_key',
+      'lims.counter',
+      'lims.incident_break',
+      'lims.session',
+    ],
   );
 });
 
@@ -2585,7 +3555,49 @@ describe('a Signature is written only by the signing function, which refuses eve
     );
   });
 
+  it('an Equipment Event this transaction recorded is signed Performed on sight of its Equipment', async () => {
+    const event = randomUUID();
+    // Version 2 is the Equipment as the fixture left it: registered, then a Suspect recorded on it.
+    assert.equal(
+      await attempt(
+        asPerson(),
+        reauthenticate(),
+        `insert into lims.equipment_event (lab_id, id, equipment_id, kind, note)
+         values ('${id.lab}', '${event}', '${id.equipment}', 'Cleaning', 'Wiped the pan (fictional).')`,
+        sign({
+          table: 'equipment_event',
+          recordId: event,
+          seen: versionOf(id.equipment, 2),
+          hash: hashOf(id.equipment, 2),
+        }),
+      ),
+      null,
+    );
+  });
+
+  const probeEvent = randomUUID();
   const cases: { name: string; statements: string[]; message: string | RegExp }[] = [
+    {
+      name: 'the Lab Manager signing a Test Performed is refused; Performed is theirs only on an Equipment Event',
+      statements: [
+        asPerson('LabManager'),
+        `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', 'LabManager')`,
+        reauthenticate(),
+        sign(),
+      ],
+      message: 'the Lab Manager signs Performed only an Equipment Event',
+    },
+    {
+      name: 'signing an Equipment Event on sight of a record that is not its Equipment is refused',
+      statements: [
+        asPerson(),
+        reauthenticate(),
+        `insert into lims.equipment_event (lab_id, id, equipment_id, kind, note)
+         values ('${id.lab}', '${probeEvent}', '${id.equipment}', 'Cleaning', 'Wiped the pan (fictional).')`,
+        sign({ table: 'equipment_event', recordId: probeEvent }),
+      ],
+      message: 'the Equipment Event signed is not recorded on the Equipment shown',
+    },
     {
       name: 'a service identity cannot sign',
       statements: [asService, reauthenticate(), sign()],
@@ -2715,6 +3727,148 @@ describe('a Signature is written only by the signing function, which refuses eve
       if (typeof c.message === 'string') assert.equal(message, c.message);
       else assert.match(message, c.message);
     });
+
+  describe('Acknowledged is signed once, on an Open System Incident, over all three of its records as they are now', () => {
+    const incident = randomUUID();
+    const holds = (role: string) =>
+      `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${id.person}', '${role}')`;
+    // The Admin who signs is a person of their own: an Admin holds no business role, and refusal.person is an Analyst.
+    const [signer, signerSession, secondProof] = [randomUUID(), randomUUID(), randomUUID()];
+    const asAdmin = [
+      asPerson('Admin').replace('person:refusal.person', 'person:refusal.acknowledger'),
+      `insert into lims.person (id, username, display_name, password_hash)
+       values ('${signer}', 'refusal.acknowledger', 'Acknowledging Admin', 'not-a-real-hash')`,
+      `insert into lims.membership (lab_id, person_id, role) values ('${id.lab}', '${signer}', 'Admin')`,
+      `insert into lims.session (lab_id, id, person_id, token_hash)
+       values ('${id.lab}', '${signerSession}', '${signer}', decode(repeat('0a', 32), 'hex'))`,
+    ];
+    const adminProof = (proof = id.probeReauthentication) =>
+      `insert into lims.reauthentication (lab_id, id, session_id, person_id, meaning, authenticator)
+       values ('${id.lab}', '${proof}', '${signerSession}', '${signer}', 'Acknowledged', 'Password')`;
+    const recorded = `impact_answer, impact_answered_by, impact_answered_at, immediate_action, immediate_action_by,
+                      immediate_action_at, corrective_action, corrective_action_by, corrective_action_at`;
+    const recordedValues = `'Yes', '${id.person}', '2026-09-30T00:00:00Z', 'Reran the entry.', '${id.person}',
+                            '2026-09-30T00:00:00Z', 'Added a check.', '${id.person}', '2026-09-30T00:00:00Z'`;
+    /** A System Incident with the three records, in the given state, written past the triggers as a past write left it. */
+    const incidentIn = (state = 'Open') =>
+      `set local session_replication_role = replica;
+       insert into lims.system_incident (id, kind, reference, requested_by, session_lab_id, step, error_class, state, ${recorded})
+       values ('${incident}', 'UnexpectedFailure', 'RF00000P', '${id.person}', '${id.lab}', 'enterResult', 'TypeError', '${state}', ${recordedValues});
+       set local session_replication_role = origin`;
+    /** A Record Version of a System Incident in this Lab holding `content`, as if written earlier. */
+    const versionHolding = (content: string, recordId = incident) =>
+      `insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
+       values ('${id.lab}', 'system_incident', '${recordId}', 1, 1, ${content})`;
+    const current = (recordId = incident) => `convert_to(lims.incident_content('${recordId}'::uuid)::text, 'UTF8')`;
+    const versioned = (proof = id.probeReauthentication) =>
+      `select lims.version_system_incident('${proof}', '${incident}')`;
+    const signAcknowledged = (recordId = incident, proof = id.probeReauthentication) =>
+      sign({
+        reauthentication: proof,
+        session: signerSession,
+        table: 'system_incident',
+        recordId,
+        seen: versionOf(recordId, 1),
+        hash: hashOf(recordId, 1),
+        meaning: 'Acknowledged',
+      });
+    const onlyIncidents =
+      'Acknowledged is the Signature Meaning of a System Incident, and a System Incident is signed only Acknowledged';
+
+    it("the Admin signs a System Incident Acknowledged over the version this signing wrote in the signing session's Lab", async () => {
+      await client.query('begin');
+      try {
+        for (const statement of [incidentIn(), ...asAdmin, adminProof(), versioned(), signAcknowledged()])
+          await client.query(statement);
+        const { rows } = await client.query<Row>(
+          `select v.lab_id, v.version, s.meaning, s.role, v.content_hash = lims.incident_content_hash(v.record_id) as current
+             from lims.signature s join lims.record_version v on v.lab_id = s.lab_id and v.id = s.record_version_id
+            where v.record_table = 'system_incident' and v.record_id = $1`,
+          [incident],
+        );
+        assert.deepEqual(rows, [{ lab_id: id.lab, version: 1, meaning: 'Acknowledged', role: 'Admin', current: true }]);
+      } finally {
+        await client.query('rollback');
+      }
+    });
+
+    it('versioning a System Incident on a re-authentication record from an earlier transaction, for another Meaning, or that does not exist is refused', async () => {
+      const versioning =
+        'a System Incident is versioned only for the Acknowledged signing re-authenticated in this transaction';
+      assert.equal(await refused(incidentIn(), ...asAdmin, versioned(id.reauthentication)), versioning);
+      assert.equal(await refused(incidentIn(), ...asAdmin, reauthenticate('Performed'), versioned()), versioning);
+      assert.equal(await refused(incidentIn(), ...asAdmin, versioned(missing)), versioning);
+    });
+
+    covered.add('lims.signature.incident_signing');
+    const incidentCases: { name: string; statements: string[]; message: string }[] = [
+      {
+        name: 'signing a Test Acknowledged is refused',
+        statements: [...asAdmin, adminProof(), sign({ session: signerSession, meaning: 'Acknowledged' })],
+        message: onlyIncidents,
+      },
+      {
+        name: 'signing a System Incident Released is refused',
+        statements: [
+          incidentIn(),
+          asPerson('QA'),
+          holds('QA'),
+          versionHolding(current()),
+          reauthenticate('Released'),
+          sign({
+            table: 'system_incident',
+            recordId: incident,
+            seen: versionOf(incident, 1),
+            hash: hashOf(incident, 1),
+            meaning: 'Released',
+          }),
+        ],
+        message: onlyIncidents,
+      },
+      {
+        name: 'signing Acknowledged on a System Incident that is not Open is refused',
+        statements: [incidentIn('Acknowledged'), ...asAdmin, adminProof(), versioned(), signAcknowledged()],
+        message: 'a System Incident is signed Acknowledged while Open, not Acknowledged',
+      },
+      {
+        name: "signing Acknowledged on a System Incident without QA's answer and both actions is refused",
+        statements: [
+          ...asAdmin,
+          adminProof(),
+          versionHolding(current(id.systemIncident), id.systemIncident),
+          signAcknowledged(id.systemIncident),
+        ],
+        message:
+          "a System Incident is signed Acknowledged only once QA's answer, its immediate action and its corrective action are recorded",
+      },
+      {
+        name: 'a second Acknowledged signing on a System Incident is refused',
+        statements: [
+          incidentIn(),
+          ...asAdmin,
+          adminProof(),
+          versioned(),
+          signAcknowledged(),
+          adminProof(secondProof),
+          signAcknowledged(incident, secondProof),
+        ],
+        message: 'a System Incident is signed Acknowledged once',
+      },
+      {
+        name: 'signing Acknowledged over a version that is not the System Incident as it is now is refused',
+        statements: [
+          incidentIn(),
+          ...asAdmin,
+          versionHolding(`'{"stale":true}'::bytea`),
+          adminProof(),
+          signAcknowledged(),
+        ],
+        message:
+          'the Acknowledged Signature binds the System Incident as it is now; it must be read again before signing',
+      },
+    ];
+    for (const c of incidentCases) it(c.name, async () => assert.equal(await refused(...c.statements), c.message));
+  });
 });
 
 describe('a session is locked and unlocked only by lims.lock_session and lims.unlock_session', () => {
@@ -3097,25 +4251,33 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
         stamp(id.probeEntry),
         `update lims.deployment set data_class = 'real', set_by_entry_id = '${id.probeEntry}'`,
       ),
-      'the database holds records created under fictional: audit_export, customer, method, result, room, sample, submission, system_incident, test, test_report, training_record, workstation',
+      'the database holds records created under fictional: audit_export, chain_verification, customer, enrolment_grant, equipment, equipment_event, method, result, room, sample, submission, system_incident, test, test_report, training_record, workstation',
     );
   });
 
   covered.add('lims.deployment.deployment_set_by_entry_id_fkey');
   it('the deployment cannot cite a Release Log entry that does not exist', async () => {
-    const error = await refusalOf(`update lims.deployment set set_by_entry_id = '${missing}'`, [], true, {}, [
-      ...declared,
-      stamp(missing),
-    ]);
+    const error = await refusalOf(
+      `update lims.deployment set set_by_entry_id = '${missing}'`,
+      [],
+      true,
+      {},
+      undefined,
+      [...declared, stamp(missing)],
+    );
     assertConstraint(error, '23503', 'lims.deployment', 'deployment_set_by_entry_id_fkey');
   });
 
   covered.add('lims.deployment.capture');
   it('a change to the deployment without an actor, a role and a reason is refused', async () => {
-    const error = await refusalOf(`update lims.deployment set set_by_entry_id = '${id.entry}'`, [], false, {}, [
-      ...declared,
-      stamp(id.entry),
-    ]);
+    const error = await refusalOf(
+      `update lims.deployment set set_by_entry_id = '${id.entry}'`,
+      [],
+      false,
+      {},
+      undefined,
+      [...declared, stamp(id.entry)],
+    );
     assert.deepEqual([error.code, error.message], ['LA001', 'an audited write needs an actor, a role and a reason']);
   });
 
@@ -3184,14 +4346,14 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
   });
 
   covered.add('lims.signature.take_effect_on_approval');
-  it('only a Release Log entry is signed Approved, and a Release Log entry takes no other Signature Meaning', async () => {
+  it('only a Release Log entry or Equipment is signed Approved, and a Release Log entry takes no other Signature Meaning', async () => {
     assert.equal(
       await refusedWith(
         'LA011',
         asSigner('refusal.other', 'QA'),
         signs(id.otherPerson, id.otherPersonSession, 'Approved', 'test', id.test),
       ),
-      'only a Release Log entry is signed Approved',
+      'only a Release Log entry or Equipment is signed Approved',
     );
     assert.equal(
       await refusedWith(
@@ -3286,8 +4448,778 @@ describe('a Release Log entry takes effect only once it is signed Approved, and 
   });
 });
 
+describe("a Chain Verification names an entry of its chain and that entry's hash", () => {
+  covered.add('lims.chain_verification.head_matches_entry');
+  it('a Chain Verification whose hash is not the hash of the entry it verified through is refused', async () => {
+    const error = await refusalOfRow('lims.chain_verification', { head: Buffer.alloc(32, 9) });
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA014', "a Chain Verification names an entry of its chain and that entry's hash"],
+    );
+  });
+  it('a Chain Verification through an entry its chain does not have is refused', async () => {
+    const error = await refusalOfRow('lims.chain_verification', { through: 1000000 });
+    assert.equal(error.code, 'LA014', error.message);
+  });
+  it('a Chain Verification recorded in a role other than QA is refused', async () => {
+    const error = await refusalOfRow('lims.chain_verification');
+    assert.deepEqual([error.code, error.message], ['LA015', 'a Chain Verification is recorded by QA, not system']);
+  });
+  it('a Chain Verification whose Verified by is not the acting QA is refused', async () => {
+    const error = await refusalOf(
+      `${actingAs('QA')};
+       insert into lims.chain_verification (chain, through, head, recomputed_from, verified_by)
+       select 'company', 1, hash, 1, '${id.person}' from lims.audit_entry where chain = 'company' and seq = 1`,
+    );
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA015', 'a Chain Verification is verified by the acting QA person:refusal.other, not person:refusal.person'],
+    );
+  });
+});
+
+describe("a password is changed only by lims.change_password, after the session's person re-authenticated", () => {
+  const change = `select lims.change_password('${id.lab}', '${id.session}', 'scrypt-hmac$changed', '192.0.2.1')`;
+
+  it("a password change in a transaction not stamped with the re-authentication of the session's person is refused", async () => {
+    const error = await refusalOf(change);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA015', "a password change needs the session's person re-authenticated in this transaction"],
+    );
+    const other = await refusalOf(
+      `select lims.set_this_transaction('lims.reauthenticated', '${id.otherPerson}'); ${change}`,
+    );
+    assert.equal(other.code, 'LA015', other.message);
+  });
+
+  it("a password change after the session's person re-authenticated sets the hash and writes a PasswordChanged Access Event", async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(`select lims.set_this_transaction('lims.reauthenticated', '${id.person}')`);
+      await client.query(`set local role lims_app; ${change}`);
+      const { rows: person } = await client.query('select password_hash from lims.person where id = $1', [id.person]);
+      const { rows: events } = await client.query(
+        `select kind, session_lab_id, host(source_address) as source, roles::text as roles from lims.access_event
+          where session_id = $1 and kind = 'PasswordChanged'`,
+        [id.session],
+      );
+      assert.deepEqual(person, [{ password_hash: 'scrypt-hmac$changed' }]);
+      assert.deepEqual(events, [
+        { kind: 'PasswordChanged', session_lab_id: id.lab, source: '192.0.2.1', roles: '{Analyst}' },
+      ]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+});
+
+describe("a Lab's time zone changes only through a migration, and a Signature and a Received keep the zone in force when written", () => {
+  it("the app role holds no update on a Lab's time zone, so a statement that changes it is refused", async () => {
+    const error = await refusalOf("set local role lims_app; update lims.lab set time_zone = 'Asia/Tokyo'");
+    assert.equal(error.code, '42501', error.message);
+    const { rows } = await client.query<{ privilege: string }>(
+      `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
+        where grantee = 'lims_app' and table_schema = 'lims' and table_name = 'lab' and privilege_type = 'UPDATE'
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.privilege),
+      ['UPDATE code', 'UPDATE name'],
+    );
+  });
+
+  covered.add('lims.signature.sign_in_lab_time_zone');
+  it("a Signature takes its Lab's time zone, whatever the insert says", async () => {
+    const forged = { ...tables['lims.signature'].row, signed_time_zone: 'Asia/Tokyo' };
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await staged(forged);
+      const [statement, values] = insert('lims.signature', forged);
+      const { rows } = await client.query<Row>(`${statement} returning signed_time_zone`, values);
+      assert.deepEqual(rows, [{ signed_time_zone: 'America/New_York' }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+
+  covered.add('lims.signature.signature_signed_time_zone_not_null');
+  it('a Signature in a Lab that does not exist is refused', async () => {
+    const error = await refusalOfRow('lims.signature', { lab_id: missing });
+    assert.deepEqual(
+      [error.code, error.table, error.column],
+      ['23502', 'signature', 'signed_time_zone'],
+      error.message,
+    );
+  });
+
+  covered.add('lims.sample.receive_in_lab_time_zone');
+  it("a Received takes its Lab's time zone when it is recorded and keeps it through any other change, whatever the statement says", async () => {
+    const sample = randomUUID();
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      const [statement, values] = insert('lims.sample', {
+        ...tables['lims.sample'].row,
+        id: sample,
+        received_time_zone: 'Asia/Tokyo',
+      });
+      const zone = async (update: string, ...rest: unknown[]) =>
+        (await client.query<{ zone: string | null }>(update, [sample, ...rest])).rows[0]?.zone;
+      const inserted = await client.query<{ zone: string | null }>(
+        `${statement} returning received_time_zone as zone`,
+        values,
+      );
+      assert.deepEqual(
+        [
+          inserted.rows[0]?.zone,
+          await zone(
+            'update lims.sample set received_time_zone = $2 where id = $1 returning received_time_zone as zone',
+            'Asia/Tokyo',
+          ),
+          await zone(
+            'update lims.sample set received_at = clock_timestamp() where id = $1 returning received_time_zone as zone',
+          ),
+          await zone(
+            'update lims.sample set received_time_zone = $2, description = $3 where id = $1 returning received_time_zone as zone',
+            'Asia/Tokyo',
+            'Capsules, relabelled',
+          ),
+          await zone(
+            'update lims.sample set received_time_zone = null where id = $1 returning received_time_zone as zone',
+          ),
+        ],
+        [null, null, 'America/New_York', 'America/New_York', 'America/New_York'],
+      );
+    } finally {
+      await client.query('rollback');
+    }
+  });
+});
+
+describe('a kept time zone is a named zone of the time zone database, and a Sample keeps one exactly when it has a Received, even with the stamping triggers bypassed', () => {
+  // The stamping triggers overwrite any zone a statement gives, so these rows reach the constraints with triggers off.
+  const refusalOfKeptZone = (table: Table, change: Row) =>
+    refusalWithTriggersOff(...insert(table, { ...tables[table].row, ...change }));
+  const received = '2026-09-30T00:00:00Z';
+  const notZones = ['Mars/Olympus_Mons', 'UTC+5', ''];
+  const cases: { name: string; table: Table; change: Row; constraint: string }[] = [
+    ...notZones.map((zone) => ({
+      name: `a Signature kept in ${JSON.stringify(zone)}, which is not a named zone, is refused`,
+      table: 'lims.signature' as const,
+      change: { signed_time_zone: zone },
+      constraint: 'signature_signed_time_zone_check',
+    })),
+    ...notZones.map((zone) => ({
+      name: `a Received kept in ${JSON.stringify(zone)}, which is not a named zone, is refused`,
+      table: 'lims.sample' as const,
+      change: { received_at: received, received_time_zone: zone },
+      constraint: 'sample_received_time_zone_check',
+    })),
+    {
+      name: 'a Received time zone on a Sample with no Received is refused',
+      table: 'lims.sample',
+      change: { received_time_zone: 'America/New_York' },
+      constraint: 'sample_received_time_zone_received_at_check',
+    },
+    {
+      name: 'a Received with no time zone is refused',
+      table: 'lims.sample',
+      change: { received_at: received },
+      constraint: 'sample_received_time_zone_received_at_check',
+    },
+  ];
+  for (const c of cases) {
+    covered.add(`${c.table}.${c.constraint}`);
+    it(c.name, async () =>
+      assertConstraint(await refusalOfKeptZone(c.table, c.change), '23514', c.table, c.constraint),
+    );
+  }
+});
+
+describe('a person is inserted without a lockout, so the database stamps every lockout', () => {
+  covered.add('lims.person.insert_unlocked');
+  // A Customer User, the one person the app role may insert without an Identity Verification.
+  const bornLockedOut = `insert into lims.person (username, display_name, customer_id, locked_at)
+    select 'refusal.born-locked-out', 'Born Locked Out', id, clock_timestamp() from lims.customer
+     where name = 'Refusal Customer (fictional)'`;
+  it('a person inserted already locked out is refused for the superuser', async () => {
+    const error = await refusalOf(bornLockedOut);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', 'a person is inserted without a lockout; a lockout lands only on a person already recorded'],
+    );
+  });
+
+  it('the app role holds no insert on a lockout, so a person inserted already locked out is refused before the trigger', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query('set local role lims_app');
+      const { rowCount } = await client.query(`insert into lims.person (username, display_name, customer_id)
+        select 'refusal.born-locked-out', 'Born Locked Out', id from lims.customer
+         where name = 'Refusal Customer (fictional)'`);
+      assert.equal(rowCount, 1, 'the app role inserts the same Customer User without a lockout');
+    } finally {
+      await client.query('rollback');
+    }
+    const error = await refusalOf(`set local role lims_app; ${bornLockedOut}`);
+    assert.equal(error.code, '42501', error.message);
+    const { rows } = await client.query<{ column: string }>(
+      `select attname as column from pg_attribute
+        where attrelid = 'lims.person'::regclass and attnum > 0 and not attisdropped
+          and has_column_privilege('lims_app', attrelid, attnum, 'INSERT')
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.column),
+      ['customer_id', 'display_name', 'identity_verification_id', 'password_hash', 'username'],
+    );
+  });
+});
+
+describe('Equipment keeps its identity and moves through its Fitness Statuses only as the rules allow', () => {
+  refusesEach('23505', [
+    {
+      name: 'a second piece of Equipment of the same name in one Lab is refused',
+      table: 'lims.equipment',
+      change: { name: 'BAL-01 (fictional)' },
+      constraint: 'equipment_lab_id_name_key',
+    },
+  ]);
+  refusesEach('23503', [
+    {
+      name: 'Equipment in a Room of another Lab is refused',
+      table: 'lims.equipment',
+      change: { room_id: id.otherLabRoom },
+      constraint: 'equipment_lab_id_room_id_fkey',
+    },
+    {
+      name: 'an Equipment Event on Equipment that does not exist is refused',
+      table: 'lims.equipment_event',
+      change: { equipment_id: missing },
+      constraint: 'equipment_event_lab_id_equipment_id_fkey',
+    },
+  ]);
+  refusesEach('23514', [
+    {
+      name: 'Equipment with a blank serial number is refused',
+      table: 'lims.equipment',
+      change: { serial: ' ' },
+      constraint: 'equipment_identity_check',
+    },
+    {
+      name: 'an Equipment Event with a blank note is refused',
+      table: 'lims.equipment_event',
+      change: { note: ' ' },
+      constraint: 'equipment_event_note_check',
+    },
+  ]);
+
+  /** Runs `body` in a transaction that is rolled back, with Refusal Person, the Lab's Analyst, acting unless it says otherwise. */
+  const within = async (body: () => Promise<void>) => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(actingFor['lims.equipment_event'] ?? '');
+      await body();
+    } finally {
+      await client.query('rollback');
+    }
+  };
+  /** Registers Equipment as Refusal Manager, the Lab's Lab Manager, who then acts for the rest of the transaction. */
+  const register = async (name: string) => {
+    await client.query(asLabManager);
+    const row = { ...tables['lims.equipment'].row, name, serial: `SN-${name}` };
+    const { rows } = await client.query<{ id: string }>(
+      `${insert('lims.equipment', row)[0]} returning id`,
+      Object.values(row),
+    );
+    return rows[0]?.id ?? assert.fail('the Equipment is registered');
+  };
+  const statusOf = async (equipmentId: string) =>
+    (await client.query<{ s: string }>('select fitness_status as s from lims.equipment where id = $1', [equipmentId]))
+      .rows[0]?.s;
+  const recordEvent = async (equipmentId: string, kind: string) => {
+    const { rows } = await client.query<{ id: string }>(
+      `insert into lims.equipment_event (lab_id, equipment_id, kind, note) values ($1, $2, $3, 'Fictional note.')
+       returning id`,
+      [id.lab, equipmentId, kind],
+    );
+    return rows[0]?.id ?? assert.fail('the Equipment Event is recorded');
+  };
+
+  /**
+   * A Signature with `meaning` over a new Record Version of the record as it is now, or of `content` when given.
+   * With `past`, it is written past the triggers, as lims.sign would leave it; without, it meets every trigger on
+   * lims.signature.
+   */
+  const signOver = async (
+    table: 'equipment' | 'equipment_event',
+    recordId: string,
+    meaning: string,
+    past: boolean,
+    content?: string,
+  ) => {
+    if (past) await client.query('set local session_replication_role = replica');
+    const reauthentication = randomUUID();
+    await client.query('select lims.set_this_transaction($1, $2)', ['lims.signing', reauthentication]);
+    await client.query(
+      `with version as (
+         insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
+         select $1, $2, $3,
+                coalesce((select max(version) from lims.record_version
+                           where lab_id = $1 and record_table = $2 and record_id = $3), 0) + 1,
+                1,
+                convert_to((case
+                  when $8::text is not null then $8::jsonb
+                  when $2::text = 'equipment' then (select lims.equipment_content(e) from lims.equipment e where e.id = $3)
+                  else (select lims.equipment_event_content(v) from lims.equipment_event v where v.id = $3)
+                end)::text, 'UTF8')
+         returning id, content_hash, canonical_form)
+       insert into lims.signature (lab_id, person_id, printed_name, username, role, meaning, record_version_id,
+                                   content_hash, canonical_form, statement_version, statement_hash, authenticator,
+                                   session_id, app_release, reauthentication_id, signed_time_zone)
+       select $1, $4, 'Refusal Person', 'refusal.person', 'QA', $5, id, content_hash, canonical_form, 1,
+              (select statement_hash from lims.signature_statement where version = 1), 'Password', $6, 'test', $7,
+              (select time_zone from lims.lab where lab_id = $1)
+         from version`,
+      [id.lab, table, recordId, id.person, meaning, id.session, reauthentication, content ?? null],
+    );
+    if (past) await client.query('set local session_replication_role = origin');
+  };
+  const approve = async (equipmentId: string) => {
+    await signOver('equipment', equipmentId, 'Approved', true);
+    await client.query(`update lims.equipment set fitness_status = 'InUse' where id = $1`, [equipmentId]);
+  };
+
+  covered.add('lims.equipment.keep_equipment');
+  covered.add('lims.equipment.equipment_fitness_status_check');
+  covered.add('lims.equipment_event.record_equipment_event');
+  covered.add('lims.equipment_event.require_event_signing');
+  covered.add('lims.signature.equipment_signing');
+
+  it('Equipment registered in any Fitness Status but Quarantined is refused', async () => {
+    const error = await refusalOfRow('lims.equipment', { fitness_status: 'InUse' });
+    assert.deepEqual([error.code, error.message], ['LA014', 'Equipment is registered Quarantined, not InUse']);
+  });
+
+  it('Equipment whose Responsible Person is not on the staff of its Lab is refused', async () => {
+    for (const outsider of [id.admin, id.operator]) {
+      const error = await refusalOfRow('lims.equipment', { responsible_person_id: outsider });
+      assert.deepEqual(
+        [error.code, error.message],
+        ['LA014', "the Responsible Person of Equipment is a member of its Lab's staff"],
+      );
+    }
+  });
+
+  it('Equipment registered by anyone but the Lab Manager is refused', async () => {
+    const row = tables['lims.equipment'].row;
+    const error = await refusalOf(...insert('lims.equipment', row), true, row);
+    assert.deepEqual([error.code, error.message], ['LA014', 'Equipment is registered only by the Lab Manager']);
+  });
+
+  it('a person acting as Lab Manager who holds it only in another Lab, or only Analyst in this Lab, is refused registering, moving and retiring Equipment', async () => {
+    const row = { ...tables['lims.equipment'].row, name: 'BAL-12 (fictional)', serial: 'SN-0012' };
+    const attempts: [string, (room: string) => Promise<unknown>][] = [
+      ['registered', () => client.query(...insert('lims.equipment', row))],
+      ['moved', (room) => client.query('update lims.equipment set room_id = $2 where id = $1', [id.equipment, room])],
+      [
+        'Retired',
+        () => client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [id.equipment]),
+      ],
+    ];
+    for (const [who, managerOf] of [
+      ['refusal.other', id.otherLab],
+      ['refusal.person', null],
+    ] as const)
+      for (const [what, attempt] of attempts)
+        await within(async () => {
+          if (managerOf) {
+            await client.query('select lims.lock_chains($1, $2)', [id.lab, managerOf]);
+            await client.query(`insert into lims.membership (lab_id, person_id, role) values ($1, $2, 'LabManager')`, [
+              managerOf,
+              id.otherPerson,
+            ]);
+          }
+          const room = await client.query<{ id: string }>(
+            `insert into lims.room (lab_id, name) values ($1, 'Weighing Room (fictional)') returning id`,
+            [id.lab],
+          );
+          await client.query(`select set_config('lims.actor', $1, true), set_config('lims.role', 'LabManager', true)`, [
+            `person:${who}`,
+          ]);
+          await assert.rejects(attempt(room.rows[0]?.id ?? assert.fail('the Room is added')), {
+            code: 'LA014',
+            message: `Equipment is ${what} only by the Lab Manager of its Lab, not ${who}`,
+          });
+        });
+  });
+
+  it('Equipment moved to another Room by anyone but the Lab Manager is refused', async () => {
+    await within(async () => {
+      const other = await client.query<{ id: string }>(
+        `insert into lims.room (lab_id, name) values ($1, 'Weighing Room (fictional)') returning id`,
+        [id.lab],
+      );
+      await assert.rejects(
+        client.query('update lims.equipment set room_id = $2 where id = $1', [id.equipment, other.rows[0]?.id]),
+        { code: 'LA014', message: 'Equipment is moved only by the Lab Manager' },
+      );
+    });
+  });
+
+  it('Equipment moved to In use with any other change in the same write is refused', async () => {
+    await within(async () => {
+      const balance = await register('BAL-08');
+      await signOver('equipment', balance, 'Approved', true);
+      await assert.rejects(
+        client.query(`update lims.equipment set fitness_status = 'InUse', asset_number = 'A-08' where id = $1`, [
+          balance,
+        ]),
+        { code: 'LA014', message: 'Equipment moves to In use as QA saw it; nothing else changes in that write' },
+      );
+    });
+  });
+
+  it('a software or firmware version change suspends In use Equipment', async () => {
+    await within(async () => {
+      const balance = await register('BAL-09');
+      await approve(balance);
+      await client.query(`update lims.equipment set software_version = '2.0' where id = $1`, [balance]);
+      assert.equal(await statusOf(balance), 'Suspended');
+      await approve(balance);
+      await client.query(`update lims.equipment set firmware_version = 'FW 2' where id = $1`, [balance]);
+      assert.equal(await statusOf(balance), 'Suspended');
+    });
+  });
+
+  it('the app role updates only the columns a step writes: the versions, the Room and the Fitness Status', async () => {
+    const { rows } = await client.query<{ privilege: string }>(
+      `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
+        where grantee = 'lims_app' and table_schema = 'lims' and table_name = 'equipment' and privilege_type = 'UPDATE'
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.privilege),
+      ['UPDATE firmware_version', 'UPDATE fitness_status', 'UPDATE room_id', 'UPDATE software_version'],
+    );
+    const error = await refusalOf(
+      `set local role lims_app; update lims.equipment set name = 'Renamed' where id = '${id.equipment}'`,
+    );
+    assert.equal(error.code, '42501', error.message);
+  });
+
+  it('an Equipment Event recorded by someone who is not on the staff of its Lab is refused', async () => {
+    await within(async () => {
+      await client.query(`select set_config('lims.actor', 'person:refusal.admin', true)`);
+      await assert.rejects(recordEvent(id.equipment, 'Note'), {
+        code: 'LA015',
+        message: "an Equipment Event is recorded by a member of its Lab's staff, not refusal.admin",
+      });
+    });
+  });
+
+  it('changing the serial number of Equipment is refused, even for the superuser', async () => {
+    const error = await refusalOf(`update lims.equipment set serial = 'SN-9999' where id = $1`, [id.equipment]);
+    assert.deepEqual([error.code, error.message], ['LA002', 'the identity of Equipment never changes']);
+  });
+
+  it('Equipment set Expired by hand is refused, because Expired is derived and never stored', async () => {
+    const error = await refusalOf(`update lims.equipment set fitness_status = 'Expired' where id = $1`, [id.equipment]);
+    assert.deepEqual([error.code, error.constraint], ['23514', 'equipment_fitness_status_check']);
+  });
+
+  it('Equipment moved to In use without an Approved Signature in the same transaction is refused', async () => {
+    const error = await refusalOf(`update lims.equipment set fitness_status = 'InUse' where id = $1`, [id.equipment]);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA014', 'Equipment moves to In use only with an Approved Signature over it, given in the same transaction'],
+    );
+  });
+
+  it('Quarantined Equipment marked Suspended is refused', async () => {
+    const error = await refusalOf(`update lims.equipment set fitness_status = 'Suspended' where id = $1`, [
+      id.equipment,
+    ]);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA014', 'Equipment is Suspended only from In use, not Quarantined'],
+    );
+  });
+
+  it('Equipment Approved in the same transaction moves to In use, and a move to another Room suspends it', async () => {
+    await within(async () => {
+      const balance = await register('BAL-03');
+      await approve(balance);
+      assert.equal(await statusOf(balance), 'InUse');
+      const other = await client.query<{ id: string }>(
+        `insert into lims.room (lab_id, name) values ($1, 'Weighing Room (fictional)') returning id`,
+        [id.lab],
+      );
+      await client.query('update lims.equipment set room_id = $2 where id = $1', [balance, other.rows[0]?.id]);
+      assert.equal(await statusOf(balance), 'Suspended');
+    });
+  });
+
+  it('Equipment Retired by anyone but the Lab Manager is refused', async () => {
+    const error = await refusalOf(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [id.equipment]);
+    assert.deepEqual([error.code, error.message], ['LA014', 'Equipment is Retired only by the Lab Manager']);
+  });
+
+  it('Retired Equipment never changes, and no Equipment Event is recorded on it', async () => {
+    await within(async () => {
+      const balance = await register('BAL-04');
+      await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
+      await assert.rejects(client.query(`update lims.equipment set name = 'Renamed' where id = $1`, [balance]), {
+        code: 'LA014',
+        message: 'Retired Equipment never changes',
+      });
+    });
+    await within(async () => {
+      const balance = await register('BAL-05');
+      await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
+      await assert.rejects(recordEvent(balance, 'Note'), {
+        code: 'LA014',
+        message: 'an Equipment Event is never recorded on Retired Equipment',
+      });
+    });
+  });
+
+  it('a Repair recorded on Equipment In use suspends it', async () => {
+    await within(async () => {
+      const balance = await register('BAL-06');
+      await approve(balance);
+      await recordEvent(balance, 'Repair');
+      assert.equal(await statusOf(balance), 'Suspended');
+    });
+  });
+
+  /** Runs `body` in a transaction that commits, with Refusal Person acting, so that another session sees its rows. */
+  const committed = async (body: () => Promise<void>) => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(actingFor['lims.equipment_event'] ?? '');
+      await body();
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    }
+  };
+
+  /**
+   * Runs `first` in a transaction this client holds open, has another session record a Suspect Event on
+   * `equipmentId`, asserts that the Event waits on a lock rather than landing beside the held change, commits `first`,
+   * and answers how the Event ended: committed (null) or refused.
+   */
+  const suspectWhileHeld = async (
+    first: () => Promise<void>,
+    equipmentId: string,
+  ): Promise<pg.DatabaseError | null> => {
+    const other = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    const watcher = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    await other.connect();
+    await watcher.connect();
+    try {
+      await client.query('begin');
+      await client.query(AUDIT_CONTEXT);
+      await first();
+      const { rows } = await other.query<{ pid: number }>('select pg_backend_pid() as pid');
+      await other.query('begin');
+      await other.query(AUDIT_CONTEXT);
+      await other.query(actingFor['lims.equipment_event'] ?? '');
+      const answered = { yet: false };
+      const suspect = other
+        .query(
+          `insert into lims.equipment_event (lab_id, equipment_id, kind, note) values ($1, $2, 'Suspect', 'Drifts (fictional).')`,
+          [id.lab, equipmentId],
+        )
+        .then(
+          () => {
+            answered.yet = true;
+            return null;
+          },
+          (e: unknown) => {
+            answered.yet = true;
+            return e instanceof pg.DatabaseError ? e : assert.fail(String(e));
+          },
+        );
+      const waiting = async () =>
+        (
+          await watcher.query(`select wait_event_type = 'Lock' as waits from pg_stat_activity where pid = $1`, [
+            rows[0]?.pid,
+          ])
+        ).rows[0]?.waits === true;
+      while (!answered.yet && !(await waiting()));
+      assert.equal(answered.yet, false, 'the Suspect Event answered before the held change committed');
+      await client.query('commit');
+      const outcome = await suspect;
+      await other.query(outcome ? 'rollback' : 'commit');
+      return outcome;
+    } finally {
+      await client.query('rollback');
+      await other.end();
+      await watcher.end();
+    }
+  };
+
+  it('a Suspect Event raised while the Lab Manager retires Suspended Equipment waits for the retire and is then refused', async () => {
+    let balance = '';
+    await committed(async () => {
+      balance = await register('BAL-10');
+      await approve(balance);
+      await recordEvent(balance, 'Suspect');
+      assert.equal(await statusOf(balance), 'Suspended');
+    });
+    const refused = await suspectWhileHeld(async () => {
+      await client.query('select lims.lock_chains($1)', [id.lab]);
+      await client.query(asLabManager);
+      await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
+    }, balance);
+    assert.deepEqual(
+      [refused?.code, refused?.message],
+      ['LA014', 'an Equipment Event is never recorded on Retired Equipment'],
+    );
+  });
+
+  it('a Suspect Event raised while QA approves Quarantined Equipment waits for the Approved signing, and the Equipment ends Suspended', async () => {
+    let balance = '';
+    await committed(async () => {
+      balance = await register('BAL-11');
+    });
+    const outcome = await suspectWhileHeld(() => approve(balance), balance);
+    assert.equal(outcome, null, outcome?.message);
+    assert.equal(await statusOf(balance), 'Suspended');
+  });
+
+  it('an Equipment Event recorded by a service identity is refused', async () => {
+    await within(async () => {
+      await client.query(`select set_config('lims.actor', 'svc:test', true)`);
+      await assert.rejects(recordEvent(id.equipment, 'Note'), {
+        code: 'LA015',
+        message: 'an Equipment Event is recorded by a person, not svc:test',
+      });
+    });
+  });
+
+  it('an Equipment Event other than Suspect without the Performed Signature of its recorder is refused at commit', async () => {
+    await within(async () => {
+      await recordEvent(id.equipment, 'Cleaning');
+      await assert.rejects(client.query('set constraints all immediate'), {
+        code: 'LA010',
+        message: 'an Equipment Event is signed Performed by the person who records it',
+      });
+    });
+    await within(async () => {
+      const cleaning = await recordEvent(id.equipment, 'Cleaning');
+      await signOver('equipment_event', cleaning, 'Performed', true);
+      await client.query('set constraints all immediate');
+    });
+  });
+
+  for (const [name, setUp, message] of [
+    [
+      'Equipment signed with any meaning but Approved is refused',
+      async () => signOver('equipment', id.equipment, 'Reviewed', false),
+      'Equipment is signed only Approved',
+    ],
+    [
+      'Equipment signed Approved while In use is refused',
+      async () => {
+        const balance = await register('BAL-07');
+        await approve(balance);
+        await signOver('equipment', balance, 'Approved', false);
+      },
+      'Equipment is signed Approved while Quarantined or Suspended, not InUse',
+    ],
+    [
+      'Equipment signed Approved over content that is not its current content is refused',
+      async () => signOver('equipment', id.equipment, 'Approved', false, '{"id":"stale"}'),
+      'the Approved Signature binds the Equipment as it is now; it must be read again before signing',
+    ],
+    [
+      'Equipment signed Approved over its content before an Event was recorded on it is refused',
+      async () => {
+        const { rows } = await client.query<{ content: string }>(
+          'select lims.equipment_content(e)::text as content from lims.equipment e where id = $1',
+          [id.equipment],
+        );
+        await recordEvent(id.equipment, 'Suspect');
+        await signOver('equipment', id.equipment, 'Approved', false, rows[0]?.content);
+      },
+      'the Approved Signature binds the Equipment as it is now; it must be read again before signing',
+    ],
+    [
+      'an Equipment Event signed with any meaning but Performed is refused',
+      async () => signOver('equipment_event', await recordEvent(id.equipment, 'Note'), 'Approved', false),
+      'an Equipment Event is signed only Performed',
+    ],
+    [
+      'a Suspect Equipment Event signed is refused',
+      async () => signOver('equipment_event', id.equipmentEvent, 'Performed', false),
+      'a Suspect Equipment Event is not signed',
+    ],
+    [
+      'an Equipment Event signed Performed a second time is refused',
+      async () => {
+        const note = await recordEvent(id.equipment, 'Note');
+        await signOver('equipment_event', note, 'Performed', true);
+        await signOver('equipment_event', note, 'Performed', false);
+      },
+      'an Equipment Event is signed Performed once',
+    ],
+  ] as const)
+    it(name, async () => {
+      await within(async () => {
+        await assert.rejects(setUp(), { code: 'LA010', message });
+      });
+    });
+});
+
+describe('Equipment is never removed, and an Equipment Event is never changed or removed, even by the superuser', () => {
+  for (const [name, table, trigger, statement] of [
+    ['deleting Equipment is refused', 'lims.equipment', 'refuse_change', 'delete from lims.equipment'],
+    ['truncating the Equipment is refused', 'lims.equipment', 'refuse_truncate', 'truncate lims.equipment cascade'],
+    [
+      'updating an Equipment Event is refused',
+      'lims.equipment_event',
+      'refuse_change',
+      `update lims.equipment_event set note = 'Changed.'`,
+    ],
+    [
+      'deleting an Equipment Event is refused',
+      'lims.equipment_event',
+      'refuse_change',
+      'delete from lims.equipment_event',
+    ],
+    [
+      'truncating the Equipment Events is refused',
+      'lims.equipment_event',
+      'refuse_truncate',
+      'truncate lims.equipment_event',
+    ],
+  ] as const) {
+    covered.add(`${table}.${trigger}`);
+    it(name, async () => {
+      const error = await refusalOf(statement);
+      assert.deepEqual([error.code, error.message], ['LA002', `${bare(table)} rows are never changed or removed`]);
+    });
+  }
+});
+
 it('every constraint, unique index and trigger of a freshly migrated database has a refusing test', async () => {
   const elsewhere = new Map([
+    ['lims.authenticator.authenticator_pkey', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_person_id_fkey', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_person_id_not_null', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_secret_ciphertext_not_null', 'authenticator.test.ts'],
+    ['lims.authenticator.authenticator_enrolled_at_not_null', 'authenticator.test.ts'],
+    ['lims.authenticator.step_moves_forward', 'authenticator.test.ts'],
     ['lims.audit_entry.refuse_change', 'audit-trail.test.ts'],
     ['lims.access_event.open_incident', 'sign-in-incidents.test.ts'],
     ['lims.access_event.stamp_lockout', 'session-expiry.test.ts'],
@@ -3332,6 +5264,10 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
       'lims.signature.signature_username_not_null',
       'unreachable: sign_as_the_person sets it with printed_name, whose not null refuses first',
     ],
+    [
+      'lims.signature.signature_lab_id_fkey',
+      'unreachable: sign_in_lab_time_zone leaves signed_time_zone null, whose not null refuses first',
+    ],
     ['lims.test.version_record', 'record-version.test.ts'],
     ['lims.result.version_record', 'record-version.test.ts'],
     ['lims.test_report.version_record', 'record-version.test.ts'],
@@ -3339,11 +5275,43 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
     ['lims.submission.version_record', 'record-version.test.ts'],
     ['lims.method.version_record', 'record-version.test.ts'],
     ['lims.customer.version_record', 'record-version.test.ts'],
+    ['lims.equipment.version_record', 'apps/api/test/equipment.test.ts'],
+    ['lims.equipment_event.version_record', 'apps/api/test/equipment.test.ts'],
+    [
+      'lims.equipment.equipment_lab_id_not_null',
+      'unreachable: keep_equipment refuses a Responsible Person outside the Lab first',
+    ],
+    [
+      'lims.equipment.equipment_responsible_person_id_not_null',
+      'unreachable: keep_equipment refuses a Responsible Person outside the Lab first',
+    ],
+    [
+      'lims.equipment.equipment_lab_id_fkey',
+      'unreachable: keep_equipment refuses a Responsible Person outside the Lab first',
+    ],
+    [
+      'lims.equipment.equipment_responsible_person_id_fkey',
+      'unreachable: keep_equipment refuses a Responsible Person outside the Lab first',
+    ],
+    ['lims.equipment.equipment_registered_at_not_null', 'unreachable: keep_equipment stamps it'],
+    [
+      'lims.equipment_event.equipment_event_lab_id_not_null',
+      'unreachable: record_equipment_event refuses a recorder who is not on the staff of a null Lab first',
+    ],
+    [
+      'lims.equipment_event.equipment_event_recorded_by_not_null',
+      'unreachable: record_equipment_event stamps it or refuses',
+    ],
+    [
+      'lims.equipment_event.equipment_event_recorded_by_fkey',
+      'unreachable: record_equipment_event takes it from lims.person',
+    ],
+    ['lims.equipment_event.equipment_event_recorded_at_not_null', 'unreachable: record_equipment_event stamps it'],
   ]);
   const { rows } = await client.query<{ rule: string }>(
     `select n.nspname || '.' || c.relname || '.' || k.conname as rule
        from pg_constraint k join pg_class c on c.oid = k.conrelid join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname in ('lims', 'public')
+      where n.nspname in ('lims', 'public') and k.contype <> 't'
      union all
      select n.nspname || '.' || c.relname || '.' || i.relname
        from pg_index x join pg_class i on i.oid = x.indexrelid join pg_class c on c.oid = x.indrelid

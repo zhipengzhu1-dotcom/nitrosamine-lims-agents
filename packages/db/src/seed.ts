@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { type Kysely, sql, type Transaction } from 'kysely';
-import { dbConfig } from './config.ts';
+import { seedConfig } from './config.ts';
 import { hashPassword } from './credentials.ts';
 import { audited, createDb, type DB, databaseUrl } from './db.ts';
 
@@ -14,6 +14,8 @@ const people = [
   { role: 'Reviewer', username: 'rui.reviewer', name: 'Rui Tanaka' },
   { role: 'QA', username: 'quinn.qa', name: 'Quinn Adeyemi' },
   { role: 'Admin', username: 'ada.admin', name: 'Ada Novak' },
+  // A second Admin, so that an enrolment grant can come from an Admin other than the one who created the account.
+  { role: 'Admin', username: 'bea.admin', name: 'Bea Okonkwo' },
 ] as const;
 
 export interface SeededAccount {
@@ -139,8 +141,15 @@ async function approveEntries(tx: Transaction<DB>, labId: string, operator: { id
   }
 }
 
-/** Seeds two Labs, two Rooms in the first, one Customer, one Method and the demo people, who all share one password, into an empty database. */
-export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('base64url')): Promise<SeededAccount[]> {
+/**
+ * Seeds two Labs, two Rooms in the first, one Customer, one Method and the demo people, who all share one password,
+ * into an empty database. The password is hashed under `pepper` when one is given, which the decided login requires.
+ */
+export async function seed(
+  db: Kysely<DB>,
+  password = randomBytes(6).toString('base64url'),
+  pepper?: Buffer,
+): Promise<SeededAccount[]> {
   if (await db.selectFrom('lab').select('labId').executeTakeFirst())
     throw new Error('already seeded; seed a fresh database');
   const accounts = await audited(db, SEED, async (tx) => {
@@ -177,7 +186,7 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
         .values({
           username: p.username,
           displayName: p.name,
-          passwordHash: await hashPassword(password),
+          passwordHash: await hashPassword(password, pepper),
           customerId: p.role === 'Customer' ? customer.id : null,
         })
         .returning('id')
@@ -199,10 +208,10 @@ export async function seed(db: Kysely<DB>, password = randomBytes(6).toString('b
 }
 
 if (import.meta.main) {
-  const { server, database, demoPassword } = dbConfig();
+  const { server, database, demoPassword, passwordPepper } = seedConfig();
   const db = createDb(databaseUrl(server, database, 'lims_app'));
   try {
-    const accounts = await seed(db, demoPassword);
+    const accounts = await seed(db, demoPassword, passwordPepper);
     console.table(accounts.map((a) => ({ username: a.username, role: a.role })));
     const [first] = accounts;
     if (!first) throw new Error('the seed made no accounts');

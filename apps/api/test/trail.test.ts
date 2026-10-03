@@ -6,6 +6,7 @@ import {
   auditedRecords,
   auditedTables,
   isAuditedTable,
+  type ListedBreak,
   routes,
   type StepInput,
   type StepName,
@@ -13,7 +14,17 @@ import {
   type TrailEntry,
 } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
+import {
+  type Account,
+  type Client,
+  labZoneMoveReason,
+  ok,
+  onLabClock,
+  refusedWith,
+  signatureOf,
+  startApi,
+  toMillis,
+} from './harness.ts';
 
 const api = await startApi('lims_api_trail_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -116,24 +127,6 @@ it("the Test's trail lists the Test's, its Result's and Signatures' entries with
   assert.ok(!entries.some((e) => otherTrail.entries.some((o) => o.raw.chain === e.raw.chain && o.seq === e.seq)));
 });
 
-function onLabClock(at: string, timeZone = 'America/New_York'): string {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-    timeZoneName: 'longOffset',
-    // oxlint-disable-next-line no-restricted-globals -- parses an instant to render it; reads no clock
-  }).formatToParts(new Date(at));
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '';
-  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice(3);
-  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${at.slice(19, 26)}${offset}`;
-}
-
 it("each entry carries the actor's label and role, the field's glossary name, old and new value, the reason, and UTC plus Lab-zone time; company-chain entries carry UTC only", async () => {
   const id = await submitTestTo('Assigned');
   const { entries } = await trailOf(id);
@@ -184,9 +177,12 @@ it("each entry carries the actor's label and role, the field's glossary name, ol
   );
   const received = entries.find((e) => e.reason === 'receive' && e.record.table === 'sample');
   assert.deepEqual(
-    received?.changes.map((c) => [c.label, c.old, c.new?.text === received.raw.newRow?.received_at]),
-    [['Received', null, true]],
-    'the Sample receipt reads as Received with the stored time',
+    received?.changes.map((c) => [c.label, c.old, c.new?.text]),
+    [
+      ['Received', null, received?.raw.newRow?.received_at],
+      ['Received in time zone', null, 'America/New_York'],
+    ],
+    'the Sample receipt reads as Received with the stored time and the Lab time zone it was received in',
   );
 });
 
@@ -323,8 +319,8 @@ it("a cited record's own trail holds only that record's entries, and a record ou
 
 it("QA's Verify chain on an untouched chain replies Intact, verified through entry N, with N the chain's last entry; another role is refused", async () => {
   await submitTestTo('Ready');
-  const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   const [labLast, companyLast] = [await lastEntryOf(api.labId), await lastEntryOf('company')];
+  const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   assert.deepEqual(verified.chains, [
     {
       chain: 'lab',
@@ -333,6 +329,8 @@ it("QA's Verify chain on an untouched chain replies Intact, verified through ent
       breaks: [],
       verdict: 'Intact',
       report: `verified through entry ${labLast}`,
+      recomputedFrom: '1',
+      verifiedBefore: null,
     },
     {
       chain: 'company',
@@ -341,6 +339,8 @@ it("QA's Verify chain on an untouched chain replies Intact, verified through ent
       breaks: [],
       verdict: 'Intact',
       report: `verified through entry ${companyLast}`,
+      recomputedFrom: '1',
+      verifiedBefore: null,
     },
   ]);
   assert.equal(
@@ -380,52 +380,87 @@ it('a stored instant carries its UTC and Lab-zone renderings, a Record kind read
   assert.match(changeOf('record_version', 'content_hash').text, /^[0-9a-f]{64}$/);
 });
 
-it("a Test's Signatures and Received carry UTC and its Lab's wall clock on the Worklist, the Test and its Test Report, as the trail renders the same stored instant", async () => {
-  const setZone = (timeZone: string) =>
-    audited(
-      api.superuser,
-      { actor: 'svc:test', role: 'system', reason: 'Show the Lab clock in a zone no other Lab has' },
-      (tx) => tx.updateTable('lab').set({ timeZone }).where('labId', '=', api.labId).execute(),
-    );
+it("a Test's Signatures and Received keep the Lab wall clock of the zone in force when each was written, on every screen and in the Audit Trail, after the Lab's time zone changes", async () => {
   const { timeZone: before } = await api.db
     .selectFrom('lab')
     .select('timeZone')
     .where('labId', '=', api.labId)
     .executeTakeFirstOrThrow();
-  const id = await submitTestTo('Reported');
-  await setZone('Asia/Tokyo');
-  try {
-    const { entries, labZone } = await trailOf(id);
-    assert.equal(labZone, 'Asia/Tokyo');
-    const trailed = (table: string, field: string, at: string) =>
-      entries
-        .flatMap((e) => (e.record.table === table ? e.changes : []))
-        .flatMap((c) => (c.field === field && c.new?.instant) || [])
-        .find((i) => i.at.startsWith(at.slice(0, -1))) ?? assert.fail(`no ${table} ${field} in the trail stores ${at}`);
+  const shownOn = async (id: string) => {
     const view = ok(await as.rui.call(routes.test, { id }));
     const report = ok(await as.cora.call(routes.report, { id }));
     const row = ok(await as.rui.call(routes.tests)).find((t) => t.id === id) ?? assert.fail('the Worklist row');
-    const shown = [
-      ...[view, report].flatMap((r) =>
-        r.signatures.map((s) => ({ table: 'signature', field: 'signed_at', at: s.signedAt, atLab: s.signedAtLab })),
-      ),
+    const inTrail = (await trailOf(id)).entries
+      .flatMap((e) => e.changes)
+      .filter((c) => c.field === 'signed_at' || c.field === 'received_at')
+      .map((c) => c.new?.instant ?? assert.fail(`the ${c.label} instant`));
+    return [
+      ...[view, report].flatMap((r) => r.signatures.map((s) => ({ at: s.signedAt, atLab: s.signedAtLab }))),
       ...[view.test, report.test, row].map((t) => ({
-        table: 'sample',
-        field: 'received_at',
         at: t.receivedAt ?? assert.fail('the Received time'),
         atLab: t.receivedAtLab,
       })),
+      ...inTrail,
     ];
-    assert.equal(shown.length, 9, 'three Signatures on the Test and on its Test Report, and three Received');
-    for (const { table, field, at, atLab } of shown) {
-      const inTrail = trailed(table, field, at);
-      assert.match(atLab ?? '', /\+09:00$/, `${at} on the Tokyo Lab's clock, not another Lab's`);
-      assert.equal(atLab, inTrail.atLab, `${at} on the Lab wall clock, as the trail renders it`);
-      assert.equal(atLab, onLabClock(inTrail.at, labZone), `${at} on the Lab wall clock, as Intl renders it`);
+  };
+  const everyLabClockIn = async (id: string) => {
+    const { entries } = await trailOf(id);
+    const stored = entries.flatMap((e) => e.changes).flatMap((c) => [c.old?.instant, c.new?.instant]);
+    return [...entries, ...stored].flatMap((i) => (i?.atLab ? [{ at: i.at, atLab: i.atLab }] : []));
+  };
+  const writtenBefore = await submitTestTo('Reported');
+  const shownBefore = await shownOn(writtenBefore);
+  const trailBefore = await everyLabClockIn(writtenBefore);
+  for (const { at, atLab } of trailBefore)
+    assert.equal(toMillis(atLab), toMillis(onLabClock(at, before)), `${at} in the Audit Trail on the ${before} clock`);
+  assert.equal(
+    shownBefore.length,
+    13,
+    'three Signatures on the Test, on its Test Report and in the Audit Trail, and a Received on each screen and in the Audit Trail',
+  );
+  for (const { at, atLab } of shownBefore)
+    assert.equal(toMillis(atLab), toMillis(onLabClock(at, before)), `${at} on the ${before} clock`);
+  await api.moveLabZone('Asia/Tokyo');
+  try {
+    assert.deepEqual(await shownOn(writtenBefore), shownBefore, 'the zone change moves no Lab clock written before it');
+    assert.deepEqual(
+      await everyLabClockIn(writtenBefore),
+      trailBefore,
+      "the zone change moves no entry's time and no stored time in the Audit Trail written before it",
+    );
+    const writtenAfter = await submitTestTo('Reported');
+    for (const { at, atLab } of await shownOn(writtenAfter)) {
+      assert.match(atLab ?? '', /\+09:00$/, `${at} on the Tokyo clock`);
+      assert.equal(
+        toMillis(atLab),
+        toMillis(onLabClock(at, 'Asia/Tokyo')),
+        `${at} on the Lab wall clock, as Intl renders it`,
+      );
     }
+    const lab = ok(await as.rui.call(routes.recordTrail, { table: 'lab', id: api.labId }));
+    assert.deepEqual([lab.record.kind, lab.labZone], ['Lab', 'Asia/Tokyo']);
+    const change = lab.entries.at(-1) ?? assert.fail('the zone change in the Lab trail');
+    assert.deepEqual(
+      [change.record.id, change.reason, change.changes.map((c) => [c.label, c.old?.text, c.new?.text])],
+      [api.labId, labZoneMoveReason, [['Time zone', before, 'Asia/Tokyo']]],
+    );
   } finally {
-    await setZone(before);
+    await api.moveLabZone(before);
   }
+});
+
+it("a Lab's own trail is not shown from another Lab", async () => {
+  const { labId } = await audited(
+    api.superuser,
+    { actor: 'svc:test', role: 'system', reason: 'Add a Lab whose trail another Lab must not see' },
+    (tx) =>
+      tx
+        .insertInto('lab')
+        .values({ code: 'NL', name: 'Neighbour Lab (fictional)', timeZone: 'Europe/Zurich' })
+        .returning('labId')
+        .executeTakeFirstOrThrow(),
+  );
+  refusedWith(await as.rui.call(routes.recordTrail, { table: 'lab', id: labId }), 'notFound');
 });
 
 it("an unreceived Sample's Received is empty in both renderings on the Worklist and the Test", async () => {
@@ -500,7 +535,12 @@ it('after an entry is altered by the database owner, Verify chain names it as th
 
   const verified = ok(await as.quinn.call(routes.verifyAuditTrail));
   const incident = verified.chains[0]?.breaks[0]?.incident ?? assert.fail('the break names a System Incident');
-  assert.deepEqual(verified.chains[0], {
+  const {
+    recomputedFrom: _from,
+    verifiedBefore: _before,
+    ...shown
+  } = verified.chains[0] ?? assert.fail('the Lab chain');
+  assert.deepEqual(shown, {
     chain: 'lab',
     lastEntry: String(last),
     intactThrough: String(altered - 1n),
@@ -545,8 +585,16 @@ it('after an entry is altered by the database owner, Verify chain names it as th
   assert.ok(entry, 'the trail still reads after a break; the break is reported by Verify chain');
 });
 
-it("after the company chain's head is moved, two QAs verifying at once open one System Incident naming the entry after the last that verifies, and the entries written since, its own among them, open no other", async () => {
+it("after the company chain's head is moved off the entry that records its latest Chain Verification, two QAs verifying at once open one System Incident for each of its two breaks, that Chain Verification and the entry after the last, and the entries written since, their own among them, open no other", async () => {
+  ok(await as.quinn.call(routes.verifyAuditTrail));
   const last = await lastEntryOf('company');
+  const { through: verified } = await api.db
+    .selectFrom('chainVerification')
+    .select('through')
+    .where('chain', '=', 'company')
+    .orderBy('through', 'desc')
+    .executeTakeFirstOrThrow();
+  assert.equal(String(BigInt(verified) + 1n), last, 'the last company entry records the latest Chain Verification');
   await api.superuser.transaction().execute(async (tx) => {
     await sql`set local session_replication_role = replica`.execute(tx);
     await sql`update lims.audit_chain set head = sha256(head) where chain = 'company'`.execute(tx);
@@ -555,25 +603,44 @@ it("after the company chain's head is moved, two QAs verifying at once open one 
   const raced = await Promise.all([as.quinn, other].map((qa) => qa.call(routes.verifyAuditTrail)));
   const [first, second] = raced.map((answer) => ok(answer).chains[1]?.breaks ?? assert.fail('the company chain'));
   assert.ok(first && second);
-  assert.equal(second[0]?.incident, first[0]?.incident, 'two QAs verifying at once share one System Incident');
-  const incident = first[0]?.incident ?? assert.fail('the moved head names a System Incident');
   const after = String(BigInt(last) + 1n);
   assert.deepEqual(
     [first.map((b) => b.entry), second.map((b) => b.entry)],
-    [[after], [after]],
-    'whichever verification reads the other one incident written on the moved head, the failing entry is the same',
+    [
+      [verified, after],
+      [verified, after],
+    ],
+    'whichever verification reads the incidents the other wrote on the moved head, the failing entries are the same',
   );
-  assert.equal(alarmsFor([incident]).length, 1, 'two QAs verifying at once raise one alarm');
+  assert.deepEqual(
+    second.map((b) => b.incident),
+    first.map((b) => b.incident),
+    'two QAs verifying at once share the System Incidents',
+  );
+  assert.equal(first[0]?.failure, `the Chain Verification through entry ${verified} does not match the Audit Trail`);
+  const incidents = first.map((b) => b.incident);
+  assert.equal(alarmsFor(incidents).length, 2, 'two QAs verifying at once raise one alarm for each System Incident');
 
   await submitTestTo('Ready');
   const again = ok(await as.quinn.call(routes.verifyAuditTrail)).chains[1]?.breaks;
   assert.deepEqual(
-    again?.map((b) => b.entry),
-    [after],
+    again?.map((b) => [b.entry, b.incident]),
+    first.map((b) => [b.entry, b.incident]),
     'the first entry written on the moved head is the one that fails, and the entries after it verify',
   );
-  assert.equal(again?.[0]?.incident, incident);
-  assert.deepEqual(await chainIncidents('company'), [{ reference: incident, firstFailure: after }]);
+  assert.deepEqual(await chainIncidents('company'), [
+    { reference: incidents[0], firstFailure: verified },
+    { reference: incidents[1], firstFailure: after },
+  ]);
+
+  const headMoved = incidents[1] ?? assert.fail('the incident on the moved head');
+  const listed = ok(await as.quinn.call(routes.incidentBreaks, { reference: headMoved }));
+  const read = (breaks: ListedBreak[] | null) => breaks?.map((b) => [b.entry, b.through, b.matches]);
+  assert.deepEqual(
+    [listed.asRecorded, read(listed.breaks), read(listed.recorded)],
+    [true, [[after, after, true]], [[after, after, true]]],
+    "a Lab's QA lists the breaks of a company-chain System Incident, whichever verification's reading it stored",
+  );
 });
 
 /** A new Lab whose chain no other test breaks, with `entries` more entries on it, and a QA signed in to it. */
@@ -586,11 +653,15 @@ async function labOfItsOwn(code: string, entries: number) {
       .returning('labId')
       .executeTakeFirstOrThrow(),
   );
-  const qa = await api.addPerson(`${code.toLowerCase()}.qa`, ['QA']);
-  await audited(api.superuser, owner, (tx) =>
-    tx.insertInto('membership').values({ labId, personId: qa.id, role: 'QA' }).execute(),
-  );
-  const client = await api.login(qa, labId);
+  /** A person who holds `role` in this Lab, signed in to it. */
+  const signIn = async (role: 'QA' | 'Admin') => {
+    const person = await api.addPerson(`${code.toLowerCase()}.${role.toLowerCase()}`, [role]);
+    await audited(api.superuser, owner, (tx) =>
+      tx.insertInto('membership').values({ labId, personId: person.id, role }).execute(),
+    );
+    return { id: person.id, client: await api.login(person, labId) };
+  };
+  const { client } = await signIn('QA');
   await audited(api.superuser, owner, async (tx) => {
     for (let n = 0; n < entries; n++)
       await tx
@@ -607,7 +678,7 @@ async function labOfItsOwn(code: string, entries: number) {
       );
     });
   const verify = async () => ok(await client.call(routes.verifyAuditTrail)).chains[0] ?? assert.fail('the Lab chain');
-  return { labId, alter, verify, last: BigInt(await lastEntryOf(labId)) };
+  return { labId, client, signIn, alter, verify, last: BigInt(await lastEntryOf(labId)) };
 }
 
 it('Verify chain reports both broken entries of a chain with two, each with its own System Incident, and raises the alarm once for each incident it opens', async () => {
@@ -679,9 +750,7 @@ it('Verify chain on a break whose System Incident is Closed still reports the ch
   const [closed, recurring] = [String(lab.last - 2n), String(lab.last)] as const;
   await lab.alter(closed);
   const incident = (await lab.verify()).breaks[0]?.incident ?? assert.fail('the break names a System Incident');
-  await audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Close a System Incident' }, (tx) =>
-    tx.updateTable('systemIncident').set({ state: 'Closed' }).where('reference', '=', incident).execute(),
-  );
+  await closeIncident(incident);
 
   const again = await lab.verify();
   assert.equal(again.verdict, 'Broken', 'a Closed incident does not make the break verify');
@@ -708,10 +777,9 @@ const tamper = (changes: Change[]) =>
     for (const change of changes) await change.execute(tx);
   });
 
+/** A Closed incident as a fixture: the state is set behind the Open → Acknowledged → Closed trigger, as tampering is. */
 const closeIncident = (reference: string) =>
-  audited(api.superuser, { actor: 'svc:test', role: 'system', reason: 'Close a System Incident' }, (tx) =>
-    tx.updateTable('systemIncident').set({ state: 'Closed' }).where('reference', '=', reference).execute(),
-  );
+  tamper([sql`update lims.system_incident set state = 'Closed' where reference = ${reference}`]);
 
 /** Changes the entry before `entry` and stores the hash its new content gives, so that only `entry`'s link breaks. */
 const recomputed = (labId: string, entry: string, reason: string) => [
@@ -863,4 +931,506 @@ it('Verify chain records 100 breaks one by one, and a 101st as one more break', 
   );
   assert.equal(more.length, 101);
   assert.equal(more[100]?.failure, '1 more break, from entry 101 to entry 101');
+});
+
+it("QA lists every break inside a More System Incident's range with its entry, kind and last entry, beside the breaks the incident stored when it opened, and the read opens no System Incident and raises no alarm while they are the same", async () => {
+  const lab = await labOfItsOwn('RNG', 130);
+  const head = String(lab.last + 1n);
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq <= 110`,
+    sql`delete from lims.audit_entry where chain = ${lab.labId} and seq between 115 and 117`,
+    sql`update lims.audit_chain set head = sha256(head) where chain = ${lab.labId}`,
+  ]);
+  const verified = await lab.verify();
+  const more = verified.breaks[100] ?? assert.fail('the breaks after the first 100');
+  assert.equal(more.failure, `12 more breaks, from entry 101 to entry ${head}`);
+  const changed = (from: number, to: number, matches = true) =>
+    Array.from({ length: to - from + 1 }, (_, i) => ({
+      entry: String(from + i),
+      kind: 'Changed',
+      through: String(from + i),
+      matches,
+    }));
+  const recorded = [
+    ...changed(101, 110),
+    { entry: '115', kind: 'Missing', through: '117', matches: true },
+    { entry: head, kind: 'HeadMoved', through: head, matches: true },
+  ];
+  const incidentsBefore = (await chainIncidents(lab.labId)).length;
+
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: more.incident }));
+  assert.deepEqual(
+    [listed.asRecorded, listed.breaks, listed.recorded, listed.incidents, listed.opened],
+    [true, recorded, recorded, [], []],
+  );
+  const { rows: stored } = await sql<{ entryListsBreaks: boolean; entryBytes: number; rows: string }>`
+    select e.new_row ? 'breaks' as entry_lists_breaks, octet_length(e.new_row::text) as entry_bytes,
+      (select count(*) from lims.incident_break b where b.incident_id = i.id)::text as rows
+    from lims.system_incident i
+    join lims.audit_entry e on e.table_name = 'system_incident' and e.op = 'INSERT' and e.new_row ->> 'id' = i.id::text
+    where i.reference = ${more.incident}`.execute(api.db);
+  assert.partialDeepStrictEqual(
+    stored,
+    [{ entryListsBreaks: false, rows: '12' }],
+    'the incident stores its breaks as rows of their own, not in its opening Audit Trail entry',
+  );
+  assert.ok(
+    (stored[0]?.entryBytes ?? Infinity) < 2048,
+    `the opening entry stays small: ${stored[0]?.entryBytes} bytes`,
+  );
+  const first = verified.breaks[0]?.incident ?? assert.fail('the first break');
+  const one = ok(await lab.client.call(routes.incidentBreaks, { reference: first }));
+  assert.deepEqual(
+    [one.asRecorded, one.breaks, one.recorded],
+    [true, changed(1, 1), changed(1, 1)],
+    'an incident of one break lists that break',
+  );
+  assert.equal((await chainIncidents(lab.labId)).length, incidentsBefore, 'a read of unchanged breaks opens none');
+  assert.equal(alarmsFor([more.incident, first]).length, 2, 'and raises no alarm beyond the two at opening');
+});
+
+it("when the chain has changed inside a System Incident's range, listing its breaks marks what changed against the breaks it stored, and records the change as Verify chain does: one new System Incident, named on the read, with one alarm, and none again on the next read", async () => {
+  const lab = await labOfItsOwn('CHG', 130);
+  const head = String(lab.last + 1n);
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq <= 110`,
+    sql`update lims.audit_chain set head = sha256(head) where chain = ${lab.labId}`,
+  ]);
+  const verified = await lab.verify();
+  const more = verified.breaks[100] ?? assert.fail('the breaks after the first 100');
+  const first = verified.breaks[0]?.incident ?? assert.fail('the first break');
+  const row = (entry: string, kind: string, matches: boolean) => ({ entry, kind, through: entry, matches });
+  const changed = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => row(String(from + i), 'Changed', true));
+
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update, again' where chain = ${lab.labId} and seq = 120`,
+  ]);
+  const after = ok(await lab.client.call(routes.incidentBreaks, { reference: more.incident }));
+  assert.equal(after.asRecorded, false, 'a break inside the range that the incident did not record');
+  assert.deepEqual(after.breaks, [...changed(101, 110), row('120', 'Changed', false), row(head, 'HeadMoved', true)]);
+  assert.deepEqual(after.recorded, [...changed(101, 110), row(head, 'HeadMoved', true)], 'the breaks it stored');
+  assert.equal(after.incidents.length, 1, 'the read records the change as one new System Incident');
+  assert.deepEqual(after.opened, after.incidents, 'which it names as opened by this read');
+  const [opened] = after.incidents;
+  assert.notEqual(opened, more.incident);
+  assert.equal(alarmsFor(after.incidents).length, 1, 'which raises the alarm');
+  const now = ok(await lab.client.call(routes.incidentBreaks, { reference: opened ?? '' }));
+  assert.deepEqual([now.asRecorded, now.breaks.length], [true, 12], 'the new incident records the breaks as they read');
+
+  const again = ok(await lab.client.call(routes.incidentBreaks, { reference: more.incident }));
+  assert.deepEqual(
+    [again.incidents, again.opened],
+    [after.incidents, []],
+    'the next read names the same incident, opened by none',
+  );
+  assert.equal(alarmsFor(after.incidents).length, 1, 'and raises no alarm again');
+  assert.equal(
+    ok(await lab.client.call(routes.incidentBreaks, { reference: first })).asRecorded,
+    true,
+    'a change outside its range leaves another incident as recorded',
+  );
+});
+
+it('when the break a System Incident recorded is put back, listing its breaks shows no break left and the break it stored, and opens no System Incident', async () => {
+  const lab = await labOfItsOwn('PUT', 4);
+  const entry = String(lab.last);
+  const { reason } = await api.db
+    .selectFrom('auditEntry')
+    .select('reason')
+    .where('chain', '=', lab.labId)
+    .where('seq', '=', entry)
+    .executeTakeFirstOrThrow();
+  await lab.alter(entry);
+  const incident = (await lab.verify()).breaks[0]?.incident ?? assert.fail('the break names a System Incident');
+  await tamper([sql`update lims.audit_entry set reason = ${reason} where chain = ${lab.labId} and seq = ${entry}`]);
+  const before = (await chainIncidents(lab.labId)).length;
+
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: incident }));
+  assert.deepEqual(
+    [listed.asRecorded, listed.breaks, listed.recorded, listed.incidents, listed.opened],
+    [false, [], [{ entry, kind: 'Changed', through: entry, matches: false }], [], []],
+  );
+  assert.equal((await chainIncidents(lab.labId)).length, before);
+});
+
+it('a System Incident of one missing run no longer lists as recorded once the run grows at its start, though it still ends at the same entry', async () => {
+  const lab = await labOfItsOwn('GRW', 6);
+  const [gone, before] = [String(lab.last - 2n), String(lab.last - 3n)] as const;
+  await tamper([sql`delete from lims.audit_entry where chain = ${lab.labId} and seq = ${gone}`]);
+  const incident = (await lab.verify()).breaks[0]?.incident ?? assert.fail('the missing entry names a System Incident');
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: incident }));
+  const missing = { entry: gone, kind: 'Missing', through: gone };
+  assert.deepEqual([listed.asRecorded, listed.breaks], [true, [{ ...missing, matches: true }]]);
+
+  await tamper([sql`delete from lims.audit_entry where chain = ${lab.labId} and seq = ${before}`]);
+  const grown = ok(await lab.client.call(routes.incidentBreaks, { reference: incident }));
+  assert.deepEqual(
+    [grown.asRecorded, grown.breaks, grown.recorded],
+    [false, [{ entry: before, kind: 'Missing', through: gone, matches: false }], [{ ...missing, matches: false }]],
+  );
+});
+
+it("Listing a System Incident's breaks is refused for a role that cannot read it, from another Lab than the chain's, for an incident that records no chain break, and for one opened before the LIMS recorded a break's range", async () => {
+  const lab = await labOfItsOwn('REF', 3);
+  await lab.alter(String(lab.last));
+  const incident = (await lab.verify()).breaks[0]?.incident ?? assert.fail('the break names a System Incident');
+
+  refusedWith(await as.ana.call(routes.incidentBreaks, { reference: incident }), 'role');
+  const elsewhere = refusedWith(await as.quinn.call(routes.incidentBreaks, { reference: incident }), 'role');
+  assert.match(elsewhere, /another Lab's chain/);
+  refusedWith(await lab.client.call(routes.incidentBreaks, { reference: 'ZZZZZZZZ' }), 'notFound');
+
+  const [failure, legacy] = ['NC000001', 'NC000002'];
+  await tamper([
+    sql`insert into lims.system_incident (kind, reference, step, error_class)
+        values ('UnexpectedFailure', ${failure}, 'submit', 'Error')`,
+    sql`insert into lims.system_incident (kind, reference, requested_by, chain, first_failure)
+        values ('ChainVerifyFailure', ${legacy}, ${quinn.id}, ${lab.labId}, 1)`,
+  ]);
+  assert.match(
+    refusedWith(await lab.client.call(routes.incidentBreaks, { reference: failure }), 'state'),
+    /records no break/,
+  );
+  assert.match(
+    refusedWith(await lab.client.call(routes.incidentBreaks, { reference: legacy }), 'state'),
+    /before the LIMS recorded a break's last entry/,
+  );
+});
+
+it('Verify chain on a chain with about 2,000 changed entries opens 100 System Incidents and one More inside the write limit, whose opening entry stays small while its rows hold every break', async () => {
+  const lab = await labOfItsOwn('BIG', 2000);
+  await tamper([sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq <= 2000`]);
+  const verified = await lab.verify();
+  assert.equal(verified.breaks.length, 101);
+  const more = verified.breaks[100] ?? assert.fail('the breaks after the first 100');
+  const { rows } = await sql<{ breakCount: number; rows: string; entryBytes: number }>`
+    select i.break_count, (select count(*) from lims.incident_break b where b.incident_id = i.id)::text as rows,
+      octet_length(e.new_row::text) as entry_bytes
+    from lims.system_incident i
+    join lims.audit_entry e on e.table_name = 'system_incident' and e.op = 'INSERT' and e.new_row ->> 'id' = i.id::text
+    where i.reference = ${more.incident}`.execute(api.db);
+  const [stored] = rows;
+  assert.equal(stored?.rows, String(stored?.breakCount), 'one row for each break the More incident counts');
+  assert.ok(
+    (stored?.breakCount ?? 0) >= 1900,
+    `the More incident counts the breaks past the first 100: ${stored?.breakCount}`,
+  );
+  assert.ok((stored?.entryBytes ?? Infinity) < 2048, `its opening entry stays small: ${stored?.entryBytes} bytes`);
+});
+
+it("an Admin reading a System Incident whose range has changed records the change as QA's read does: one new System Incident, requested by the Admin, named on the read, with one alarm; QA's read and Verify chain after it open none again", async () => {
+  const lab = await labOfItsOwn('ADM', 6);
+  const entry = String(lab.last);
+  await lab.alter(entry);
+  const incident = (await lab.verify()).breaks[0]?.incident ?? assert.fail('the break names a System Incident');
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update, again' where chain = ${lab.labId} and seq = ${entry}`,
+  ]);
+  const admin = await lab.signIn('Admin');
+  const before = (await chainIncidents(lab.labId)).length;
+
+  const byAdmin = ok(await admin.client.call(routes.incidentBreaks, { reference: incident }));
+  assert.deepEqual(
+    [byAdmin.asRecorded, byAdmin.breaks],
+    [false, [{ entry, kind: 'Changed', through: entry, matches: false }]],
+    'the Admin sees the change',
+  );
+  assert.equal(byAdmin.opened.length, 1, "the Admin's read opens one System Incident");
+  const opened = byAdmin.opened[0] ?? assert.fail('the read names the incident it opened');
+  assert.deepEqual(byAdmin.incidents, byAdmin.opened, 'which records the break as it reads now');
+  assert.equal((await chainIncidents(lab.labId)).length, before + 1);
+  assert.equal(alarmsFor(byAdmin.opened).length, 1, 'and raises the alarm');
+  assert.partialDeepStrictEqual(ok(await admin.client.call(routes.incident, { reference: opened })), {
+    kind: 'ChainVerifyFailure',
+    requestedBy: admin.id,
+  });
+
+  const byQa = ok(await lab.client.call(routes.incidentBreaks, { reference: incident }));
+  assert.deepEqual([byQa.incidents, byQa.opened], [byAdmin.opened, []], "QA's read names it and opens none");
+  const verified = await lab.verify();
+  assert.deepEqual(
+    verified.breaks.map((b) => b.incident),
+    byAdmin.opened,
+    'Verify chain finds the incident the Admin opened',
+  );
+  assert.equal((await chainIncidents(lab.labId)).length, before + 1, 'and opens none again');
+  assert.equal(alarmsFor(byAdmin.opened).length, 1, 'nor raises the alarm again');
+});
+
+it("QA's read of a changed System Incident names every System Incident it opened, inside the range or not, and Verify chain after it opens none again", async () => {
+  const lab = await labOfItsOwn('OUT', 8);
+  const [inside, outside] = [String(lab.last - 4n), String(lab.last - 1n)];
+  await lab.alter(inside);
+  const incident = (await lab.verify()).breaks[0]?.incident ?? assert.fail('the break names a System Incident');
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update, again' where chain = ${lab.labId} and seq = ${inside}`,
+    sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq = ${outside}`,
+  ]);
+
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: incident }));
+  assert.equal(listed.asRecorded, false);
+  assert.equal(listed.opened.length, 2, 'the read opens one incident for each new break on the chain');
+  assert.equal(listed.incidents.length, 1, 'and names the one inside the range among those recording it');
+  assert.ok(listed.incidents.every((r) => listed.opened.includes(r)));
+  const after = (await chainIncidents(lab.labId)).length;
+  const verified = await lab.verify();
+  assert.deepEqual(
+    verified.breaks.map((b) => b.incident).sort(),
+    [...listed.opened].sort(),
+    'Verify chain finds the same incidents',
+  );
+  assert.equal((await chainIncidents(lab.labId)).length, after, 'and opens none again');
+});
+
+const chainVerificationsOf = (chain: string) =>
+  api.db
+    .selectFrom('chainVerification')
+    .select(['through', 'recomputedFrom', 'verifiedBy', sql<string>`encode(head, 'hex')`.as('head')])
+    .where('chain', '=', chain)
+    .orderBy('verifiedAt')
+    .execute();
+
+it('Verify chain records a Chain Verification for each intact chain and resumes from it next time, so a changed entry behind it is found only by Recompute every entry, which records none for a broken chain', async () => {
+  const lab = await labOfItsOwn('CKP', 4);
+  const last = String(lab.last);
+  const first = await lab.verify();
+  assert.deepEqual([first.verdict, first.recomputedFrom, first.verifiedBefore], ['Intact', '1', null]);
+  const [recorded] = await chainVerificationsOf(lab.labId);
+  const head = await api.db
+    .selectFrom('auditEntry')
+    .select(sql<string>`encode(hash, 'hex')`.as('hash'))
+    .where('chain', '=', lab.labId)
+    .where('seq', '=', last)
+    .executeTakeFirstOrThrow();
+  assert.deepEqual(recorded, { through: last, recomputedFrom: '1', verifiedBy: recorded?.verifiedBy, head: head.hash });
+  assert.equal(
+    (
+      await api.db
+        .selectFrom('person')
+        .select('username')
+        .where('id', '=', recorded?.verifiedBy ?? '')
+        .executeTakeFirst()
+    )?.username,
+    'ckp.qa',
+    'the QA who verified is recorded',
+  );
+
+  const second = await lab.verify();
+  assert.equal(
+    second.recomputedFrom,
+    String(lab.last + 1n),
+    'the next verification resumes after the Chain Verification',
+  );
+  assert.deepEqual(
+    [second.verifiedBefore?.through, second.verifiedBefore?.by, second.verdict],
+    [last, 'ckp.qa', 'Intact'],
+  );
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 2, 'each intact verification is recorded');
+
+  const behind = String(lab.last - 2n);
+  await lab.alter(behind);
+  assert.equal(
+    (await lab.verify()).verdict,
+    'Intact',
+    'a routine verification does not look behind the Chain Verification',
+  );
+  const every = ok(await lab.client.call(routes.recomputeAuditTrail)).chains[0] ?? assert.fail('the Lab chain');
+  assert.deepEqual(
+    [every.verdict, every.recomputedFrom, every.verifiedBefore, every.breaks.map((b) => b.entry)],
+    ['Broken', '1', null, [behind]],
+  );
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 3, 'a broken chain records no Chain Verification');
+  assert.equal(
+    ok(await lab.client.call(routes.recomputeAuditTrail)).chains[0]?.breaks[0]?.incident,
+    every.breaks[0]?.incident,
+    'recomputing again names the same System Incident',
+  );
+  const after = await lab.verify();
+  assert.deepEqual(
+    [after.verdict, after.recomputedFrom, after.breaks.map((b) => b.incident)],
+    ['Broken', '1', [every.breaks[0]?.incident]],
+    'once a System Incident records a break, a routine verification no longer resumes past it',
+  );
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 3, 'nor records a Chain Verification over it');
+});
+
+it('after a Chain Verification, a consistent rewrite of the Lab chain behind it makes Verify chain answer Broken at the Chain Verification the Audit Trail no longer matches, with a System Incident; a second Verify chain names the same incident and records no new Chain Verification', async () => {
+  const lab = await labOfItsOwn('CFW', 4);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 1);
+  const from = lab.last - 2n;
+  await api.superuser.transaction().execute(async (tx) => {
+    await sql`set local session_replication_role = replica`.execute(tx);
+    await sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq = ${String(from)}`.execute(
+      tx,
+    );
+    for (let seq = from; seq <= lab.last; seq++)
+      await sql`update lims.audit_entry e set prev_hash = p.hash, hash = sha256(p.hash || lims.audit_entry_bytes(e))
+          from lims.audit_entry p
+         where p.chain = e.chain and p.seq = e.seq - 1 and e.chain = ${lab.labId} and e.seq = ${String(seq)}`.execute(
+        tx,
+      );
+    await sql`update lims.audit_chain c set head = e.hash
+          from lims.audit_entry e where e.chain = c.chain and e.seq = c.seq and c.chain = ${lab.labId}`.execute(tx);
+  });
+  const broken = await lab.verify();
+  const [found] = broken.breaks;
+  assert.deepEqual(
+    [broken.verdict, broken.recomputedFrom, broken.verifiedBefore, found?.entry, found?.failure],
+    [
+      'Broken',
+      '1',
+      null,
+      String(lab.last),
+      `the Chain Verification through entry ${lab.last} does not match the Audit Trail`,
+    ],
+  );
+  assert.match(found?.incident ?? '', /^[0-9A-Z]{8}$/, 'the break names a System Incident');
+  assert.deepEqual(
+    (await lab.verify()).breaks.map((b) => b.incident),
+    [found?.incident],
+    'verifying again names the same System Incident',
+  );
+  assert.equal(
+    (await chainVerificationsOf(lab.labId)).length,
+    1,
+    'a chain whose Chain Verification is contradicted records no new one',
+  );
+});
+
+it('when a rewrite of more than 100 entries reaches the entry a Chain Verification names, Verify chain opens the More System Incident holding both the changed entry and the contradicted Chain Verification, and listing it reads both as recorded', async () => {
+  const lab = await labOfItsOwn('TIE', 150);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  const named = String(lab.last);
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq <= ${named}`,
+  ]);
+  const broken = await lab.verify();
+  assert.equal(broken.breaks.length, 101, 'the first 100 breaks one by one and the rest as one More');
+  const more = broken.breaks[100] ?? assert.fail('the breaks after the first 100');
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: more.incident }));
+  assert.equal(listed.asRecorded, true, 'the More incident reads its breaks as recorded');
+  assert.deepEqual(
+    listed.breaks.filter((b) => b.entry === named).map((b) => [b.kind, b.matches]),
+    [
+      ['Changed', true],
+      ['Contradicted', true],
+    ],
+    'both breaks at the named entry are stored on the More incident',
+  );
+});
+
+it("listing a contradicted Chain Verification's System Incident opened before the LIMS stored its breaks reads its own break as recorded, not the changed entry's", async () => {
+  const lab = await labOfItsOwn('OLD', 4);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  const named = String(lab.last);
+  await lab.alter(named);
+  const legacy = 'NC000003';
+  await tamper([
+    sql`insert into lims.system_incident
+          (kind, reference, requested_by, chain, first_failure, last_failure, break_count, fingerprint)
+        select 'ChainVerifyFailure', ${legacy}, ${quinn.id}, ${lab.labId}, b.seq, b.through, 1, b.fingerprint
+        from lims.chain_breaks(${lab.labId}) as b where b.kind = 'Contradicted'`,
+  ]);
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: legacy }));
+  assert.deepEqual(
+    [listed.asRecorded, listed.recorded, listed.breaks.map((b) => [b.entry, b.kind]), listed.opened],
+    [true, null, [[named, 'Contradicted']], []],
+  );
+});
+
+it('when the entry a Chain Verification names is changed, Verify chain opens one System Incident for the changed entry and one for the contradicted Chain Verification, each storing its own break, and listing either opens none', async () => {
+  const lab = await labOfItsOwn('SAM', 4);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  const named = String(lab.last);
+  await lab.alter(named);
+  const broken = await lab.verify();
+  assert.deepEqual(
+    broken.breaks.map((b) => b.entry),
+    [named, named],
+    'the changed entry and the Chain Verification that names it are two breaks at the one entry',
+  );
+  const incidents = broken.breaks.map((b) => b.incident);
+  assert.equal(new Set(incidents).size, 2, 'each break has its own System Incident');
+  const stored = await api.db
+    .selectFrom('incidentBreak')
+    .innerJoin('systemIncident', 'systemIncident.id', 'incidentBreak.incidentId')
+    .select(['systemIncident.reference', 'incidentBreak.kind', sql<string>`incident_break.seq::text`.as('seq')])
+    .where('systemIncident.reference', 'in', incidents)
+    .orderBy('incidentBreak.kind')
+    .execute();
+  assert.deepEqual(
+    stored.map((s) => [s.kind, s.seq]),
+    [
+      ['Changed', named],
+      ['Contradicted', named],
+    ],
+  );
+  assert.equal(new Set(stored.map((s) => s.reference)).size, 2, 'each System Incident stores only its own break');
+  for (const { reference, kind } of stored) {
+    const listed = ok(await lab.client.call(routes.incidentBreaks, { reference }));
+    assert.deepEqual(
+      [listed.asRecorded, listed.breaks.map((l) => [l.entry, l.kind, l.matches]), listed.incidents, listed.opened],
+      [true, [[named, kind, true]], [], []],
+      `listing the ${kind} incident reads its own break as recorded and opens none`,
+    );
+  }
+});
+
+it("when the entry a Chain Verification names changes again, listing the changed entry's System Incident names the one that records the change now, not the contradicted Chain Verification's", async () => {
+  const lab = await labOfItsOwn('AGN', 4);
+  assert.equal((await lab.verify()).verdict, 'Intact');
+  const named = String(lab.last);
+  await lab.alter(named);
+  const stored = await api.db
+    .selectFrom('incidentBreak')
+    .innerJoin('systemIncident', 'systemIncident.id', 'incidentBreak.incidentId')
+    .select(['systemIncident.reference', 'incidentBreak.kind'])
+    .where(
+      'systemIncident.reference',
+      'in',
+      (await lab.verify()).breaks.map((b) => b.incident),
+    )
+    .execute();
+  const of = (kind: string) =>
+    stored.find((s) => s.kind === kind)?.reference ?? assert.fail(`the ${kind} break names a System Incident`);
+  const [changed, contradicted] = [of('Changed'), of('Contradicted')];
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update, again' where chain = ${lab.labId} and seq = ${named}`,
+  ]);
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: changed }));
+  assert.deepEqual(
+    [listed.asRecorded, listed.breaks.map((l) => [l.entry, l.kind, l.matches])],
+    [false, [[named, 'Changed', false]]],
+  );
+  assert.equal(listed.opened.length, 1, 'the read records the changed entry in one new System Incident');
+  assert.deepEqual(
+    [listed.incidents, listed.incidents.includes(contradicted)],
+    [listed.opened, false],
+    "the read names the System Incident that records the listed break, and not the contradicted Chain Verification's",
+  );
+});
+
+it("Verify chain refuses, naming the chain and the read limit, when a chain's recompute does not finish within it, and opens the System Incident the refusal names", async () => {
+  const slow = await startApi('lims_api_trail_slow_test', { verifyReadLimitSeconds: 0.3 });
+  const qa = await slow.login(await slow.addPerson('slow.qa', ['QA']));
+  const holder = await slow.superuser.connection().execute(async (held) => {
+    await sql`begin`.execute(held);
+    await sql`lock table lims.chain_verification in access exclusive mode`.execute(held);
+    const refused = refusedWith(await qa.call(routes.verifyAuditTrail), 'state');
+    await sql`rollback`.execute(held);
+    return refused;
+  });
+  const reference =
+    /System Incident (\w+) records it/.exec(holder)?.[1] ?? assert.fail(`no System Incident in ${holder}`);
+  assert.equal(
+    holder,
+    `Verifying the Lab chain did not finish within 0.3 seconds, and System Incident ${reference} records it. Try again when the LIMS is less busy.`,
+  );
+  assert.deepEqual(
+    await slow.db.selectFrom('systemIncident').select(['kind', 'reference', 'sqlstate', 'step']).execute(),
+    [{ kind: 'UnexpectedFailure', reference, sqlstate: '57014', step: 'verifyAuditTrail' }],
+    'the overrun leaves one System Incident',
+  );
 });

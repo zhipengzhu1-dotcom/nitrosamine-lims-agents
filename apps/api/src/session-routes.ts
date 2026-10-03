@@ -1,17 +1,24 @@
 import type { DB } from '@lims/db';
 import type { Kysely } from 'kysely';
 import type { App } from './app.ts';
-import { actorFor, labSwitchRoute, lockScreenRoutes, type Login, SESSION_COOKIE, type SessionLimits } from './auth.ts';
+import { actorFor, labSwitchRoute, lockScreenRoutes, SESSION_COOKIE, type Credentials } from './auth.ts';
+import { passwordChangeRoute } from './password-change.ts';
 import { preferenceRoutes } from './preferences.ts';
 import { readRoutes } from './reads.ts';
-import { deploymentRoute, releaseLogRoutes } from './release-log.ts';
+import { roomRoutes } from './room-routes.ts';
 import { staffRoutes } from './staff.ts';
 import { stepRoutes } from './steps.ts';
-import { workstationRoutes } from './workstations.ts';
 
-/** The public deployment read, then every route that needs a session. A locked session reaches only lock, unlock and sign-out; every other route answers sessionLocked. */
-export function sessionRoutes(app: App, db: Kysely<DB>, limits: SessionLimits, login: Login, release: string): void {
-  deploymentRoute(app, db);
+/** Every route that needs a session, the Release Log's among them. A locked session reaches only lock, unlock and sign-out; every other route answers sessionLocked. */
+export function sessionRoutes(
+  app: App,
+  db: Kysely<DB>,
+  credentials: Credentials,
+  release: string,
+  releaseLog: (signedIn: App) => void,
+  verifyReadLimitSeconds?: number,
+): void {
+  const limits = credentials.policy;
   const withSession = (whileLocked: boolean, routes: (scope: App) => void) =>
     app.register(async (scope) => {
       scope.decorateRequest('actor');
@@ -27,14 +34,15 @@ export function sessionRoutes(app: App, db: Kysely<DB>, limits: SessionLimits, l
       });
       routes(scope);
     });
-  withSession(true, (lockScreen) => lockScreenRoutes(lockScreen, db, limits));
+  withSession(true, (lockScreen) => lockScreenRoutes(lockScreen, db, credentials));
   withSession(false, (signedIn) => {
-    labSwitchRoute(signedIn, db, limits);
+    labSwitchRoute(signedIn, db, credentials);
+    passwordChangeRoute(signedIn, db, credentials);
     preferenceRoutes(signedIn, db);
-    readRoutes(signedIn, db);
-    releaseLogRoutes(signedIn, db, login, release);
+    readRoutes(signedIn, db, verifyReadLimitSeconds);
+    releaseLog(signedIn);
     staffRoutes(signedIn, db, limits);
-    stepRoutes(signedIn, db, release);
-    workstationRoutes(signedIn, db);
+    stepRoutes(signedIn, db, credentials, release);
+    roomRoutes(signedIn, db, credentials, release);
   });
 }

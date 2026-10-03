@@ -51,8 +51,10 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   [K in StepName]: { route: Route; body: StepBody<K> };
 } = {
   login: entry(routes.login, { username: cora.username, password: 'not-the-password' }),
+  enrolAuthenticator: entry(routes.enrolAuthenticator, { username: cora.username, password: 'not-the-password' }),
   switchLab: entry(routes.switchLab, { username: cora.username, password: 'not-the-password', labId: api.labId }),
   verifyAuditTrail: entry(routes.verifyAuditTrail, {}),
+  recomputeAuditTrail: entry(routes.recomputeAuditTrail, {}),
   setPreferences: entry(routes.setPreferences, { reducedMotion: true }),
   auditExport: entry(routes.auditExport, { customerId: randomUUID(), format: 'JSON' }),
   submit: step('submit', {
@@ -70,6 +72,16 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   }),
   createAccount: entry(routes.createAccount, { identityVerificationId: randomUUID(), username: 'nell.newcomer' }),
   issueLink: entry(routes.issueLink, { personId: randomUUID() }),
+  registerEquipment: entry(routes.registerEquipment, {
+    kind: 'Balance',
+    name: 'BAL-99 (fictional)',
+    manufacturer: 'Fictional Instruments',
+    model: 'RX-5',
+    serial: 'SN-0099',
+    roomId: randomUUID(),
+    responsiblePersonId: randomUUID(),
+  }),
+  issueEnrolmentGrant: entry(routes.issueEnrolmentGrant, { personId: randomUUID() }),
   grantMembership: entry(routes.grantMembership, { personId: randomUUID(), role: 'Analyst', reason: 'New starter' }),
   changePrintedName: entry(routes.changePrintedName, {
     personId: randomUUID(),
@@ -93,6 +105,7 @@ const posts: { [K in BodyRouteName]: { route: Route; body: object } } & {
   }),
   approveReleaseLogEntry: entry(routes.approveReleaseLogEntry, { entryId: randomUUID(), ...signature }),
   unlock: entry(routes.unlock, { password: 'not-the-password' }),
+  changePassword: entry(routes.changePassword, { password: 'not-the-password', newPassword: 'Benchline-2026-unused' }),
   lock: entry(routes.lock, {}),
   logout: entry(routes.logout, {}),
 };

@@ -2,10 +2,15 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 import cookie from '@fastify/cookie';
 import { type AuditContext, audited, type DB, type Role, type SignInFailure } from '@lims/db';
-import { hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from '@lims/db/credentials';
+import { hashPassword, verifyPassword } from '@lims/db/credentials';
 import {
   type ActorContext,
+  type Authenticator,
+  DECIDED_PASSWORD,
+  DEMO_PASSWORD,
   type LoginConfiguration,
+  type PasswordRule,
+  passwordRefusal,
   routes,
   type Sentence,
   SESSION_ENDED,
@@ -13,10 +18,9 @@ import {
 } from '@lims/domain';
 import { type Insertable, type Kysely, sql, type Transaction } from 'kysely';
 import type { App } from './app.ts';
-import { openJobIncident } from './incident.ts';
-import { refuse, requestReference } from './refuse.ts';
+import { type CodeFailure, type CodeProof, checkCode, spendCode } from './authenticator.ts';
+import { refuse } from './refuse.ts';
 
-export const LOCKOUT_AFTER_FAILURES = 20;
 export const SESSION_COOKIE = 'lims_session';
 
 /** How long a session lives: `idleMs` after its last request, and `absoluteMs` after sign-in at most. */
@@ -26,15 +30,84 @@ export interface SessionLimits {
 }
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
+/** How a person signs in and signs: the session limits, the lockout, the second factor and the password rule. */
+export interface LoginPolicy extends SessionLimits {
+  /** The consecutive failures, sign-in and re-authentication together, at which the account locks. */
+  lockoutAfter: number;
+  /** Whether sign-in, signing, unlocking and a Lab switch also need a fresh code from the person's authenticator. */
+  secondFactor: boolean;
+  /**
+   * Whether a password hash made without the pepper, as the demo seed makes them, still proves the person. The
+   * decided login refuses one as a wrong password, so every account it admits was hashed under the pepper (#13).
+   */
+  acceptsUnpepperedHash: boolean;
+  password: PasswordRule;
+}
 /**
- * The session limits of each login configuration. The demo's 8-hour idle limit stands under ADR 0002's demo-login
- * exception until the real-data gate (#102), which is to refuse `real` while the login is not `decided`.
+ * Each login configuration (#13, #45). The demo's values stand under ADR 0002's demo-login exception until the
+ * real-data gate (#102), which is to refuse `real` while any value differs from `decided`.
  */
-export const SESSION_LIMITS = {
-  decided: { idleMs: 15 * MINUTE_MS, absoluteMs: 12 * HOUR_MS },
-  demo: { idleMs: 8 * HOUR_MS, absoluteMs: 12 * HOUR_MS },
-} as const satisfies Record<LoginConfiguration, SessionLimits>;
-export type Login = keyof typeof SESSION_LIMITS;
+export const LOGIN = {
+  decided: {
+    idleMs: 15 * MINUTE_MS,
+    absoluteMs: 12 * HOUR_MS,
+    lockoutAfter: 5,
+    secondFactor: true,
+    acceptsUnpepperedHash: false,
+    password: DECIDED_PASSWORD,
+  },
+  demo: {
+    idleMs: 8 * HOUR_MS,
+    absoluteMs: 12 * HOUR_MS,
+    lockoutAfter: 20,
+    secondFactor: false,
+    acceptsUnpepperedHash: true,
+    password: DEMO_PASSWORD,
+  },
+} as const satisfies Record<LoginConfiguration, LoginPolicy>;
+export type Login = keyof typeof LOGIN;
+
+/** The login configuration a policy runs: `decided` only while every value is the decided one, else `demo`. */
+export function loginOf(policy: LoginPolicy): Login {
+  const decided = LOGIN.decided;
+  return policy.idleMs === decided.idleMs &&
+    policy.absoluteMs === decided.absoluteMs &&
+    policy.lockoutAfter === decided.lockoutAfter &&
+    policy.secondFactor === decided.secondFactor &&
+    policy.acceptsUnpepperedHash === decided.acceptsUnpepperedHash &&
+    policy.password === decided.password
+    ? 'decided'
+    : 'demo';
+}
+
+/** What proves a person: the login policy, the pepper every new password hash takes, and the key that seals TOTP secrets. */
+export interface Credentials {
+  policy: LoginPolicy;
+  pepper: Buffer;
+  totpKey: Buffer;
+}
+
+/** Verifies `password` against `stored` under the login: with the pepper, and a hash made without it only where the policy accepts one. */
+export const proves = (credentials: Credentials, password: string, stored: string): Promise<boolean> =>
+  verifyPassword(password, stored, credentials.pepper, credentials.policy.acceptsUnpepperedHash);
+
+/** The authenticator's two settings, as `checkCode` takes them. */
+const totpOf = (credentials: Credentials) => ({
+  secondFactor: credentials.policy.secondFactor,
+  key: credentials.totpKey,
+});
+
+/**
+ * The one sentence every credential failure answers with, so it never says which part failed; it names the user ID
+ * when the person typed one and the code when the login asks for one.
+ */
+export function credentialsNotValid(policy: LoginPolicy, typed: 'userId' | 'password'): Sentence {
+  if (typed === 'userId')
+    return policy.secondFactor
+      ? 'The user ID, password or code is not valid.'
+      : 'The user ID or password is not valid.';
+  return policy.secondFactor ? 'The password or code is not valid.' : 'The password is not valid.';
+}
 
 type AccessEvent = Insertable<DB['accessEvent']>;
 export interface SessionKey {
@@ -49,14 +122,16 @@ export interface SignedIn {
   view: SignedInView;
 }
 
-const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', reason: 'Sign in' };
+/** The Audit Trail context of a sign-in attempt and of an enrolment attempt, which no person has proven yet. */
+export const SIGN_IN_SERVICE: AuditContext = { actor: 'svc:sign-in', role: 'system', reason: 'Sign in' };
 const SWEEP_SERVICE: AuditContext = {
   actor: 'svc:session-sweep',
   role: 'system',
   reason: 'End sessions past their limit or locked out',
 };
 
-const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
+/** A hash no password matches, verified in place of a missing one so that an unknown user ID takes as long as a wrong password. */
+export const TIMING_DECOY_HASH = await hashPassword(randomBytes(16).toString('base64url'));
 
 /** Signing out, locking, unlocking, switching Lab and setting preferences act on the person's own account, under no role of the Lab. */
 const NEEDS_NO_ROLE = 'none' as const;
@@ -85,27 +160,77 @@ export async function deviceOf(
     .where('deviceTokenHash', '=', hashToken(token))
     .executeTakeFirst();
 }
-const notValid = () => refuse('badCredentials', 'The user ID or password is not valid.');
 const linkNotValid = () =>
   refuse('badCredentials', 'This link has been used, replaced or has expired. Ask the Admin for a new one.');
 
-const REFUSAL: { readonly [F in SignInFailure]: (labName?: string) => never } = {
-  UnknownUserId: notValid,
-  WrongPassword: notValid,
-  WrongPasswordOnLockedAccount: notValid,
-  OtherUserId: notValid,
-  NoCredential: notValid,
-  AccountLocked: () => refuse('accountLocked', 'This account is locked.'),
-  NoLab: () => refuse('role', 'This account belongs to no Lab.'),
-  WrongUserId: notValid,
-  NoLabChosen: () => refuse('labNotChosen', 'Choose the Lab to work in.'),
-  NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
-  NotInWorkstationLab: () => refuse('role', "You hold no Membership in this Workstation's Lab."),
-  SessionEnded: () =>
-    refuse('stale', 'This session has already moved to another Lab or ended. Reload to see where you work.'),
+type Refusals = { readonly [F in SignInFailure]: (labName?: string) => never };
+/** How each sign-in or Lab switch failure is refused under `policy`; a credential failure answers its one sentence. */
+export const refusalsUnder = (policy: LoginPolicy): Refusals => {
+  const notValid = () => refuse('badCredentials', credentialsNotValid(policy, 'userId'));
+  return {
+    UnknownUserId: notValid,
+    WrongPassword: notValid,
+    WrongPasswordOnLockedAccount: notValid,
+    OtherUserId: notValid,
+    NoCredential: notValid,
+    AccountLocked: () => refuse('accountLocked', 'This account is locked.'),
+    NoLab: () => refuse('role', 'This account belongs to no Lab.'),
+    WrongUserId: notValid,
+    WrongCode: notValid,
+    NoAuthenticator: notValid,
+    CodeAlreadyUsed: notValid,
+    AlreadyEnrolled: notValid,
+    NoEnrolmentGrant: notValid,
+    OtherPersonSignedIn: () =>
+      refuse(
+        'guard',
+        'Sign out first. Only the holder of an account enrols its authenticator, in a browser where no one else is signed in.',
+      ),
+    NoLabChosen: () => refuse('labNotChosen', 'Choose the Lab to work in.'),
+    NoMembership: (labName = 'that Lab') => refuse('role', `You hold no Membership in ${labName}. Choose another Lab.`),
+    NotInWorkstationLab: () => refuse('role', "You hold no Membership in this Workstation's Lab."),
+    SessionEnded: () =>
+      refuse('stale', 'This session has already moved to another Lab or ended. Reload to see where you work.'),
+  };
 };
 
-const record = (tx: Transaction<DB>, event: AccessEvent) => tx.insertInto('accessEvent').values(event).execute();
+/** Writes one Access Event in the caller's transaction. */
+export const record = (tx: Transaction<DB>, event: AccessEvent) => tx.insertInto('accessEvent').values(event).execute();
+
+/** Thrown inside a transaction when another request spent the checked code first, so that it rolls back with nothing written. */
+const CODE_SPENT = new Error('another request spent this code first');
+
+/** Spends the checked code in `tx`, or throws `CODE_SPENT` for `auditedUnlessCodeSpent` to record and refuse. */
+async function spendCodeOrThrow(tx: Transaction<DB>, personId: string, proof: CodeProof): Promise<void> {
+  if (!(await spendCode(tx, personId, proof))) throw CODE_SPENT;
+}
+
+/** How a write refused because its code was spent first is recorded, under which context, and the sentence it answers. */
+interface SpentCode {
+  event: AccessEvent;
+  recordedAs: AuditContext;
+  sentence: Sentence;
+}
+
+/**
+ * Runs `write` audited under `ctx`. When `write` throws `CODE_SPENT`, the rollback keeps nothing of it; `spent.event`
+ * is then written in a transaction of its own, not counted toward the lockout because the code was right, and the
+ * write is refused as badCredentials with `spent.sentence`.
+ */
+async function auditedUnlessCodeSpent<R>(
+  db: Kysely<DB>,
+  ctx: AuditContext,
+  write: (tx: Transaction<DB>) => Promise<R>,
+  spent: SpentCode,
+): Promise<R> {
+  try {
+    return await audited(db, ctx, write);
+  } catch (error) {
+    if (error !== CODE_SPENT) throw error;
+    await audited(db, spent.recordedAs, (tx) => record(tx, spent.event));
+    return refuse('badCredentials', spent.sentence);
+  }
+}
 
 async function rolesIn(db: Kysely<DB>, personId: string, labId: string): Promise<Role[]> {
   const rows = await db
@@ -154,14 +279,14 @@ async function chooseLab(
 }
 
 /** Counts a wrong credential; `locksOut` says this one reaches the lockout, which `lockOut` applies once the failure is recorded. */
-async function countFailure(tx: Transaction<DB>, personId: string) {
+async function countFailure(tx: Transaction<DB>, personId: string, lockoutAfter: number) {
   return tx
     .updateTable('person')
     .set({ failedLogins: sql`failed_logins + 1` })
     .where('id', '=', personId)
     .returning([
       sql<boolean>`locked_at is not null`.as('wasLocked'),
-      sql<boolean>`locked_at is null and failed_logins >= ${LOCKOUT_AFTER_FAILURES}`.as('locksOut'),
+      sql<boolean>`locked_at is null and failed_logins >= ${lockoutAfter}`.as('locksOut'),
     ])
     .executeTakeFirstOrThrow();
 }
@@ -178,13 +303,14 @@ async function lockOut(tx: Transaction<DB>, event: Omit<AccessEvent, 'kind'> & {
 }
 
 /** Counts a wrong credential toward the lockout and records it, with any Lockout it applies, in the caller's transaction. */
-async function recordWrongCredential(
+export async function recordWrongCredential(
   tx: Transaction<DB>,
   kind: 'SignInFailed' | 'LabSwitchFailed',
   event: Omit<AccessEvent, 'kind' | 'failureReason'> & { subjectId: string },
-  wrong: 'WrongPassword' | 'OtherUserId',
+  wrong: 'WrongPassword' | 'OtherUserId' | CodeFailure,
+  lockoutAfter: number,
 ): Promise<SignInFailure> {
-  const { wasLocked, locksOut } = await countFailure(tx, event.subjectId);
+  const { wasLocked, locksOut } = await countFailure(tx, event.subjectId, lockoutAfter);
   const reason = wrong === 'WrongPassword' && wasLocked ? 'WrongPasswordOnLockedAccount' : wrong;
   await record(tx, { ...event, kind, failureReason: reason });
   if (locksOut) await lockOut(tx, event);
@@ -235,15 +361,32 @@ export function sourceAddressOf(req: {
   return mapped && isIP(mapped) === 4 ? mapped : address;
 }
 
-/** A password `reauthenticate` proved; only this module makes one, so a write cannot claim a proof it was not given. */
+/** The credentials `reauthenticate` checked; only this module makes one, so a write cannot claim a proof it was not given. */
 class Reauthenticated {
   declare private readonly madeByReauthenticate: never;
   readonly personId: string;
+  /** The checked code, which the write that this proof enables spends in its own transaction. */
+  readonly code: CodeProof;
+  /** What the Signature this proof enables records as having proved the signer. */
+  readonly authenticator: Authenticator;
+  /** The sentence the write refuses with when the code was spent by another request first. */
+  readonly codeSpent: Sentence;
   /** The Access Event that records the write refused because a Lockout landed after the password was checked. */
   readonly refusedByLockout: AccessEvent;
-  constructor(personId: string, refusedByLockout: AccessEvent) {
+  /** The Access Event that records the write refused because another request spent the code first. */
+  readonly codeAlreadyUsed: AccessEvent;
+  constructor(
+    personId: string,
+    code: CodeProof,
+    codeSpent: Sentence,
+    refused: { byLockout: AccessEvent; codeAlreadyUsed: AccessEvent },
+  ) {
     this.personId = personId;
-    this.refusedByLockout = refusedByLockout;
+    this.code = code;
+    this.authenticator = code.step === null ? 'Password' : 'PasswordAndCode';
+    this.codeSpent = codeSpent;
+    this.refusedByLockout = refused.byLockout;
+    this.codeAlreadyUsed = refused.codeAlreadyUsed;
   }
 }
 export type { Reauthenticated };
@@ -251,7 +394,9 @@ export type { Reauthenticated };
 /**
  * Runs `write` in one audited transaction that holds the re-authenticated person's row first, so a Lockout lands wholly
  * before the write, which it then refuses as accountLocked and records as a failed authentication, or wholly after it.
- * The transaction is stamped with the person re-authenticated, which lims.unlock_session requires. With
+ * The checked code is spent next, in the same transaction, so a refused write leaves it unspent, and a code another
+ * request spent first refuses the write as badCredentials with nothing of it written, recorded afterwards as a code
+ * already used. The transaction is stamped with the person re-authenticated, which lims.unlock_session requires. With
  * `declaresDataClassChange`, the transaction first declares that it changes the data class, which takes no lock, so
  * the database locks the deployment row for the change before the transaction's first chain.
  */
@@ -270,37 +415,53 @@ export async function auditedAfterReauthentication<R>(
       await declare(tx);
       return write(tx);
     });
-  const done = await audited(db, ctx, async (tx) => {
-    await declare(tx);
-    if (await resetFailuresUnlessLocked(tx, reauthenticated.personId)) return null;
-    await sql`select lims.set_this_transaction('lims.reauthenticated', ${reauthenticated.personId})`.execute(tx);
-    return { written: await write(tx) };
-  });
+  const failedAuthentication = { ...ctx, reason: 'Failed authentication' };
+  const done = await auditedUnlessCodeSpent(
+    db,
+    ctx,
+    async (tx) => {
+      await declare(tx);
+      if (await resetFailuresUnlessLocked(tx, reauthenticated.personId)) return null;
+      await spendCodeOrThrow(tx, reauthenticated.personId, reauthenticated.code);
+      await sql`select lims.set_this_transaction('lims.reauthenticated', ${reauthenticated.personId})`.execute(tx);
+      return { written: await write(tx) };
+    },
+    { event: reauthenticated.codeAlreadyUsed, recordedAs: failedAuthentication, sentence: reauthenticated.codeSpent },
+  );
   if (done) return done.written;
-  await audited(db, { ...ctx, reason: 'Failed authentication' }, (tx) => record(tx, reauthenticated.refusedByLockout));
+  await audited(db, failedAuthentication, (tx) => record(tx, reauthenticated.refusedByLockout));
   return refuse('accountLocked', 'This account is locked.');
 }
 
 /**
- * Proves the person of the session again, to sign or to unlock: the password must be theirs, and a typed user ID, when
- * given, must be theirs too. Success writes nothing and answers a `Reauthenticated` for the write it enables, which
- * `auditedAfterReauthentication` holds. A failure refuses as badCredentials, counts toward the lockout and writes
- * `failureEvent`, with why for a failed re-authentication; a lockout it applies is an Access Event.
+ * Proves the person of the session again, to sign, unlock or change the password: the password must be theirs, and a typed user ID, when
+ * given, must be theirs too, and the code, under the decided login, must be current and unspent. Success writes nothing
+ * and answers a `Reauthenticated` for the write it enables, which `auditedAfterReauthentication` holds and which spends
+ * the code. A failure refuses as badCredentials, counts toward the lockout and writes
+ * `failureEvent` with why; a lockout it applies is an Access Event.
  */
 export async function reauthenticate(
   db: Kysely<DB>,
+  credentials: Credentials,
   { actor, session }: Pick<SignedIn, 'actor' | 'session'>,
-  typed: { password: string; username?: string },
+  typed: { password: string; username?: string; code?: string | undefined },
   role: Role | typeof NEEDS_NO_ROLE,
   sourceAddress: string,
   failureEvent: 'UnlockFailed' | 'ReauthenticationFailed',
 ): Promise<Reauthenticated> {
   const person = await db.selectFrom('person').selectAll().where('id', '=', actor.person.id).executeTakeFirstOrThrow();
   const theirs = typed.username === undefined || typed.username === person.username;
-  const proven = await verifyPassword(
+  const proven = await proves(
+    credentials,
     typed.password,
     theirs && person.passwordHash ? person.passwordHash : TIMING_DECOY_HASH,
   );
+  const checked =
+    theirs && proven && person.passwordHash
+      ? await checkCode(db, totpOf(credentials), person.id, typed.code)
+      : { step: null };
+  const codeFailure = 'refused' in checked ? checked.refused : null;
+  const notValid = credentialsNotValid(credentials.policy, typed.username === undefined ? 'password' : 'userId');
   const event = {
     subjectId: person.id,
     roles: actor.roles,
@@ -309,20 +470,20 @@ export async function reauthenticate(
     sessionId: session.id,
     workstationId: session.workstationId,
   };
-  const failed = (failureReason: SignInFailure): AccessEvent =>
-    failureEvent === 'ReauthenticationFailed'
-      ? { ...event, kind: failureEvent, failureReason }
-      : { ...event, kind: failureEvent };
-  if (theirs && proven && person.passwordHash) return new Reauthenticated(person.id, failed('AccountLocked'));
+  const failed = (failureReason: SignInFailure): AccessEvent => ({ ...event, kind: failureEvent, failureReason });
+  if (theirs && proven && person.passwordHash && !('refused' in checked))
+    return new Reauthenticated(person.id, checked, notValid, {
+      byLockout: failed('AccountLocked'),
+      codeAlreadyUsed: failed('CodeAlreadyUsed'),
+    });
   await audited(db, { actor: `person:${person.username}`, role, reason: 'Failed authentication' }, async (tx) => {
-    const { wasLocked, locksOut } = await countFailure(tx, person.id);
-    let failureReason: SignInFailure = 'WrongUserId';
-    if (theirs) failureReason = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
+    const { wasLocked, locksOut } = await countFailure(tx, person.id, credentials.policy.lockoutAfter);
+    let failureReason: SignInFailure = codeFailure ?? 'WrongUserId';
+    if (theirs && !codeFailure) failureReason = wasLocked ? 'WrongPasswordOnLockedAccount' : 'WrongPassword';
     await record(tx, failed(failureReason));
     if (locksOut) await lockOut(tx, event);
   });
-  if (typed.username === undefined) refuse('badCredentials', 'The password is not valid.');
-  return notValid();
+  return refuse('badCredentials', notValid);
 }
 
 const interval = (ms: number) => sql<string>`${ms} * interval '1 millisecond'`;
@@ -460,32 +621,13 @@ async function endSession(
   return rows[0]?.ended === true;
 }
 
-/**
- * Runs the expiry sweep every `everyMs` until the API closes. A failed sweep opens a System Incident and the next one
- * retries, writing the same record, since each expiry is stamped at its computed end. A tick skips while a sweep is
- * still running, and close waits for it.
- */
-export function scheduleExpirySweep(app: App, db: Kysely<DB>, limits: SessionLimits, everyMs: number): void {
-  let running: Promise<void> | null = null;
-  const sweep = setInterval(() => {
-    running ??= endLapsedSessions(db, limits)
-      .catch((err: Error) => openJobIncident(db, app.log, { reference: requestReference(), step: 'expirySweep' }, err))
-      .finally(() => {
-        running = null;
-      });
-  }, everyMs);
-  app.addHook('onClose', async () => {
-    clearInterval(sweep);
-    await running;
-  });
-}
-
-function typedUserIdDigest(key: Buffer, typed: string) {
+/** How an Access Event records a user ID nobody holds: its HMAC under the key, and its length, never the text. */
+export function typedUserIdDigest(key: Buffer, typed: string) {
   return { typedUserIdHmac: createHmac('sha256', key).update(typed).digest(), typedUserIdLength: typed.length };
 }
 
 /** The session this browser's cookie still names: the one a Switch user sign-in takes over. */
-const browserSession = async (db: Kysely<DB>, token: string | undefined) =>
+export const browserSession = async (db: Kysely<DB>, token: string | undefined) =>
   token
     ? db
         .selectFrom('session')
@@ -496,8 +638,11 @@ const browserSession = async (db: Kysely<DB>, token: string | undefined) =>
     : undefined;
 
 /**
- * The routes before a session: the Labs to choose from, sign-in, and how long a session has left without touching it.
- * Every sign-in attempt, refused or not, writes its Access Event in a transaction of its own that commits. An enrolled
+ * The routes before a session but enrolment: the Labs to choose from, sign-in, a password set through a link, and
+ * how long a session has left without touching it.
+ * Every sign-in attempt, refused or not, writes its Access Event in a transaction of its own that commits. One whose
+ * code another request spent first rolls back with nothing of the sign-in written, then records that the code was
+ * already used, which counts toward no lockout. An enrolled
  * browser's sign-in carries its Workstation and opens in the Workstation's Lab. A sign-in over a live session on the
  * same browser (Switch user) ends it with a takeover Access Event in the same transaction; the takeover names the
  * earlier session's Workstation. An earlier session that has lapsed ends at its lapse instead, with no takeover. A
@@ -508,8 +653,11 @@ export function loginRoutes(
   db: Kysely<DB>,
   accessEventKey: Buffer,
   secureCookie: boolean,
-  limits: SessionLimits,
+  credentials: Credentials,
 ): void {
+  const { policy: limits, pepper } = credentials;
+  const REFUSAL = refusalsUnder(limits);
+  const notValid = REFUSAL.WrongPassword;
   app.register(cookie, { parseOptions: { path: '/', httpOnly: true, sameSite: 'strict', secure: secureCookie } });
   app.route({
     ...routes.labs,
@@ -520,10 +668,11 @@ export function loginRoutes(
       return (device ? labs.where('labId', '=', device.labId) : labs).execute();
     },
   });
+  app.route({ ...routes.loginPolicy, handler: async () => ({ secondFactor: limits.secondFactor }) });
   app.route({
     ...routes.login,
     handler: async (req, reply) => {
-      const { username, password } = req.body;
+      const { username, password, code } = req.body;
       const sourceAddress = sourceAddressOf(req);
       const device = await deviceOf(db, req.cookies[DEVICE_COOKIE]);
       // A token no Workstation holds any more (enrolled again elsewhere) is dropped, so the browser shows as unregistered.
@@ -532,7 +681,7 @@ export function loginRoutes(
       const labId = device?.labId ?? req.body.labId;
       const person = await db.selectFrom('person').selectAll().where('username', '=', username).executeTakeFirst();
       if (!person) {
-        await verifyPassword(password, TIMING_DECOY_HASH);
+        await proves(credentials, password, TIMING_DECOY_HASH);
         await audited(db, SIGN_IN_SERVICE, (tx) =>
           record(tx, {
             kind: 'SignInFailed',
@@ -546,7 +695,10 @@ export function loginRoutes(
         return notValid();
       }
 
-      const proven = await verifyPassword(password, person.passwordHash ?? TIMING_DECOY_HASH);
+      const proven = await proves(credentials, password, person.passwordHash ?? TIMING_DECOY_HASH);
+      const checked =
+        proven && person.passwordHash ? await checkCode(db, totpOf(credentials), person.id, code) : { step: null };
+      const codeFailure = 'refused' in checked ? checked.refused : null;
       const offWorkstation =
         device && (await rolesIn(db, person.id, device.labId)).length === 0
           ? { refused: 'NotInWorkstationLab' as const, roles: [] }
@@ -556,17 +708,18 @@ export function loginRoutes(
       const subject = { subjectId: person.id, roles: choice.roles, sourceAddress, workstationId };
 
       const refusal = person.lockedAt ? 'AccountLocked' : 'refused' in choice ? choice.refused : null;
-      if (!proven || !person.passwordHash || refusal || 'refused' in choice) {
+      if (!proven || !person.passwordHash || 'refused' in checked || refusal || 'refused' in choice) {
         const failure = await audited(db, SIGN_IN_SERVICE, async (tx): Promise<SignInFailure> => {
           if (!person.passwordHash) {
             await record(tx, { kind: 'SignInFailed', failureReason: 'NoCredential', ...subject });
             return 'NoCredential';
           }
+          if (codeFailure) return recordWrongCredential(tx, 'SignInFailed', subject, codeFailure, limits.lockoutAfter);
           if (proven && refusal) {
             await record(tx, { kind: 'SignInFailed', failureReason: refusal, ...subject });
             return refusal;
           }
-          return recordWrongCredential(tx, 'SignInFailed', subject, 'WrongPassword');
+          return recordWrongCredential(tx, 'SignInFailed', subject, 'WrongPassword', limits.lockoutAfter);
         });
         return REFUSAL[failure]('labName' in choice ? choice.labName : undefined);
       }
@@ -574,26 +727,36 @@ export function loginRoutes(
       const earlier = await browserSession(db, req.cookies[SESSION_COOKIE]);
       const earlierRoles = earlier ? await rolesIn(db, earlier.personId, earlier.labId) : [];
       const token = randomBytes(32).toString('base64url');
-      const locked = await audited(db, SIGN_IN_SERVICE, async (tx) => {
-        if (await resetFailuresUnlessLocked(tx, person.id)) {
-          await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...subject });
-          return true;
-        }
-        if (earlier && (await endSession(tx, earlier, limits)))
-          await record(tx, {
-            kind: 'Takeover',
-            subjectId: earlier.personId,
-            takenById: person.id,
-            roles: earlierRoles,
-            sourceAddress,
-            workstationId: earlier.workstationId,
-            sessionLabId: earlier.labId,
-            sessionId: earlier.id,
-          });
-        const session = await openSession(tx, person.id, choice.labId, token, workstationId);
-        await record(tx, { kind: 'SignInSucceeded', ...subject, sessionLabId: session.labId, sessionId: session.id });
-        return false;
-      });
+      const locked = await auditedUnlessCodeSpent(
+        db,
+        SIGN_IN_SERVICE,
+        async (tx) => {
+          if (await resetFailuresUnlessLocked(tx, person.id)) {
+            await record(tx, { kind: 'SignInFailed', failureReason: 'AccountLocked', ...subject });
+            return true;
+          }
+          await spendCodeOrThrow(tx, person.id, checked);
+          if (earlier && (await endSession(tx, earlier, limits)))
+            await record(tx, {
+              kind: 'Takeover',
+              subjectId: earlier.personId,
+              takenById: person.id,
+              roles: earlierRoles,
+              sourceAddress,
+              workstationId: earlier.workstationId,
+              sessionLabId: earlier.labId,
+              sessionId: earlier.id,
+            });
+          const session = await openSession(tx, person.id, choice.labId, token, workstationId);
+          await record(tx, { kind: 'SignInSucceeded', ...subject, sessionLabId: session.labId, sessionId: session.id });
+          return false;
+        },
+        {
+          event: { kind: 'SignInFailed', failureReason: 'CodeAlreadyUsed', ...subject },
+          recordedAs: SIGN_IN_SERVICE,
+          sentence: credentialsNotValid(limits, 'userId'),
+        },
+      );
       if (locked) return REFUSAL.AccountLocked();
       reply.setCookie(SESSION_COOKIE, token);
       return (await actorFor(db, token, limits)).view;
@@ -603,8 +766,8 @@ export function loginRoutes(
     ...routes.setPasswordThroughLink,
     handler: async (req) => {
       const { token, password } = req.body;
-      if (password.length < MIN_PASSWORD_LENGTH)
-        refuse('malformed', `A password needs at least ${MIN_PASSWORD_LENGTH} characters.`);
+      const weak = passwordRefusal(limits.password, password);
+      if (weak) refuse('malformed', weak);
       const live = await db
         .selectFrom('credentialLink')
         .select('id')
@@ -613,7 +776,7 @@ export function loginRoutes(
         .where('expiresAt', '>', sql<Date>`clock_timestamp()`)
         .executeTakeFirst();
       if (!live) return linkNotValid();
-      const passwordHash = await hashPassword(password);
+      const passwordHash = await hashPassword(password, pepper);
       const as = { ...SIGN_IN_SERVICE, reason: 'Set a password through a one-time link' };
       const set = await audited(db, as, async (tx) => {
         const { rows } = await sql<{ person: string | null }>`
@@ -627,7 +790,12 @@ export function loginRoutes(
           .orderBy('labId')
           .executeTakeFirst();
         const roles = lab ? await rolesIn(tx, personId, lab.labId) : [];
-        await record(tx, { kind: 'PasswordSet', subjectId: personId, roles, sourceAddress: sourceAddressOf(req) });
+        await record(tx, {
+          kind: 'PasswordSet',
+          subjectId: personId,
+          roles,
+          sourceAddress: sourceAddressOf(req),
+        });
         return tx.selectFrom('person').select('username').where('id', '=', personId).executeTakeFirstOrThrow();
       });
       return set ?? linkNotValid();
@@ -666,10 +834,11 @@ export function loginRoutes(
 
 /**
  * The routes a locked session still reaches: sign-out, lock and unlock. Lock hides the session behind sessionLocked;
- * only the same person's password unlocks it, and a wrong one is an UnlockFailed Access Event that counts toward
- * lockout. Each change is an Access Event under the person whose session it is.
+ * only the same person's password unlocks it, and a wrong one is an UnlockFailed Access Event, with why, that counts
+ * toward lockout. Each change is an Access Event under the person whose session it is.
  */
-export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits): void {
+export function lockScreenRoutes(app: App, db: Kysely<DB>, credentials: Credentials): void {
+  const limits = credentials.policy;
   app.route({
     ...routes.logout,
     handler: async (req, reply) => {
@@ -725,8 +894,9 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
       const signedIn = { actor: req.actor, session: req.sessionKey };
       const reauthenticated = await reauthenticate(
         db,
+        credentials,
         signedIn,
-        { password: req.body.password },
+        { password: req.body.password, code: req.body.code },
         NEEDS_NO_ROLE,
         sourceAddressOf(req),
         'UnlockFailed',
@@ -739,12 +909,14 @@ export function lockScreenRoutes(app: App, db: Kysely<DB>, limits: SessionLimits
 }
 
 /** Switching Lab moves the request's session, written under the person whose session it is. A session on a Workstation stays in the Workstation's Lab. */
-export function labSwitchRoute(app: App, db: Kysely<DB>, limits: SessionLimits): void {
+export function labSwitchRoute(app: App, db: Kysely<DB>, credentials: Credentials): void {
+  const limits = credentials.policy;
+  const REFUSAL = refusalsUnder(limits);
   app.route({
     ...routes.switchLab,
     handler: async (req, reply) => {
       const { actor, sessionKey: session } = req;
-      const { username, password, labId } = req.body;
+      const { username, password, code, labId } = req.body;
       if (labId === session.labId) refuse('state', `You already work in ${actor.lab.name}.`);
       if (session.workstationId)
         refuse(
@@ -758,8 +930,11 @@ export function labSwitchRoute(app: App, db: Kysely<DB>, limits: SessionLimits):
         .executeTakeFirstOrThrow();
       const as = asOwnAccount(person.username, 'Switch Lab');
       const sameUserId = username === person.username;
-      const proven =
-        (await verifyPassword(password, (sameUserId && person.passwordHash) || TIMING_DECOY_HASH)) && sameUserId;
+      const passwordProven =
+        (await proves(credentials, password, (sameUserId && person.passwordHash) || TIMING_DECOY_HASH)) && sameUserId;
+      const checked = passwordProven ? await checkCode(db, totpOf(credentials), person.id, code) : { step: null };
+      const codeFailure = 'refused' in checked ? checked.refused : null;
+      const proven = passwordProven && !('refused' in checked);
       const choice = await chooseLab(db, person, labId);
       const inSession = {
         subjectId: person.id,
@@ -769,40 +944,57 @@ export function labSwitchRoute(app: App, db: Kysely<DB>, limits: SessionLimits):
         sessionId: session.id,
       };
 
-      if (!proven || 'refused' in choice) {
+      if (!proven || 'refused' in checked || 'refused' in choice) {
         const failure = await audited(db, as, async (tx): Promise<SignInFailure> => {
           if (proven && 'refused' in choice) {
             await record(tx, { kind: 'LabSwitchFailed', failureReason: choice.refused, ...inSession });
             return choice.refused;
           }
-          return recordWrongCredential(tx, 'LabSwitchFailed', inSession, sameUserId ? 'WrongPassword' : 'OtherUserId');
+          return recordWrongCredential(
+            tx,
+            'LabSwitchFailed',
+            inSession,
+            codeFailure ?? (sameUserId ? 'WrongPassword' : 'OtherUserId'),
+            limits.lockoutAfter,
+          );
         });
         return REFUSAL[failure]('refused' in choice ? choice.labName : undefined);
       }
 
       const token = randomBytes(32).toString('base64url');
-      const outcome = await audited(db, as, async (tx): Promise<'AccountLocked' | 'SessionEnded' | 'Switched'> => {
-        if (await resetFailuresUnlessLocked(tx, person.id)) {
-          await record(tx, { kind: 'LabSwitchFailed', failureReason: 'AccountLocked', ...inSession });
-          return 'AccountLocked';
-        }
-        if (!(await endSession(tx, session, limits))) {
-          await record(tx, { kind: 'LabSwitchFailed', failureReason: 'SessionEnded', ...inSession });
-          return 'SessionEnded';
-        }
-        const opened = await openSession(tx, person.id, choice.labId, token, null);
-        await record(tx, {
-          kind: 'LabSwitch',
-          subjectId: person.id,
-          roles: choice.roles,
-          sourceAddress: sourceAddressOf(req),
-          sessionLabId: opened.labId,
-          sessionId: opened.id,
-          previousSessionLabId: session.labId,
-          previousSessionId: session.id,
-        });
-        return 'Switched';
-      });
+      const outcome = await auditedUnlessCodeSpent(
+        db,
+        as,
+        async (tx): Promise<'AccountLocked' | 'SessionEnded' | 'Switched'> => {
+          if (await resetFailuresUnlessLocked(tx, person.id)) {
+            await record(tx, { kind: 'LabSwitchFailed', failureReason: 'AccountLocked', ...inSession });
+            return 'AccountLocked';
+          }
+          if (!(await endSession(tx, session, limits))) {
+            await record(tx, { kind: 'LabSwitchFailed', failureReason: 'SessionEnded', ...inSession });
+            return 'SessionEnded';
+          }
+          // Spent only once the switch is sure to happen, so a session that ended first leaves the code for the next sign-in.
+          await spendCodeOrThrow(tx, person.id, checked);
+          const opened = await openSession(tx, person.id, choice.labId, token, null);
+          await record(tx, {
+            kind: 'LabSwitch',
+            subjectId: person.id,
+            roles: choice.roles,
+            sourceAddress: sourceAddressOf(req),
+            sessionLabId: opened.labId,
+            sessionId: opened.id,
+            previousSessionLabId: session.labId,
+            previousSessionId: session.id,
+          });
+          return 'Switched';
+        },
+        {
+          event: { kind: 'LabSwitchFailed', failureReason: 'CodeAlreadyUsed', ...inSession },
+          recordedAs: as,
+          sentence: credentialsNotValid(limits, 'userId'),
+        },
+      );
       if (outcome !== 'Switched') return REFUSAL[outcome]();
       reply.setCookie(SESSION_COOKIE, token);
       return (await actorFor(db, token, limits)).view;

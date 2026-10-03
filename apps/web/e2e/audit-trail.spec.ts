@@ -44,7 +44,20 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   const trail = page.getByRole('region', { name: 'Audit Trail' });
   const entries = trail.getByRole('listitem');
   await expect(trail.getByRole('heading', { name: 'Audit Trail' })).toBeVisible();
-  await expect(trail.getByText(/\d+ entries\. Times in UTC and in the Lab's zone, America\/New_York\./)).toBeVisible();
+  await expect(
+    trail.getByText(
+      /\d+ entries\. Times in UTC and on the Lab's zone in force when each was written, now America\/New_York\./,
+    ),
+  ).toBeVisible();
+  const zone = trail.getByRole('link', { name: 'America/New_York' });
+  await atLeast(zone, 44, 44);
+  await zone.click();
+  await expect(page.getByRole('heading', { level: 1 }), "the zone opens the Lab's own trail").toHaveText('Lab RD');
+  await expect(
+    page.getByRole('region', { name: 'Audit Trail' }).getByRole('listitem').first(),
+    'where the Lab and its time zone were recorded',
+  ).toContainText(/Time zone\s*America\/New_York/);
+  await page.goBack();
   await expect(entries.first()).toContainText('Company chain');
   await expect(entries.first()).toContainText('Cora Lindqvist (Customer) created the Submission');
   await expect(entries.first().locator('.entry__time')).toHaveText(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC$/);
@@ -90,7 +103,9 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     'App release',
     'Re-authentication',
     'Signed at',
+    'Signed in time zone',
   ]);
+  await expect(signed.locator('dt:text-is("Signed in time zone") + dd')).toHaveText('America/New_York');
   await expect(signed.locator('dt:text-is("Signature statement hash") + dd summary')).toHaveText(/^[0-9a-f]{48}…$/);
   await expect(signed.locator('dt:text-is("Signed at") + dd')).toHaveText(
     /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC · \d{4}-\d\d-\d\d \d\d:\d\d:\d\d -0[45]:00$/,
@@ -105,6 +120,7 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     receipt.locator('dt:text-is("Received") + dd'),
     "the trail's Received is the one the Test page shows",
   ).toHaveText(`none → ${received}`);
+  await expect(receipt.locator('dt:text-is("Received in time zone") + dd')).toHaveText('none → America/New_York');
   // The Signature entry above it also has long values (its copied hashes), so the Record Version is found by its content.
   const versioned = entries.filter({ has: page.locator('details.long', { hasText: '"analyte"' }) }).first();
   await expect(versioned).toContainText('Record Version');
@@ -159,8 +175,8 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
     /^Recomputed at \d{4}-\d\d-\d\d \d\d:\d\d:\d\d UTC\. Not anchored off-server \(demo\)\.$/,
   );
   await expect(page.locator('.chains li')).toHaveText([
-    /^Lab chain Intact verified through entry \d+$/,
-    /^Company chain Intact verified through entry \d+$/,
+    /^Lab chain Intact verified through entry \d+ (Every entry recomputed\.|Recomputed from entry \d+; entries through \d+ were verified .* by .*\.)$/,
+    /^Company chain Intact verified through entry \d+ (Every entry recomputed\.|Recomputed from entry \d+; entries through \d+ were verified .* by .*\.)$/,
   ]);
   for (const status of await page.locator('.chains .status').all()) {
     await expect(status, 'intact reads in the ok colour').toHaveCSS('color', INTACT_COLOUR);
@@ -211,7 +227,7 @@ test('QA verifying a broken chain sees Broken beside that chain, in its own glyp
   await expect(chains.first().locator('.breaks li').first()).toHaveText(
     /^entry 1 fails to verify, recorded as System Incident \w{8} Open$/,
   );
-  await expect(chains.last()).toHaveText(/^Company chain Intact verified through entry \d+$/);
+  await expect(chains.last()).toHaveText(/^Company chain Intact verified through entry \d+ (Every|Recomputed)/);
   const [broken, intact] = [chains.first().locator('.status').first(), chains.last().locator('.status')];
   await expect(broken).toHaveCSS('color', 'rgb(179, 38, 30)');
   await expect(intact).toHaveCSS('color', INTACT_COLOUR);
@@ -247,10 +263,23 @@ function closeQcIncidentAt(entry: string) {
     '../../scripts/pg.sh',
     ['psql', '-q', '-v', 'ON_ERROR_STOP=1', '-v', `entry=${entry}`, '--single-transaction', '-d', E2E_DATABASE],
     {
-      input: `select set_config('lims.actor', 'svc:e2e', true), set_config('lims.role', 'system', true),
-                     set_config('lims.reason', 'Close a System Incident (e2e)', true);
+      input: `set local session_replication_role = replica;
               update lims.system_incident set state = 'Closed'
                where chain = (select lab_id::text from lims.lab where code = 'QC') and first_failure = :entry;`,
+      stdio: ['pipe', 'ignore', 'inherit'],
+    },
+  );
+}
+
+/** Alters the broken QC Lab entry a second time, so that the chain reads differently from what its incident recorded. */
+function alterQcEntryAgain(entry: string) {
+  execFileSync(
+    '../../scripts/pg.sh',
+    ['psql', '-q', '-v', 'ON_ERROR_STOP=1', '-v', `entry=${entry}`, '--single-transaction', '-d', E2E_DATABASE],
+    {
+      input: `set local session_replication_role = replica;
+              update lims.audit_entry set reason = 'Altered again behind the chain (e2e)'
+               where chain = (select lab_id::text from lims.lab where code = 'QC') and seq = :entry;`,
       stdio: ['pipe', 'ignore', 'inherit'],
     },
   );
@@ -279,5 +308,39 @@ test('QA verifying a chain whose break has a Closed System Incident still sees B
   await verify.click();
   await expect(own).toHaveText(`entry ${entry} fails to verify, recorded as System Incident ${incident} Closed`);
   await expect(page.locator('.chains > li').first().locator('.status').first()).toHaveText('Broken');
+  await signOutFromRail(page);
+});
+
+test("QA opens a break's System Incident from Verify chain and reads every break inside its range, as it recorded them", async ({
+  page,
+}) => {
+  const entry = breakANewQcEntry();
+  await page.goto('/');
+  await signIn(page, 'quinn.qa', /QC Laboratory/);
+  const { methods } = await (await page.request.get('/api/lookups')).json();
+  await page.goto(`/#/trails/method/${methods[0].id}`);
+  await page.getByRole('button', { name: 'Verify chain' }).click();
+  const own = page
+    .locator('.chains > li')
+    .first()
+    .locator('.breaks li', { hasText: `entry ${entry} fails` });
+  await own.getByRole('link', { name: /System Incident/ }).click();
+
+  const breaks = page.getByRole('region', { name: 'Breaks in this range' });
+  await expect(breaks).toContainText('These are the breaks this System Incident recorded.');
+  await expect(breaks.getByRole('row')).toHaveCount(2);
+  await expect(breaks.getByRole('row').last().getByRole('cell')).toHaveText([entry, 'Changed', entry]);
+
+  // The entry is altered again behind the chain: QA's next read records the change as a new System Incident, names
+  // it, and the list beside the record shows it.
+  alterQcEntryAgain(entry);
+  await page.reload();
+  await expect(breaks).toContainText('The chain has changed inside this range since this System Incident was opened.');
+  const named = /System Incident ([0-9A-HJKMNP-TV-Z]{8})/.exec((await breaks.textContent()) ?? '')?.[1] ?? '';
+  expect(named).not.toBe('');
+  await expect(breaks.getByRole('region', { name: 'As this System Incident recorded them' })).toBeVisible();
+  // The list beside the record, which only desktop width shows, holds the incident the read named.
+  const list = page.locator('.split__list');
+  if (await list.isVisible()) await expect(list.getByRole('row').filter({ hasText: named })).toHaveCount(1);
   await signOutFromRail(page);
 });

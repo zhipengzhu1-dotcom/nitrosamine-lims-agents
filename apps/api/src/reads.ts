@@ -4,8 +4,9 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { factsFor, latestVersion, signedVersions, statementInForce } from './steps.ts';
-import { onWallClock, trailRoutes } from './trail.ts';
+import { statementInForce } from './signing.ts';
+import { factsFor, latestVersion, signedVersions } from './steps.ts';
+import { onWallClock, signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
 import { auditExportRoutes } from './audit-export.ts';
 
 function visibleTests(scope: Scope) {
@@ -16,7 +17,6 @@ function visibleTests(scope: Scope) {
     .innerJoin('submission', 'submission.id', 'sample.submissionId')
     .innerJoin('customer', 'customer.id', 'submission.customerId')
     .innerJoin('method', 'method.id', 'test.methodId')
-    .innerJoin('lab', 'lab.labId', 'test.labId')
     .leftJoin('person as assignee', 'assignee.id', 'test.assigneeId')
     .select([
       'test.id',
@@ -25,7 +25,7 @@ function visibleTests(scope: Scope) {
       'sample.number as sampleNumber',
       'sample.description',
       'sample.receivedAt',
-      onWallClock(sql.ref<Date | null>('sample.received_at'), sql.ref('lab.time_zone')).as('receivedAtLab'),
+      onWallClock(sql.ref<Date | null>('sample.received_at'), sql.ref('sample.received_time_zone')).as('receivedAtLab'),
       'customer.name as customer',
       'method.code as methodCode',
       'method.version as methodVersion',
@@ -74,18 +74,9 @@ async function testView(scope: Scope, id: string) {
     signatures: withheld
       ? []
       : await signedVersions(scope)
-          .innerJoin('lab', 'lab.labId', 'signature.labId')
+          .select(signatureReplyColumns)
           .select([
-            'signature.meaning',
-            'signature.printedName as signer',
-            'signature.username',
-            'signature.role',
-            'signature.signedAt',
-            onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('lab.time_zone')).as('signedAtLab'),
             'recordVersion.recordTable as record',
-            'recordVersion.version',
-            'recordVersion.canonicalForm',
-            sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
             sql<boolean>`exists (select from lims.record_version later
               where later.lab_id = record_version.lab_id and later.record_table = record_version.record_table
                 and later.record_id = record_version.record_id and later.version > record_version.version)`.as(
@@ -95,21 +86,15 @@ async function testView(scope: Scope, id: string) {
           .where('recordVersion.recordId', 'in', ids)
           .orderBy('signature.signedAt')
           .execute()
-          .then((rows) =>
-            rows.map(({ record, version, canonicalForm, contentHash, ...signature }) => ({
-              ...signature,
-              record: recordKind(record),
-              recordVersion: { version, canonicalForm, contentHash },
-            })),
-          ),
+          .then((rows) => rows.map(({ record, ...row }) => signatureReply(row, recordKind(record)))),
     withheld,
     next,
-    statement: isCustomer ? null : await statementInForce(scope),
+    statement: isCustomer ? null : await statementInForce(scope.company),
   };
 }
 
-export function readRoutes(app: App, db: Kysely<DB>): void {
-  trailRoutes(app, db);
+export function readRoutes(app: App, db: Kysely<DB>, verifyReadLimitSeconds?: number): void {
+  trailRoutes(app, db, verifyReadLimitSeconds);
   auditExportRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => req.signedInView });
 
@@ -149,41 +134,6 @@ export function readRoutes(app: App, db: Kysely<DB>): void {
       if (!report) return refuse('notFound', 'This Test has no released Test Report.');
       const { version, canonicalForm, contentHash } = await latestVersion(scope, 'test_report', report.id);
       return { report, recordVersion: { version, canonicalForm, contentHash }, test, result, signatures };
-    },
-  });
-
-  app.route({
-    ...routes.incident,
-    handler: async (req) => {
-      if (!req.actor.roles.some((role) => role === 'Admin' || role === 'QA'))
-        refuse('role', 'Reading a System Incident is an Admin or QA action.');
-      return (
-        (await db
-          .selectFrom('systemIncident')
-          .select([
-            'reference',
-            'kind',
-            'state',
-            'step',
-            'recordId',
-            'requestedBy',
-            'sessionLabId',
-            'errorClass',
-            'sqlstate',
-            'constraintName',
-            'subjectId',
-            sql<string | null>`host(source_address)`.as('sourceAddress'),
-            sql<string | null>`encode(typed_user_id_hmac, 'hex')`.as('typedUserIdHmac'),
-            'chain',
-            'firstFailure',
-            'lastFailure',
-            'breakCount',
-            'openedAt',
-            'loggedAt',
-          ])
-          .where('reference', '=', req.params.reference)
-          .executeTakeFirst()) ?? refuse('notFound', `No System Incident has the reference ${req.params.reference}.`)
-      );
     },
   });
 }

@@ -64,9 +64,33 @@ export const controls: Control[] = [
     phase: 2,
     control:
       'Decided login (TOTP, password rules, lockout 5, pepper) behind the data class; TOTP covers sign-in, signing and the Lab switch, which until then re-authenticates with user ID and password only ([#98](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/98))',
+    built: 'yes',
+  },
+  {
+    phase: 2,
+    control:
+      'Authenticator revocation and replacement behind a new Identity Verification and enrolment grant ([#13](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13))',
+    built: 'no',
+  },
+  {
+    phase: 2,
+    control:
+      'Breach-list check at every sign-in ([#13](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/13))',
+    built: 'no',
+  },
+  {
+    phase: 2,
+    control:
+      "First-Admin bootstrap under the decided login: a real deploy issues the first enrolment grant as the database owner under the owner's own actor, never under the e2e walk's `person:bea.admin`, so the Audit Trail names the person who granted it ([#96](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/96))",
     built: 'no',
   },
   { phase: 2, control: 'Release Log, service identities, real-data gate and banner', built: 'yes' },
+  {
+    phase: 2,
+    control:
+      "Close System Incidents with QA's impact answer (QA answers whether the incident could have affected results or records, the Admin records the immediate and corrective actions, signs Acknowledged and closes it; the database allows only Open → Acknowledged → Closed)",
+    built: 'partly',
+  },
   { phase: 3, control: 'Critical Data Change', built: 'no' },
   { phase: 3, control: 'Return', built: 'no' },
   { phase: 3, control: 'Holds', built: 'no' },
@@ -81,7 +105,7 @@ export const controls: Control[] = [
   { phase: 4, control: 'Authorisations', built: 'no' },
   { phase: 4, control: 'Appointments', built: 'no' },
   { phase: 4, control: 'Competence Assessments', built: 'no' },
-  { phase: 7, control: 'Equipment', built: 'no' },
+  { phase: 7, control: 'Equipment', built: 'partly' },
   { phase: 7, control: 'Rooms', built: 'no' },
   { phase: 7, control: 'Check Plans', built: 'no' },
   { phase: 7, control: 'Checks', built: 'no' },

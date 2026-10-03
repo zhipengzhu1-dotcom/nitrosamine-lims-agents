@@ -343,6 +343,9 @@ th {
   font-size: 13px;
   cursor: pointer;
 }
+.record-steps {
+  margin-bottom: 12px;
+}
 .pipe input {
   flex: none;
   width: 18px;
@@ -544,7 +547,8 @@ th {
   font-variant-numeric: tabular-nums;
 }
 td a,
-.facts a {
+.facts a,
+.trail__head a {
   display: inline-block;
   min-width: 44px;
   padding: 13px 0;
@@ -993,6 +997,21 @@ select {
 .signin .rbtn {
   width: 100%;
 }
+.signin__link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+}
+.qr {
+  display: block;
+  width: min(100%, 240px);
+  margin: 12px auto;
+}
+.secret {
+  font-size: 16px;
+  word-break: break-word;
+}
 .lock__set {
   display: grid;
   gap: 10px;
@@ -1422,4 +1441,9 @@ a.btn {
 }
 .export__done code {
   overflow-wrap: anywhere;
+}
+
+/* The stored breaks follow the recomputed table, so the heading stands off it. */
+.recorded-breaks {
+  margin-top: 24px;
 }
