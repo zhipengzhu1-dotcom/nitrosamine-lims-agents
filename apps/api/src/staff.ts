@@ -112,7 +112,8 @@ const LISTED_ACCESS_EVENTS = 100;
 
 /**
  * The person's newest Access Events that this Lab sees, each Lockout listing the sessions here that it ended, at its
- * instant, whether or not a request or the sweep has ended them yet.
+ * instant, whether or not a request or the sweep has ended them yet. A Lockout not stamped at its person's lock instant
+ * was recorded before sessions ended there, so it lists null rather than claim it ended none.
  */
 async function accessEventsOf(scope: Scope, personId: string, limits: SessionLimits) {
   const rows = await scope
@@ -124,6 +125,9 @@ async function accessEventsOf(scope: Scope, personId: string, limits: SessionLim
       'workstationId',
       sql<string | null>`host(source_address)`.as('sourceAddress'),
       'failureReason',
+      sql<boolean>`coalesce(access_event.at = (select p.locked_at from lims.person p where p.id = access_event.subject_id), false)`.as(
+        'atLockInstant',
+      ),
     ])
     .where('subjectId', '=', personId)
     .orderBy('at', 'desc')
@@ -154,9 +158,11 @@ async function accessEventsOf(scope: Scope, personId: string, limits: SessionLim
       failureReason: e.failureReason,
     };
     if (e.kind !== 'Lockout') return Object.assign(listed, { kind: e.kind });
-    const endedSessions = ended
-      .filter((s) => s.lockoutId === e.id)
-      .map((s) => ({ id: s.id, signedInAt: s.signedInAt, workstation: workstation(s.workstationId) }));
+    const endedSessions = e.atLockInstant
+      ? ended
+          .filter((s) => s.lockoutId === e.id)
+          .map((s) => ({ id: s.id, signedInAt: s.signedInAt, workstation: workstation(s.workstationId) }))
+      : null;
     return Object.assign(listed, { kind: e.kind, endedSessions });
   });
   return { events, earlierNotListed: rows.length > LISTED_ACCESS_EVENTS };

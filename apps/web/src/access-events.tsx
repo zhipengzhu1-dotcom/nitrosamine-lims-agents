@@ -4,7 +4,14 @@ import { Shell, words } from './rail.tsx';
 import { type Column, StackTable } from './stack.tsx';
 import { time } from './time.tsx';
 
-function EndedSessions({ sessions }: { sessions: readonly EndedSession[] }) {
+function EndedSessions({ sessions }: { sessions: readonly EndedSession[] | null }) {
+  if (sessions === null)
+    return (
+      <span>
+        Recorded before a Lockout ended sessions at its instant, so the record does not say which sessions in this Lab
+        it ended.
+      </span>
+    );
   if (sessions.length === 0) return <span>Ended no session in this Lab.</span>;
   return (
     <div>
