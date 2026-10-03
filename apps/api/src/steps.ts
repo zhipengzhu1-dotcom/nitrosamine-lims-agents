@@ -98,7 +98,6 @@ export async function factsFor(
   test: FactsTest | null,
   assigneeId?: string,
 ): Promise<StepFacts> {
-  // The Test's own Signatures, and the Approved ones on its Critical Data Changes.
   const signatures = test
     ? await signedVersions(q)
         .select(['signature.meaning', 'signature.personId'])
