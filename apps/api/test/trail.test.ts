@@ -412,9 +412,17 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
       ...inTrail,
     ];
   };
+  const everyLabClockIn = async (id: string) => {
+    const { entries } = await trailOf(id);
+    const stored = entries.flatMap((e) => e.changes).flatMap((c) => [c.old?.instant, c.new?.instant]);
+    return [...entries, ...stored].flatMap((i) => (i?.atLab ? [{ at: i.at, atLab: i.atLab }] : []));
+  };
   const toMillis = (atLab: string | null) => atLab?.replace(/(\.\d{3})\d{3}/, '$1');
   const writtenBefore = await submitTestTo('Reported');
   const shownBefore = await shownOn(writtenBefore);
+  const trailBefore = await everyLabClockIn(writtenBefore);
+  for (const { at, atLab } of trailBefore)
+    assert.equal(toMillis(atLab), toMillis(onLabClock(at, before)), `${at} in the Audit Trail on the ${before} clock`);
   assert.equal(
     shownBefore.length,
     13,
@@ -425,6 +433,11 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
   await setZone('Asia/Tokyo');
   try {
     assert.deepEqual(await shownOn(writtenBefore), shownBefore, 'the zone change moves no Lab clock written before it');
+    assert.deepEqual(
+      await everyLabClockIn(writtenBefore),
+      trailBefore,
+      "the zone change moves no entry's time and no stored time in the Audit Trail written before it",
+    );
     const writtenAfter = await submitTestTo('Reported');
     for (const { at, atLab } of await shownOn(writtenAfter)) {
       assert.match(atLab ?? '', /\+09:00$/, `${at} on the Tokyo clock`);

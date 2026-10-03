@@ -18,6 +18,10 @@ language sql stable set search_path = lims, pg_temp as $$
       order by e.seq limit 1),
     (select time_zone from lab where lab_id = p_lab_id))
 $$;
+-- The Audit Trail reads every Lab-clock time it does not keep a zone for on the zone in force at that time, so a
+-- zone change moves no entry's time; the index keeps each lookup to the Lab's few zone changes.
+grant execute on function lims.lab_time_zone_at(uuid, timestamptz) to lims_app;
+create index audit_entry_lab_seq on lims.audit_entry (chain, seq) where table_name = 'lab';
 
 -- A Signature and a Received keep the Lab's zone in force when they were written (Annex 11 draft §13.4), so their
 -- Lab-clock half reads the same after the Lab's zone changes.

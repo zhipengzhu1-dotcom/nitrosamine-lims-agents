@@ -44,7 +44,11 @@ test('a Reviewer reads, filters and expands a Test trail and opens a raw entry; 
   const trail = page.getByRole('region', { name: 'Audit Trail' });
   const entries = trail.getByRole('listitem');
   await expect(trail.getByRole('heading', { name: 'Audit Trail' })).toBeVisible();
-  await expect(trail.getByText(/\d+ entries\. Times in UTC and in the Lab's zone, America\/New_York\./)).toBeVisible();
+  await expect(
+    trail.getByText(
+      /\d+ entries\. Times in UTC and on the Lab's zone in force when each was written, now America\/New_York\./,
+    ),
+  ).toBeVisible();
   const zone = trail.getByRole('link', { name: 'America/New_York' });
   await atLeast(zone, 44, 44);
   await zone.click();

@@ -65,8 +65,9 @@ const entryAt = sql.ref('audit_entry.at');
 /** Selected as text, not a Date: the driver's Date keeps milliseconds, and order and labels compare `at` to the microsecond, as the hash renders it. */
 const atText = inUtc(entryAt);
 const atLabText = sql<Instant | null>`(
-  select ${onWallClock(entryAt, sql.ref('l.time_zone'))}
-    from lims.lab l where l.lab_id::text = audit_entry.chain)`;
+  select ${onWallClock(entryAt, sql.ref('z.zone'))}
+    from lims.lab l cross join lateral (select lims.lab_time_zone_at(l.lab_id, audit_entry.at) as zone) z
+   where l.lab_id::text = audit_entry.chain)`;
 const rowId = sql<string>`coalesce(new_row, old_row)->>'id'`;
 const rowIdOf = (table: AuditedTable) => sql<string>`coalesce(new_row, old_row)->>${recordKey(table)}`;
 const newIdOf = (table: AuditedTable) => sql<string>`new_row->>${recordKey(table)}`;
@@ -162,17 +163,17 @@ export async function imagesFor(scope: Scope, entries: TimedEntry[]): Promise<Ro
   return images;
 }
 
-/** Each stored instant as the database renders it, in UTC and on the wall clock of the zone its row kept, else `labZone`, so that no host clock formats one. */
+/** Each stored instant as the database renders it, in UTC and on the wall clock of the zone its row kept, else of the zone `labId`'s chain records in force at that instant, so that no host clock formats one and no zone change moves one. */
 export async function storedInstantsIn(
   scope: Scope,
-  labZone: string,
+  labId: string,
   wanted: ZonedInstant[],
 ): Promise<Map<string, StoredInstant>> {
   const value = sql`${sql.ref('v.stored')}::timestamptz`;
   const { rows } = await sql<StoredInstant & ZonedInstant>`
-    select v.stored, v.zone, ${inUtc(value)} as at,
-           ${onWallClock(value, sql`coalesce(${sql.ref('v.zone')}, ${labZone}::text)`)} as at_lab
-      from unnest(${wanted.map((w) => w.stored)}::text[], ${wanted.map((w) => w.zone)}::text[]) as v(stored, zone)`.execute(
+    select v.stored, v.zone, ${inUtc(value)} as at, ${onWallClock(value, sql.ref('z.zone'))} as at_lab
+      from unnest(${wanted.map((w) => w.stored)}::text[], ${wanted.map((w) => w.zone)}::text[]) as v(stored, zone)
+     cross join lateral (select coalesce(v.zone, lims.lab_time_zone_at(${labId}::uuid, ${value})) as zone) z`.execute(
     scope.company,
   );
   return new Map(rows.map(({ stored, zone, ...rendered }) => [instantKey({ stored, zone }), rendered]));
@@ -187,7 +188,7 @@ async function trailOf(scope: Scope, root: { table: AuditedTable; id: string }, 
     .where('labId', '=', scope.ctx.lab.id)
     .executeTakeFirstOrThrow();
   const images = await imagesFor(scope, entries);
-  const instants = await storedInstantsIn(scope, timeZone, storedInstants(entries));
+  const instants = await storedInstantsIn(scope, scope.ctx.lab.id, storedInstants(entries));
   return {
     record: {
       table: root.table,

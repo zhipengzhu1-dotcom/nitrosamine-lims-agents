@@ -64,7 +64,10 @@ before(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'lims-lab-time-zone-'));
   copies.push(dir);
   await cp(new URL('../migrations/', import.meta.url), dir, { recursive: true });
-  for (const name of await readdir(dir)) if (name >= '0030') await rm(join(dir, name));
+  const names = await readdir(dir);
+  const stamping =
+    names.find((name) => name.endsWith('_lab_time_zone.sql')) ?? assert.fail('the Lab time zone migration');
+  for (const name of names) if (name >= stamping) await rm(join(dir, name));
   await migrate(server, DATABASE, pathToFileURL(`${dir}/`));
   await client.connect();
 
