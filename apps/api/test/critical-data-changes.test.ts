@@ -116,8 +116,16 @@ function decide(
   );
 }
 
-/** The Approved Signature `by` gives, through lims.sign, on the change's latest Record Version, inside `tx`. */
-async function signApproved(tx: Transaction<DB>, by: Account, changeId: string): Promise<string> {
+type Meaning = Insertable<DB['reauthentication']>['meaning'];
+
+/** The Signature `by` gives, through lims.sign, on the record's latest Record Version, inside `tx`. */
+async function signThrough(
+  tx: Transaction<DB>,
+  by: Account,
+  meaning: Meaning,
+  recordTable: 'critical_data_change' | 'test',
+  recordId: string,
+): Promise<string> {
   const { id: sessionId } = await tx
     .selectFrom('session')
     .select('id')
@@ -127,14 +135,14 @@ async function signApproved(tx: Transaction<DB>, by: Account, changeId: string):
     .executeTakeFirstOrThrow();
   const { id: proof } = await tx
     .insertInto('reauthentication')
-    .values({ labId: api.labId, sessionId, personId: by.id, meaning: 'Approved', authenticator: 'Password' })
+    .values({ labId: api.labId, sessionId, personId: by.id, meaning, authenticator: 'Password' })
     .returning('id')
     .executeTakeFirstOrThrow();
   const seen = await tx
     .selectFrom('recordVersion')
     .select(['id', sql<string>`encode(content_hash, 'hex')`.as('hash')])
-    .where('recordTable', '=', 'critical_data_change')
-    .where('recordId', '=', changeId)
+    .where('recordTable', '=', recordTable)
+    .where('recordId', '=', recordId)
     .orderBy('version', 'desc')
     .executeTakeFirstOrThrow();
   const { version } = await tx
@@ -142,14 +150,14 @@ async function signApproved(tx: Transaction<DB>, by: Account, changeId: string):
     .select('version')
     .orderBy('version', 'desc')
     .executeTakeFirstOrThrow();
-  const { rows } = await sql<{ id: string }>`select lims.sign(${proof}, ${sessionId}, 'critical_data_change',
-    ${changeId}, ${seen.id}, decode(${seen.hash}, 'hex'), ${version}, 'Approved', 'test-release') as id`.execute(tx);
+  const { rows } = await sql<{ id: string }>`select lims.sign(${proof}, ${sessionId}, ${recordTable}, ${recordId},
+    ${seen.id}, decode(${seen.hash}, 'hex'), ${version}, ${meaning}, 'test-release') as id`.execute(tx);
   return rows[0]?.id ?? assert.fail('lims.sign returns the Signature');
 }
 
 const approve = (changeId: string, testId: string, by = rui) =>
   acting(api.db, by, 'Reviewer', async (tx) => {
-    const signatureId = await signApproved(tx, by, changeId);
+    const signatureId = await signThrough(tx, by, 'Approved', 'critical_data_change', changeId);
     await tx
       .insertInto('criticalDataChangeDecision')
       .values({ labId: api.labId, changeId, testId, outcome: 'Approved', signatureId })
@@ -353,6 +361,21 @@ describe('a Critical Data Change is decided once: withdrawn by its proposer, app
       .where('s.meaning', '=', 'Approved')
       .executeTakeFirstOrThrow();
     assert.deepEqual(signed, { personId: rui.id, recordTable: 'critical_data_change', newValue: '0.0310' });
+  });
+});
+
+describe('no Test step signs while a Critical Data Change on one of its Results is pending, even past the registry', () => {
+  it('a Reviewed Signature on the Test is refused while a change is pending, and given once it is decided', async () => {
+    const test = await performedTest();
+    const changeId = await propose(test);
+    const review = () => acting(api.db, rui, 'Reviewer', (tx) => signThrough(tx, rui, 'Reviewed', 'test', test.testId));
+    const error = await refusal(review());
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA010', 'a Test is not signed while a Critical Data Change on one of its Results is pending'],
+    );
+    await decide(changeId, test.testId, { outcome: 'Withdrawn', reasonId: reason.inError }, ana, 'Analyst');
+    assert.ok(await review(), 'the Reviewed Signature is given once the change is decided');
   });
 });
 

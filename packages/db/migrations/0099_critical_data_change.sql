@@ -303,6 +303,35 @@ end $$;
 create trigger version_record after insert on lims.critical_data_change
   for each row execute function lims.version_critical_data_change();
 
+-- No Test step signs while a Critical Data Change on one of the Test's Results is pending: neither the Test nor the
+-- Test Report built on it. Holds the Lab's chain before the check, as a proposal does, so of a proposal and a signing at
+-- once the second sees the first.
+create function lims.refuse_signing_while_change_pending() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+declare
+  signed_test uuid;
+begin
+  select coalesce(r.test_id, v.record_id) into signed_test
+    from record_version v
+    left join test_report r on v.record_table = 'test_report' and r.lab_id = v.lab_id and r.id = v.record_id
+   where v.lab_id = new.lab_id and v.id = new.record_version_id and v.record_table in ('test', 'test_report');
+  if signed_test is null then
+    return new;
+  end if;
+  perform lock_chains(new.lab_id::text);
+  if exists (select from critical_data_change c
+              where c.lab_id = new.lab_id and c.test_id = signed_test
+                and not exists (select from critical_data_change_decision d
+                                 where d.lab_id = c.lab_id and d.change_id = c.id)) then
+    raise exception 'a Test is not signed while a Critical Data Change on one of its Results is pending'
+      using errcode = 'LA010';
+  end if;
+  return new;
+end $$;
+
+create trigger test_signing_waits_for_change before insert on lims.signature
+  for each row execute function lims.refuse_signing_while_change_pending();
+
 grant execute on function lims.acting_person() to lims_app;
 grant select on lims.picklist_reason to lims_app;
 grant select on lims.critical_data_change, lims.critical_data_change_decision to lims_app;

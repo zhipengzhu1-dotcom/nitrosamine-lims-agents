@@ -3893,6 +3893,7 @@ it('every constraint, unique index and trigger of a freshly migrated database ha
     ['lims.picklist_reason.picklist_reason_step_not_null', 'critical-data-changes.test.ts'],
     ['lims.picklist_reason.picklist_reason_step_position_key', 'critical-data-changes.test.ts'],
     ['lims.result.value_through_change', 'critical-data-changes.test.ts'],
+    ['lims.signature.test_signing_waits_for_change', 'critical-data-changes.test.ts'],
     [
       'lims.critical_data_change.critical_data_change_lab_id_id_test_id_key',
       'unreachable: (lab_id, id) is already the key',
