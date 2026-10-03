@@ -141,7 +141,7 @@ interface ListenOptions {
   log?: LogSink;
   login?: AppOptions['login'];
   sweepEveryMs?: number | null;
-  verifyReadLimit?: string;
+  verifyReadLimitSeconds?: number;
   logVolume?: AppOptions['logVolume'];
   trustedProxies?: string[];
 }
@@ -154,7 +154,7 @@ async function listen(
     log,
     login = 'decided',
     sweepEveryMs = null,
-    verifyReadLimit,
+    verifyReadLimitSeconds,
     logVolume = null,
     trustedProxies = ['127.0.0.1'],
   }: ListenOptions = {},
@@ -168,7 +168,7 @@ async function listen(
     login,
     release: TEST_RELEASE,
     sweepEveryMs,
-    verifyReadLimit,
+    verifyReadLimitSeconds,
     trustedProxies,
   });
   const base = await app.listen({ port: 0, host: '127.0.0.1' });

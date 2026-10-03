@@ -5,8 +5,8 @@ import {
   type BreakKind,
   breakReport,
   type ChainBreakFound,
-  chainVerification,
-  type ChainVerification,
+  chainReading,
+  type ChainReading,
   currentLabel,
   describeTrail,
   fromTheFirstEntry,
@@ -39,7 +39,7 @@ describe('a recomputed chain reads as how far it is intact, and names each break
     name: string;
     last: string;
     breaks: ChainBreakFound[];
-    expected: Omit<ChainVerification, 'chain' | keyof Resumed>;
+    expected: Omit<ChainReading, 'chain' | keyof Resumed>;
   }[] = [
     {
       name: 'an untouched chain is intact through its last entry',
@@ -122,7 +122,7 @@ describe('a recomputed chain reads as how far it is intact, and names each break
   ];
   for (const c of cases)
     it(c.name, () =>
-      assert.deepEqual(chainVerification('lab', c.last, c.breaks), {
+      assert.deepEqual(chainReading('lab', c.last, c.breaks), {
         chain: 'lab',
         ...fromTheFirstEntry,
         ...c.expected,
@@ -130,7 +130,7 @@ describe('a recomputed chain reads as how far it is intact, and names each break
     );
 
   it('a break reads as where the chain fails and its System Incident in its state', () => {
-    const [closed, head] = chainVerification('lab', '12', [
+    const [closed, head] = chainReading('lab', '12', [
       { ...open('3', 'RF000001'), incidentState: 'Closed' },
       open('13', 'RF000002', 'HeadMoved'),
     ]).breaks;

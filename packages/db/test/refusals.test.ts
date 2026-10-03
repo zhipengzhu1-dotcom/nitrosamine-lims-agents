@@ -11,6 +11,11 @@ const DATABASE = checkoutDatabase('lims_refusals_test');
 const client = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
 
 type Row = Record<string, unknown>;
+type Literal = { literal: string };
+/** A column value written as the SQL given, for a value the fixture can only read from the database. */
+const literal = (text: string): Literal => ({ literal: text });
+const isLiteral = (value: unknown): value is Literal =>
+  typeof value === 'object' && value !== null && 'literal' in value;
 
 const id = {
   customer: randomUUID(),
@@ -281,7 +286,7 @@ const fixture: [string, Row][] = [
       id: id.chainVerification,
       chain: 'company',
       through: 1,
-      head: Buffer.alloc(32, 9),
+      head: literal("(select hash from lims.audit_entry where chain = 'company' and seq = 1)"),
       recomputed_from: 1,
       verified_by: id.person,
     },
@@ -556,7 +561,13 @@ const tables = {
   },
   'lims.chain_verification': {
     noun: 'Chain Verification',
-    row: { chain: 'company', through: 1, head: Buffer.alloc(32, 9), recomputed_from: 1, verified_by: id.person },
+    row: {
+      chain: 'company',
+      through: 1,
+      head: literal("(select hash from lims.audit_entry where chain = 'company' and seq = 1)"),
+      recomputed_from: 1,
+      verified_by: id.person,
+    },
     notNull: ['id', 'chain', 'through', 'head', 'recomputed_from', 'verified_by', 'verified_at'],
   },
   'lims.audit_export': {
@@ -646,8 +657,11 @@ const bare = (table: string) => table.slice(table.indexOf('.') + 1);
 function insert(table: string, row: Row): [string, unknown[]] {
   const columns = Object.keys(row);
   const names = columns.map((column) => pg.escapeIdentifier(column)).join(', ');
-  const params = columns.map((_, i) => `$${i + 1}`).join(', ');
-  return [`insert into ${table} (${names}) values (${params})`, Object.values(row)];
+  const values: unknown[] = [];
+  const params = Object.values(row)
+    .map((value) => (isLiteral(value) ? value.literal : `$${values.push(value)}`))
+    .join(', ');
+  return [`insert into ${table} (${names}) values (${params})`, values];
 }
 
 // The Admin acts, so that an Identity Verification's checker is the actor of its write.
@@ -2832,6 +2846,21 @@ describe('a session is locked and unlocked only by lims.lock_session and lims.un
       rows.map((row) => row.privilege),
       ['INSERT lab_id', 'INSERT person_id', 'INSERT token_hash', 'INSERT workstation_id'],
     );
+  });
+});
+
+describe("a Chain Verification names an entry of its chain and that entry's hash", () => {
+  covered.add('lims.chain_verification.head_matches_entry');
+  it('a Chain Verification whose hash is not the hash of the entry it verified through is refused', async () => {
+    const error = await refusalOfRow('lims.chain_verification', { head: Buffer.alloc(32, 9) });
+    assert.deepEqual(
+      [error.code, error.message],
+      ['LA014', "a Chain Verification names an entry of its chain and that entry's hash"],
+    );
+  });
+  it('a Chain Verification through an entry its chain does not have is refused', async () => {
+    const error = await refusalOfRow('lims.chain_verification', { through: 1000000 });
+    assert.equal(error.code, 'LA014', error.message);
   });
 });
 

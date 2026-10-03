@@ -14,6 +14,7 @@ import {
   type Insertable,
   type Kysely,
   type SelectQueryBuilder,
+  type RawBuilder,
   sql,
   type Transaction,
   type UpdateQueryBuilder,
@@ -104,14 +105,17 @@ const BREAKS_ONE_BY_ONE = 100;
 /** A break, or the breaks after the first ones taken together, as a verification records it. */
 export type RecordedBreak = { entry: string; kind: BreakKind; through: string; breaks: number; fingerprint: string };
 
-export const VERIFY_READ_LIMIT_SECONDS = 30;
-const VERIFY_READ_LIMIT = `${VERIFY_READ_LIMIT_SECONDS}s`;
+/** How long one chain's recompute may run: a routine Verify chain, and Recompute every entry. */
+export const VERIFY_READ_LIMIT_SECONDS = { routine: 30, everyEntry: 600 } as const;
 
 export interface VerifyOptions {
   everyEntry?: boolean;
-  /** A PostgreSQL interval such as `30s`. */
-  readLimit?: string | undefined;
+  readLimitSeconds?: number | undefined;
 }
+
+/** `at` rendered by the database as ISO 8601 UTC to the microsecond, so that no host clock formats it. */
+export const inUtc = (at: RawBuilder<unknown>) =>
+  sql<Instant>`to_char(${at} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 
 /** A chain as the database recomputed it, before QA reads it. */
 export type RecomputedChain = {
@@ -123,21 +127,19 @@ export type RecomputedChain = {
   breaks: RecordedBreak[];
 } & Resumed;
 
-export type VerifiedChains = { at: Instant; chains: RecomputedChain[] } | { timedOut: ChainKind };
+type TimedOut = { timedOut: ChainKind; withinSeconds: number };
+export type VerifiedChains = { at: Instant; chains: RecomputedChain[] } | TimedOut;
+type Recomputed = Omit<RecomputedChain, 'chain' | 'chainId'>;
 
-async function recompute(
-  tx: Kysely<DB>,
-  chain: string,
-  everyEntry: boolean,
-): Promise<Omit<RecomputedChain, 'chain' | 'chainId'>> {
+async function recompute(tx: Kysely<DB>, chain: string, everyEntry: boolean): Promise<Recomputed> {
   const zero = sql`decode(repeat('00', 32), 'hex')`;
-  const { rows } = await sql<Omit<RecomputedChain, 'chain' | 'chainId'>>`
+  const { rows } = await sql<Recomputed>`
     with resume as (
       select case when ${everyEntry} then 0 else coalesce(c.through, 0) end as through,
              case when ${everyEntry} then ${zero} else coalesce(c.head, ${zero}) end as head,
              case when ${everyEntry} or c.through is null then null else json_build_object(
                'through', c.through::text,
-               'at', to_char(c.verified_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+               'at', ${inUtc(sql`c.verified_at`)},
                'by', p.display_name) end as verified_before
       from (select) as one
       left join lims.latest_chain_verification(${chain}) as c on true
@@ -152,9 +154,9 @@ async function recompute(
         sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq))
       from found where n > ${BREAKS_ONE_BY_ONE} having count(*) > 0
     )
-    select to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as at,
-      coalesce((select seq from lims.audit_chain where chain = ${chain}), 0)::text as last_entry,
-      encode(coalesce((select head from lims.audit_chain where chain = ${chain}), ${zero}), 'hex') as head,
+    select ${inUtc(sql`now()`)} as at,
+      coalesce(chain_now.seq, 0)::text as last_entry,
+      encode(coalesce(chain_now.head, ${zero}), 'hex') as head,
       (resume.through + 1)::text as recomputed_from,
       resume.verified_before,
       coalesce((
@@ -164,7 +166,7 @@ async function recompute(
         ) order by r.seq)
         from recorded as r
       ), '[]') as breaks
-    from resume`.execute(tx);
+    from resume left join lims.audit_chain as chain_now on chain_now.chain = ${chain}`.execute(tx);
   const [found] = rows;
   if (!found) throw new Error(`the recompute of chain ${chain} returned no row`);
   return found;
@@ -181,22 +183,27 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
     trail: () => db.selectFrom('auditEntry').where('chain', 'in', [labId, 'company']),
     /**
      * Recomputes this Lab's chain and the company chain from one snapshot, each from its latest Chain Verification
-     * unless `everyEntry` asks for the whole chain, and each within `readLimit`: the first chain that overruns it is
+     * unless `everyEntry` asks for the whole chain, and each within `readLimitSeconds`: the first chain that overruns it is
      * answered as `timedOut` instead of a failure.
      */
-    verifyAuditTrail: async ({ everyEntry = false, readLimit = VERIFY_READ_LIMIT }: VerifyOptions = {}) => {
+    verifyAuditTrail: async ({
+      everyEntry = false,
+      readLimitSeconds = VERIFY_READ_LIMIT_SECONDS.routine,
+    }: VerifyOptions = {}) => {
       const read = async (tx: Kysely<DB>): Promise<VerifiedChains> => {
-        await sql`select set_config('statement_timeout', ${readLimit}, true)`.execute(tx);
+        await sql`select set_config('statement_timeout', ${`${Math.round(readLimitSeconds * 1000)}ms`}, true)`.execute(
+          tx,
+        );
         const chains: RecomputedChain[] = [];
         for (const [chain, chainId] of [
           ['lab', labId],
           ['company', 'company'],
         ] as const) {
-          const found = await recompute(tx, chainId, everyEntry).catch((error: unknown) => {
-            if (postgresFault(error)?.sqlstate === '57014') return chain;
+          const found = await recompute(tx, chainId, everyEntry).catch((error: unknown): TimedOut => {
+            if (postgresFault(error)?.sqlstate === '57014') return { timedOut: chain, withinSeconds: readLimitSeconds };
             throw new Error(`Verify chain could not recompute the ${chain} chain`, { cause: error });
           });
-          if (typeof found === 'string') return { timedOut: found };
+          if ('timedOut' in found) return found;
           chains.push({ chain, chainId, ...found });
         }
         const [first] = chains;

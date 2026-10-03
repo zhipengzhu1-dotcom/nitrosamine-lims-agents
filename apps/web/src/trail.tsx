@@ -6,7 +6,8 @@ import {
   auditedRecords,
   type AuditTrailVerification,
   breakLine,
-  type ChainVerification,
+  type ChainReading,
+  resumedLine,
   isTestState,
   type ShownValue,
   routes,
@@ -139,10 +140,7 @@ function RawDialog({ entry, onClose }: { entry: TrailEntry | null; onClose: () =
   );
 }
 
-const resumedText = (c: ChainVerification) =>
-  c.verifiedBefore === null
-    ? 'Every entry recomputed.'
-    : `Recomputed from entry ${c.recomputedFrom}; entries through ${c.verifiedBefore.through} were verified ${time(c.verifiedBefore.at)} by ${c.verifiedBefore.by}.`;
+const resumedText = (c: ChainReading) => resumedLine(c, time);
 
 function VerifyChain() {
   const inFlight = useRef(false);

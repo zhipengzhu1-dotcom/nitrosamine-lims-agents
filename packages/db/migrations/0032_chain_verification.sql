@@ -21,6 +21,17 @@ create trigger refuse_change before update or delete on lims.chain_verification
 create trigger refuse_truncate before truncate on lims.chain_verification
   for each statement execute function lims.refuse_change();
 
+create function lims.chain_verification_head_matches_entry() returns trigger
+language plpgsql security definer set search_path = lims, pg_temp as $$
+begin
+  if not exists (select from audit_entry e where e.chain = new.chain and e.seq = new.through and e.hash = new.head) then
+    raise exception 'a Chain Verification names an entry of its chain and that entry''s hash' using errcode = 'LA014';
+  end if;
+  return new;
+end $$;
+create trigger head_matches_entry after insert on lims.chain_verification
+  for each row execute function lims.chain_verification_head_matches_entry();
+
 grant select on lims.chain_verification to lims_app;
 grant insert (chain, through, head, recomputed_from, verified_by) on lims.chain_verification to lims_app;
 

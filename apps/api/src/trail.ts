@@ -4,11 +4,10 @@ import {
   actorUsername,
   type AuditedTable,
   type AuditTrailVerification,
-  type ChainKind,
   auditedRecords,
   auditOp,
-  type ChainVerification,
-  chainVerification,
+  type ChainReading,
+  chainReading,
   currentLabel,
   describeTrail,
   imagesOf,
@@ -42,6 +41,7 @@ import {
   type RecomputedChain,
   type Scope,
   VERIFY_READ_LIMIT_SECONDS,
+  inUtc,
   type VerifiedChains,
   type VerifyOptions,
 } from './scope.ts';
@@ -57,8 +57,6 @@ function opOf(op: string): TimedEntry['op'] {
   throw new Error(`an Audit Trail entry has the op ${op}`);
 }
 
-const inUtc = (at: RawBuilder<unknown>) =>
-  sql<Instant>`to_char(${at} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 /** `at` on `zone`'s wall clock, ISO 8601 to the microsecond with the zone's offset, rendered by the database so that no host clock formats it; null when `at` may be null. */
 export const onWallClock = <At>(at: RawBuilder<At>, zone: RawBuilder<unknown>) => sql<
   null extends At ? Instant | null : Instant
@@ -221,7 +219,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
           .selectFrom('chainVerification')
           .select('id')
           .where('id', '=', id)
-          .where('chain', 'in', [scope.ctx.lab.id ?? 'company', 'company'])
+          .where('chain', 'in', [scope.ctx.lab.id, 'company'])
           .executeTakeFirst(),
       );
     case 'person':
@@ -249,7 +247,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
   }
 }
 
-export function trailRoutes(app: App, db: Kysely<DB>, readLimit?: string): void {
+export function trailRoutes(app: App, db: Kysely<DB>, readLimitSeconds?: number): void {
   app.route({
     ...routes.testTrail,
     handler: async (req) => {
@@ -298,15 +296,23 @@ export function trailRoutes(app: App, db: Kysely<DB>, readLimit?: string): void 
     },
   });
 
-  app.route({ ...routes.verifyAuditTrail, handler: (req) => verify(db, req, { everyEntry: false, readLimit }) });
-  app.route({ ...routes.recomputeAuditTrail, handler: (req) => verify(db, req, { everyEntry: true, readLimit }) });
+  app.route({
+    ...routes.verifyAuditTrail,
+    handler: (req) =>
+      verify(db, req, { everyEntry: false, readLimitSeconds: readLimitSeconds ?? VERIFY_READ_LIMIT_SECONDS.routine }),
+  });
+  app.route({
+    ...routes.recomputeAuditTrail,
+    handler: (req) =>
+      verify(db, req, { everyEntry: true, readLimitSeconds: readLimitSeconds ?? VERIFY_READ_LIMIT_SECONDS.everyEntry }),
+  });
 }
 
 async function verify(db: Kysely<DB>, req: FastifyRequest, options: VerifyOptions): Promise<AuditTrailVerification> {
   if (!req.actor.roles.includes('QA')) refuse('role', 'Verifying the Audit Trail is a QA action.');
   const scope = labScope(db, req.actor);
   const { at, chains: recomputed } = chainsOf(await scope.verifyAuditTrail(options));
-  const chains = await chainVerifications(db, req.log, req.actor, recomputed);
+  const chains = await chainReadings(db, req.log, req.actor, recomputed);
   const intact = recomputed.filter(
     (c) => chains.some((v) => v.chain === c.chain && v.verdict === 'Intact') && c.lastEntry !== '0',
   );
@@ -329,11 +335,11 @@ async function verify(db: Kysely<DB>, req: FastifyRequest, options: VerifyOption
 }
 
 /** The recomputed chains, or the refusal that names the chain whose recompute did not finish within the read limit. */
-export function chainsOf(verified: VerifiedChains): Exclude<VerifiedChains, { timedOut: ChainKind }> {
+export function chainsOf(verified: VerifiedChains): Extract<VerifiedChains, { chains: RecomputedChain[] }> {
   if ('timedOut' in verified)
     refuse(
       'state',
-      `Verifying the ${verified.timedOut === 'lab' ? 'Lab' : 'company'} chain did not finish within ${VERIFY_READ_LIMIT_SECONDS} seconds. Try again when the LIMS is less busy.`,
+      `Verifying the ${verified.timedOut === 'lab' ? 'Lab' : 'company'} chain did not finish within ${verified.withinSeconds} seconds. Try again when the LIMS is less busy.`,
     );
   return verified;
 }
@@ -342,16 +348,16 @@ export function chainsOf(verified: VerifiedChains): Exclude<VerifiedChains, { ti
  * Reads each recomputed chain as QA sees it; each break opens its System Incident, or answers the one that records it
  * already, so no break is shown without a record.
  */
-export async function chainVerifications(
+export async function chainReadings(
   db: Kysely<DB>,
   log: FastifyBaseLogger,
   requester: ActorContext,
   chains: RecomputedChain[],
-): Promise<ChainVerification[]> {
+): Promise<ChainReading[]> {
   const verified = [];
   for (const { chain, chainId, lastEntry, breaks, recomputedFrom, verifiedBefore } of chains)
     verified.push(
-      chainVerification(chain, lastEntry, await openChainIncidents(db, log, requester, chainId, breaks), {
+      chainReading(chain, lastEntry, await openChainIncidents(db, log, requester, chainId, breaks), {
         recomputedFrom,
         verifiedBefore,
       }),

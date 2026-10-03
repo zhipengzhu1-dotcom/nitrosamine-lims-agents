@@ -361,7 +361,7 @@ const chainBreak = Type.Object({
   incidentState,
 });
 export type ChainBreak = Static<typeof chainBreak>;
-const chainVerification = Type.Object({
+const chainReading = Type.Object({
   chain: chainKind,
   verdict: chainVerdict,
   lastEntry: seq,
@@ -374,8 +374,8 @@ const chainVerification = Type.Object({
   /** The Chain Verification resumed from: the entry it verified through, when, and who verified; null when none. */
   verifiedBefore: nullable(Type.Object({ through: seq, at: instant, by: Type.String() })),
 });
-export type ChainVerification = Static<typeof chainVerification>;
-const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
+export type ChainReading = Static<typeof chainReading>;
+const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainReading) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
 const auditExportFormat = Type.Enum({ JSON: 'JSON', CSV: 'CSV' } as const satisfies { [K in db.AuditExportFormat]: K });
 export type AuditExportFormat = Static<typeof auditExportFormat>;
@@ -389,7 +389,7 @@ export const auditExportData = Type.Object({
   lab: Type.Object({ code: Type.String(), name: Type.String(), zone: Type.String() }),
   asOf: instant,
   generatedBy: Type.Object({ label: Type.String(), username: Type.String(), role }),
-  chains: Type.Array(chainVerification),
+  chains: Type.Array(chainReading),
   entries: Type.Array(exportedEntry),
 });
 export type AuditExportData = Static<typeof auditExportData>;

@@ -940,7 +940,7 @@ it('Verify chain records a Chain Verification for each intact chain and resumes 
 });
 
 it("Verify chain refuses, naming the chain, when a chain's recompute does not finish within the read limit, and opens no System Incident", async () => {
-  const slow = await startApi('lims_api_trail_slow_test', { verifyReadLimit: '300ms' });
+  const slow = await startApi('lims_api_trail_slow_test', { verifyReadLimitSeconds: 0.3 });
   const qa = await slow.login(await slow.addPerson('slow.qa', ['QA']));
   const holder = await slow.superuser.connection().execute(async (held) => {
     await sql`begin`.execute(held);
@@ -951,7 +951,7 @@ it("Verify chain refuses, naming the chain, when a chain's recompute does not fi
   });
   assert.equal(
     holder,
-    'Verifying the Lab chain did not finish within 30 seconds. Try again when the LIMS is less busy.',
+    'Verifying the Lab chain did not finish within 0.3 seconds. Try again when the LIMS is less busy.',
   );
   assert.deepEqual(
     await slow.db.selectFrom('systemIncident').select('kind').execute(),

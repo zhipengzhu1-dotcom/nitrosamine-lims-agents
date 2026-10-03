@@ -14,7 +14,7 @@ export function sessionRoutes(
   db: Kysely<DB>,
   limits: SessionLimits,
   release: string,
-  verifyReadLimit?: string,
+  verifyReadLimitSeconds?: number,
 ): void {
   const withSession = (whileLocked: boolean, routes: (scope: App) => void) =>
     app.register(async (scope) => {
@@ -35,7 +35,7 @@ export function sessionRoutes(
   withSession(false, (signedIn) => {
     labSwitchRoute(signedIn, db, limits);
     preferenceRoutes(signedIn, db);
-    readRoutes(signedIn, db, verifyReadLimit);
+    readRoutes(signedIn, db, verifyReadLimitSeconds);
     staffRoutes(signedIn, db, limits);
     stepRoutes(signedIn, db, release);
     workstationRoutes(signedIn, db);

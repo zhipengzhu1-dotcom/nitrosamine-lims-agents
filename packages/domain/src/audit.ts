@@ -2,7 +2,7 @@ import type {
   AuditedTable,
   ChainBreak,
   ChainKind,
-  ChainVerification,
+  ChainReading,
   Instant,
   RawEntry,
   RecordRef,
@@ -440,20 +440,26 @@ export const breakLine = (b: ChainBreak) => `${b.failure}, recorded as System In
 /** A break as one line of text: `breakLine` and the System Incident's state now. */
 export const breakReport = (b: ChainBreak) => `${breakLine(b)} (${b.incidentState})`;
 
-export type Resumed = Pick<ChainVerification, 'recomputedFrom' | 'verifiedBefore'>;
+export type Resumed = Pick<ChainReading, 'recomputedFrom' | 'verifiedBefore'>;
 
 export const fromTheFirstEntry: Resumed = { recomputedFrom: '1', verifiedBefore: null };
+
+/** Which entries a reading recomputed, and the Chain Verification before them that it trusted; `when` renders the Instant. */
+export const resumedLine = (c: Resumed, when: (at: Instant) => string) =>
+  c.verifiedBefore === null
+    ? 'Every entry recomputed.'
+    : `Recomputed from entry ${c.recomputedFrom}; entries through ${c.verifiedBefore.through} were verified ${when(c.verifiedBefore.at)} by ${c.verifiedBefore.by}.`;
 
 /**
  * How QA reads a recomputed chain: intact through its last entry, or through the entry before its first break, with
  * every break and the System Incident that records each, which `breakReport` reads out, and where the recompute began.
  */
-export function chainVerification(
+export function chainReading(
   chain: ChainKind,
   lastEntry: string,
   found: ChainBreakFound[],
   resumed: Resumed = fromTheFirstEntry,
-): ChainVerification {
+): ChainReading {
   const breaks = found.map(({ entry, kind, through, breaks: count, incident, incidentState }) => ({
     entry,
     failure: failureOf({ entry, kind, through, breaks: count }),
