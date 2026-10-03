@@ -366,12 +366,6 @@ it('a stored instant carries its UTC and Lab-zone renderings, a Record kind read
 });
 
 it("a Test's Signatures and Received keep the Lab wall clock of the zone in force when each was written, on every screen and in the Audit Trail, after the Lab's time zone changes", async () => {
-  const setZone = (timeZone: string) =>
-    audited(
-      api.superuser,
-      { actor: 'svc:migrate', role: 'system', reason: 'Move the Lab to a zone no other Lab has' },
-      (tx) => tx.updateTable('lab').set({ timeZone }).where('labId', '=', api.labId).execute(),
-    );
   const { timeZone: before } = await api.db
     .selectFrom('lab')
     .select('timeZone')
@@ -412,7 +406,7 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
   );
   for (const { at, atLab } of shownBefore)
     assert.equal(toMillis(atLab), toMillis(onLabClock(at, before)), `${at} on the ${before} clock`);
-  await setZone('Asia/Tokyo');
+  await api.moveLabZone('Asia/Tokyo');
   try {
     assert.deepEqual(await shownOn(writtenBefore), shownBefore, 'the zone change moves no Lab clock written before it');
     assert.deepEqual(
@@ -437,7 +431,7 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
       [api.labId, 'Move the Lab to a zone no other Lab has', [['Time zone', before, 'Asia/Tokyo']]],
     );
   } finally {
-    await setZone(before);
+    await api.moveLabZone(before);
   }
 });
 

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
-import { audited } from '@lims/db';
 import { forcesYes, incidentStepRoute, type Role, routes, type SigningBody, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
 import { type Account, type Client, ok, onLabClock, refusedWith, signatureOf, startApi } from './harness.ts';
@@ -396,12 +395,6 @@ it('a System Incident whose content changes after the Acknowledged signing retur
 });
 
 it('the Acknowledged Signature keeps the Lab wall clock of the zone it was signed in after the Lab’s time zone changes', async () => {
-  const setZone = (timeZone: string) =>
-    audited(
-      api.superuser,
-      { actor: 'svc:migrate', role: 'system', reason: 'Move the Lab to a zone no other Lab has' },
-      (tx) => tx.updateTable('lab').set({ timeZone }).where('labId', '=', api.labId).execute(),
-    );
   const { timeZone: before } = await api.db
     .selectFrom('lab')
     .select('timeZone')
@@ -411,13 +404,14 @@ it('the Acknowledged Signature keeps the Lab wall clock of the zone it was signe
   ok(await answer(as.quinn, reference, 'Yes'));
   ok(await immediate(as.ada, reference, 'Reran the entry.'));
   ok(await corrective(as.ada, reference, 'Added a check.'));
-  const signed = ok(await acknowledge(as.ada, reference, ada)).acknowledged ?? assert.fail('the Acknowledged Signature');
+  const signed =
+    ok(await acknowledge(as.ada, reference, ada)).acknowledged ?? assert.fail('the Acknowledged Signature');
   assert.equal(
     signed.signedAtLab.replace(/(\.\d{3})\d{3}/, '$1'),
     onLabClock(signed.signedAt, before),
     `signed on the ${before} clock, to the millisecond the UTC time carries`,
   );
-  await setZone('Asia/Tokyo');
+  await api.moveLabZone('Asia/Tokyo');
   try {
     const shown = (await view(as.ada, reference)).acknowledged ?? assert.fail('the Acknowledged Signature');
     assert.deepEqual(
@@ -425,9 +419,8 @@ it('the Acknowledged Signature keeps the Lab wall clock of the zone it was signe
       [signed.signedAt, signed.signedAtLab],
       'the zone change moves no Lab clock signed before it',
     );
-    assert.doesNotMatch(shown.signedAtLab, /\+09:00$/, 'not on the Tokyo clock');
   } finally {
-    await setZone(before);
+    await api.moveLabZone(before);
   }
 });
 

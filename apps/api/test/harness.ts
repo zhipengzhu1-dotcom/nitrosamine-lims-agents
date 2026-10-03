@@ -295,6 +295,14 @@ export async function startApi(name: string) {
         .where('endedAt', 'is', null)
         .execute();
     },
+    /** Moves the default Lab to `timeZone` through the Audit Trail, as the migration service would. */
+    async moveLabZone(timeZone: string): Promise<void> {
+      await audited(
+        superuser,
+        { actor: 'svc:migrate', role: 'system', reason: 'Move the Lab to a zone no other Lab has' },
+        (tx) => tx.updateTable('lab').set({ timeZone }).where('labId', '=', labId).execute(),
+      );
+    },
     labId,
     qcLabId,
     methodId,

@@ -18,7 +18,7 @@ import { type Credentials, reauthenticate, sourceAddressOf } from './auth.ts';
 import { refuse } from './refuse.ts';
 import { labScope } from './scope.ts';
 import { proveReauthentication, signingRefused, signRecord, statementInForce } from './signing.ts';
-import { onWallClock } from './trail.ts';
+import { signedAtLab } from './trail.ts';
 
 /** System Incidents are company records (map #1, lab-scope-incidents): Admin and QA of any Lab read and act on them. */
 function readableBy(actor: ActorContext): void {
@@ -109,7 +109,7 @@ async function readIncident(db: Kysely<DB>, labId: string, reference: string) {
       'signature.role',
       sql<Authenticator | null>`signature.authenticator`.as('authenticator'),
       'signature.signedAt',
-      onWallClock(sql.ref<Date>('signature.signed_at'), sql.ref('signature.signed_time_zone')).as('signedAtLab'),
+      signedAtLab,
       'recordVersion.version',
       'recordVersion.canonicalForm',
       sql<string>`encode(record_version.content_hash, 'hex')`.as('contentHash'),
