@@ -403,7 +403,7 @@ it('each version reads with its state: the version in force, the newest draft ab
   assert.equal(stateOf(older), 'Superseded', 'a draft below the newest is listed as Superseded');
 });
 
-it('a draft whose evidence the checklist kind cannot show, or whose keys repeat, is refused', async () => {
+it('a draft whose evidence the checklist kind cannot show, whose keys repeat, or whose item text is blank is refused', async () => {
   assert.deepEqual(
     (await versions()).evidenceSources,
     ['performedSignature'],
@@ -423,5 +423,12 @@ it('a draft whose evidence the checklist kind cannot show, or whose keys repeat,
   assert.equal(
     refusedWith(await as.quinn.call(routes.draftChecklistVersion, { kind: 'Test', items: [item, item] }), 'malformed'),
     'Each item of a Review Checklist version needs its own key.',
+  );
+  assert.equal(
+    refusedWith(
+      await as.quinn.call(routes.draftChecklistVersion, { kind: 'Test', items: [{ ...item, text: '   ' }] }),
+      'malformed',
+    ),
+    'Each item of a Review Checklist version needs its text.',
   );
 });

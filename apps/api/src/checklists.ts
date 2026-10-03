@@ -174,6 +174,8 @@ export function checklistRoutes(app: App, db: Kysely<DB>, credentials: Credentia
           refuse('guard', `The ${kind} Review Checklist cannot show the evidence “${item.evidence}”.`);
       if (new Set(req.body.items.map((i) => i.key)).size !== req.body.items.length)
         refuse('malformed', 'Each item of a Review Checklist version needs its own key.');
+      if (req.body.items.some((i) => i.text.trim() === ''))
+        refuse('malformed', 'Each item of a Review Checklist version needs its text.');
       await scope.write('draftReviewChecklist', 'QA', async (q) => {
         await sql`select lims.lock_chains('company')`.execute(q.company);
         const { max } = await q.company
