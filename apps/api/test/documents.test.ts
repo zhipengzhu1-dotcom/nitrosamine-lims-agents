@@ -214,6 +214,19 @@ it('the author Abandons a Draft with a reason and it keeps its number; someone e
   assert.equal(following(next.number), following(number) + 1);
 });
 
+it('an Approved version is Abandoned before its Effective Date and not once the date has come', async () => {
+  const { id } = ok(await draft(as.lena, 'Receiving samples (fictional)', later));
+  ok(await step(as.lena, lena, 'signAuthored', id));
+  ok(await step(as.rui, rui, 'signReviewed', id));
+  assert.deepEqual(ok(await step(as.quinn, quinn, 'signApproved', id)).steps, ['abandon']);
+  await moveEffectiveDate(id, -30);
+  assert.deepEqual(ok(await as.quinn.call(routes.document, { id })).steps, []);
+  assert.equal(
+    refusedWith(await step(as.quinn, quinn, 'abandon', id, 'Not needed.'), 'guard'),
+    'A Document version Approved for an Effective Date that has come is not Abandoned.',
+  );
+});
+
 it('a Customer neither reads nor writes the Document vault', async () => {
   refusedWith(await as.cora.call(routes.documents), 'role');
   refusedWith(await draft(as.cora), 'role');

@@ -15,9 +15,16 @@ const quinn: DocumentActor = { username: 'quinn.qa', roles: ['QA'] };
 const ana: DocumentActor = { username: 'ana.analyst', roles: ['Analyst'] };
 const ada: DocumentActor = { username: 'ada.admin', roles: ['Admin'] };
 
-const draft: DocumentFacts = { status: 'Draft', author: 'lena.manager', authored: [], reviewed: [] };
+const draft: DocumentFacts = {
+  status: 'Draft',
+  author: 'lena.manager',
+  authored: [],
+  reviewed: [],
+  effectiveDateHasCome: false,
+};
 const inReview: DocumentFacts = { ...draft, status: 'InReview', authored: ['lena.manager'] };
 const reviewed: DocumentFacts = { ...inReview, reviewed: ['rui.reviewer'] };
+const approved: DocumentFacts = { ...reviewed, status: 'Approved' };
 
 describe('the Document step registry', () => {
   const cases: [string, DocumentStepName, DocumentFacts, DocumentActor, string | null][] = [
@@ -76,6 +83,15 @@ describe('the Document step registry', () => {
     ],
     ['the author abandons a Draft', 'abandon', draft, lena, null],
     ['QA abandons a version in review', 'abandon', inReview, quinn, null],
+    ['the author abandons an Approved version before its Effective Date', 'abandon', approved, lena, null],
+    [
+      'an Approved version whose Effective Date has come is not abandoned',
+      'abandon',
+      { ...approved, effectiveDateHasCome: true },
+      quinn,
+      'A Document version Approved for an Effective Date that has come is not Abandoned.',
+    ],
+    ['the author abandons a Draft dated today', 'abandon', { ...draft, effectiveDateHasCome: true }, lena, null],
     [
       'an Analyst who did not author it may not abandon',
       'abandon',

@@ -138,7 +138,8 @@ end $$;
 -- Signatures, each over its content as it is now, Approved to Effective once its Effective Date has come in the Lab's
 -- zone, and Effective to Superseded when a later version is Effective or Approved with an Effective Date that has
 -- come, which the API then makes Effective in the same transaction. An open version may be Abandoned, by its author
--- or a person who holds QA in its Lab, with a reason written then and never changed.
+-- or a person who holds QA in its Lab, with a reason written then and never changed, an Approved one only before its
+-- Effective Date: once the date has come it is the version that replaces the Effective one.
 -- What the Signatures cover, the Effective Date among it, changes only while Draft, and the Effective Date is never
 -- written in the past. A version whose Effective Date has passed is not Approved: its Signatures would approve a day
 -- it did not take effect on.
@@ -192,6 +193,10 @@ begin
        select from document_version later where later.document_id = new.document_id and later.version > new.version
           and (later.status = 'Effective' or (later.status = 'Approved' and later.effective_date <= lab_today))) then
     raise exception 'a Document version is Superseded only by a later version whose Effective Date has come'
+      using errcode = 'LA014';
+  end if;
+  if old.status = 'Approved' and new.status = 'Abandoned' and old.effective_date <= lab_today then
+    raise exception 'a Document version Approved for an Effective Date that has come is not Abandoned'
       using errcode = 'LA014';
   end if;
   if new.status = 'Abandoned'

@@ -54,6 +54,8 @@ async function readDocument(scope: Scope, id: string) {
       'person.username',
       'person.displayName',
       sql<string>`to_char(document_version.effective_date, 'YYYY-MM-DD')`.as('effectiveDate'),
+      sql<boolean>`document_version.effective_date <= (select (now() at time zone time_zone)::date from lims.lab
+        where lab.lab_id = document_version.lab_id)`.as('effectiveDateHasCome'),
       'documentVersion.abandonReason',
     ])
     .where('documentVersion.documentId', '=', id)
@@ -97,6 +99,7 @@ async function readDocument(scope: Scope, id: string) {
     author: newest.username,
     authored: signers('Authored'),
     reviewed: signers('Reviewed'),
+    effectiveDateHasCome: newest.effectiveDateHasCome,
   };
   const view = {
     ...document,

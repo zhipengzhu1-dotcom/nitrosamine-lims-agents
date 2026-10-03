@@ -1,6 +1,5 @@
 import {
   type ActorContext,
-  type DocumentFacts,
   type DocumentRow,
   type DocumentStepName,
   type DocumentView,
@@ -26,19 +25,6 @@ const documentUi: { [K in DocumentStepName]: { label: string; fields: readonly F
   abandon: { label: 'Abandon', fields: [{ name: 'reason', label: 'Reason', kind: 'text' }] },
 };
 
-/** What the step registry decides on, read from the newest version the server sent. */
-function factsOf(view: DocumentView): DocumentFacts | null {
-  const [newest] = view.versions;
-  if (!newest) return null;
-  const signers = (meaning: string) => newest.signatures.filter((s) => s.meaning === meaning).map((s) => s.username);
-  return {
-    status: newest.status,
-    author: newest.author.username,
-    authored: signers('Authored'),
-    reviewed: signers('Reviewed'),
-  };
-}
-
 /** The rail's action for a step the person may take on the newest version; a signing carries its Record Version. */
 function documentAction(
   me: ActorContext,
@@ -47,9 +33,13 @@ function documentAction(
   onDone: () => Promise<void>,
 ): RailAction | null {
   const [newest] = view.versions;
-  const facts = factsOf(view);
-  const role = facts && documentStepRole(name, facts, { username: me.person.username, roles: me.roles });
-  if (!newest || !role) return null;
+  if (!newest) return null;
+  const role = documentStepRole(
+    name,
+    { author: newest.author.username },
+    { username: me.person.username, roles: me.roles },
+  );
+  if (!role) return null;
   const step = documentSteps[name];
   const ui = documentUi[name];
   const what = [

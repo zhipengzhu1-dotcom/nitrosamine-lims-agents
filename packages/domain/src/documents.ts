@@ -14,12 +14,16 @@ export const mayAuthorDocuments = (roles: readonly Role[]): boolean =>
 export const mayReadDocuments = (roles: readonly Role[]): boolean =>
   roles.some((role) => role !== 'Customer' && role !== 'PlatformOperator');
 
-/** What a Document version holds that decides which step may be taken on it: its status, its author, and who signed what. */
+/**
+ * What a Document version holds that decides which step may be taken on it: its status, its author, who signed what,
+ * and whether its Effective Date is the Lab's today or earlier.
+ */
 export interface DocumentFacts {
   status: DocumentStatus;
   author: string;
   authored: readonly string[];
   reviewed: readonly string[];
+  effectiveDateHasCome: boolean;
 }
 
 /** The person asking, by username, and the roles they hold in the session's Lab. */
@@ -44,8 +48,8 @@ export interface DocumentStep<K extends DocumentStepName = DocumentStepName> {
 /**
  * How a Document version becomes Effective: its author signs Authored on the Draft, a Reviewer who did not author it
  * signs Reviewed, and QA, who neither authored nor reviewed it, signs Approved. All three sign the Effective Date the
- * author wrote on the Draft. Its author or QA may Abandon an open version with a reason. The API refuses and the web offers by this table, and the database
- * holds the same rules.
+ * author wrote on the Draft. Its author or QA may Abandon an open version with a reason, an Approved one only before
+ * its Effective Date. The API refuses and the web offers by this table, and the database holds the same rules.
  */
 export const documentSteps: { [K in DocumentStepName]: DocumentStep<K> } = {
   signAuthored: {
@@ -83,10 +87,13 @@ export const documentSteps: { [K in DocumentStepName]: DocumentStep<K> } = {
     to: 'Abandoned',
     roles: documentAuthors,
     signs: null,
-    guard: (f, actor) =>
-      actor.username === f.author || actor.roles.includes('QA')
-        ? null
-        : 'A Document version is Abandoned by its author or QA.',
+    guard: (f, actor) => {
+      if (actor.username !== f.author && !actor.roles.includes('QA'))
+        return 'A Document version is Abandoned by its author or QA.';
+      if (f.status === 'Approved' && f.effectiveDateHasCome)
+        return 'A Document version Approved for an Effective Date that has come is not Abandoned.';
+      return null;
+    },
   },
 };
 
@@ -114,7 +121,11 @@ export function documentRefusal<K extends DocumentStepName>(
 }
 
 /** The role a step the actor may take acts in: QA for an abandon by someone other than the author, else the first of its roles the actor holds. */
-export function documentStepRole(name: DocumentStepName, facts: DocumentFacts, actor: DocumentActor): Role | undefined {
+export function documentStepRole(
+  name: DocumentStepName,
+  facts: Pick<DocumentFacts, 'author'>,
+  actor: DocumentActor,
+): Role | undefined {
   if (name === 'abandon' && actor.username !== facts.author) return 'QA';
   return documentSteps[name].roles.find((role) => actor.roles.includes(role));
 }

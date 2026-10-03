@@ -4267,6 +4267,11 @@ describe('a Document keeps its number, and its versions reach Effective only thr
       statements: [...versionIn('Draft'), asPerson('refusal.reviewer', 'Reviewer'), abandon('Not needed.')],
       message: 'a Document version is Abandoned by its author or QA',
     },
+    {
+      name: 'a Document version Approved for an Effective Date that has come, Abandoned by its author, is refused',
+      statements: [...versionIn('Approved', '2026-01-01'), asAuthor, abandon('Not needed.')],
+      message: 'a Document version Approved for an Effective Date that has come is not Abandoned',
+    },
   ];
   for (const move of moves) {
     it(move.name, async () => {
@@ -4298,6 +4303,17 @@ describe('a Document keeps its number, and its versions reach Effective only thr
         version,
       ]);
       assert.deepEqual(rows, [{ status: 'Abandoned', abandon_reason: 'Withdrawn.' }]);
+    } finally {
+      await client.query('rollback');
+    }
+  });
+  it('the author Abandons an Approved version before its Effective Date', async () => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await accepted(...versionIn('Approved', '2099-01-01'), asAuthor, abandon('Not needed.'));
+      const { rows } = await client.query('select status from lims.document_version where id = $1', [version]);
+      assert.deepEqual(rows, [{ status: 'Abandoned' }]);
     } finally {
       await client.query('rollback');
     }
