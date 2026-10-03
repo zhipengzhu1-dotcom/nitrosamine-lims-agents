@@ -715,6 +715,21 @@ async function refusalOf(
   return assert.fail(`the database accepted ${statement}`);
 }
 
+/** Like refusalOf, with triggers off, for a row a trigger would otherwise stamp over or refuse first. */
+async function refusalWithTriggersOff(statement: string, values: unknown[]): Promise<pg.DatabaseError> {
+  await client.query('begin');
+  try {
+    await client.query('set local session_replication_role = replica');
+    await client.query(statement, values);
+  } catch (error) {
+    if (error instanceof pg.DatabaseError) return error;
+    throw error;
+  } finally {
+    await client.query('rollback');
+  }
+  return assert.fail(`the database accepted ${statement}`);
+}
+
 function refusalOfRow(table: Table, change: Row = {}, context = true) {
   const row = { ...tables[table].row, ...change };
   return refusalOf(...insert(table, row), context, row);
@@ -1500,6 +1515,18 @@ describe('the database refuses a value outside its allowed set', () => {
       change: { kind: 'SignInFailed', failure_reason: 'WrongUserId' },
       constraint: 'access_event_failure_kind_check',
     },
+    {
+      name: 'a failed unlock Access Event without a failure reason is refused',
+      table: 'lims.access_event',
+      change: { kind: 'UnlockFailed', failure_reason: null, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_unlock_failure_check',
+    },
+    ...['NoCredential', 'NoLab', 'NoMembership', 'NotInWorkstationLab'].map((reason) => ({
+      name: `a failed unlock Access Event with the ${reason} reason, which no password, code or Lockout gives, is refused`,
+      table: 'lims.access_event' as const,
+      change: { kind: 'UnlockFailed', failure_reason: reason, session_lab_id: id.lab, session_id: id.session },
+      constraint: 'access_event_failure_kind_check',
+    })),
     ...each(
       'a Lab code that is not two to four capital letters is refused',
       'lims.lab',
@@ -1760,7 +1787,11 @@ describe('the database refuses a value outside its allowed set', () => {
     ...(['SignInSucceeded', 'SignOut', 'Lock', 'Unlock', 'UnlockFailed', 'Takeover'] as const).map((kind) => ({
       name: `an Access Event of kind ${kind} without a session is refused`,
       table: 'lims.access_event' as const,
-      change: { kind, failure_reason: null, ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }) },
+      change: {
+        kind,
+        failure_reason: kind === 'UnlockFailed' ? 'WrongPassword' : null,
+        ...(kind === 'Takeover' && { taken_by_id: id.otherPerson }),
+      },
       constraint: 'access_event_session_kind_check',
     })),
     ...(['IdleExpiry', 'AbsoluteExpiry'] as const).flatMap((kind) => [
@@ -1969,24 +2000,53 @@ describe('the database refuses a value outside its allowed set', () => {
   ]);
 });
 
+describe('a failed unlock records why, as a failed sign-in does', () => {
+  it('a failed unlock Access Event with each reason a password, a code or a Lockout gives is accepted', async () => {
+    const reasons = [
+      'WrongPassword',
+      'WrongPasswordOnLockedAccount',
+      'AccountLocked',
+      'WrongCode',
+      'NoAuthenticator',
+      'CodeAlreadyUsed',
+    ];
+    for (const reason of reasons) {
+      const row = {
+        ...tables['lims.access_event'].row,
+        kind: 'UnlockFailed',
+        failure_reason: reason,
+        session_lab_id: id.lab,
+        session_id: id.session,
+      };
+      await client.query('begin');
+      try {
+        await client.query(AUDIT_CONTEXT);
+        await client.query(...insert('lims.access_event', row));
+      } finally {
+        await client.query('rollback');
+      }
+    }
+  });
+
+  it('every Access Event rule binds the rows written before it, except the reason that failed unlocks before #245 lack', async () => {
+    const { rows } = await client.query<{ name: string }>(
+      `select conname as name from pg_constraint
+        where conrelid = 'lims.access_event'::regclass and not convalidated order by conname`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.name),
+      ['access_event_unlock_failure_check'],
+    );
+  });
+});
+
 describe('a counter holds at most six digits and is never empty', () => {
   // The counter trigger lets a counter start only at zero, so these rows reach the constraints with triggers off.
-  async function refusalOfCounter(last: number | null): Promise<pg.DatabaseError> {
-    await client.query('begin');
-    try {
-      await client.query('set local session_replication_role = replica');
-      await client.query(`insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', $2)`, [
-        id.otherLab,
-        last,
-      ]);
-    } catch (error) {
-      if (error instanceof pg.DatabaseError) return error;
-      throw error;
-    } finally {
-      await client.query('rollback');
-    }
-    return assert.fail(`the database accepted a counter at ${last}`);
-  }
+  const refusalOfCounter = (last: number | null) =>
+    refusalWithTriggersOff(`insert into lims.counter (lab_id, kind, last) values ($1, 'Sample', $2)`, [
+      id.otherLab,
+      last,
+    ]);
   covered.add('lims.counter.counter_last_check');
   covered.add('lims.counter.counter_last_not_null');
   it('a counter past 999999 or below zero is refused', async () => {
@@ -3623,6 +3683,46 @@ describe("a Lab's time zone changes only through a migration, and a Signature an
       await client.query('rollback');
     }
   });
+});
+
+describe('a kept time zone is a named zone of the time zone database, and a Sample keeps one exactly when it has a Received, even with the stamping triggers bypassed', () => {
+  // The stamping triggers overwrite any zone a statement gives, so these rows reach the constraints with triggers off.
+  const refusalOfKeptZone = (table: Table, change: Row) =>
+    refusalWithTriggersOff(...insert(table, { ...tables[table].row, ...change }));
+  const received = '2026-09-30T00:00:00Z';
+  const notZones = ['Mars/Olympus_Mons', 'UTC+5', ''];
+  const cases: { name: string; table: Table; change: Row; constraint: string }[] = [
+    ...notZones.map((zone) => ({
+      name: `a Signature kept in ${JSON.stringify(zone)}, which is not a named zone, is refused`,
+      table: 'lims.signature' as const,
+      change: { signed_time_zone: zone },
+      constraint: 'signature_signed_time_zone_check',
+    })),
+    ...notZones.map((zone) => ({
+      name: `a Received kept in ${JSON.stringify(zone)}, which is not a named zone, is refused`,
+      table: 'lims.sample' as const,
+      change: { received_at: received, received_time_zone: zone },
+      constraint: 'sample_received_time_zone_check',
+    })),
+    {
+      name: 'a Received time zone on a Sample with no Received is refused',
+      table: 'lims.sample',
+      change: { received_time_zone: 'America/New_York' },
+      constraint: 'sample_received_time_zone_received_at_check',
+    },
+    {
+      name: 'a Received with no time zone is refused',
+      table: 'lims.sample',
+      change: { received_at: received },
+      constraint: 'sample_received_time_zone_received_at_check',
+    },
+  ];
+  for (const c of cases) {
+    covered.add(`${c.table}.${c.constraint}`);
+    it(c.name, async () =>
+      assertConstraint(await refusalOfKeptZone(c.table, c.change), '23514', c.table, c.constraint),
+    );
+  }
 });
 
 describe('a person is inserted without a lockout, so the database stamps every lockout', () => {

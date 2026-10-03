@@ -13,7 +13,17 @@ import {
   type TrailEntry,
 } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, type Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
+import {
+  type Account,
+  type Client,
+  labZoneMoveReason,
+  ok,
+  onLabClock,
+  refusedWith,
+  signatureOf,
+  startApi,
+  toMillis,
+} from './harness.ts';
 
 const api = await startApi('lims_api_trail_test');
 const [cora, samir, lena, ana, rui, quinn] = [
@@ -115,24 +125,6 @@ it("the Test's trail lists the Test's, its Result's and Signatures' entries with
   const otherTrail = await trailOf(other);
   assert.ok(!entries.some((e) => otherTrail.entries.some((o) => o.raw.chain === e.raw.chain && o.seq === e.seq)));
 });
-
-function onLabClock(at: string, timeZone = 'America/New_York'): string {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-    timeZoneName: 'longOffset',
-    // oxlint-disable-next-line no-restricted-globals -- parses an instant to render it; reads no clock
-  }).formatToParts(new Date(at));
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((x) => x.type === type)?.value ?? '';
-  const offset = part('timeZoneName').replace(/^GMT$/, 'GMT+00:00').slice(3);
-  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}${at.slice(19, -1)}${offset}`;
-}
 
 it("each entry carries the actor's label and role, the field's glossary name, old and new value, the reason, and UTC plus Lab-zone time; company-chain entries carry UTC only", async () => {
   const id = await submitTestTo('Assigned');
@@ -388,12 +380,6 @@ it('a stored instant carries its UTC and Lab-zone renderings, a Record kind read
 });
 
 it("a Test's Signatures and Received keep the Lab wall clock of the zone in force when each was written, on every screen and in the Audit Trail, after the Lab's time zone changes", async () => {
-  const setZone = (timeZone: string) =>
-    audited(
-      api.superuser,
-      { actor: 'svc:migrate', role: 'system', reason: 'Move the Lab to a zone no other Lab has' },
-      (tx) => tx.updateTable('lab').set({ timeZone }).where('labId', '=', api.labId).execute(),
-    );
   const { timeZone: before } = await api.db
     .selectFrom('lab')
     .select('timeZone')
@@ -421,7 +407,6 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
     const stored = entries.flatMap((e) => e.changes).flatMap((c) => [c.old?.instant, c.new?.instant]);
     return [...entries, ...stored].flatMap((i) => (i?.atLab ? [{ at: i.at, atLab: i.atLab }] : []));
   };
-  const toMillis = (atLab: string | null) => atLab?.replace(/(\.\d{3})\d{3}/, '$1');
   const writtenBefore = await submitTestTo('Reported');
   const shownBefore = await shownOn(writtenBefore);
   const trailBefore = await everyLabClockIn(writtenBefore);
@@ -434,7 +419,7 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
   );
   for (const { at, atLab } of shownBefore)
     assert.equal(toMillis(atLab), toMillis(onLabClock(at, before)), `${at} on the ${before} clock`);
-  await setZone('Asia/Tokyo');
+  await api.moveLabZone('Asia/Tokyo');
   try {
     assert.deepEqual(await shownOn(writtenBefore), shownBefore, 'the zone change moves no Lab clock written before it');
     assert.deepEqual(
@@ -456,10 +441,10 @@ it("a Test's Signatures and Received keep the Lab wall clock of the zone in forc
     const change = lab.entries.at(-1) ?? assert.fail('the zone change in the Lab trail');
     assert.deepEqual(
       [change.record.id, change.reason, change.changes.map((c) => [c.label, c.old?.text, c.new?.text])],
-      [api.labId, 'Move the Lab to a zone no other Lab has', [['Time zone', before, 'Asia/Tokyo']]],
+      [api.labId, labZoneMoveReason, [['Time zone', before, 'Asia/Tokyo']]],
     );
   } finally {
-    await setZone(before);
+    await api.moveLabZone(before);
   }
 });
 

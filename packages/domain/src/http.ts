@@ -127,7 +127,7 @@ const signature = Type.Object({
   /** Null only on a Signature given before the signing function recorded what proved the signer. */
   authenticator: nullable(authenticator),
   signedAt: instant,
-  /** `signedAt` on the Lab's wall clock, ISO 8601 with the Lab's offset, as the database renders it. */
+  /** `signedAt` on the wall clock of the zone its Lab was in at signing, ISO 8601 with that offset, as the database renders it. */
   signedAtLab: instant,
   /** The signed record's glossary noun, such as "Test Report". */
   record: Type.String(),
@@ -308,13 +308,14 @@ const listedAccessEvent = Type.Union([
 ]);
 export type ListedAccessEvent = Static<typeof listedAccessEvent>;
 /**
- * A person's Access Events as this Lab's Admin reads them, newest first: those of sessions in this Lab, those of no
- * session, and every Lockout. `earlierNotListed` says that older ones exist beyond the oldest listed.
+ * A page of a person's Access Events as this Lab's Admin reads them, newest first: those of sessions in this Lab, those
+ * of no session, and every Lockout. `earlier` is the oldest listed while earlier ones exist, so the Admin reads those
+ * before it, and is null once the person's oldest is listed.
  */
 const personAccessEvents = Type.Object({
   person: Type.Object({ id: uuid, printedName: Type.String(), username: Type.String() }),
   events: Type.Array(listedAccessEvent),
-  earlierNotListed: Type.Boolean(),
+  earlier: nullable(uuid),
 });
 export type PersonAccessEvents = Static<typeof personAccessEvents>;
 /** The roles an Admin grants. Platform Operator is held outside the LIMS, and Customer Users get portal accounts. */
@@ -719,6 +720,13 @@ export const routes = {
     enrolmentGrantIssued,
   ),
   accessEvents: route('GET', '/api/staff/:id/access-events', { params: byId }, personAccessEvents),
+  /** The person's Access Events before one of theirs that this Lab sees, so the Admin reaches every one. */
+  earlierAccessEvents: route(
+    'GET',
+    '/api/staff/:id/access-events/before/:before',
+    { params: Type.Object({ id: uuid, before: uuid }) },
+    personAccessEvents,
+  ),
   grantMembership: route(
     'POST',
     '/api/staff/memberships',
