@@ -23,10 +23,13 @@ create trigger refuse_change before update or delete on lims.incident_break
 create trigger refuse_truncate before truncate on lims.incident_break
   for each statement execute function lims.refuse_change();
 
--- A break belongs to a chain-verify System Incident, and the statement that writes an incident's breaks leaves it
--- with exactly its break count, so that no break is added to an incident after it opened: its count is a fact that
--- keep_incident_facts freezes, and a break is never removed. Once per statement, after the rows' own checks and their
--- foreign key, so that those refuse first and a chain with thousands of breaks is counted once.
+-- A break belongs to a chain-verify System Incident opened in this transaction, and the statement that writes an
+-- incident's breaks leaves it with exactly its break count, so that no break is added to an incident after it
+-- opened, not even to one opened before this migration: opened_at is stamped by the database, the app role cannot
+-- write it, and it is before now(), the transaction's start, for every incident an earlier transaction opened; the
+-- count is a fact that keep_incident_facts freezes, and a break is never removed. Once per statement, after the
+-- rows' own checks and their foreign key, so that those refuse first and a chain with thousands of breaks is
+-- counted once.
 create function lims.breaks_written_once() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 begin
@@ -34,6 +37,11 @@ begin
              join system_incident i on i.id = a.incident_id
              where i.chain is null) then
     raise exception 'a break is recorded only on a chain-verify System Incident' using errcode = '23514';
+  end if;
+  if exists (select from (select distinct incident_id from added) a
+             join system_incident i on i.id = a.incident_id
+             where i.opened_at < now()) then
+    raise exception 'a break is recorded in the transaction that opens its System Incident' using errcode = '23514';
   end if;
   if exists (select from (select distinct incident_id from added) a
              join system_incident i on i.id = a.incident_id

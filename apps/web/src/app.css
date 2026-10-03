@@ -1424,3 +1424,8 @@ a.btn {
 .export__done code {
   overflow-wrap: anywhere;
 }
+
+/* The stored breaks follow the recomputed table, so the heading stands off it. */
+.recorded-breaks {
+  margin-top: 24px;
+}

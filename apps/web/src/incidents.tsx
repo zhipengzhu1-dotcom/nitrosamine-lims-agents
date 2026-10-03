@@ -204,7 +204,7 @@ function IncidentBreaks({ reference, changed }: { reference: string; changed: ()
             />
           )}
           {data.recorded && !data.asRecorded && (
-            <section aria-labelledby="incident-breaks-recorded">
+            <section className="recorded-breaks" aria-labelledby="incident-breaks-recorded">
               <h3 id="incident-breaks-recorded">As this System Incident recorded them</h3>
               <StackTable columns={markedColumns('Now')} rows={data.recorded} rowKey={(b) => b.entry} />
             </section>

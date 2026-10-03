@@ -77,7 +77,7 @@ const fixtureContent = Buffer.from('{"id":"fixture"}');
 let statementHash: Buffer = zeros;
 
 type Fixture = [string, Row];
-/** Rows written in one transaction, because a break is recorded only in the transaction that opens its incident. */
+/** Rows written in one transaction, because a break is recorded only in the transaction that opens its incident, in one statement. */
 const isGroup = (f: Fixture | Fixture[]): f is Fixture[] => Array.isArray(f[0]);
 const fixture: (Fixture | Fixture[])[] = [
   ['lims.customer', { id: id.customer, name: 'Refusal Customer (fictional)' }],
@@ -664,7 +664,7 @@ const actingAs = (role: 'QA' | 'Admin') =>
 /**
  * What a probe row needs in its transaction before it is written: the stamp lims.sign leaves, so that a Signature
  * reaches the constraints behind the sign_only trigger, or the chain-verify System Incident a break is opened with,
- * so that a break reaches the constraints behind the written_with_incident trigger.
+ * so that a break reaches the constraints behind the breaks_written_once trigger.
  */
 const staged = (row: Row) => {
   if (typeof row.reauthentication_id === 'string')
@@ -2269,9 +2269,26 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
     '23514',
     "a chain-verify System Incident's breaks are written once, in one statement, and give its count",
   ];
+  const breakLater = ['23514', 'a break is recorded in the transaction that opens its System Incident'];
   it('a break recorded on a System Incident after the transaction that opened it is refused', async () => {
     const error = await refusalOf(...insert('lims.incident_break', breakRow(9)));
-    assert.deepEqual([error.code, error.message], breakAdded);
+    assert.deepEqual([error.code, error.message], breakLater);
+  });
+  it('a chain-verify System Incident opened before the LIMS stored its breaks never gains them', async () => {
+    // Opened as before this migration: a count and no rows, which the commit-time check would refuse today.
+    const incident = randomUUID();
+    await client.query('begin');
+    await client.query(AUDIT_CONTEXT);
+    await client.query('set local session_replication_role = replica');
+    await client.query(
+      `insert into lims.system_incident
+         (id, kind, reference, requested_by, chain, first_failure, last_failure, break_count, fingerprint)
+       values ($1, 'ChainVerifyFailure', 'RF00000Y', $2, $3, 4, 4, 1, $4)`,
+      [incident, id.person, id.lab, fp7],
+    );
+    await client.query('commit');
+    const error = await refusalOf(...insert('lims.incident_break', { ...breakRow(4), incident_id: incident }));
+    assert.deepEqual([error.code, error.message], breakLater);
   });
   it('a break recorded in a transaction that updates its open System Incident is refused', async () => {
     await client.query('begin');
@@ -2283,7 +2300,7 @@ describe('a Signature, a Record Version, a signature statement, a re-authenticat
         (e: unknown) => e,
       );
       assert.ok(error instanceof pg.DatabaseError);
-      assert.deepEqual([error.code, error.message], breakAdded);
+      assert.deepEqual([error.code, error.message], breakLater);
     } finally {
       await client.query('rollback');
     }
