@@ -27,11 +27,11 @@ async function refusal(text: string, values: unknown[]): Promise<pg.DatabaseErro
   assert.fail(`the database accepted ${text}`);
 }
 
-async function write(text: string, values: unknown[]): Promise<void> {
-  await app.query('begin');
-  await app.query(AS_ADMIN);
-  await app.query(text, values);
-  await app.query('commit');
+async function write(text: string, values: unknown[], client = app): Promise<void> {
+  await client.query('begin');
+  await client.query(AS_ADMIN);
+  await client.query(text, values);
+  await client.query('commit');
 }
 
 before(async () => {
@@ -41,10 +41,18 @@ before(async () => {
   await admin.end();
   await migrate(server, DATABASE);
   await app.connect();
-  await write(
-    `insert into lims.person (id, username, display_name, password_hash) values ($1, 'auth.person', 'A', 'x')`,
-    [person],
-  );
+  // The owner adds the test person, because the app role cannot choose a person's id.
+  const owner = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+  await owner.connect();
+  try {
+    await write(
+      `insert into lims.person (id, username, display_name, password_hash) values ($1, 'auth.person', 'A', 'x')`,
+      [person],
+      owner,
+    );
+  } finally {
+    await owner.end();
+  }
   await write('insert into lims.authenticator (person_id, secret_ciphertext) values ($1, $2)', [person, secret]);
   await write('update lims.authenticator set last_used_step = 100 where person_id = $1', [person]);
 });

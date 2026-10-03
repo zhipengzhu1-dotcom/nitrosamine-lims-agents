@@ -3615,15 +3615,32 @@ describe('a person is inserted without a lockout, so the database stamps every l
   const bornLockedOut = `insert into lims.person (username, display_name, customer_id, locked_at)
     select 'refusal.born-locked-out', 'Born Locked Out', id, clock_timestamp() from lims.customer
      where name = 'Refusal Customer (fictional)'`;
-  it('a person inserted already locked out is refused, for the app role and for the superuser', async () => {
-    for (const asRole of ['set local role lims_app; ', '']) {
-      const error = await refusalOf(`${asRole}${bornLockedOut}`);
-      assert.deepEqual(
-        [error.code, error.message],
-        ['23514', 'a person is inserted without a lockout; a lockout lands only on a person already recorded'],
-        asRole || 'as the superuser',
-      );
-    }
+  it('a person inserted already locked out is refused for the superuser', async () => {
+    const error = await refusalOf(bornLockedOut);
+    assert.deepEqual(
+      [error.code, error.message],
+      ['23514', 'a person is inserted without a lockout; a lockout lands only on a person already recorded'],
+    );
+  });
+
+  it('the app role holds no insert on a lockout, so a person inserted already locked out is refused before the trigger', async () => {
+    const error = await refusalOf(`set local role lims_app; ${bornLockedOut}`);
+    assert.equal(error.code, '42501', error.message);
+    const { rows } = await client.query<{ privilege: string }>(
+      `select privilege_type || ' ' || column_name as privilege from information_schema.column_privileges
+        where grantee = 'lims_app' and table_schema = 'lims' and table_name = 'person' and privilege_type = 'INSERT'
+        order by 1`,
+    );
+    assert.deepEqual(
+      rows.map((row) => row.privilege),
+      [
+        'INSERT customer_id',
+        'INSERT display_name',
+        'INSERT identity_verification_id',
+        'INSERT password_hash',
+        'INSERT username',
+      ],
+    );
   });
 });
 
