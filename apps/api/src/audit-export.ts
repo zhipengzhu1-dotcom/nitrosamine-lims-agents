@@ -280,9 +280,9 @@ async function exportData(
       ]),
     ]),
   );
-  const [images, verified, lab] = await Promise.all([
+  const verified = chainsOf(await scope.verifyAuditTrail());
+  const [images, lab] = await Promise.all([
     imagesFor(scope, entries),
-    scope.verifyAuditTrail().then(chainsOf),
     scope.company
       .selectFrom('lab')
       .select(['code', 'name', 'timeZone'])

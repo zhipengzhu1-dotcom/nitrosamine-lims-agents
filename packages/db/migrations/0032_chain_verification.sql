@@ -38,22 +38,30 @@ grant insert (chain, through, head, recomputed_from, verified_by) on lims.chain_
 create index audit_entry_chain_verification on lims.audit_entry (((new_row ->> 'id')::uuid))
   where table_name = 'chain_verification' and op = 'INSERT';
 
--- The latest Chain Verification a verification may resume from: one whose insert the company chain records with the
--- same entry and hash, and whose entries are all still present.
+-- The latest Chain Verification a verification may resume from: one before the first break any System Incident records
+-- on the chain, whose insert the company chain records with the same chain, entry and hash, and whose entry still
+-- carries that hash and recomputes to it. When entries through it are no longer all present, none is.
 create function lims.latest_chain_verification(p_chain text)
 returns table (through bigint, head bytea, verified_at timestamptz, verified_by uuid)
 language sql stable security definer set search_path = lims, pg_temp as $$
   select c.through, c.head, c.verified_at, c.verified_by
-  from chain_verification c
-  where c.chain = p_chain
-    and exists (select from audit_entry a
-                where a.table_name = 'chain_verification' and a.op = 'INSERT'
-                  and (a.new_row ->> 'id')::uuid = c.id
-                  and (a.new_row ->> 'through')::bigint = c.through
-                  and a.new_row ->> 'head' = '\x' || encode(c.head, 'hex'))
-    and (select count(*) from audit_entry e where e.chain = p_chain and e.seq <= c.through) = c.through
-  order by c.through desc, c.verified_at desc
-  limit 1
+  from (select c.through, c.head, c.verified_at, c.verified_by
+        from chain_verification c
+        where c.chain = p_chain
+          and not exists (select from system_incident i
+                          where i.kind = 'ChainVerifyFailure' and i.chain = p_chain and i.first_failure <= c.through)
+          and exists (select from audit_entry a
+                      where a.table_name = 'chain_verification' and a.op = 'INSERT' and a.chain = 'company'
+                        and (a.new_row ->> 'id')::uuid = c.id
+                        and a.new_row ->> 'chain' = c.chain
+                        and (a.new_row ->> 'through')::bigint = c.through
+                        and (a.new_row ->> 'head')::bytea = c.head)
+          and exists (select from audit_entry e
+                      where e.chain = p_chain and e.seq = c.through and e.hash = c.head
+                        and e.hash = sha256(e.prev_hash || audit_entry_bytes(e)))
+        order by c.through desc, c.verified_at desc
+        limit 1) as c
+  where (select count(*) from audit_entry e where e.chain = p_chain and e.seq between 1 and c.through) = c.through
 $$;
 
 -- Every break after entry p_from, whose hash is p_head, each with the fingerprint a recompute from the first entry

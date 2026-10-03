@@ -109,8 +109,11 @@ const BREAKS_ONE_BY_ONE = 100;
 /** A break, or the breaks after the first ones taken together, as a verification records it. */
 export type RecordedBreak = { entry: string; kind: BreakKind; through: string; breaks: number; fingerprint: string };
 
-/** How long one chain's recompute may run: a routine Verify chain, and Recompute every entry. */
-export const VERIFY_READ_LIMIT_SECONDS = { routine: 30, everyEntry: 600 } as const;
+/**
+ * How long one chain's recompute may run: a routine Verify chain, and Recompute every entry. Both chains of Recompute
+ * every entry together stay under the 100 seconds Cloudflare's edge waits for a reply, so QA reads the refusal.
+ */
+export const VERIFY_READ_LIMIT_SECONDS = { routine: 30, everyEntry: 45 } as const;
 
 export interface VerifyOptions {
   everyEntry?: boolean;
@@ -139,14 +142,14 @@ async function recompute(tx: Kysely<DB>, chain: string, everyEntry: boolean): Pr
   const zero = sql`decode(repeat('00', 32), 'hex')`;
   const { rows } = await sql<Recomputed>`
     with resume as (
-      select case when ${everyEntry} then 0 else coalesce(c.through, 0) end as through,
-             case when ${everyEntry} then ${zero} else coalesce(c.head, ${zero}) end as head,
-             case when ${everyEntry} or c.through is null then null else json_build_object(
+      select coalesce(c.through, 0) as through,
+             coalesce(c.head, ${zero}) as head,
+             case when c.through is not null then json_build_object(
                'through', c.through::text,
                'at', ${inUtc(sql`c.verified_at`)},
                'by', p.display_name) end as verified_before
       from (select) as one
-      left join lims.latest_chain_verification(${chain}) as c on true
+      left join lateral (select * from lims.latest_chain_verification(${chain}) where not ${everyEntry}) as c on true
       left join lims.person as p on p.id = c.verified_by
     ), found as (
       select b.*, row_number() over (order by b.seq) as n
@@ -210,6 +213,9 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
           if ('timedOut' in found) return found;
           chains.push({ chain, chainId, ...found });
         }
+        await sql`select set_config(name, reset_val, true) from pg_settings where name = 'statement_timeout'`.execute(
+          tx,
+        );
         const [first] = chains;
         if (!first) throw new Error('Verify chain recomputed no chain');
         return { at: first.at, chains };

@@ -979,6 +979,13 @@ it('Verify chain records a Chain Verification for each intact chain and resumes 
     every.breaks[0]?.incident,
     'recomputing again names the same System Incident',
   );
+  const after = await lab.verify();
+  assert.deepEqual(
+    [after.verdict, after.recomputedFrom, after.breaks.map((b) => b.incident)],
+    ['Broken', '1', [every.breaks[0]?.incident]],
+    'once a System Incident records a break, a routine verification no longer resumes past it',
+  );
+  assert.equal((await chainVerificationsOf(lab.labId)).length, 3, 'nor records a Chain Verification over it');
 });
 
 it("Verify chain refuses, naming the chain, when a chain's recompute does not finish within the read limit, and opens no System Incident", async () => {

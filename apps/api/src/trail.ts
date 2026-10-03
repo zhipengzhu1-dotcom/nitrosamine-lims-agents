@@ -322,9 +322,7 @@ async function verify(db: Kysely<DB>, req: FastifyRequest, options: VerifyOption
   const scope = labScope(db, req.actor);
   const { at, chains: recomputed } = chainsOf(await scope.verifyAuditTrail(options));
   const chains = await chainReadings(db, req.log, req.actor, recomputed);
-  const intact = recomputed.filter(
-    (c) => chains.some((v) => v.chain === c.chain && v.verdict === 'Intact') && c.lastEntry !== '0',
-  );
+  const intact = recomputed.filter((c) => c.breaks.length === 0 && c.lastEntry !== '0');
   if (intact.length > 0)
     await scope.write('Verify chain', 'QA', (q) =>
       q.company

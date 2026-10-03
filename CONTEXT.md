@@ -423,7 +423,7 @@ A record that the LIMS itself failed or misbehaved (an unexpected failure answer
 _Avoid_: Alarm (the notice, not the record), outage, Deviation (for LIMS failures)
 
 **Chain Verification**:
-The record that a verification of an Audit Trail chain found it intact through an entry: the chain, that entry and its hash, who verified and when, and the first entry recomputed. Verify chain resumes from the latest one the company chain records, so it recomputes only the entries written since; Recompute every entry starts from the chain's first entry, and QA uses it when a break behind a Chain Verification is suspected.
+The record that a verification of an Audit Trail chain found it intact through an entry: the chain, that entry and its hash, who verified and when, and the first entry recomputed. Verify chain resumes from the latest one the company chain records, so it recomputes only the entries written since, unless a System Incident records a break at or before it, its entry no longer carries its hash, or an entry before it is missing; Recompute every entry starts from the chain's first entry, and QA uses it when a break behind a Chain Verification is suspected.
 _Avoid_: Checkpoint, anchor (the off-server copy of a chain head)
 
 **Training Record**:
