@@ -1086,40 +1086,44 @@ describe('a Document version is one open and one Effective version of its Docume
       constraint: 'document_version_one_open',
     },
   ]);
-  const twoEffective = `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id,
-                          effective_date) values
-                        ('${id.lab}', '${id.emptyDocument}', 1, 'Effective', 'One', 'One.', '${id.admin}', '2026-01-01'),
-                        ('${id.lab}', '${id.emptyDocument}', 2, 'Effective', 'Two', 'Two.', '${id.admin}', '2026-01-02')`;
   covered.add('lims.document_version.document_version_one_effective');
   it('a second Effective version of a Document is refused, even past the triggers', async () => {
-    const error = await refusalWithTriggersOff(twoEffective, []);
+    const error = await refusalWithTriggersOff(
+      `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id, effective_date)
+       values ($1, $2, 1, 'Effective', 'One', 'One.', $3, '2026-01-01'), ($1, $2, 2, 'Effective', 'Two', 'Two.', $3, '2026-01-02')`,
+      [id.lab, id.emptyDocument, id.admin],
+    );
     assert.deepEqual([error.code, error.constraint], ['23505', 'document_version_one_effective']);
   });
-  const pastTriggers: { name: string; statement: string; code: string; constraint: string }[] = [
+  const pastTriggers: { name: string; statement: string; values: unknown[]; code: string; constraint: string }[] = [
     {
       name: 'a second Document with the number of an existing one is refused',
-      statement: `insert into lims.document (lab_id, document_type, number) values ('${id.lab}', 'SOP', 'RF-SOP-0001')`,
+      statement: `insert into lims.document (lab_id, document_type, number) values ($1, 'SOP', 'RF-SOP-0001')`,
+      values: [id.lab],
       code: '23505',
       constraint: 'document_number_key',
     },
     {
       name: 'a Document with no number is refused',
-      statement: `insert into lims.document (lab_id, document_type) values ('${id.lab}', 'SOP')`,
+      statement: `insert into lims.document (lab_id, document_type) values ($1, 'SOP')`,
+      values: [id.lab],
       code: '23502',
       constraint: 'document_number_not_null',
     },
     {
       name: 'a second version 1 of a Document is refused',
       statement: `insert into lims.document_version (lab_id, document_id, version, status, title, body, author_id,
-                  abandon_reason, effective_date) values ('${id.lab}', '${id.document}', 1, 'Abandoned', 'Again', 'Again.',
-                  '${id.admin}', 'Again.', '2099-01-01')`,
+                  abandon_reason, effective_date) values ($1, $2, 1, 'Abandoned', 'Again', 'Again.', $3, 'Again.',
+                  '2099-01-01')`,
+      values: [id.lab, id.document, id.admin],
       code: '23505',
       constraint: 'document_version_document_id_version_key',
     },
     {
       name: 'a Document version numbered below 1 is refused',
       statement: `insert into lims.document_version (lab_id, document_id, version, title, body, author_id, effective_date)
-                  values ('${id.lab}', '${id.emptyDocument}', 0, 'Zero', 'Zero.', '${id.admin}', '2099-01-01')`,
+                  values ($1, $2, 0, 'Zero', 'Zero.', $3, '2099-01-01')`,
+      values: [id.lab, id.emptyDocument, id.admin],
       code: '23514',
       constraint: 'document_version_version_check',
     },
@@ -1129,7 +1133,7 @@ describe('a Document version is one open and one Effective version of its Docume
       `lims.${c.constraint.startsWith('document_version') ? 'document_version' : 'document'}.${c.constraint}`,
     );
     it(c.name, async () => {
-      const error = await refusalWithTriggersOff(c.statement, []);
+      const error = await refusalWithTriggersOff(c.statement, c.values);
       const constraint = error.constraint ?? `${error.table}_${error.column}_not_null`;
       assert.deepEqual([error.code, constraint], [c.code, c.constraint], error.message);
     });
@@ -3901,48 +3905,103 @@ describe('a person is inserted without a lockout, so the database stamps every l
 });
 
 describe('a Document keeps its number, and its versions reach Effective only through three independent Signatures', () => {
+  interface Statement {
+    text: string;
+    values: unknown[];
+  }
+  const statement = (text: string, ...values: unknown[]): Statement => ({ text, values });
+  const triggersOff = statement('set local session_replication_role = replica');
+  const triggersOn = statement('set local session_replication_role = origin');
   const asPerson = (username: string, role: string) =>
-    `select set_config('lims.actor', 'person:${username}', true), set_config('lims.role', '${role}', true),
-            set_config('lims.reason', 'Probe the Document vault', true)`;
+    statement(
+      `select set_config('lims.actor', $1, true), set_config('lims.role', $2, true),
+              set_config('lims.reason', 'Probe the Document vault', true)`,
+      `person:${username}`,
+      role,
+    );
   const asAuthor = asPerson('refusal.admin', 'LabManager');
   const version = randomUUID();
   /** A Document version of the empty Document, written past the triggers as a past write left it. */
-  const versionIn = (status: string, effectiveDate = `'2099-01-01'`) =>
-    `set local session_replication_role = replica;
-     insert into lims.document_version (lab_id, id, document_id, version, status, title, body, author_id, effective_date)
-     values ('${id.lab}', '${version}', '${id.emptyDocument}', 1, '${status}', 'Probe', 'Probe.', '${id.admin}', ${effectiveDate});
-     insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
-     values ('${id.lab}', 'document_version', '${version}', 1, 1,
-             convert_to(lims.document_version_content('${version}')::text, 'UTF8'));
-     set local session_replication_role = origin`;
-  const versionId = `(select id from lims.record_version where record_table = 'document_version' and record_id = '${version}' order by version desc limit 1)`;
+  const versionIn = (status: string, effectiveDate = '2099-01-01'): Statement[] => [
+    triggersOff,
+    statement(
+      `insert into lims.document_version (lab_id, id, document_id, version, status, title, body, author_id, effective_date)
+       values ($1, $2, $3, 1, $4, 'Probe', 'Probe.', $5, $6)`,
+      id.lab,
+      version,
+      id.emptyDocument,
+      status,
+      id.admin,
+      effectiveDate,
+    ),
+    statement(
+      `insert into lims.record_version (lab_id, record_table, record_id, version, canonical_form, content)
+       values ($1, 'document_version', $2, 1, 1, convert_to(lims.document_version_content($2)::text, 'UTF8'))`,
+      id.lab,
+      version,
+    ),
+    triggersOn,
+  ];
   /** A Signature on the version, written past the triggers as lims.sign left it. */
-  const signed = (meaning: string, person: string) =>
-    `set local session_replication_role = replica;
-     insert into lims.signature (lab_id, person_id, printed_name, username, role, meaning, record_version_id,
-                                 content_hash, canonical_form, statement_version, statement_hash, authenticator,
-                                 session_id, app_release, reauthentication_id, signed_time_zone)
-     select '${id.lab}', '${person}', 'Signer', 'signer', 'QA', '${meaning}', v.id, v.content_hash, 1, 1,
-            '\\x${'00'.repeat(32)}', 'Password', '${id.session}', 'test', gen_random_uuid(), 'UTC'
-       from lims.record_version v where v.id = ${versionId};
-     set local session_replication_role = origin`;
+  const signed = (meaning: string, person: string): Statement[] => [
+    triggersOff,
+    statement(
+      `insert into lims.signature (lab_id, person_id, printed_name, username, role, meaning, record_version_id,
+                                   content_hash, canonical_form, statement_version, statement_hash, authenticator,
+                                   session_id, app_release, reauthentication_id, signed_time_zone)
+       select $1, $2, 'Signer', 'signer', 'QA', $3, v.id, v.content_hash, 1, 1, $4, 'Password', $5, 'test',
+              gen_random_uuid(), 'UTC'
+         from lims.record_version v where v.record_table = 'document_version' and v.record_id = $6
+        order by v.version desc limit 1`,
+      id.lab,
+      person,
+      meaning,
+      zeros,
+      id.session,
+      version,
+    ),
+    triggersOn,
+  ];
   /** The insert lims.sign makes, which reaches document_signing before sign_only refuses it. */
-  const signing = (meaning: string, person: string, recordVersion = versionId) =>
-    `insert into lims.signature (lab_id, person_id, meaning, record_version_id)
-     values ('${id.lab}', '${person}', '${meaning}', ${recordVersion})`;
+  const signing = (meaning: string, person: string): Statement =>
+    statement(
+      `insert into lims.signature (lab_id, person_id, meaning, record_version_id)
+       values ($1, $2, $3, (select id from lims.record_version where record_table = 'document_version'
+                                and record_id = $4 order by version desc limit 1))`,
+      id.lab,
+      person,
+      meaning,
+      version,
+    );
+  const setStatus = (status: string) =>
+    statement('update lims.document_version set status = $1 where id = $2', status, version);
+  const setTitle = (title: string) =>
+    statement('update lims.document_version set title = $1 where id = $2', title, version);
+  const setEffectiveDate = (date: string) =>
+    statement('update lims.document_version set effective_date = $1 where id = $2', date, version);
+  const abandon = (reason: string) =>
+    statement(
+      `update lims.document_version set status = 'Abandoned', abandon_reason = $1 where id = $2`,
+      reason,
+      version,
+    );
 
-  async function refusal(...statements: string[]): Promise<pg.DatabaseError> {
+  async function refusal(...statements: Statement[]): Promise<pg.DatabaseError> {
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      for (const statement of statements) await client.query(statement);
+      for (const { text, values } of statements) await client.query(text, values);
     } catch (error) {
       if (error instanceof pg.DatabaseError) return error;
       throw error;
     } finally {
       await client.query('rollback');
     }
-    return assert.fail(`the database accepted ${statements.at(-1)}`);
+    return assert.fail(`the database accepted ${statements.at(-1)?.text}`);
+  }
+
+  async function accepted(...statements: Statement[]): Promise<void> {
+    for (const { text, values } of statements) await client.query(text, values);
   }
 
   covered.add('lims.document.number_document');
@@ -3969,16 +4028,16 @@ describe('a Document keeps its number, and its versions reach Effective only thr
   covered.add('lims.document_version.refuse_change');
   covered.add('lims.document_version.refuse_truncate');
   it('a Document is never changed or removed, and a Document version is never removed, even by the superuser', async () => {
-    for (const statement of [
-      `update lims.document set number = 'RF-SOP-0009' where id = '${id.document}'`,
-      `update lims.document set document_type = 'Policy' where id = '${id.document}'`,
-      `delete from lims.document where id = '${id.emptyDocument}'`,
-      'truncate lims.document cascade',
-      `delete from lims.document_version where id = '${id.documentVersion}'`,
-      'truncate lims.document_version',
+    for (const s of [
+      statement(`update lims.document set number = 'RF-SOP-0009' where id = $1`, id.document),
+      statement(`update lims.document set document_type = 'Policy' where id = $1`, id.document),
+      statement('delete from lims.document where id = $1', id.emptyDocument),
+      statement('truncate lims.document cascade'),
+      statement('delete from lims.document_version where id = $1', id.documentVersion),
+      statement('truncate lims.document_version'),
     ]) {
-      const error = await refusal(statement);
-      assert.equal(error.code, 'LA002', `${statement}: ${error.message}`);
+      const error = await refusal(s);
+      assert.equal(error.code, 'LA002', `${s.text}: ${error.message}`);
     }
   });
 
@@ -3987,11 +4046,13 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      await client.query(versionIn('Draft'));
-      await client.query(`update lims.document_version set title = 'Probe again' where id = $1`, [version]);
-      await client.query(`update lims.document_version set effective_date = '2099-02-01' where id = $1`, [version]);
-      await client.query(signed('Authored', id.admin));
-      await client.query(`update lims.document_version set status = 'InReview' where id = $1`, [version]);
+      await accepted(
+        ...versionIn('Draft'),
+        setTitle('Probe again'),
+        setEffectiveDate('2099-02-01'),
+        ...signed('Authored', id.admin),
+        setStatus('InReview'),
+      );
       const { rows } = await client.query<{ version: number; title: string; effectiveDate: string }>(
         `select version, convert_from(content, 'UTF8')::jsonb ->> 'title' as title,
                 convert_from(content, 'UTF8')::jsonb ->> 'effectiveDate' as "effectiveDate"
@@ -4010,110 +4071,104 @@ describe('a Document keeps its number, and its versions reach Effective only thr
 
   covered.add('lims.document_version.open_document_version');
   it('a Document version opens only as the next Draft of its Document, by the person who writes it', async () => {
-    const insertVersion = (columns: string, values: string) =>
-      `insert into lims.document_version (lab_id, document_id, title, body, effective_date, ${columns})
-       values ('${id.lab}', '${id.emptyDocument}', 'Probe', 'Probe.', ${values})`;
-    const cases: [string, string, string][] = [
+    const cases: [Statement, string][] = [
       [
-        'version, author_id, status',
-        `'2099-01-01', 1, '${id.admin}', 'Approved'`,
+        statement(
+          `insert into lims.document_version (lab_id, document_id, title, body, effective_date, version, author_id, status)
+           values ($1, $2, 'Probe', 'Probe.', '2099-01-01', 1, $3, 'Approved')`,
+          id.lab,
+          id.emptyDocument,
+          id.admin,
+        ),
         'a Document version opens as a Draft, not Approved',
       ],
       [
-        'version, author_id',
-        `'2099-01-01', 2, '${id.admin}'`,
+        statement(
+          `insert into lims.document_version (lab_id, document_id, title, body, effective_date, version, author_id)
+           values ($1, $2, 'Probe', 'Probe.', '2099-01-01', 2, $3)`,
+          id.lab,
+          id.emptyDocument,
+          id.admin,
+        ),
         'a Document version is the next version of its Document',
       ],
       [
-        'version, author_id',
-        `'2099-01-01', 1, '${id.person}'`,
+        statement(
+          `insert into lims.document_version (lab_id, document_id, title, body, effective_date, version, author_id)
+           values ($1, $2, 'Probe', 'Probe.', '2099-01-01', 1, $3)`,
+          id.lab,
+          id.emptyDocument,
+          id.person,
+        ),
         "a Document version's author is the person who writes it",
       ],
       [
-        'version, author_id',
-        `'2000-01-01', 1, '${id.admin}'`,
+        statement(
+          `insert into lims.document_version (lab_id, document_id, title, body, effective_date, version, author_id)
+           values ($1, $2, 'Probe', 'Probe.', '2000-01-01', 1, $3)`,
+          id.lab,
+          id.emptyDocument,
+          id.admin,
+        ),
         "a Document version's Effective Date is today or later in the Lab",
       ],
     ];
-    for (const [columns, values, message] of cases) {
-      const error = await refusal(insertVersion(columns, values));
+    for (const [insert, message] of cases) {
+      const error = await refusal(insert);
       assert.deepEqual([error.code, error.message], ['LA014', message]);
     }
   });
 
   covered.add('lims.document_version.move_document_version');
-  const moves: { name: string; statements: string[]; message: string }[] = [
+  const moves: { name: string; statements: Statement[]; message: string }[] = [
     {
       name: "a change to a Document version's title once it left Draft is refused",
-      statements: [versionIn('InReview'), `update lims.document_version set title = 'Changed' where id = '${version}'`],
+      statements: [...versionIn('InReview'), setTitle('Changed')],
       message: "a Document version's content changes only while it is a Draft",
     },
     {
       name: "a change to a Document version's Effective Date once it left Draft is refused",
-      statements: [
-        versionIn('InReview'),
-        `update lims.document_version set effective_date = '2099-02-01' where id = '${version}'`,
-      ],
+      statements: [...versionIn('InReview'), setEffectiveDate('2099-02-01')],
       message: "a Document version's content changes only while it is a Draft",
     },
     {
       name: 'a Draft that goes straight to Effective is refused',
-      statements: [versionIn('Draft'), `update lims.document_version set status = 'Effective' where id = '${version}'`],
+      statements: [...versionIn('Draft'), setStatus('Effective')],
       message: 'a Document version does not move from Draft to Effective',
     },
     {
       name: 'a Draft that goes In Review with no Authored Signature is refused',
-      statements: [versionIn('Draft'), `update lims.document_version set status = 'InReview' where id = '${version}'`],
+      statements: [...versionIn('Draft'), setStatus('InReview')],
       message: 'a Document version goes In Review only on its Authored Signature',
     },
     {
       name: 'a Document version Approved with no Approved Signature is refused',
-      statements: [
-        versionIn('InReview'),
-        `update lims.document_version set status = 'Approved' where id = '${version}'`,
-      ],
+      statements: [...versionIn('InReview'), setStatus('Approved')],
       message: 'a Document version is Approved only by an Approved Signature over its content as it is now',
     },
     {
       name: 'a Document version Approved after its Effective Date has passed is refused',
-      statements: [
-        versionIn('InReview', `'2000-01-01'`),
-        signed('Approved', id.person),
-        `update lims.document_version set status = 'Approved' where id = '${version}'`,
-      ],
+      statements: [...versionIn('InReview', '2000-01-01'), ...signed('Approved', id.person), setStatus('Approved')],
       message: 'a Document version is not Approved after its Effective Date, 2000-01-01, has passed',
     },
     {
       name: 'an Effective Date before the Lab’s today is refused',
-      statements: [
-        versionIn('Draft'),
-        `update lims.document_version set effective_date = '2000-01-01' where id = '${version}'`,
-      ],
+      statements: [...versionIn('Draft'), setEffectiveDate('2000-01-01')],
       message: "a Document version's Effective Date is today or later in the Lab",
     },
     {
       name: 'a Document version that takes effect before its Effective Date is refused',
-      statements: [
-        versionIn('Approved', `'2099-01-01'`),
-        `update lims.document_version set status = 'Effective' where id = '${version}'`,
-      ],
+      statements: [...versionIn('Approved', '2099-01-01'), setStatus('Effective')],
       message: 'a Document version takes effect on its Effective Date, 2099-01-01, not before',
     },
     {
       name: 'an Effective version Superseded with no later Approved version is refused',
-      statements: [
-        versionIn('Effective', `'2026-01-01'`),
-        `update lims.document_version set status = 'Superseded' where id = '${version}'`,
-      ],
+      statements: [...versionIn('Effective', '2026-01-01'), setStatus('Superseded')],
       message: 'a Document version is Superseded only by a later Approved version',
     },
     {
       name: 'a Document version Abandoned by someone who is neither its author nor QA is refused',
-      statements: [
-        versionIn('Draft'),
-        asPerson('refusal.person', 'Analyst'),
-        `update lims.document_version set status = 'Abandoned', abandon_reason = 'Not needed.' where id = '${version}'`,
-      ],
+      statements: [...versionIn('Draft'), asPerson('refusal.person', 'Analyst'), abandon('Not needed.')],
       message: 'a Document version is Abandoned by its author or QA',
     },
   ];
@@ -4127,12 +4182,7 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     await client.query('begin');
     try {
       await client.query(AUDIT_CONTEXT);
-      await client.query(versionIn('Draft'));
-      await client.query(asAuthor);
-      await client.query(
-        `update lims.document_version set status = 'Abandoned', abandon_reason = 'Not needed.' where id = $1`,
-        [version],
-      );
+      await accepted(...versionIn('Draft'), asAuthor, abandon('Not needed.'));
       const { rows } = await client.query(
         `select v.status, d.number from lims.document_version v join lims.document d on d.id = v.document_id
           where v.id = $1`,
@@ -4145,48 +4195,56 @@ describe('a Document keeps its number, and its versions reach Effective only thr
   });
 
   covered.add('lims.signature.document_signing');
-  const signings: { name: string; statements: string[]; message: string }[] = [
+  const signings: { name: string; statements: Statement[]; message: string }[] = [
     {
       name: 'signing a Test Authored is refused',
-      statements: [signing('Authored', id.person, `'${id.laterRecordVersion}'`)],
+      statements: [
+        statement(
+          'insert into lims.signature (lab_id, person_id, meaning, record_version_id) values ($1, $2, $3, $4)',
+          id.lab,
+          id.person,
+          'Authored',
+          id.laterRecordVersion,
+        ),
+      ],
       message: 'Authored and Approved are Signature Meanings of a Document version',
     },
     {
       name: 'signing a Document version Performed is refused',
-      statements: [versionIn('Draft'), signing('Performed', id.admin)],
+      statements: [...versionIn('Draft'), signing('Performed', id.admin)],
       message: 'a Document version is signed Authored, Reviewed or Approved, not Performed',
     },
     {
       name: 'signing a Document version Authored by someone other than its author is refused',
-      statements: [versionIn('Draft'), signing('Authored', id.person)],
+      statements: [...versionIn('Draft'), signing('Authored', id.person)],
       message: 'a Document version is signed Authored only by its author',
     },
     {
       name: 'signing a Document version Authored a second time is refused',
-      statements: [versionIn('Draft'), signed('Authored', id.admin), signing('Authored', id.admin)],
+      statements: [...versionIn('Draft'), ...signed('Authored', id.admin), signing('Authored', id.admin)],
       message: 'a Document version is signed Authored once, while a Draft',
     },
     {
       name: 'signing a Draft Reviewed is refused',
-      statements: [versionIn('Draft'), signing('Reviewed', id.person)],
+      statements: [...versionIn('Draft'), signing('Reviewed', id.person)],
       message: 'a Document version is signed Reviewed while In Review, not Draft',
     },
     {
       name: 'signing a Document version Reviewed by its Authored signer is refused',
-      statements: [versionIn('InReview'), signed('Authored', id.admin), signing('Reviewed', id.admin)],
+      statements: [...versionIn('InReview'), ...signed('Authored', id.admin), signing('Reviewed', id.admin)],
       message: 'a Document version is signed Reviewed by someone who has not authored or reviewed it',
     },
     {
       name: 'signing a Document version Approved with no Reviewed Signature is refused',
-      statements: [versionIn('InReview'), signed('Authored', id.admin), signing('Approved', id.otherPerson)],
+      statements: [...versionIn('InReview'), ...signed('Authored', id.admin), signing('Approved', id.otherPerson)],
       message: 'a Document version is signed Approved once, while In Review, after a Reviewed Signature',
     },
     {
       name: 'signing a Document version Approved by its Reviewed signer is refused',
       statements: [
-        versionIn('InReview'),
-        signed('Authored', id.admin),
-        signed('Reviewed', id.otherPerson),
+        ...versionIn('InReview'),
+        ...signed('Authored', id.admin),
+        ...signed('Reviewed', id.otherPerson),
         signing('Approved', id.otherPerson),
       ],
       message: 'a Document version is signed Approved by someone who has not authored or reviewed it',
@@ -4194,9 +4252,9 @@ describe('a Document keeps its number, and its versions reach Effective only thr
     {
       name: 'signing a Document version Approved by its Authored signer is refused',
       statements: [
-        versionIn('InReview'),
-        signed('Authored', id.admin),
-        signed('Reviewed', id.person),
+        ...versionIn('InReview'),
+        ...signed('Authored', id.admin),
+        ...signed('Reviewed', id.person),
         signing('Approved', id.admin),
       ],
       message: 'a Document version is signed Approved by someone who has not authored or reviewed it',
@@ -4210,9 +4268,9 @@ describe('a Document keeps its number, and its versions reach Effective only thr
   }
   it('an Approved signing by a third person, after Authored and Reviewed, passes the independence rules', async () => {
     const error = await refusal(
-      versionIn('InReview'),
-      signed('Authored', id.admin),
-      signed('Reviewed', id.person),
+      ...versionIn('InReview'),
+      ...signed('Authored', id.admin),
+      ...signed('Reviewed', id.person),
       signing('Approved', id.otherPerson),
     );
     assert.doesNotMatch(error.message, /Document version/);
