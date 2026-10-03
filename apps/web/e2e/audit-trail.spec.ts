@@ -280,3 +280,25 @@ test('QA verifying a chain whose break has a Closed System Incident still sees B
   await expect(page.locator('.chains > li').first().locator('.status').first()).toHaveText('Broken');
   await signOutFromRail(page);
 });
+
+test("QA opens a break's System Incident from Verify chain and reads every break inside its range, as it recorded them", async ({
+  page,
+}) => {
+  const entry = breakANewQcEntry();
+  await page.goto('/');
+  await signIn(page, 'quinn.qa', /QC Laboratory/);
+  const { methods } = await (await page.request.get('/api/lookups')).json();
+  await page.goto(`/#/trails/method/${methods[0].id}`);
+  await page.getByRole('button', { name: 'Verify chain' }).click();
+  const own = page
+    .locator('.chains > li')
+    .first()
+    .locator('.breaks li', { hasText: `entry ${entry} fails` });
+  await own.getByRole('link', { name: /System Incident/ }).click();
+
+  const breaks = page.getByRole('region', { name: 'Breaks in this range' });
+  await expect(breaks).toContainText('These are the breaks this System Incident recorded.');
+  await expect(breaks.getByRole('row')).toHaveCount(2);
+  await expect(breaks.getByRole('row').last().getByRole('cell')).toHaveText([entry, 'Changed', entry]);
+  await signOutFromRail(page);
+});

@@ -286,5 +286,34 @@ export function incidentRoutes(app: App, db: Kysely<DB>, release: string): void 
       return (await readIncident(db, req.actor.lab.id, req.params.reference)).view;
     },
   });
+  app.route({
+    ...routes.incidentBreaks,
+    handler: async (req) => {
+      readableBy(req.actor);
+      const { reference } = req.params;
+      const incident =
+        (await db
+          .selectFrom('systemIncident')
+          .select(['chain', 'firstFailure', 'lastFailure', 'fingerprint'])
+          .where('reference', '=', reference)
+          .executeTakeFirst()) ?? refuse('notFound', `No System Incident has the reference ${reference}.`);
+      const { chain, firstFailure, lastFailure, fingerprint } = incident;
+      if (chain === null || firstFailure === null)
+        refuse('state', `System Incident ${reference} records no break in an Audit Trail chain.`);
+      if (lastFailure === null || fingerprint === null)
+        refuse(
+          'state',
+          `System Incident ${reference} was opened before the LIMS recorded a break's last entry. Verify the chain to record it again.`,
+        );
+      const range = { chain, first: firstFailure, last: lastFailure, fingerprint };
+      return (
+        (await labScope(db, req.actor).breaksWithin(range)) ??
+        refuse(
+          'role',
+          `System Incident ${reference} records breaks in another Lab's chain. Switch to that Lab to list them.`,
+        )
+      );
+    },
+  });
   for (const name of incidentStepNames) registerIncidentStep(app, db, name, release);
 }

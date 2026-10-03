@@ -1,6 +1,7 @@
 import type { DB } from '@lims/db';
 import {
   type ActorContext,
+  type BreakInRange,
   type BreakKind,
   type NumberedKind,
   type NumberTaken,
@@ -98,8 +99,14 @@ export type WriteQueries = ReturnType<typeof inWrite>;
  */
 const BREAKS_ONE_BY_ONE = 100;
 
+/** What a `More` break records in place of its breaks' fingerprints: one digest of every break, in entry order. */
+const digestOfBreaks = sql<Buffer>`sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq))`;
+
 /** A break, or the breaks after the first ones taken together, as a verification records it. */
 export type RecordedBreak = { entry: string; kind: BreakKind; through: string; breaks: number; fingerprint: string };
+
+/** A chain-verify System Incident's break range and the fingerprint it recorded for the breaks inside it. */
+export type BreakRange = { chain: string; first: string; last: string; fingerprint: Buffer };
 
 /** The one lab-scoped seam: every read and write after login goes through it, filtered to the context's Lab. */
 export function labScope(db: Kysely<DB>, ctx: ActorContext) {
@@ -121,8 +128,7 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
           ), recorded as (
             select seq, kind, through, 1 as breaks, fingerprint from found where n <= ${BREAKS_ONE_BY_ONE}
             union all
-            select min(seq), 'More', max(through), count(*)::int,
-              sha256(string_agg(int8send(seq) || sha256(fingerprint), ''::bytea order by seq))
+            select min(seq), 'More', max(through), count(*)::int, ${digestOfBreaks}
             from found where n > ${BREAKS_ONE_BY_ONE} having count(*) > 0
           )
           select json_agg(json_build_object(
@@ -147,6 +153,27 @@ export function labScope(db: Kysely<DB>, ctx: ActorContext) {
           { chain: 'company' as const, chainId: 'company', lastEntry: found.companyLast, breaks: found.companyBreaks },
         ],
       };
+    },
+    /**
+     * Recomputes every break that covers an entry of `range`, on this Lab's chain or the company chain only, and
+     * whether they are still the breaks it recorded: one break's own fingerprint, or the digest of all of theirs.
+     * Null for another Lab's chain.
+     */
+    breaksWithin: async ({ chain, first, last, fingerprint }: BreakRange) => {
+      if (chain !== labId && chain !== 'company') return null;
+      const { rows } = await sql<{ recomputedAt: Date; asRecorded: boolean; breaks: BreakInRange[] }>`
+        with found as (
+          select b.seq, b.kind, b.through, b.fingerprint from lims.chain_breaks(${chain}) as b
+          where b.through >= ${first}::bigint and b.seq <= ${last}::bigint
+        )
+        select now() as recomputed_at,
+          coalesce((select ${fingerprint} = ${digestOfBreaks} or (count(*) = 1 and bool_or(fingerprint = ${fingerprint}))
+            from found), false) as as_recorded,
+          coalesce((select json_agg(json_build_object('entry', seq::text, 'kind', kind, 'through', through::text)
+            order by seq) from found), '[]') as breaks`.execute(db);
+      const [recomputed] = rows;
+      if (!recomputed) throw new Error('the break range read returned no row');
+      return recomputed;
     },
     /** One audited transaction; a write a re-authentication enables holds that person's row before anything else. */
     write: <R>(reason: string, role: Role, fn: (q: WriteQueries) => Promise<R>, reauthenticated?: Reauthenticated) =>

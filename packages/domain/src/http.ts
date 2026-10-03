@@ -374,6 +374,26 @@ const chainVerification = Type.Object({
   report: Type.String(),
 });
 export type ChainVerification = Static<typeof chainVerification>;
+/**
+ * One break as the chain reads now: its first entry, its kind, and the last entry it covers, which is past the first
+ * only for a run of missing entries.
+ */
+const breakInRange = Type.Object({
+  entry: seq,
+  kind: Type.Enum({ Changed: 'Changed', Missing: 'Missing', HeadMoved: 'HeadMoved' } as const),
+  through: seq,
+});
+export type BreakInRange = Static<typeof breakInRange>;
+/**
+ * Every break inside a chain-verify System Incident's range, recomputed at `recomputedAt`, and whether they are still
+ * the breaks the incident recorded; false means the chain changed inside the range after the incident was opened.
+ */
+const incidentBreaks = Type.Object({
+  recomputedAt: instant,
+  asRecorded: Type.Boolean(),
+  breaks: Type.Array(breakInRange),
+});
+export type IncidentBreaks = Static<typeof incidentBreaks>;
 const auditTrailVerification = Type.Object({ at: instant, chains: Type.Array(chainVerification) });
 export type AuditTrailVerification = Static<typeof auditTrailVerification>;
 const auditExportFormat = Type.Enum({ JSON: 'JSON', CSV: 'CSV' } as const satisfies { [K in db.AuditExportFormat]: K });
@@ -686,6 +706,8 @@ export const routes = {
   /** The System Incidents not yet Closed, newest first, for Admin and QA. */
   incidents: route('GET', '/api/incidents', {}, Type.Array(incidentRow)),
   incident: route('GET', '/api/incidents/:reference', { params: byReference }, systemIncident),
+  /** Every break inside a chain-verify System Incident's range, as this Lab's chain or the company chain reads now. */
+  incidentBreaks: route('GET', '/api/incidents/:reference/breaks', { params: byReference }, incidentBreaks),
 } satisfies Record<string, Route>;
 
 const incidentStepInputs = {

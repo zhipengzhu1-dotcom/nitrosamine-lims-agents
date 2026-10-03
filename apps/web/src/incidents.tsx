@@ -1,5 +1,6 @@
 import {
   type ActorContext,
+  type BreakInRange,
   forcesYes,
   type IncidentRow,
   type IncidentStepName,
@@ -113,6 +114,33 @@ function Recorded({ record }: { record: Recording | null }) {
   );
 }
 
+const breakColumns: Column<BreakInRange>[] = [
+  { head: 'Entry', cell: (b) => b.entry },
+  { head: 'Kind', cell: (b) => words(b.kind) },
+  { head: 'Last entry', cell: (b) => b.through },
+];
+
+/** Every break inside a chain-verify incident's range as the chain reads now, and whether they are the ones it recorded. */
+function IncidentBreaks({ reference }: { reference: string }) {
+  const { data, error } = useApi(routes.incidentBreaks, { reference });
+  return (
+    <section aria-labelledby="incident-breaks">
+      <h2 id="incident-breaks">Breaks in this range</h2>
+      {error && <p className="note--bad">{error}</p>}
+      {data && (
+        <>
+          <p className={data.asRecorded ? 'muted' : 'note--bad'}>
+            {data.asRecorded
+              ? `Recomputed ${time(data.recomputedAt)}. These are the breaks this System Incident recorded.`
+              : `Recomputed ${time(data.recomputedAt)}. The chain has changed inside this range since this System Incident was opened; Verify chain records the change as a new System Incident.`}
+          </p>
+          <StackTable columns={breakColumns} rows={data.breaks} rowKey={(b) => b.entry} />
+        </>
+      )}
+    </section>
+  );
+}
+
 /** One System Incident with what QA and the Admin have recorded on it, and the rail's next step for the signed-in person. */
 function IncidentRecord({
   me,
@@ -168,7 +196,9 @@ function IncidentRecord({
             <dt>Chain</dt>
             <dd>
               {view.chain}
-              {view.firstFailure && `, first failing entry ${view.firstFailure}`}
+              {view.breakCount && view.lastFailure
+                ? `, ${view.breakCount} ${view.breakCount === 1 ? 'break' : 'breaks'} from entry ${view.firstFailure} to entry ${view.lastFailure}`
+                : view.firstFailure && `, first failing entry ${view.firstFailure}`}
             </dd>
           </>
         )}
@@ -187,6 +217,7 @@ function IncidentRecord({
           {view.recordVersion.version} · <code className="hash">{view.recordVersion.contentHash}</code>
         </dd>
       </dl>
+      {view.chain && view.lastFailure && <IncidentBreaks reference={view.reference} />}
       <h2>Impact and actions</h2>
       <p className="muted">QA answers whether this could have affected results or records.</p>
       <dl className="facts">

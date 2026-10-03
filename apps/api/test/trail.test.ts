@@ -607,7 +607,7 @@ async function labOfItsOwn(code: string, entries: number) {
       );
     });
   const verify = async () => ok(await client.call(routes.verifyAuditTrail)).chains[0] ?? assert.fail('the Lab chain');
-  return { labId, alter, verify, last: BigInt(await lastEntryOf(labId)) };
+  return { labId, client, alter, verify, last: BigInt(await lastEntryOf(labId)) };
 }
 
 it('Verify chain reports both broken entries of a chain with two, each with its own System Incident, and raises the alarm once for each incident it opens', async () => {
@@ -860,4 +860,70 @@ it('Verify chain records 100 breaks one by one, and a 101st as one more break', 
   );
   assert.equal(more.length, 101);
   assert.equal(more[100]?.failure, '1 more break, from entry 101 to entry 101');
+});
+
+it("QA lists every break inside a More System Incident's range with its entry, kind and last entry, and learns when the chain has changed inside the range since the incident was opened", async () => {
+  const lab = await labOfItsOwn('RNG', 130);
+  const head = String(lab.last + 1n);
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update' where chain = ${lab.labId} and seq <= 110`,
+    sql`delete from lims.audit_entry where chain = ${lab.labId} and seq between 115 and 117`,
+    sql`update lims.audit_chain set head = sha256(head) where chain = ${lab.labId}`,
+  ]);
+  const verified = await lab.verify();
+  const more = verified.breaks[100] ?? assert.fail('the breaks after the first 100');
+  assert.equal(more.failure, `12 more breaks, from entry 101 to entry ${head}`);
+  const changed = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => ({
+      entry: String(from + i),
+      kind: 'Changed',
+      through: String(from + i),
+    }));
+
+  const listed = ok(await lab.client.call(routes.incidentBreaks, { reference: more.incident }));
+  assert.equal(listed.asRecorded, true);
+  assert.deepEqual(listed.breaks, [
+    ...changed(101, 110),
+    { entry: '115', kind: 'Missing', through: '117' },
+    { entry: head, kind: 'HeadMoved', through: head },
+  ]);
+  const first = verified.breaks[0]?.incident ?? assert.fail('the first break');
+  const one = ok(await lab.client.call(routes.incidentBreaks, { reference: first }));
+  assert.deepEqual([one.asRecorded, one.breaks], [true, changed(1, 1)], 'an incident of one break lists that break');
+
+  await tamper([
+    sql`update lims.audit_entry set reason = 'Routine update, again' where chain = ${lab.labId} and seq = 120`,
+  ]);
+  const after = ok(await lab.client.call(routes.incidentBreaks, { reference: more.incident }));
+  assert.equal(after.asRecorded, false, 'a break inside the range that the incident did not record');
+  assert.deepEqual(
+    after.breaks.map((b) => b.entry),
+    [...changed(101, 110).map((b) => b.entry), '115', '120', head],
+  );
+  assert.equal(
+    ok(await lab.client.call(routes.incidentBreaks, { reference: first })).asRecorded,
+    true,
+    'a change outside its range leaves another incident as recorded',
+  );
+});
+
+it("Listing a System Incident's breaks is refused for a role that cannot read it, from another Lab than the chain's, for an incident that records no chain break, and for one opened before the LIMS recorded a break's range", async () => {
+  const lab = await labOfItsOwn('REF', 3);
+  await lab.alter(String(lab.last));
+  const incident = (await lab.verify()).breaks[0]?.incident ?? assert.fail('the break names a System Incident');
+
+  refusedWith(await as.ana.call(routes.incidentBreaks, { reference: incident }), 'role');
+  const elsewhere = refusedWith(await as.quinn.call(routes.incidentBreaks, { reference: incident }), 'role');
+  assert.match(elsewhere, /another Lab's chain/);
+  refusedWith(await lab.client.call(routes.incidentBreaks, { reference: 'ZZZZZZZZ' }), 'notFound');
+
+  const [failure, legacy] = ['NC000001', 'NC000002'];
+  await tamper([
+    sql`insert into lims.system_incident (kind, reference, step, error_class)
+        values ('UnexpectedFailure', ${failure}, 'submit', 'Error')`,
+    sql`insert into lims.system_incident (kind, reference, requested_by, chain, first_failure)
+        values ('ChainVerifyFailure', ${legacy}, ${quinn.id}, ${lab.labId}, 1)`,
+  ]);
+  refusedWith(await lab.client.call(routes.incidentBreaks, { reference: failure }), 'state');
+  refusedWith(await lab.client.call(routes.incidentBreaks, { reference: legacy }), 'state');
 });
