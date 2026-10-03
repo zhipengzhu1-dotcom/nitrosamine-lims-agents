@@ -7,3 +7,4 @@ export * from './redaction.ts';
 export * from './staff.ts';
 export * from './sentence.ts';
 export * from './password.ts';
+export * from './checklist.ts';

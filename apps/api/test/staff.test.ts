@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { it } from 'node:test';
 import { routes, type StepInput, type StepName, stepRoute } from '@lims/domain';
 import { sql } from 'kysely';
-import { type Account, Client, ok, refusedWith, signatureOf, startApi } from './harness.ts';
+import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
 
 const api = await startApi('lims_api_staff_test');
 const ada = api.person('ada');
@@ -288,8 +288,7 @@ async function take(client: Client, name: StepName, testId: string, input: StepI
     await client.call(stepRoute(name), {
       commitKey: randomUUID(),
       testId,
-      input,
-      ...(signer && { signature: await signatureOf(client, testId, signer) }),
+      ...(await api.press(client, name, testId, input, signer)),
     }),
   );
 }

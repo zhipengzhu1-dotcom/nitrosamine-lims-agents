@@ -4,10 +4,10 @@ import { type Kysely, sql } from 'kysely';
 import type { App } from './app.ts';
 import { refuse } from './refuse.ts';
 import { labScope, type Scope } from './scope.ts';
-import { statementInForce } from './signing.ts';
-import { factsFor, latestVersion, signedVersions } from './steps.ts';
+import { latestVersion, statementInForce } from './signing.ts';
+import { factsFor, signedVersions } from './steps.ts';
 import { onWallClock, signatureReplyColumns, signatureReply, trailRoutes } from './trail.ts';
-import { auditExportRoutes } from './audit-export.ts';
+import { testChecklist } from './checklists.ts';
 
 function visibleTests(scope: Scope) {
   const { customerId } = scope.ctx.person;
@@ -43,7 +43,8 @@ async function testView(scope: Scope, id: string) {
     (await visibleTests(scope).where('test.id', '=', id).executeTakeFirst()) ??
     refuse('notFound', 'You can see no such Test.');
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
-  const ids = [test.id, test.sampleId, ...(report ? [report.id] : [])];
+  const reviews = await scope.from('testReview').select('id').where('testId', '=', id).execute();
+  const ids = [test.id, test.sampleId, ...(report ? [report.id] : []), ...reviews.map((r) => r.id)];
   const isCustomer = scope.ctx.person.customerId !== null;
   // Released means a Test Report exists, the same fact the report route refuses on, so the two reads cannot disagree.
   const withheld = isCustomer && !report;
@@ -90,12 +91,12 @@ async function testView(scope: Scope, id: string) {
     withheld,
     next,
     statement: isCustomer ? null : await statementInForce(scope.company),
+    checklist: await testChecklist(scope, test),
   };
 }
 
 export function readRoutes(app: App, db: Kysely<DB>, verifyReadLimitSeconds?: number): void {
   trailRoutes(app, db, verifyReadLimitSeconds);
-  auditExportRoutes(app, db);
   app.route({ ...routes.me, handler: async (req) => req.signedInView });
 
   app.route({

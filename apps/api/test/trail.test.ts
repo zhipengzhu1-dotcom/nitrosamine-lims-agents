@@ -20,7 +20,6 @@ import {
   ok,
   onLabClock,
   refusedWith,
-  signatureOf,
   startApi,
   toMillis,
 } from './harness.ts';
@@ -53,10 +52,14 @@ const result = {
 };
 
 async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
-  const signature = signer && (await signatureOf(client, testId, signer));
   assert.equal(
-    (await client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) }))
-      .status,
+    (
+      await client.call(stepRoute(name), {
+        commitKey: randomUUID(),
+        testId,
+        ...(await api.press(client, name, testId, input, signer)),
+      })
+    ).status,
     200,
   );
 }
@@ -109,6 +112,7 @@ it("the Test's trail lists the Test's, its Result's and Signatures' entries with
     'submission',
     'test',
     'test_report',
+    'test_review',
   ]);
   assert.deepEqual(
     entries.filter((e) => e.record.table === 'test').map((e) => e.op),

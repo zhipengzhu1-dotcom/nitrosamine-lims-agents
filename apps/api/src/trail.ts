@@ -246,6 +246,9 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'method':
     case 'signature_statement':
     case 'signing_role':
+    case 'evidence_source':
+    case 'review_checklist_version':
+    case 'review_checklist_item':
       return true;
     case 'chain_verification':
       return Boolean(
@@ -279,6 +282,7 @@ async function seenFromLab(scope: Scope, table: AuditedTable, id: string): Promi
     case 'signature':
     case 'audit_export':
     case 'reauthentication':
+    case 'test_review':
       return true;
   }
 }
@@ -297,7 +301,8 @@ export function trailRoutes(app: App, db: Kysely<DB>, readLimitSeconds?: number)
           .select(['test.id', 'test.sampleId', 'sample.submissionId', 'testReport.id as reportId'])
           .where('test.id', '=', id)
           .executeTakeFirst()) ?? refuse('notFound', 'This Lab has no such Test.');
-      const ids = [test.id, test.sampleId, ...(test.reportId ? [test.reportId] : [])];
+      const reviews = await scope.from('testReview').select('id').where('testId', '=', id).execute();
+      const ids = [test.id, test.sampleId, ...(test.reportId ? [test.reportId] : []), ...reviews.map((r) => r.id)];
       return trailOf(scope, { table: 'test', id }, (eb) =>
         eb.or([
           eb.and([

@@ -15,6 +15,8 @@ import {
   readReply,
   routes,
   type SigningBody,
+  type StepInput,
+  type StepName,
 } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import { type AppOptions, buildApp } from '../src/app.ts';
@@ -39,6 +41,7 @@ const STATUS_OF: { readonly [K in RefusalKind]: number } = {
   stale: 409,
   recordChanged: 409,
   signingRefused: 409,
+  checklistIncomplete: 409,
   keyReused: 422,
   accountLocked: 423,
   failure: 500,
@@ -264,7 +267,69 @@ export async function startApi(name: string, options: ListenOptions = {}) {
     assert.fail(`${sessions} sessions never waited on a lock`);
   }
 
+  const seededAccount = (name: SeededName): Account =>
+    seeded.find((a) => a.username.startsWith(`${name}.`)) ?? assert.fail(`no seeded person ${name}`);
+  const signIn = async (account: Account): Promise<Client> => {
+    const client = new Client(base);
+    ok(await client.call(routes.login, { username: account.username, password: account.password, labId }));
+    return client;
+  };
+  /** QA signs `version` of the Test Review Checklist Approved, unless that version or a later one is already in force. */
+  async function approveChecklist(version = 1): Promise<void> {
+    const qa = seededAccount('quinn');
+    const client = await signIn(qa);
+    const { inForce, versions } = ok(await client.call(routes.reviewChecklists, { kind: 'Test' }));
+    if (inForce !== null && inForce >= version) return;
+    const chosen = versions.find((v) => v.version === version) ?? assert.fail(`no Test checklist version ${version}`);
+    const statement = await superuser
+      .selectFrom('signatureStatement')
+      .select((eb) => eb.fn.max('version').as('version'))
+      .executeTakeFirstOrThrow();
+    ok(
+      await client.call(routes.approveChecklistVersion, {
+        kind: 'Test',
+        version,
+        username: qa.username,
+        password: qa.password,
+        recordVersion: { version: 1, contentHash: chosen.contentHash },
+        statementVersion: statement.version,
+      }),
+    );
+  }
+  /**
+   * A Reviewed press's input and signature: QA approves the Test checklist's version 1 if none is in force, then the
+   * Reviewer saves a Test Review that ticks every item, with a comment where one is needed, and signs its Record Version.
+   */
+  async function reviewPress(client: Client, testId: string, signer: Account) {
+    await approveChecklist();
+    const { checklist, statement } = ok(await client.call(routes.test, { id: testId }));
+    const { version, items } = checklist ?? assert.fail('a Reviewer sees the Test Review Checklist in force');
+    const ticks = Object.fromEntries(
+      items.filter((i) => i.ticked).map((i) => [i.key, { comment: i.needsComment ? 'None raised (fictional)' : null }]),
+    );
+    const saved = ok(await client.call(routes.saveReview, { testId, checklistVersion: version, ticks }));
+    const signature: SigningBody = {
+      username: signer.username,
+      password: signer.password,
+      recordVersion: { version: saved.recordVersion.version, contentHash: saved.recordVersion.contentHash },
+      statementVersion: statement?.version ?? assert.fail('a signer sees the signature statement'),
+    };
+    return { input: { review: saved.review }, signature };
+  }
   return {
+    approveChecklist,
+    reviewPress,
+    /** A step press's input and, for a signer, signature: a Reviewed press first saves a full Test Review, as `reviewPress` does. */
+    async press(
+      client: Client,
+      name: StepName,
+      testId: string,
+      input: StepInput<StepName>,
+      signer?: Account,
+    ): Promise<{ input: StepInput<StepName>; signature?: SigningBody }> {
+      if (name === 'review' && signer) return reviewPress(client, testId, signer);
+      return { input, ...(signer && { signature: await signatureOf(client, testId, signer) }) };
+    },
     db,
     superuser,
     base,
@@ -316,9 +381,7 @@ export async function startApi(name: string, options: ListenOptions = {}) {
     labId,
     qcLabId,
     methodId,
-    person(name: SeededName): Account {
-      return seeded.find((a) => a.username.startsWith(`${name}.`)) ?? assert.fail(`no seeded person ${name}`);
-    },
+    person: seededAccount,
     async login(account: Account, lab = labId): Promise<Client> {
       const client = new Client(base);
       ok(await client.call(routes.login, { username: account.username, password: account.password, labId: lab }));

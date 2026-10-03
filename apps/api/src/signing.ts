@@ -3,10 +3,10 @@ import type { ActorContext, Meaning, SignatureStatement } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
 import type { Reauthenticated } from './auth.ts';
 import { refuse } from './refuse.ts';
-import type { WriteQueries } from './scope.ts';
+import type { LabQueries, WriteQueries } from './scope.ts';
 
 /** The records a Signature can be given on, each with its own canonical content in the database. */
-export type Signable = 'test' | 'test_report' | 'system_incident';
+export type Signable = 'test' | 'test_report' | 'system_incident' | 'test_review' | 'review_checklist_version';
 
 /** The Record Version the signer saw: its id and the hash the sheet showed. */
 export interface Seen {
@@ -71,6 +71,21 @@ export function statementInForce(company: Kysely<DB>): Promise<SignatureStatemen
   return company
     .selectFrom('signatureStatement')
     .select(['version', sql<string>`convert_from(statement, 'UTF8')`.as('text')])
+    .orderBy('version', 'desc')
+    .executeTakeFirstOrThrow();
+}
+
+/**
+ * The record's latest Record Version, which the database wrote as it changed: what a Signature given now binds to. Every
+ * signable row has one, because the `version_record` trigger writes it on insert, so a missing one throws as a broken
+ * invariant.
+ */
+export function latestVersion(q: LabQueries, table: Signable, recordId: string) {
+  return q
+    .from('recordVersion')
+    .select(['id', 'version', 'canonicalForm', sql<string>`encode(content_hash, 'hex')`.as('contentHash')])
+    .where('recordTable', '=', table)
+    .where('recordId', '=', recordId)
     .orderBy('version', 'desc')
     .executeTakeFirstOrThrow();
 }

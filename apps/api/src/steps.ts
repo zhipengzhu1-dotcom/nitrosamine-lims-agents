@@ -21,13 +21,22 @@ import {
 import { type Kysely, type Selectable, sql } from 'kysely';
 import type { App } from './app.ts';
 import { type Credentials, type Reauthenticated, reauthenticate, sourceAddressOf } from './auth.ts';
-import { incidentRoutes } from './incident-steps.ts';
 import { refuse } from './refuse.ts';
 import { type LabQueries, labScope, type WriteQueries } from './scope.ts';
-import { proveReauthentication, type Seen, type Signable, signRecord, statementInForce } from './signing.ts';
+import { reviewToSign } from './checklists.ts';
+import {
+  latestVersion,
+  proveReauthentication,
+  type Seen,
+  type Signable,
+  signRecord,
+  statementInForce,
+} from './signing.ts';
 
 interface Effect<I> {
   signedRecord?: 'test_report';
+  /** The Test Review a Reviewed press signs instead of the Test, refused before the signer re-authenticates unless it may be signed. */
+  review?: (scope: LabQueries, ctx: ActorContext, testId: string, input: I) => Promise<string>;
   assignee?: (input: I) => PersonId;
   write(q: WriteQueries, ctx: ActorContext, testId: string, input: I): Promise<unknown>;
 }
@@ -81,7 +90,13 @@ const effects: { [K in StepName]: Effect<StepInput<K>> } = {
         })
         .execute(),
   },
-  review: { write: async () => {} },
+  review: {
+    review: async (scope, ctx, testId, input) => {
+      await reviewToSign(scope, ctx, testId, input.review);
+      return input.review;
+    },
+    write: async () => {},
+  },
   release: {
     signedRecord: 'test_report',
     write: async (q, _ctx, testId) =>
@@ -100,7 +115,12 @@ export async function factsFor(
   const signatures = test
     ? await signedVersions(q)
         .select(['signature.meaning', 'signature.personId'])
-        .where('recordVersion.recordId', '=', test.id)
+        .where((eb) =>
+          eb.or([
+            eb('recordVersion.recordId', '=', test.id),
+            eb('recordVersion.recordId', 'in', q.from('testReview').select('id').where('testId', '=', test.id)),
+          ]),
+        )
         .execute()
     : [];
   const assignee = assigneeId ?? test?.assigneeId ?? null;
@@ -138,46 +158,43 @@ export function signedVersions(q: LabQueries) {
     );
 }
 
-/**
- * The record's latest Record Version, which the database wrote as it changed: what a Signature given now binds to. Every
- * signable row has one, because the `version_record` trigger writes it on insert, so a missing one throws as a broken
- * invariant.
- */
-export function latestVersion(q: LabQueries, table: Signable, recordId: string) {
-  return q
-    .from('recordVersion')
-    .select(['id', 'version', 'canonicalForm', sql<string>`encode(content_hash, 'hex')`.as('contentHash')])
-    .where('recordTable', '=', table)
-    .where('recordId', '=', recordId)
-    .orderBy('version', 'desc')
-    .executeTakeFirstOrThrow();
-}
-
 interface Signing {
   reauthenticated: Reauthenticated;
   meaning: Meaning;
   table: Signable;
   testId: string;
+  /** The signed record when the press names it, as a Reviewed press names its Test Review. */
+  recordId: string | null;
   seen: Seen;
   statementVersion: number;
   release: string;
 }
 
-/** Signs the Test, or the Test Report this step issued on it. */
+/** Signs the Test, the Test Review the press names, or the Test Report this step issued on the Test. */
 async function sign(q: WriteQueries, ctx: ActorContext, sessionId: string, signing: Signing) {
   const { reauthenticated, meaning, table, testId, seen, statementVersion, release } = signing;
   const recordId =
-    table === 'test'
+    signing.recordId ??
+    (table === 'test'
       ? testId
-      : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id;
+      : (await q.from('testReport').select('id').where('testId', '=', testId).executeTakeFirstOrThrow()).id);
   const proof = await proveReauthentication(q, ctx, sessionId, meaning, reauthenticated);
   await signRecord(q, { proof, sessionId, meaning, table, recordId, seen, statementVersion, release });
 }
 
-async function seenVersion(scope: LabQueries, testId: string, signature: SigningBody): Promise<Seen> {
-  const latest = await latestVersion(scope, 'test', testId);
+async function seenVersion(
+  scope: LabQueries,
+  [table, recordId]: ['test' | 'test_review', string],
+  signature: SigningBody,
+): Promise<Seen> {
+  const latest = await latestVersion(scope, table, recordId);
   if (latest.version !== signature.recordVersion.version || latest.contentHash !== signature.recordVersion.contentHash)
-    refuse('recordChanged', 'The Test changed since this screen loaded it. Read it again before signing.');
+    refuse(
+      'recordChanged',
+      table === 'test'
+        ? 'The Test changed since this screen loaded it. Read it again before signing.'
+        : 'The Test changed since its Test Review was saved. Tick the checklist again before signing.',
+    );
   if ((await statementInForce(scope.company)).version !== signature.statementVersion)
     refuse(
       'signingRefused',
@@ -240,7 +257,8 @@ function registerStep<K extends StepName>(
       }
       const signature = body.signature ?? refuse('malformed', `The ${name} step needs the signer's credentials.`);
       const testId = test?.id ?? refuse('malformed', `The ${name} step signs a Test, and this request names none.`);
-      const seen = await seenVersion(scope, testId, signature);
+      const review = (await effect.review?.(scope, actor, testId, body.input)) ?? null;
+      const seen = await seenVersion(scope, review ? ['test_review', review] : ['test', testId], signature);
       const reauthenticated = await reauthenticate(
         db,
         credentials,
@@ -253,8 +271,9 @@ function registerStep<K extends StepName>(
       signing = {
         reauthenticated,
         meaning: step.signs,
-        table: effect.signedRecord ?? 'test',
+        table: review ? 'test_review' : (effect.signedRecord ?? 'test'),
         testId,
+        recordId: review,
         seen,
         statementVersion: signature.statementVersion,
         release,
@@ -298,11 +317,7 @@ function registerStep<K extends StepName>(
   });
 }
 
-/**
- * `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema, and the
- * System Incident routes, whose steps sign through the same credentials and release.
- */
+/** `POST /api/steps/:step`, one route per registry entry so each body is validated against its own schema. */
 export function stepRoutes(app: App, db: Kysely<DB>, credentials: Credentials, release: string): void {
   for (const name of stepNames) registerStep(app, db, credentials, name, release);
-  incidentRoutes(app, db, credentials, release);
 }

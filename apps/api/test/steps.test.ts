@@ -63,8 +63,11 @@ const result = {
 };
 
 async function take(client: Client, name: StepName, testId: string, input: StepInput<StepName> = {}, signer?: Account) {
-  const signature = signer && (await signatureOf(client, testId, signer));
-  return client.call(stepRoute(name), { commitKey: randomUUID(), testId, input, ...(signature && { signature }) });
+  return client.call(stepRoute(name), {
+    commitKey: randomUUID(),
+    testId,
+    ...(await api.press(client, name, testId, input, signer)),
+  });
 }
 
 async function submitTestTo(state: 'Requested' | 'Ready' | 'Assigned', analyst: Account = ana): Promise<string> {
@@ -86,7 +89,7 @@ function object(json: Json | undefined): JsonObject {
   return typeof json === 'object' && json !== null && !Array.isArray(json) ? json : assert.fail('not an object');
 }
 
-function recordVersions(table: 'test' | 'test_report', recordId: string) {
+function recordVersions(table: 'test' | 'test_report' | 'test_review', recordId: string) {
   return api.db
     .selectFrom('recordVersion')
     .select([
@@ -148,7 +151,7 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
     reported.signatures.map((s) => [s.meaning, s.signer, s.record, s.recordVersion.version, s.unsigned]),
     [
       ['Performed', 'Ana Ferreira', 'Test', 3, false],
-      ['Reviewed', 'Rui Tanaka', 'Test', 3, false],
+      ['Reviewed', 'Rui Tanaka', 'Test Review', 1, false],
       ['Released', 'Quinn Adeyemi', 'Test Report', 1, false],
     ],
     'Performed and Reviewed bind to the Record Version the Result made; Released to the Test Report',
@@ -218,9 +221,15 @@ it('the chain walks a submitted Test to Reported with three Signatures and an au
   assert.deepEqual(reported.recordVersion, { version: 3, canonicalForm: 1, contentHash: current.contentHash });
   const reportId = reported.report?.id ?? assert.fail();
   const [reportVersion] = await recordVersions('test_report', reportId);
+  const review = await api.superuser
+    .selectFrom('testReview')
+    .select('id')
+    .where('testId', '=', id)
+    .executeTakeFirstOrThrow();
+  const [reviewVersion] = await recordVersions('test_review', review.id);
   assert.deepEqual(
     reported.signatures.map((s) => s.recordVersion.contentHash),
-    [current.contentHash, current.contentHash, reportVersion?.contentHash],
+    [current.contentHash, reviewVersion?.contentHash, reportVersion?.contentHash],
   );
   assert.deepEqual(
     reportVersion?.content,
@@ -268,7 +277,7 @@ it('a change to a signed Test re-versions it and its Test Report, and every Sign
     changed.signatures.map((s) => [s.meaning, s.recordVersion.version, s.unsigned]),
     [
       ['Performed', 3, true],
-      ['Reviewed', 3, true],
+      ['Reviewed', 1, true],
       ['Released', 1, true],
     ],
     'each Signature keeps the version it was given on and is returned as unsigned',
@@ -351,7 +360,7 @@ it('the Analyst who signed Performed cannot review, and the Reviewer who reviewe
   const selfReview = await as.dana.call(stepRoute('review'), {
     commitKey: randomUUID(),
     testId: id,
-    input: {},
+    input: { review: randomUUID() },
     signature: anySignature,
   });
   assert.equal(refusedWith(selfReview, 'guard'), 'The Analyst who performed the Test cannot review it.');
@@ -464,7 +473,8 @@ it('a signing on sight of a signature statement version that is not in force is 
 it('a signing on sight of a Record Version that is no longer the latest is refused with its own kind and writes no Signature', async () => {
   const id = await submitTestTo('Assigned');
   assert.equal((await take(as.ana, 'enterResult', id, result, ana)).status, 200);
-  const seen = await signatureOf(as.rui, id, rui);
+  const before = (await view(id, as.rui)).recordVersion ?? assert.fail('a Reviewer sees the Test Record Version');
+  const { input, signature: seen } = await api.reviewPress(as.rui, id, rui);
   await audited(
     api.superuser,
     { actor: 'svc:test', role: 'system', reason: 'Rename the Customer behind the Test' },
@@ -478,12 +488,12 @@ it('a signing on sight of a Record Version that is no longer the latest is refus
   const refused = await as.rui.call(stepRoute('review'), {
     commitKey: randomUUID(),
     testId: id,
-    input: {},
+    input,
     signature: seen,
   });
   assert.equal(
     refusedWith(refused, 'recordChanged'),
-    'The Test changed since this screen loaded it. Read it again before signing.',
+    'The Test changed since its Test Review was saved. Tick the checklist again before signing.',
   );
   const after = await view(id, as.rui);
   assert.deepEqual(
@@ -491,10 +501,7 @@ it('a signing on sight of a Record Version that is no longer the latest is refus
     ['SubmittedForReview', ['Performed']],
     'no Reviewed Signature and no state move',
   );
-  assert.ok(
-    after.recordVersion && after.recordVersion.version > seen.recordVersion.version,
-    'the Test has a later version',
-  );
+  assert.ok(after.recordVersion && after.recordVersion.version > before.version, 'the Test has a later version');
   assert.equal(
     (await take(as.rui, 'review', id, {}, rui)).status,
     200,
@@ -535,7 +542,11 @@ it(`every Signature of the chain is written by the signing function and records 
         'onOwnSession',
       ),
     ])
-    .where('v.recordId', 'in', [id, api.superuser.selectFrom('testReport').select('id').where('testId', '=', id)])
+    .where('v.recordId', 'in', [
+      id,
+      api.superuser.selectFrom('testReview').select('id').where('testId', '=', id),
+      api.superuser.selectFrom('testReport').select('id').where('testId', '=', id),
+    ])
     .orderBy('s.signedAt')
     .execute();
   const signed = (meaning: string, signer: Account, role: string, recordTable: string, version: number) => ({
@@ -561,7 +572,7 @@ it(`every Signature of the chain is written by the signing function and records 
   });
   assert.deepEqual(rows, [
     signed('Performed', ana, 'Analyst', 'test', 3),
-    signed('Reviewed', rui, 'Reviewer', 'test', 3),
+    signed('Reviewed', rui, 'Reviewer', 'test_review', 1),
     signed('Released', quinn, 'QA', 'test_report', 1),
   ]);
   assert.deepEqual(
