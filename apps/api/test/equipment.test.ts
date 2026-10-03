@@ -273,6 +273,28 @@ it('a Note pressed on Equipment that is retired before the write lands is refuse
   assert.ok(!after.logbook.some((line) => line.entry === 'event'), 'the Logbook holds no Event');
 });
 
+it('a Suspect and a retire sent at once on In use Equipment both answer: the Suspect suspends it and the retire is refused as stale', async () => {
+  const equipment = await inUse();
+  const held = { actor: 'svc:test', role: 'system', reason: 'Hold the Lab chain under two presses' } as const;
+  // The chain is held while both presses queue on it, the Suspect first, so that the Suspect takes it first once released.
+  const { suspect, retire } = await audited(api.superuser, held, async (tx) => {
+    await sql`select lims.lock_chains(${api.labId})`.execute(tx);
+    const suspect = as.samir.call(equipmentStepRoute('markSuspect'), {
+      id: equipment.id,
+      input: { reason: 'The pan rocks.' },
+    });
+    suspect.catch(() => {});
+    await api.untilWaitingOnLocks(1);
+    const retire = as.lena.call(equipmentStepRoute('retire'), { id: equipment.id, input: {} });
+    retire.catch(() => {});
+    await api.untilWaitingOnLocks(2);
+    return { suspect, retire };
+  });
+  assert.equal(ok(await suspect).fitnessStatus, 'Suspended');
+  assert.equal(refusedWith(await retire, 'stale'), stale);
+  assert.equal(ok(await as.lena.call(routes.equipment, { id: equipment.id })).fitnessStatus, 'Suspended');
+});
+
 /** The version of the Equipment that its latest Approved Signature binds. */
 async function boundVersion(equipmentId: string): Promise<number> {
   const bound = await api.superuser

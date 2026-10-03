@@ -4126,6 +4126,105 @@ describe('Equipment keeps its identity and moves through its Fitness Statuses on
     });
   });
 
+  /** Runs `body` in a transaction that commits, with Refusal Person acting, so that another session sees its rows. */
+  const committed = async (body: () => Promise<void>) => {
+    await client.query('begin');
+    try {
+      await client.query(AUDIT_CONTEXT);
+      await client.query(actingFor['lims.equipment_event'] ?? '');
+      await body();
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    }
+  };
+
+  /**
+   * Runs `first` in a transaction this client holds open, has another session record a Suspect Event on
+   * `equipmentId`, asserts that the Event waits on a lock rather than landing beside the held change, commits `first`,
+   * and answers how the Event ended: committed (null) or refused.
+   */
+  const suspectWhileHeld = async (
+    first: () => Promise<void>,
+    equipmentId: string,
+  ): Promise<pg.DatabaseError | null> => {
+    const other = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    const watcher = new pg.Client({ connectionString: databaseUrl(server, DATABASE) });
+    await other.connect();
+    await watcher.connect();
+    try {
+      await client.query('begin');
+      await client.query(AUDIT_CONTEXT);
+      await first();
+      const { rows } = await other.query<{ pid: number }>('select pg_backend_pid() as pid');
+      await other.query('begin');
+      await other.query(AUDIT_CONTEXT);
+      await other.query(actingFor['lims.equipment_event'] ?? '');
+      const answered = { yet: false };
+      const suspect = other
+        .query(
+          `insert into lims.equipment_event (lab_id, equipment_id, kind, note) values ($1, $2, 'Suspect', 'Drifts (fictional).')`,
+          [id.lab, equipmentId],
+        )
+        .then(
+          () => {
+            answered.yet = true;
+            return null;
+          },
+          (e: unknown) => {
+            answered.yet = true;
+            return e instanceof pg.DatabaseError ? e : assert.fail(String(e));
+          },
+        );
+      const waiting = async () =>
+        (
+          await watcher.query(`select wait_event_type = 'Lock' as waits from pg_stat_activity where pid = $1`, [
+            rows[0]?.pid,
+          ])
+        ).rows[0]?.waits === true;
+      while (!answered.yet && !(await waiting()));
+      assert.equal(answered.yet, false, 'the Suspect Event answered before the held change committed');
+      await client.query('commit');
+      const outcome = await suspect;
+      await other.query(outcome ? 'rollback' : 'commit');
+      return outcome;
+    } finally {
+      await client.query('rollback');
+      await other.end();
+      await watcher.end();
+    }
+  };
+
+  it('a Suspect Event raised while the Lab Manager retires Suspended Equipment waits for the retire and is then refused', async () => {
+    let balance = '';
+    await committed(async () => {
+      balance = await register('BAL-10');
+      await approve(balance);
+      await recordEvent(balance, 'Suspect');
+      assert.equal(await statusOf(balance), 'Suspended');
+    });
+    const refused = await suspectWhileHeld(async () => {
+      await client.query('select lims.lock_chains($1)', [id.lab]);
+      await client.query(asRole('LabManager'));
+      await client.query(`update lims.equipment set fitness_status = 'Retired' where id = $1`, [balance]);
+    }, balance);
+    assert.deepEqual(
+      [refused?.code, refused?.message],
+      ['LA014', 'an Equipment Event is never recorded on Retired Equipment'],
+    );
+  });
+
+  it('a Suspect Event raised while QA approves Quarantined Equipment waits for the Approved signing, and the Equipment ends Suspended', async () => {
+    let balance = '';
+    await committed(async () => {
+      balance = await register('BAL-11');
+    });
+    const outcome = await suspectWhileHeld(() => approve(balance), balance);
+    assert.equal(outcome, null, outcome?.message);
+    assert.equal(await statusOf(balance), 'Suspended');
+  });
+
   it('an Equipment Event recorded by a service identity is refused', async () => {
     await within(async () => {
       await client.query(`select set_config('lims.actor', 'svc:test', true)`);

@@ -300,6 +300,9 @@ function registerEquipmentStep<K extends EquipmentStepName>(
       async (q) => {
         const target = { id: body.id, status: view.fitnessStatus, personId: actor.person.id };
         if (!(signs && signature && reauthenticated)) {
+          // Every Equipment write holds the Lab's chain before its row: a signed step through its re-authentication
+          // record, an Event through its trigger, and an unsigned step here, so no two of them lock in opposite orders.
+          await sql`select lims.lock_chains(${actor.lab.id})`.execute(q.company);
           await effects[name](q, target, body.input);
           return;
         }

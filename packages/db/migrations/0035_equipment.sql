@@ -169,15 +169,18 @@ create trigger keep_equipment before insert or update on lims.equipment
 
 -- An Equipment Event is recorded by the person acting, a member of the Lab's staff, at the database's instant, never
 -- on Retired Equipment, and an Event after which the Equipment must be checked again suspends In use Equipment. The
--- Fitness Status is read without a row lock on purpose: every signed Event takes the Lab's Audit Trail chain at its
--- re-authentication record before it reads, and a status change takes it in the same statement as the row, so the
--- two serialize on the chain; a row lock here would wait behind a status change that waits behind this chain, a deadlock.
+-- Lab's Audit Trail chain is taken first, before the Fitness Status is read: every write to Equipment holds that
+-- chain, a signed step from its re-authentication record and an unsigned step from the lock the API takes before its
+-- row, so an Event never reads a status that another transaction is changing, and a Suspect raised while QA approves
+-- the Equipment lands after the approval and suspends it. The chain comes before the row here as it does in every
+-- other Equipment write, so no two writers hold the row and the chain in opposite orders.
 create function lims.record_equipment_event() returns trigger
 language plpgsql set search_path = lims, pg_temp as $$
 declare
   actor  text := current_setting('lims.actor', true);
   status fitness_status;
 begin
+  perform lock_chains(new.lab_id::text);
   select id into new.recorded_by from person where 'person:' || username = actor;
   if new.recorded_by is null then
     raise exception 'an Equipment Event is recorded by a person, not %', coalesce(nullif(actor, ''), 'no actor')
