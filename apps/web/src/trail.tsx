@@ -203,8 +203,15 @@ export function TrailPanel({ me, trail }: { me: ActorContext; trail: Trail | und
         <h2>Audit Trail</h2>
         {trail && (
           <p className="muted">
-            {needle === '' ? trail.entries.length : `${shown.length} of ${trail.entries.length}`} entries. Times in UTC
-            {trail.entries.some((e) => e.atLab !== null) ? ` and in the Lab's zone, ${trail.labZone}` : ''}.
+            {needle === '' ? trail.entries.length : `${shown.length} of ${trail.entries.length}`}{' '}
+            {trail.entries.length === 1 ? 'entry' : 'entries'}. Times in UTC
+            {trail.entries.some((e) => e.atLab !== null) && (
+              <>
+                {" and on the Lab's zone in force when each was written, now "}
+                <a href={`#/trails/lab/${me.lab.id}`}>{trail.labZone}</a>
+              </>
+            )}
+            .
           </p>
         )}
       </div>
