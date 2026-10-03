@@ -410,10 +410,22 @@ it("the Admin reads earlier Access Events only before one of the person's own Ac
   assert.ok(othersEvent);
   refusedWith(await ada.call(routes.earlierAccessEvents, { id: person.id, before: othersEvent.id }), 'notFound');
   refusedWith(await ada.call(routes.earlierAccessEvents, { id: person.id, before: randomUUID() }), 'notFound');
-  refusedWith(
-    await ada.call(routes.earlierAccessEvents, { id: api.person('cora').id, before: othersEvent.id }),
-    'notFound',
+  const cora = api.person('cora');
+  const [corasEvent] = await audited(api.superuser, SYSTEM, (tx) =>
+    tx
+      .insertInto('accessEvent')
+      .values({
+        kind: 'SignInFailed',
+        failureReason: 'WrongPassword',
+        subjectId: cora.id,
+        sourceAddress: '192.0.2.7',
+        roles: ['Analyst'],
+      })
+      .returning('id')
+      .execute(),
   );
+  assert.ok(corasEvent, 'an Access Event of no session, which every Lab sees');
+  refusedWith(await ada.call(routes.earlierAccessEvents, { id: cora.id, before: corasEvent.id }), 'notFound');
   await audited(api.superuser, SYSTEM, (tx) =>
     tx.insertInto('membership').values({ labId: api.qcLabId, personId: person.id, role: 'Analyst' }).execute(),
   );
