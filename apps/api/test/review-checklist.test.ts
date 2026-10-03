@@ -252,9 +252,11 @@ it('Reviewed on a Test Review whose needs-comment item has a blank comment is re
   );
 });
 
-it('Reviewed binds the Test Review, whose Record Version holds the Test version, the checklist version and every tick and comment', async () => {
+it('Reviewed binds the Test Review, whose Record Version holds the Test version, the checklist version, every tick and comment, and the evidence the Test view showed', async () => {
   await api.approveChecklist();
   const testId = await awaitingReview();
+  if (!(await checklistOf(testId)).items.some((i) => !i.ticked))
+    ok(await approveAs(as.qiao, qiao, await draftNext([performedSignature])));
   const checklist = await checklistOf(testId);
   const testVersion = (await testView(testId)).recordVersion ?? assert.fail();
   const review = await saved(testId);
@@ -274,6 +276,11 @@ it('Reviewed binds the Test Review, whose Record Version holds the Test version,
       .filter((i) => i.ticked)
       .map((i) => ({ key: i.key, text: i.text, comment: i.needsComment ? 'No flags raised.' : null })),
   );
+  const shown = checklist.items.flatMap((i) => (i.ticked ? [] : [{ key: i.key, text: i.text, value: i.value }]));
+  assert.deepEqual(content.evidence, shown, 'the signed evidence is what the Test view showed');
+  const performed =
+    shown.find((e) => e.key === 'performedSignature') ?? assert.fail('the Performed Signature is shown');
+  assert.deepEqual([performed.value['Signed by'], performed.value.Role], ['Ana Ferreira', 'Analyst']);
 });
 
 it('a Reviewer signs only a Test Review they saved', async () => {
