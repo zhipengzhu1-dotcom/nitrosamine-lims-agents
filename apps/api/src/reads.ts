@@ -44,8 +44,9 @@ async function testView(scope: Scope, id: string) {
     refuse('notFound', 'You can see no such Test.');
   const report = await scope.from('testReport').select(['id', 'number']).where('testId', '=', id).executeTakeFirst();
   const isCustomer = scope.ctx.person.customerId !== null;
-  const changes = await changesOf(scope, id);
-  // An Approved Signature binds the Critical Data Change's own Record Version, so it is read by the change's id.
+  // A Customer sees no Critical Data Change. An Approved Signature binds the change's own Record Version, so it is read
+  // by the change's id, and a Customer's read names none.
+  const changes = isCustomer ? [] : await changesOf(scope, id);
   const ids = [test.id, test.sampleId, ...(report ? [report.id] : []), ...changes.map((c) => c.id)];
   // Released means a Test Report exists, the same fact the report route refuses on, so the two reads cannot disagree.
   const withheld = isCustomer && !report;
@@ -92,8 +93,10 @@ async function testView(scope: Scope, id: string) {
     withheld,
     next,
     statement: isCustomer ? null : await statementInForce(scope.company),
-    changes: withheld ? [] : changes,
-    changeNext: openChangeSteps((await changeFactsFor(scope, scope.ctx, test)).facts, scope.ctx.roles),
+    changes,
+    changeNext: isCustomer
+      ? []
+      : openChangeSteps((await changeFactsFor(scope, scope.ctx, test)).facts, scope.ctx.roles),
   };
 }
 

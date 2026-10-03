@@ -1018,3 +1018,21 @@ describe('an approval on a Reviewed Test sends it back for review before it is r
     ok(await signStep(as.quinn, 'release', second.testId, quinn));
   });
 });
+
+describe('a Customer sees no Critical Data Change on a Test', () => {
+  it('a Customer reading a released Test whose value was changed sees neither the change nor its Approved Signature', async () => {
+    const { testId } = await performedTest();
+    ok(await proposeOver(testId));
+    ok(await as.rui.call(changeStepRoute('approveChange'), { testId, ...(await approvalOf(as.rui, testId, rui)) }));
+    ok(await signStep(as.rui, 'review', testId, rui));
+    ok(await signStep(as.quinn, 'release', testId, quinn));
+    const view = ok(await as.cora.call(routes.test, { id: testId }));
+    assert.equal(view.withheld, false);
+    assert.deepEqual(view.changes, []);
+    assert.deepEqual(view.changeNext, []);
+    assert.deepEqual(
+      view.signatures.map((s) => s.meaning),
+      ['Performed', 'Reviewed', 'Released'],
+    );
+  });
+});
