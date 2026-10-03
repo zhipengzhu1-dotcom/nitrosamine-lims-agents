@@ -1,6 +1,7 @@
 import { type DB, postgresFault } from '@lims/db';
 import type { ActorContext, Meaning, SignatureStatement } from '@lims/domain';
 import { type Kysely, sql } from 'kysely';
+import type { Reauthenticated } from './auth.ts';
 import { refuse } from './refuse.ts';
 import type { WriteQueries } from './scope.ts';
 
@@ -27,16 +28,23 @@ export interface RecordSigning {
 
 /**
  * Writes the single-use re-authentication record a signing names, in the session's Lab, for the person the step
- * re-authenticated; it is written only after `reauthenticate` proved the password, by the write it enables.
+ * re-authenticated, naming what proved them; it is written only after `reauthenticate` proved the credentials, by the
+ * write it enables.
  */
 export async function proveReauthentication(
   q: WriteQueries,
   ctx: ActorContext,
   sessionId: string,
   meaning: Meaning,
+  reauthenticated: Reauthenticated,
 ): Promise<string> {
   const proof = await q
-    .insert('reauthentication', { sessionId, personId: ctx.person.id, meaning, authenticator: 'Password' })
+    .insert('reauthentication', {
+      sessionId,
+      personId: ctx.person.id,
+      meaning,
+      authenticator: reauthenticated.authenticator,
+    })
     .returning('id')
     .executeTakeFirstOrThrow();
   return proof.id;

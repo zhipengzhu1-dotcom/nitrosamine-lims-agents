@@ -477,6 +477,14 @@ test('the whole chain through the UI, ending in a Test Report with three Signatu
     /^1 · [0-9a-f]{64}$/,
   );
   await expect(signatureRow(page, 'Released').locator('td[data-label="Record Version"]')).toHaveText('1');
+  await expect(page.locator('td[data-label="Proved by"]'), 'each Signature says what proved its signer').toHaveText([
+    'Password',
+    'Password',
+    'Password',
+  ]);
+  await expect(
+    page.getByText('Demo: a Signature proved by Password re-entered the user ID and password'),
+  ).toBeVisible();
   const reportTimes = page.locator('td[data-label="Time"]');
   await expect(reportTimes, 'each Signature time in UTC, then on the Lab wall clock').toHaveText([
     utcThenLabClock,

@@ -187,7 +187,8 @@ export async function lock(mode: LockMode): Promise<void> {
 }
 
 /** Unlocks the session with the same person's password and restarts its countdown. */
-export const unlock = (password: string) => startSession(() => api(routes.unlock, { password }));
+export const unlock = (credentials: RouteInput<typeof routes.unlock>[0]) =>
+  startSession(() => api(routes.unlock, credentials));
 
 let actorChanged = (_me: ActorContext) => {};
 /** Registers the one listener that shows the person the session the server answered with after a Lab switch. */

@@ -1,5 +1,6 @@
 import {
   type ActorContext,
+  type Authenticator,
   type Result,
   routes,
   type Signature,
@@ -228,6 +229,24 @@ export function unsignedNotice(rows: Signature[]): string | undefined {
 const rowClass = (s: Signature, fresh?: ReadonlySet<string>) =>
   [fresh?.has(signatureKey(s)) ? 'row--fresh' : '', s.unsigned ? 'row--unsigned' : ''].join(' ').trim() || undefined;
 
+/** What a Signature records as having proved its signer, as the Signatures table and the Test Report print it. */
+const PROVED_BY: Record<Authenticator, string> = { Password: 'Password', PasswordAndCode: 'Password and code' };
+const provedBy = (authenticator: Authenticator | null) =>
+  authenticator === null ? 'Not recorded' : PROVED_BY[authenticator];
+
+/** One sentence for each way the signers of `rows` were proved, from the Signatures themselves and never from the current login. */
+export function signingNotes(rows: readonly Signature[]): string[] {
+  const notes: [Authenticator | null, string][] = [
+    [
+      'PasswordAndCode',
+      'A Signature proved by Password and code re-entered the user ID, the password and a fresh code from the authenticator.',
+    ],
+    ['Password', 'Demo: a Signature proved by Password re-entered the user ID and password without a second factor.'],
+    [null, 'A Signature marked Not recorded was given before the LIMS recorded what proved its signer.'],
+  ];
+  return notes.flatMap(([proof, note]) => (rows.some((s) => s.authenticator === proof) ? [note] : []));
+}
+
 const signatureColumns: Column<Signature>[] = [
   {
     head: 'Meaning',
@@ -239,6 +258,7 @@ const signatureColumns: Column<Signature>[] = [
     ),
   },
   { head: 'Signed by', cell: (s) => `${s.signer} (${s.username}, ${words(s.role)})` },
+  { head: 'Proved by', cell: (s) => provedBy(s.authenticator) },
   { head: 'Time', cell: (s) => <When at={s.signedAt} atLab={s.signedAtLab} /> },
   { head: 'Record', cell: (s) => s.record },
   { head: 'Record Version', cell: (s) => s.recordVersion.version },

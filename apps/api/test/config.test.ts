@@ -5,10 +5,11 @@ import { fileURLToPath } from 'node:url';
 
 const api = fileURLToPath(new URL('../src/main.ts', import.meta.url));
 const UNREACHABLE = 'postgres://nobody@127.0.0.1:1';
+const SECRETS = { LIMS_PASSWORD_PEPPER: 'cd'.repeat(32), LIMS_TOTP_KEY: 'ef'.repeat(32) };
 
 function start(env: Record<string, string>) {
   return spawnSync(process.execPath, [api], {
-    env: { LIMS_PG: UNREACHABLE, LIMS_DB: 'lims_unreachable', LIMS_RELEASE: 'config-test', ...env },
+    env: { LIMS_PG: UNREACHABLE, LIMS_DB: 'lims_unreachable', LIMS_RELEASE: 'config-test', ...SECRETS, ...env },
     encoding: 'utf8',
     timeout: 10_000,
   });
@@ -63,6 +64,24 @@ for (const [name, key] of [
     assert.match(started.stderr, /LIMS_ACCESS_EVENT_KEY must hold the Access Event HMAC key/);
   });
 }
+
+for (const [setting, message] of [
+  ['LIMS_PASSWORD_PEPPER', /LIMS_PASSWORD_PEPPER must hold the password pepper/],
+  ['LIMS_TOTP_KEY', /LIMS_TOTP_KEY must hold the key that encrypts TOTP secrets/],
+] as const) {
+  it(`the API without ${setting}, a secret with no default, stops at start and names it`, () => {
+    const started = start({ PORT: '3000', LIMS_ACCESS_EVENT_KEY: 'ab'.repeat(32), [setting]: '' });
+    assert.equal(started.signal, null, 'the API stopped by itself instead of listening');
+    assert.notEqual(started.status, 0);
+    assert.match(started.stderr, message);
+  });
+}
+
+it('a TOTP key that is not an AES-256 key stops the API at start', () => {
+  const started = start({ PORT: '3000', LIMS_ACCESS_EVENT_KEY: 'ab'.repeat(32), LIMS_TOTP_KEY: 'ef'.repeat(33) });
+  assert.notEqual(started.status, 0);
+  assert.match(started.stderr, /LIMS_TOTP_KEY must be exactly 64 hex digits/);
+});
 
 it('a LIMS_LOGIN other than decided or demo stops the API at start and names LIMS_LOGIN', () => {
   const started = start({ PORT: '3000', LIMS_ACCESS_EVENT_KEY: 'ab'.repeat(32), LIMS_LOGIN: 'strict' });

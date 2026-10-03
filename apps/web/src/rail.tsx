@@ -23,6 +23,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { api, type LockMode, lock, Refused, signOut, useApi, useSecondsLeft } from './api.ts';
+import { CodeField, useLoginPolicy } from './form.tsx';
 import { reducedMotion } from './motion.ts';
 
 export type FieldKind = 'text' | 'decimal' | 'date' | 'method' | 'analyst' | 'room' | 'choice';
@@ -62,8 +63,15 @@ export const stepUi: {
   release: { label: 'Release', fields: [], record: 'The Test Report this release issues' },
 };
 
-export const demoSigning =
-  'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
+/** What the signature sheet says a signing re-enters under this login; a given Signature's note comes from the Signature itself. */
+const signingNote = (secondFactor: boolean) =>
+  secondFactor
+    ? 'A signing re-enters the user ID, the password and a fresh code from the authenticator.'
+    : 'Demo: accounts share one password, and a signing re-enters the user ID and password without a second factor.';
+
+/** The signing note once the login policy is known, the failure if it could not be read, and nothing while it is read. */
+export const signingNoteOf = (policy: ReturnType<typeof useLoginPolicy>) =>
+  policy.secondFactor === undefined ? (policy.error ?? '') : signingNote(policy.secondFactor);
 
 export interface SigningView {
   recordVersion: RecordVersionRef;
@@ -332,6 +340,9 @@ function Rail({
   const [values, setValues] = useState<Record<string, string>>({});
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const policy = useLoginPolicy();
+  const secondFactor = policy.secondFactor === true;
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<Note | null>(null);
   const [refusal, setRefusal] = useState<Note | null>(null);
@@ -411,13 +422,13 @@ function Rail({
   const closed = () => setSheet((s) => (s?.closing ? null : s));
 
   async function commit(a: RailAction) {
-    if (inFlight.current) return;
+    if (inFlight.current || (a.signs && policy.secondFactor === undefined)) return;
     inFlight.current = true;
     setBusy(true);
     onCommitting(true);
     setRefusal(null);
     try {
-      const text = await a.run(values, a.signs ? { username, password } : null);
+      const text = await a.run(values, a.signs ? { username, password, ...(secondFactor && { code }) } : null);
       setNote({ text, tone: 'ok', n: ++count.current, action: a.label });
       setUsername('');
       returnFocus.current = true;
@@ -437,6 +448,7 @@ function Rail({
       setBusy(false);
       if (mounted.current) onCommitting(false);
       setPassword('');
+      setCode('');
     }
   }
 
@@ -571,19 +583,32 @@ function Rail({
                         onChange={(e) => setPassword(e.target.value)}
                       />
                     </label>
+                    {secondFactor && (
+                      <CodeField
+                        value={code}
+                        aria-invalid={refusal !== null && !code}
+                        aria-describedby="sheet-line"
+                        onChange={(e) => setCode(e.target.value)}
+                      />
+                    )}
                   </section>
                 </>
               )}
             </div>
             <div className="sheet__foot">
               <p key={refusal?.n} id="sheet-line" className={`sheet__line ${refusal ? 'refusal' : ''}`}>
-                <span hidden={refusal !== null}>{shown.signs ? demoSigning : shown.context}</span>
+                <span hidden={refusal !== null}>{shown.signs ? signingNoteOf(policy) : shown.context}</span>
                 {refusal && <span>{refusal.text}</span>}
               </p>
               <button type="button" className="rbtn rbtn--quiet" onClick={() => close(false)}>
                 Cancel
               </button>
-              <button type="submit" className="rbtn" aria-busy={busy}>
+              <button
+                type="submit"
+                className="rbtn"
+                aria-busy={busy}
+                disabled={shown.signs !== null && policy.secondFactor === undefined}
+              >
                 {shown.signs ? `Sign as ${shown.signs.meaning}` : shown.label}
               </button>
             </div>

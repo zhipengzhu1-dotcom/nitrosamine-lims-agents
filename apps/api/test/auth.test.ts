@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { it } from 'node:test';
 import { pathOf, type Route, routes, SESSION_ENDED } from '@lims/domain';
 import { sql } from 'kysely';
-import { LOCKOUT_AFTER_FAILURES, SESSION_COOKIE, SESSION_LIMITS } from '../src/auth.ts';
-import { Client, ok, refusedWith, startApi } from './harness.ts';
+import { LOGIN, SESSION_COOKIE } from '../src/auth.ts';
+import { Client, ok, refusedWith, startApi, HARNESS_LOGIN } from './harness.ts';
 
 const api = await startApi('lims_api_auth_test');
 
@@ -25,16 +25,16 @@ it('a wrong password or an unknown username gives no session, and the right pass
   assert.equal(refusedWith(refused, 'role'), 'This account belongs to no Lab.', 'told only with the right password');
 });
 
-it(`the ${LOCKOUT_AFTER_FAILURES}th failed login locks the account and ends its sessions, and only the right password learns of the lock`, async () => {
+it(`the ${HARNESS_LOGIN.lockoutAfter}th failed login locks the account and ends its sessions, and only the right password learns of the lock`, async () => {
   const ada = api.person('ada');
   const fail = () => new Client(api.base).call(routes.login, { username: ada.username, password: 'not-the-password' });
   const lockedAt = async () =>
     (await api.superuser.selectFrom('person').select('lockedAt').where('id', '=', ada.id).executeTakeFirstOrThrow())
       .lockedAt;
-  for (let i = 1; i < LOCKOUT_AFTER_FAILURES; i++) refusedWith(await fail(), 'badCredentials');
+  for (let i = 1; i < HARNESS_LOGIN.lockoutAfter; i++) refusedWith(await fail(), 'badCredentials');
   const session = await api.login(ada);
 
-  for (let i = 1; i <= LOCKOUT_AFTER_FAILURES; i++) refusedWith(await fail(), 'badCredentials');
+  for (let i = 1; i <= HARNESS_LOGIN.lockoutAfter; i++) refusedWith(await fail(), 'badCredentials');
   const firstLock = (await lockedAt()) ?? assert.fail('the account is locked');
   const locked = await new Client(api.base).call(routes.login, { username: ada.username, password: ada.password });
   assert.equal(refusedWith(locked, 'accountLocked'), 'This account is locked.');
@@ -57,12 +57,12 @@ it('a session ends when idle too long, when too old, and on logout', async () =>
   const ago = (ms: number) => sql<Date>`now() - ${`${ms + 60_000} milliseconds`}::interval`;
   await api.superuser
     .updateTable('session')
-    .set({ lastSeenAt: ago(SESSION_LIMITS.decided.idleMs) })
+    .set({ lastSeenAt: ago(LOGIN.decided.idleMs) })
     .where('personId', '=', api.person('samir').id)
     .execute();
   await api.superuser
     .updateTable('session')
-    .set({ createdAt: ago(SESSION_LIMITS.decided.absoluteMs) })
+    .set({ createdAt: ago(LOGIN.decided.absoluteMs) })
     .where('personId', '=', api.person('lena').id)
     .execute();
   assert.equal((await sessions.out.call(routes.logout)).status, 200);

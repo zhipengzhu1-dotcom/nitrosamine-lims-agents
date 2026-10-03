@@ -4,8 +4,7 @@ import { it } from 'node:test';
 import { audited, type IncidentKind } from '@lims/db';
 import { routes } from '@lims/domain';
 import { sql } from 'kysely';
-import { LOCKOUT_AFTER_FAILURES } from '../src/auth.ts';
-import { type Account, Client, ok, refusedWith, startApi } from './harness.ts';
+import { type Account, Client, ok, refusedWith, startApi, HARNESS_LOGIN } from './harness.ts';
 
 const api = await startApi('lims_api_sign_in_incidents_test');
 
@@ -184,9 +183,13 @@ it('repeated attempts against a locked account open a System Incident naming the
 it('a lockout opens a System Incident of kind lockout naming the account, and the Access Events stay under the sign-in service', async () => {
   const person = await api.addPerson('burst.lockout', ['Analyst']);
   const from = nextAddress();
-  for (let i = 0; i < LOCKOUT_AFTER_FAILURES; i++)
+  for (let i = 0; i < HARNESS_LOGIN.lockoutAfter; i++)
     refusedWith(
-      await signIn(LOCKOUT_AFTER_FAILURES - i > addressRule.attempts ? nextAddress() : from, person.username, 'wrong'),
+      await signIn(
+        HARNESS_LOGIN.lockoutAfter - i > addressRule.attempts ? nextAddress() : from,
+        person.username,
+        'wrong',
+      ),
       'badCredentials',
     );
 
@@ -265,7 +268,7 @@ it('attempts against an unknown user ID lock no account', async () => {
     api.superuser.selectFrom('person').select('id').where('lockedAt', 'is not', null).orderBy('id').execute();
   const before = await lockedAccounts();
   const typed = person.username.toUpperCase();
-  for (let i = 0; i < LOCKOUT_AFTER_FAILURES + 1; i++)
+  for (let i = 0; i < HARNESS_LOGIN.lockoutAfter + 1; i++)
     refusedWith(await signIn(nextAddress(), typed, 'not-the-password'), 'badCredentials');
 
   assert.deepEqual(await lockedAccounts(), before, 'no account was locked');
