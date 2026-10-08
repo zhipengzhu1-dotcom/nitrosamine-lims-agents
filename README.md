@@ -75,3 +75,7 @@ Run `start` again after the Mac restarts. Closing the lid still sleeps the Mac a
 - Code reaches `main` only through a squash-merged pull request that links one ticket.
 - A behaviour change ends with a compliance review by the `part11-expert`, `iso17025-expert` and `usp-expert` agents. Other work says "No compliance review: <reason>" in the pull request.
 - [`docs/coding-standards.md`](docs/coding-standards.md) holds the rules for hand-written code, and [`CLAUDE.md`](CLAUDE.md) holds the rules for agents working in this repo.
+
+## Licence
+
+Released under the MIT License. See [LICENSE](LICENSE).
