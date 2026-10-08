@@ -4,6 +4,20 @@ A demo laboratory information management system for a nitrosamine QC lab, built 
 
 The work is planned on GitHub: the [map](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/1) holds the standing decisions, and [spec #85](https://github.com/zhipengzhu1-dotcom/09-28-2026-LIMS/issues/85) holds the build tickets.
 
+## Screenshots
+
+The Worklist lists every Test in the Lab, filtered by state and searchable by Sample number:
+
+![The Tests Worklist in the R&D Lab, with six fictional metformin Tests across the Requested, Ready, Assigned and Submitted For Review states](docs/screenshots/tests-worklist.png)
+
+Opening a Test shows it beside the Worklist. Here a Reviewer reads the Result and the Analyst's signature and works through the Test Review Checklist, while the rail at the foot names the step and what it still needs:
+
+![A Test in Submitted For Review opened beside the Worklist, showing its Sample, Method, NDMA Result and the Test Review Checklist, with the Review step in the rail](docs/screenshots/test-review.png)
+
+Each signed step opens a sheet that shows what is being signed, the Signature Meaning and the Record Version it binds, and asks the signer to type their user ID and password again:
+
+![The Sign Performed sheet for an NDMA Result of 0.0300 ppm, with the Performed meaning, the Record Version's SHA-256, and Ana Ferreira's user ID and password fields](docs/screenshots/sign-result-performed.png)
+
 ## Layout
 
 | Path | What it holds |
